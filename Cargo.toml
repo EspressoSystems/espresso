@@ -1,0 +1,8 @@
+[package]
+name = "thread-example"
+version = "0.1.0"
+authors = ["corbett@pictographer.com"]
+edition = "2018"
+description = "A thread example"
+repository = "https://gitlab.com/translucence/thread-example"
+license = "Copyright © 2021 Translucence Research, Inc. All rights reserved."
