@@ -1,0 +1,9 @@
+*# Apple Mac OS
+.DS_Store
+
+# Rust cargo
+target
+/target
+# ignore Cargo.lock for library, recommendation here:
+# https://doc.rust-lang.org/cargo/faq.html#why-do-binaries-have-cargolock-in-version-control-but-not-libraries
+Cargo.lock
