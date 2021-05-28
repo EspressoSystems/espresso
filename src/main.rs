@@ -1,12 +1,35 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
+use std::fmt;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use structopt::StructOpt;
 use tracing::info;
 
-const VALIDATOR_COUNT: u8 = 4;
+//type Transaction = u32;
 
-type Transaction = u32;
+type UserId = u32;
+type AssetId = u32;
+type TransactionId = u32;
+
+#[derive(Clone)]
+struct Transfer {
+    owner: UserId,
+    recipient: UserId,
+    asset: AssetId,
+    amount: u32,
+}
+
+#[derive(Clone)]
+struct Transaction {
+    id: TransactionId,
+    transfer: Transfer,
+}
+
+impl fmt::Display for Transaction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "TXN~{}", self.id)
+    }
+}
 
 #[derive(StructOpt)]
 /// Translucence Ledger Demo 1
@@ -14,8 +37,18 @@ type Transaction = u32;
 /// Submits a number of transactions to consensus validation and
 /// records successful transactions to the ledger
 pub struct Args {
-    #[structopt(verbatim_doc_comment, long, short = "c", default_value = "1")]
+    /// Number of transactions to
+    ///   process
+    #[structopt(verbatim_doc_comment, long, short = "t", default_value = "1")]
     pub transaction_count: u8,
+    /// Number of
+    ///   validators
+    #[structopt(verbatim_doc_comment, long, short = "a", default_value = "3")]
+    pub validator_count: u8,
+}
+
+fn get_validator_count() -> u8 {
+    Args::from_args().validator_count
 }
 
 fn load_crs() {
@@ -28,9 +61,12 @@ fn build_transaction(specification: Transaction) -> Transaction {
 }
 
 fn submit_transaction(tx: Sender<bool>, transaction: Transaction) {
-    info!("Submitting transaction to {} validators", VALIDATOR_COUNT);
-    for id in 0..VALIDATOR_COUNT {
-        propose_transaction(id, tx.clone(), transaction);
+    info!(
+        "Submitting transaction to {} validators",
+        get_validator_count()
+    );
+    for id in 0..get_validator_count() {
+        propose_transaction(id, tx.clone(), transaction.clone());
     }
 }
 
@@ -61,7 +97,7 @@ fn consense(rx: Receiver<bool>) -> bool {
     info!("Consensing");
 
     let mut unanimous = true;
-    for _ in 0..VALIDATOR_COUNT {
+    for _ in 0..get_validator_count() {
         let next = rx.recv().unwrap();
         info!("  Validity is {}", &next);
         if !&next {
@@ -84,9 +120,18 @@ fn main() {
 
     for i in 0..args.transaction_count {
         info!("⬤  TRANSACTION {}", i);
-        let transaction = build_transaction(i as Transaction + 42);
+        let txn = Transaction {
+            id: i as TransactionId + 42,
+            transfer: Transfer {
+                owner: 100,
+                recipient: 200,
+                asset: 1000,
+                amount: 5,
+            },
+        };
+        let transaction = build_transaction(txn);
         let (tx, rx) = channel();
-        submit_transaction(tx, transaction);
+        submit_transaction(tx, transaction.clone());
         if consense(rx) {
             info!("Consensus was achieved");
             log_transaction(transaction);
