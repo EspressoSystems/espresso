@@ -1,0 +1,12 @@
+# Apple Mac OS
+.DS_Store
+
+# Rust cargo
+target
+/target
+Cargo.lock
+
+# Emacs temporary files
+*~
+\#*\#
+.\#*
