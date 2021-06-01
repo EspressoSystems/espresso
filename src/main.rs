@@ -3,9 +3,8 @@ use std::fmt;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use structopt::StructOpt;
+use tagged_base64::TaggedBase64;
 use tracing::info;
-
-//type Transaction = u32;
 
 type UserId = u32;
 type AssetId = u32;
@@ -27,7 +26,8 @@ struct Transaction {
 
 impl fmt::Display for Transaction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TXN~{}", self.id)
+        let tb64 = TaggedBase64::new("TX", &self.id.to_le_bytes());
+        write!(f, "{}", tb64.unwrap())
     }
 }
 
