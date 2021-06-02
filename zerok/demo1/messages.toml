@@ -1,0 +1,27 @@
+# Message Catalog
+#
+# These messages appear in web responses and log messages.
+DISCO_routes = "<p>The <a href='/routes'>routes</a> route lists all the starting points for interacting with this web service.</p>"
+DISCO_health = "<p>The <a href='/health'>/health</a> route returns a '1', indicating that this web service is functioning normally.</p>"
+DISCO_help = "<p>Append <code>/help</code> to any route for help with that route.</p>"
+DISCO_version = "<p>The <a href='/version'>/version</a> reports the version from <code>Cargo.toml</code>."
+NO_SUCH_ROUTE = "No such route: "
+ONE = "1"
+THE_FOLLOWING_ROUTES = "<p>The following routes are defined</p>"
+THE_HEALTH_ROUTE_RETURNS_A_ONE = "<p>The <code>/health</code> route returns a '1'.</p>"
+WEB_SERVICE_API_DOCUMENTATION = """
+<h1>Web Service API Documentation</h1>
+<p>This is an example application. It demonstrates</p>
+<p><ul>
+<li>A web server</li>
+<li>Command line argument handling</li>
+<li>Discoverability for web routes and command line arguments</li>
+<li>Messages from an external file</li>
+<li>Use of reflection to minimize code duplication</li>
+<li>Logging</li>
+<li>Automatic documentation extraction from the source code for both discoverability and source code documentation</li>
+<li>Automated unit testing and automated black box testing</li>
+</ul>
+
+Questions? Contact <a href="mailto:corbett@translucence.net?subject=Web Service example">John D. Corbett</a></p>
+"""
