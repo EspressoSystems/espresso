@@ -1,8 +1,16 @@
 [package]
-name = "thread-example"
+name = "demo_1"
 version = "0.1.0"
 authors = ["corbett@pictographer.com"]
 edition = "2018"
-description = "A thread example"
+description = "Top level of the Translucence Ledger"
 repository = "https://gitlab.com/translucence/thread-example"
 license = "Copyright © 2021 Translucence Research, Inc. All rights reserved."
+
+[dependencies]
+hotstuff = { git = "ssh://git@gitlab.com/translucence/systems/hotstuff.git", branch = "main"}
+serde = { version = "1.0.123", features = ["derive", "rc"] }
+structopt = "0.3"
+tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
+tracing = "0.1"
+tracing-subscriber = "0.2"
