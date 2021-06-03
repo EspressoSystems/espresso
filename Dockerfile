@@ -7,10 +7,10 @@ COPY --from=hotstuff /app /app/hotstuff
 WORKDIR /app/system
 COPY . /app/system
 WORKDIR /app/system/zerok
-RUN cargo audit || true
-RUN cargo clippy --workspace
+RUN --mount=type=ssh cargo audit || true
+RUN --mount=type=ssh cargo clippy --workspace
 RUN cargo fmt --all -- --check
-RUN cargo build --workspace --release
-RUN cargo test --workspace --release
+RUN --mount=type=ssh cargo build --workspace --release
+RUN --mount=type=ssh cargo test --workspace --release
 FROM debian:buster
 COPY --from=builder /app/system/zerok/target/release/libzerok_lib* /app/
