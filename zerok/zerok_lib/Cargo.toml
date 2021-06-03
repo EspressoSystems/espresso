@@ -7,11 +7,12 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# TODO(joe): don't do a relative path
-jf-plonk = { path = "../../../jellyfish/plonk" }
-jf-primitives = { path = "../../../jellyfish/primitives" }
-jf-txn = { path = "../../../jellyfish/transactions" }
-jf-utils = { path = "../../../jellyfish/utilities" }
+# per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
+# however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
+jf-plonk = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
+jf-primitives = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
+jf-txn = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
+jf-utils = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
 ark-serialize = "0.2.0"
 rand = ""
 rand_chacha = "0.2.2"
