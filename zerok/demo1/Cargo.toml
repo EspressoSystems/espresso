@@ -1,0 +1,37 @@
+[package]
+name = "system"
+version = "0.1.0"
+authors = ["corbett@pictographer.com"]
+edition = "2018"
+description = "Top level of the Translucence core system"
+repository = "https://gitlab.com/translucence/systems/system"
+license = "Copyright © 2021 Translucence Research, Inc. All rights reserved."
+
+[dependencies]
+bitvec = "0.21.1"
+log = "0.4"
+rand = ""
+rand_chacha = "0.2.2"
+rocket = { git = "https://github.com/SergioBenitez/Rocket.git" }
+serde = { version = "1.0.123", features = ["derive", "rc"] }
+serde_derive = "1.0"
+shellexpand = "2.0"
+structopt = { version = "0.3", features = ["paw"] }
+strum = "0.20"
+strum_macros = "0.20.1"
+toml = "0.4.2"
+tracing = "0.1"
+tracing-subscriber = "0.2"
+hotstuff = { git = "ssh://git@gitlab.com/translucence/systems/hotstuff.git", branch = "main"}
+tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
+
+# TODO(corbett): don't do a relative path
+jf-plonk = { path = "../../../jellyfish/plonk" }
+jf-primitives = { path = "../../../jellyfish/primitives" }
+jf-txn = { path = "../../../jellyfish/transactions" }
+jf-utils = { path = "../../../jellyfish/utilities" }
+zerok_lib = { path = "../zerok_lib/" }
+
+# [dev-dependencies]
+quickcheck = "0.9"
+quickcheck_macros = "0.9"
