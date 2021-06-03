@@ -13,6 +13,7 @@ jf-plonk = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", bra
 jf-primitives = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
 jf-txn = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
 jf-utils = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
+hotstuff = { git = "ssh://git@gitlab.com/translucence/systems/hotstuff.git", branch = "add-ci"}
 ark-serialize = "0.2.0"
 rand = ""
 rand_chacha = "0.2.2"
@@ -22,7 +23,6 @@ serde_json = "1.0"
 serde_cbor = "*"
 blake2 = "0.9.1"
 bitvec = "0.21.1"
-hotstuff = { path = "../../../hotstuff/" }
 rayon = "*"
 generic-array = { version = "0.14.4", features = ["serde"] }
 lazy_static = "1.4.0"
