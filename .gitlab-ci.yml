@@ -16,7 +16,8 @@ build:
     - if: $CI_MERGE_REQUEST_ID
   stage: build
   script:
-    - docker build --pull -t $DOCKER_REGISTRY/$CONTAINER_IMAGE:$CI_MERGE_REQUEST_ID .
+    - eval `keychain --eval id_rsa`
+    - DOCKER_BUILDKIT=1 docker build --ssh default --pull -t $DOCKER_REGISTRY/$CONTAINER_IMAGE:$CI_MERGE_REQUEST_ID .
 
 build:
   tags:
@@ -25,5 +26,6 @@ build:
     - if: $CI_COMMIT_BRANCH
   stage: build
   script:
-    - docker build --pull -t $DOCKER_REGISTRY/$CONTAINER_IMAGE:$CI_COMMIT_BRANCH .
+    - eval `keychain --eval id_rsa`
+    - DOCKER_BUILDKIT=1 docker build --ssh default --pull -t $DOCKER_REGISTRY/$CONTAINER_IMAGE:$CI_COMMIT_BRANCH .
     - docker push $DOCKER_REGISTRY/$CONTAINER_IMAGE:$CI_COMMIT_BRANCH
