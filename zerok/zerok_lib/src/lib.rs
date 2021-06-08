@@ -384,7 +384,7 @@ mod tests {
         let bob_key = UserKeyPair::generate(&mut prng);
 
         let coin = AssetDefinition::new(
-            AssetCode::random(&mut prng).0, /* other returns? */
+            AssetCode::native(), /* other returns? */
             Default::default(),
         );
 
