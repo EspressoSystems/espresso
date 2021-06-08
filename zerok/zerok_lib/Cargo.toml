@@ -1,0 +1,33 @@
+[package]
+name = "zerok_lib"
+version = "0.1.0"
+authors = ["Joe Doyle <joe@translucence.net>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
+# however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
+jf-plonk = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
+jf-primitives = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
+jf-txn = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
+jf-utils = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
+hotstuff = { git = "ssh://git@gitlab.com/translucence/systems/hotstuff.git", branch = "add-ci"}
+ark-serialize = "0.2.0"
+rand = ""
+rand_chacha = "0.2.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_derive = "1.0"
+serde_json = "1.0"
+serde_cbor = "*"
+blake2 = "0.9.1"
+bitvec = "0.21.1"
+rayon = "*"
+generic-array = { version = "0.14.4", features = ["serde"] }
+lazy_static = "1.4.0"
+
+[dev-dependencies]
+quickcheck = "0.9"
+quickcheck_macros = "0.9"
+
