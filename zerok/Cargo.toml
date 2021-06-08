@@ -1,7 +1,8 @@
 [workspace]
 members = [
-    "zerok_lib",
-    "zerok_client",
-    "zerok_validator",
-    "demo1",
+    "zerok/zerok_lib",
+    "zerok/zerok_client",
+    "zerok/zerok_validator",
+    "zerok/demo1",
+    "examples/consensing",
     ]
