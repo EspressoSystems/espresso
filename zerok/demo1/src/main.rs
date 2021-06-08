@@ -6,12 +6,11 @@
 
 #![feature(proc_macro_hygiene, decl_macro)]
 
-
-use jf_txn::parameters::CacheableProverSrs;
-use jf_txn::structs::RecordCommitment;
-use jf_txn::proof::transfer::{TransferProvingKey, TransferVerifyingKey};
 use jf_primitives::merkle_tree::MerkleTree;
 use jf_txn::keys::UserKeyPair;
+use jf_txn::parameters::CacheableProverSrs;
+use jf_txn::proof::transfer::{TransferProvingKey, TransferVerifyingKey};
+use jf_txn::structs::RecordCommitment;
 
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
@@ -96,5 +95,4 @@ async fn main() {
         (time_delta, input00, input01, key00, key01, amt_diff0),
         (time_delta, input10, input11, key10, key11, amt_diff1),
     ];
-
 }

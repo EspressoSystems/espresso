@@ -9,11 +9,13 @@ edition = "2018"
 [dependencies]
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
-jf-plonk = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
-jf-primitives = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
-jf-txn = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
-jf-utils = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
+jf-plonk = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "system-compat-patches"}
+jf-primitives = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "system-compat-patches"}
+jf-txn = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "system-compat-patches"}
+jf-utils = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "system-compat-patches"}
 hotstuff = { git = "ssh://git@gitlab.com/translucence/systems/hotstuff.git", branch = "add-ci"}
+ark-std = { version = "0.2.0", default-features = false }
+ark-ff = { version = "0.2.0", default-features = false }
 ark-serialize = "0.2.0"
 rand = ""
 rand_chacha = "0.2.2"

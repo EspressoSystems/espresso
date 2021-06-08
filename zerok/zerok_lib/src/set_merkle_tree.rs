@@ -4,33 +4,29 @@
 use crate::util::byte_array_to_bits;
 use bitvec::vec::BitVec;
 use core::mem;
+use jf_txn::structs::Nullifier;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
-use ark_serialize::CanonicalSerialize;
-use jf_txn::structs::RecordCommitment;
 
 pub mod set_hash {
     use super::*;
     use blake2::crypto_mac::Mac;
     use generic_array::GenericArray;
+    use jf_utils::serialize::CanonicalBytes;
     pub type Hash = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
     lazy_static::lazy_static! {
         pub static ref EMPTY_HASH: Hash = GenericArray::<_,_>::default();
     }
 
-    pub fn elem_hash(x: &RecordCommitment) -> Hash {
+    pub fn elem_hash(x: Nullifier) -> Hash {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Elem".as_bytes());
-        let mut bytes = vec![];
-        &CanonicalSerialize::serialize(x, &mut bytes).unwrap();
-        hasher.update(&bytes);
+        hasher.update(&CanonicalBytes::from(x).0);
         hasher.finalize().into_bytes()
     }
 
-    pub fn leaf_hash(x: &RecordCommitment) -> Hash {
+    pub fn leaf_hash(x: Nullifier) -> Hash {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Leaf".as_bytes());
-        let mut bytes = vec![];
-        &CanonicalSerialize::serialize(x, &mut bytes).unwrap();
-        hasher.update(&bytes);
+        hasher.update(&CanonicalBytes::from(x).0);
         hasher.finalize().into_bytes()
     }
 
@@ -47,7 +43,7 @@ pub mod set_hash {
 #[derive(Debug, Clone)]
 pub enum SetMerkleTree {
     Empty(),
-    Leaf(set_hash::Hash, RecordCommitment),
+    Leaf(set_hash::Hash, Nullifier),
     Branch(set_hash::Hash, Box<SetMerkleTree>, Box<SetMerkleTree>),
 }
 
@@ -69,9 +65,9 @@ pub struct SetMerkleProof {
 // element ends in Empty" and "Not in the tree because the path to the element abruptly ends at a
 // different element". I think it requires a slightly different proof structure as well -- for
 // example, instead of `is_present`, you have something with 3 options: Present, EmptyPath, and
-// NonemptyPath(RecordCommitment).
+// NonemptyPath(Nullifier).
 impl SetMerkleProof {
-    pub fn check(&self, elem: &RecordCommitment, root: &set_hash::Hash) -> Result<bool, set_hash::Hash> {
+    pub fn check(&self, elem: Nullifier, root: &set_hash::Hash) -> Result<bool, set_hash::Hash> {
         let mut running_hash = if self.is_present {
             set_hash::leaf_hash(elem)
         } else {
@@ -107,7 +103,7 @@ impl SetMerkleProof {
 
     pub fn lightweight_insert(
         &self,
-        elem: &RecordCommitment,
+        elem: Nullifier,
         root: &set_hash::Hash,
     ) -> Result<(set_hash::Hash, Self), set_hash::Hash> {
         let mut running_hash = if self.is_present {
@@ -172,9 +168,9 @@ impl SetMerkleProof {
 
     pub fn update_proof_for_lw_insert(
         &self,
-        elem: &RecordCommitment,
+        elem: Nullifier,
         other: Self,
-        other_elem: &RecordCommitment,
+        other_elem: Nullifier,
         root: &set_hash::Hash,
     ) -> Result<(set_hash::Hash, Self), set_hash::Hash> {
         if elem == other_elem {
@@ -350,20 +346,20 @@ impl SetMerkleProof {
 }
 
 pub fn set_merkle_lw_multi_insert(
-    inserts: Vec<(RecordCommitment, SetMerkleProof)>,
+    inserts: Vec<(Nullifier, SetMerkleProof)>,
     mut root: set_hash::Hash,
 ) -> Result<(set_hash::Hash, Vec<SetMerkleProof>), set_hash::Hash> {
-    let elems: Vec<_> = inserts.iter().map(|(x, _)| x.clone()).collect();
+    let elems: Vec<_> = inserts.iter().map(|(x, _)| *x).collect();
     let mut pfs: Vec<_> = inserts.into_iter().map(|(_, y)| y).collect();
     for i in 0..pfs.len() {
         let old_pf = pfs[i].clone();
-        let (new_root, new_pf) = old_pf.lightweight_insert(&elems[i], &root)?;
+        let (new_root, new_pf) = old_pf.lightweight_insert(elems[i], &root)?;
         pfs[i] = new_pf;
 
         for j in (0..i).chain((i + 1)..pfs.len()) {
             let old_other_pf = pfs[j].clone();
             let (_, new_other_pf) =
-                old_pf.update_proof_for_lw_insert(&elems[i], old_other_pf, &elems[j], &root)?;
+                old_pf.update_proof_for_lw_insert(elems[i], old_other_pf, elems[j], &root)?;
             pfs[j] = new_other_pf;
         }
         root = new_root;
@@ -381,7 +377,7 @@ impl SetMerkleTree {
         }
     }
 
-    pub fn contains(&self, elem: &RecordCommitment) -> (bool, SetMerkleProof) {
+    pub fn contains(&self, elem: Nullifier) -> (bool, SetMerkleProof) {
         use SetMerkleTree::*;
         let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
         let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
@@ -423,7 +419,7 @@ impl SetMerkleTree {
                 )
             }
             Leaf(_, leaf_elem) => {
-                assert_eq!(leaf_elem, elem);
+                assert_eq!(leaf_elem, &elem);
                 path.reverse();
                 (
                     true,
@@ -437,9 +433,9 @@ impl SetMerkleTree {
         }
     }
 
-    pub fn insert(&mut self, elem: RecordCommitment) {
+    pub fn insert(&mut self, elem: Nullifier) {
         use SetMerkleTree::*;
-        let elem_bytes: Vec<u8> = set_hash::elem_hash(&elem).into_iter().collect();
+        let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
         let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
         let elem_bits = elem_bit_vec.into_iter().rev();
 
@@ -463,7 +459,7 @@ impl SetMerkleTree {
 
             siblings.push((sib_is_left, sib));
         }
-        end_branch = Leaf(set_hash::leaf_hash(&elem), elem);
+        end_branch = Leaf(set_hash::leaf_hash(elem), elem);
 
         siblings.reverse();
         for (sib_is_left, sib) in siblings {
@@ -493,9 +489,11 @@ mod tests {
         use blake2::crypto_mac::Mac;
 
         let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
-        let base_elem = RecordCommitment::random(&mut ChaChaRng::from_seed([0u8; 32]));
-        let elems = (1..1000).map(|i| base_elem.pow(&[i]));
+        let elems = (1..1000)
+            .map(|_| Nullifier::rand(&mut prng))
+            .collect::<Vec<_>>();
         let pfs = elems
+            .into_iter()
             .map(|elem| {
                 let elem_bit_vec = byte_array_to_bits(set_hash::elem_hash(elem));
                 let pf = elem_bit_vec
@@ -531,17 +529,20 @@ mod tests {
     }
 
     fn test_merkle_tree_set(updates: Vec<u16>, checks: Vec<Result<u16, u8>>) {
-        use std::collections::HashSet;
-        let base_scalar = RecordCommitment::random(&mut ChaChaRng::from_seed([0u8; 32]));
+        use std::collections::{HashMap, HashSet};
+        let mut prng = ChaChaRng::from_seed([0u8; 32]);
+        let update_vals = updates
+            .iter()
+            .cloned()
+            .chain(checks.iter().filter_map(|x| x.ok().clone()))
+            .map(|u| (u, Nullifier::rand(&mut prng)))
+            .collect::<HashMap<_, _>>();
         let mut hset = HashSet::new();
         let mut t = SetMerkleTree::default();
         let mut lw_t = t.hash();
         assert_eq!(t.hash(), lw_t);
 
-        let update_elems: Vec<_> = updates
-            .iter()
-            .map(|u| base_scalar.pow(&[*u as u64]))
-            .collect();
+        let update_elems: Vec<_> = updates.iter().map(|u| update_vals[u]).collect();
         let mut update_proofs: Vec<_> = update_elems.iter().map(|x| t.contains(*x).1).collect();
 
         for (u, elem) in updates.iter().zip(update_elems.iter()) {
@@ -579,7 +580,7 @@ mod tests {
                     (val, true)
                 }
             };
-            let elem = base_scalar.pow(&[val as u64]);
+            let elem = update_vals[&val];
 
             let (t_contains, pf) = t.contains(elem);
 
