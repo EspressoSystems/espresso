@@ -9,7 +9,7 @@ use jf_primitives::merkle_tree;
 use jf_txn::errors::TxnApiError;
 use jf_txn::keys::UserKeyPair;
 use jf_txn::proof::transfer::TransferVerifyingKey;
-use jf_txn::structs::{CommitmentValue, Nullifier, ReceiverMemo, RecordCommitment};
+use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
 use jf_txn::transfer::TransferNote;
 use jf_utils::serialize::CanonicalBytes;
 use serde::{Deserialize, Serialize};
@@ -281,7 +281,6 @@ impl ValidatorState {
             .map_err(|_| ValidationError::BadNullifierProof())?
             .0;
 
-        // TODO: make mut when we have working txn contents
         let mut ret = vec![];
         for o in txns.0.iter().flat_map(|x| x.0.output_commitments.iter()) {
             let uid = self.next_uid;
@@ -305,7 +304,7 @@ pub struct TestState {
     pub owners: Vec<usize>, // for each record
     pub memos: Vec<ReceiverMemo>,
     pub nullifiers: SetMerkleTree,
-    pub record_merkle_vec: Vec<CommitmentValue>,
+    pub record_merkle_vec: Vec<RecordCommitment>,
     // pub asset_defs: Vec<AssetDefinition>,
     pub validator: ValidatorState,
 }
@@ -314,19 +313,19 @@ pub struct TestState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jf_txn::keys::FreezerKeyPair;
+    // use jf_txn::proof::transfer::TransferProvingKey;
+    use jf_txn::structs::{AssetCode, AssetDefinition, CommitmentValue, FreezeFlag, RecordOpening};
+    use merkle_tree::{AccMemberWitness, MerkleTree, MerkleTreeElem, NodeValue};
     use quickcheck::QuickCheck;
     use rand_chacha::rand_core::SeedableRng;
     use rand_chacha::ChaChaRng;
-    // use rayon::prelude::*;
+    use rayon::prelude::*;
     use std::time::Instant;
-    // use jf_txn::proof::transfer::TransferProvingKey;
-    use jf_txn::structs::{AssetCode, AssetDefinition, FreezeFlag, RecordOpening};
-    use merkle_tree::{AccMemberWitness, MerkleTree, MerkleTreeElem};
     // use jf_txn::parameters::CacheableProverSrs;
     use ark_ff::Field;
     use ark_ff::UniformRand;
     use jf_txn::transfer::TransferNoteInput;
-    use merkle_tree::NodeValue;
 
     /*
      * Test idea:
@@ -355,25 +354,34 @@ mod tests {
         let file_name = format!("setup_params_2x2_mh{}", MERKLE_HEIGHT);
         println!("loading params from file {}", &file_name);
 
-        let user_params =
-            TransferProverCRS::from_file(2, 2, Some((MERKLE_HEIGHT) as usize), Some(file_name))
-                .unwrap();
+        // let mut prng = ChaChaRng::from_entropy();
+        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
+
+        let univ_setup =
+            jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
+        let (prove_key, verif_key) = jf_txn::proof::transfer::preprocess(
+            &mut prng,
+            &univ_setup,
+            1,
+            1,
+            MERKLE_HEIGHT as usize,
+        )
+        .unwrap();
 
         println!("CRS set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
-
-        // let mut prng = ChaChaRng::from_entropy();
-        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
 
         let keys: Vec<_> = (0..=(nkeys as usize + 1))
             .map(|_| UserKeyPair::generate(&mut prng))
             .collect();
 
+        let freezer_keys = FreezerKeyPair::generate(&mut prng);
+
         let asset_defs: Vec<_> = (0..=(ndefs as usize + 1))
-            .map(|_| AssetDefinition::new(AssetCode::random(&mut prng), Default::default()))
+            .map(|_| AssetDefinition::new(AssetCode::random(&mut prng).0, Default::default()))
             .collect();
 
-        let mut t = AAPMerkleTree::new(MERKLE_HEIGHT);
+        let mut t = MerkleTree::new(MERKLE_HEIGHT);
         let mut t_vec = vec![];
 
         let mut owners = vec![];
@@ -388,11 +396,17 @@ mod tests {
             let key = key as usize % keys.len();
             owners.push(key);
             let key = &keys[key];
-            let rec = RecordOpening::new(&mut prng, amt, def.clone(), key.pub_key(), false);
-            t.insert(&rec.derive_record_commitment());
-            t_vec.push(rec.derive_record_commitment());
+            let rec = RecordOpening::new(
+                &mut prng,
+                amt,
+                def.clone(),
+                key.pub_key(),
+                FreezeFlag::Unfrozen,
+            );
+            t.insert(&RecordCommitment::from_ro(&rec).into());
+            t_vec.push(RecordCommitment::from_ro(&rec).into());
 
-            memos.push(ReceiverMemo::from_oar(&mut prng, &rec).unwrap());
+            memos.push(ReceiverMemo::from_ro(&mut prng, &rec, &[]).unwrap());
         }
 
         let first_root = t.get_root_value();
@@ -412,7 +426,7 @@ mod tests {
             validator: ValidatorState {
                 prev_commit_time: 0u64,
                 prev_state: *state_comm::INITIAL_PREV_COMM,
-                verif_crs: TransferVerifierCRS::from(user_params.clone()),
+                verif_crs: TransferVerifyingKey::from(verif_key.clone()),
                 record_merkle_root: first_root,
                 record_merkle_frontier: t,
                 nullifiers_root,
@@ -464,25 +478,18 @@ mod tests {
                         let key = &state.keys[kix];
 
                         let comm = state.record_merkle_vec.get(i).unwrap();
-                        let rec = RecordCommitment { commitment: *comm };
-                        let proof = state.validator.record_merkle_frontier.prove(i).unwrap();
 
-                        let mut open_rec = RecordOpening::from_ar(&rec, &memo, &key).unwrap();
+                        let open_rec = memo.decrypt(&key, comm, &[]).unwrap();
 
-                        let nullifier = key.nullify(&FreezerPubKey::dummy(), i as u64, comm);
+                        let nullifier = key.nullify(&freezer_keys.pub_key(), i as u64, comm.value());
                         if !state.nullifiers.contains(nullifier).0 {
                             in1 = i;
-                            open_rec.update_acc_member_witness(&AccMemberWitness {
-                                path: proof,
-                                root: state.validator.record_merkle_root.clone(),
-                                uid: i as u64,
-                            });
                             rec1 = Some((open_rec, kix));
                             break;
                         }
                     }
 
-                    let owner_memos_key = schnorr::KeyPair::generate(&mut prng);
+                    // let owner_memos_key = schnorr::KeyPair::generate(&mut prng);
 
                     // TODO; factor this into a local closure or something instead
                     // of a pasted block
@@ -496,18 +503,11 @@ mod tests {
                         let key = &state.keys[kix];
 
                         let comm = state.record_merkle_vec.get(i).unwrap();
-                        let rec = RecordCommitment { commitment: *comm };
-                        let proof = state.validator.record_merkle_frontier.prove(i).unwrap();
 
-                        let mut open_rec = RecordOpening::from_ar(&rec, memo, &key).unwrap();
+                        let open_rec = memo.decrypt(&key, comm, &[]).unwrap();
 
-                        let nullifier = key.nullify(&FreezerPubKey::dummy(), i as u64, comm);
+                        let nullifier = key.nullify(&freezer_keys.pub_key(), i as u64, comm.value());
                         if !state.nullifiers.contains(nullifier).0 {
-                            open_rec.update_acc_member_witness(&AccMemberWitness {
-                                path: proof,
-                                root: state.validator.record_merkle_root.clone(),
-                                uid: i as u64,
-                            });
                             rec2 = Some((open_rec, kix));
                             break;
                         }
@@ -535,12 +535,12 @@ mod tests {
                     let k2_ix = k2;
                     let k2 = &state.keys[k2];
 
-                    let out_def1 = rec1.asset_def();
-                    let out_def2 = rec2.asset_def();
+                    let out_def1 = rec1.asset_def.clone();
+                    let out_def2 = rec2.asset_def.clone();
 
                     let (out_amt1, out_amt2) = {
                         if out_def1 == out_def2 {
-                            let total = rec1.amount() + rec2.amount();
+                            let total = rec1.amount + rec2.amount;
                             let offset = (amt_diff as i64) / 2;
                             let midval = (total / 2) as i64;
                             let amt1 = midval + offset;
@@ -554,7 +554,7 @@ mod tests {
                             let amt2 = total - amt1;
                             (amt1, amt2)
                         } else {
-                            (rec1.amount() - 1, rec2.amount())
+                            (rec1.amount - 1, rec2.amount)
                         }
                     };
 
@@ -572,15 +572,13 @@ mod tests {
                     let out_amt1 = out_amt1 - 1;
 
                     let out_rec1 =
-                        RecordOpening::new(&mut prng, out_amt1, out_def1, k1.pub_key(), false);
+                        RecordOpening::new(&mut prng, out_amt1, out_def1, k1.pub_key(), FreezeFlag::Unfrozen);
 
                     let out_rec2 =
-                        RecordOpening::new(&mut prng, out_amt2, out_def2, k2.pub_key(), false);
+                        RecordOpening::new(&mut prng, out_amt2, out_def2, k2.pub_key(), FreezeFlag::Unfrozen);
 
-                    // state.memos.push(ReceiverMemo::from_oar(&mut prng, &out_rec1).unwrap());
-                    // state.memos.push(ReceiverMemo::from_oar(&mut prng, &out_rec2).unwrap());
-
-                    let new_time = state.validator.prev_commit_time + 1;
+                    // state.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec1, &[]).unwrap());
+                    // state.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec2, &[]).unwrap());
 
                     println!(
                         "Txn {}.{}/{} inputs chosen: {}",
@@ -591,22 +589,26 @@ mod tests {
                     );
                     let now2 = Instant::now();
 
+                    let input1 =
+                        TransferNoteInput::create(rec1.clone(), in_key1, None, AccMemberWitness {
+                            merkle_path: state.validator.record_merkle_frontier.prove(0).unwrap(),
+                            root: state.validator.record_merkle_frontier.get_root_value().clone(),
+                            uid: 0,
+                        }).unwrap();
+
+                    let input2 =
+                        TransferNoteInput::create(rec2.clone(), in_key2, None, AccMemberWitness {
+                            merkle_path: state.validator.record_merkle_frontier.prove(1).unwrap(),
+                            root: state.validator.record_merkle_frontier.get_root_value().clone(),
+                            uid: 1,
+                        }).unwrap();
+
                     let (txn, owner_memos, _owner_memos_sig) = TransferNote::generate(
                         &mut prng,
-                        &TransferNoteInputsRef {
-                            prover_crs: &user_params,
-                            verifier_crs: &state.validator.verif_crs,
-                            inputs: vec![&rec1, &rec2],
-                            outputs: vec![&out_rec1, &out_rec2],
-                            keypairs_in: vec![in_key1, in_key2],
-                            keypairs_out: vec![],
-                            in_creds: vec![&None, &None],
-                            root_value: state.validator.record_merkle_root,
-                            valid_until: new_time + 1,
-                            receiver_memos_signing_keypair: &owner_memos_key,
-                            now: new_time,
-                        },
-                        &state.validator.record_merkle_root,
+                        vec![input1, input2],
+                        &[out_rec1, out_rec2],
+                        &prove_key,
+                        1024,
                     )
                     .unwrap();
 
@@ -623,7 +625,7 @@ mod tests {
                     let now2 = Instant::now();
 
                     let nullifier_pfs = txn
-                        .inputs
+                        .inputs_nullifiers
                         .iter()
                         .map(|n| state.nullifiers.contains(*n).1)
                         .collect();
@@ -670,7 +672,7 @@ mod tests {
                     state.owners.push(k2_ix);
                     state
                         .record_merkle_vec
-                        .extend(txn.txn.0.outputs.iter().map(|o| o.commitment));
+                        .extend(txn.txn.0.output_commitments.iter());
 
                     blk = newblk;
                 }
@@ -679,7 +681,7 @@ mod tests {
             assert!(blk.validate_block(&state.validator));
             let new_state = blk.append_to(&state.validator).unwrap();
 
-            for n in blk.block.0.iter().flat_map(|x| x.0.inputs.iter()) {
+            for n in blk.block.0.iter().flat_map(|x| x.0.inputs_nullifiers.iter()) {
                 assert!(!state.nullifiers.contains(*n).0);
                 state.nullifiers.insert(*n);
             }
