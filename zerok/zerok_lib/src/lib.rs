@@ -409,14 +409,14 @@ mod tests {
                         key.pub_key(),
                         FreezeFlag::Unfrozen,
                     )
-                },
+                }
                 false => RecordOpening::new(
                     &mut prng,
                     amt,
                     def.clone(),
                     key.pub_key(),
                     FreezeFlag::Unfrozen,
-                )
+                ),
             };
 
             t.insert(&RecordCommitment::from_ro(&rec).into());
