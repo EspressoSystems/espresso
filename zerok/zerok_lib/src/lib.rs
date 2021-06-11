@@ -359,11 +359,11 @@ mod tests {
 
         let univ_setup =
             jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
-        let (prove_key, verif_key) = jf_txn::proof::transfer::preprocess(
+        let (prove_key, verif_key, _constraint_count) = jf_txn::proof::transfer::preprocess(
             &mut prng,
             &univ_setup,
-            1,
-            1,
+            2,
+            2,
             MERKLE_HEIGHT as usize,
         )
         .unwrap();
@@ -378,7 +378,9 @@ mod tests {
         let freezer_keys = FreezerKeyPair::generate(&mut prng);
 
         let asset_defs: Vec<_> = (0..=(ndefs as usize + 1))
-            .map(|_| AssetDefinition::new(AssetCode::random(&mut prng).0, Default::default()))
+            .map(|_| {
+                AssetDefinition::new(AssetCode::random(&mut prng).0, Default::default()).unwrap()
+            })
             .collect();
 
         let mut t = MerkleTree::new(MERKLE_HEIGHT);
@@ -390,19 +392,33 @@ mod tests {
         println!("Keys and defs: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
 
+        let mut collecting_fee = true;
         for (def, key, amt) in std::iter::once(init_rec).chain(init_recs.into_iter()) {
             let amt = if amt < 2 { 2 } else { amt };
             let def = &asset_defs[def as usize % asset_defs.len()];
             let key = key as usize % keys.len();
             owners.push(key);
             let key = &keys[key];
-            let rec = RecordOpening::new(
-                &mut prng,
-                amt,
-                def.clone(),
-                key.pub_key(),
-                FreezeFlag::Unfrozen,
-            );
+            let rec = match collecting_fee {
+                true => {
+                    collecting_fee = false;
+                    RecordOpening::new(
+                        &mut prng,
+                        amt,
+                        AssetDefinition::native(),
+                        key.pub_key(),
+                        FreezeFlag::Unfrozen,
+                    )
+                }
+                false => RecordOpening::new(
+                    &mut prng,
+                    amt,
+                    def.clone(),
+                    key.pub_key(),
+                    FreezeFlag::Unfrozen,
+                ),
+            };
+
             t.insert(&RecordCommitment::from_ro(&rec).into());
             t_vec.push(RecordCommitment::from_ro(&rec).into());
 
@@ -481,7 +497,8 @@ mod tests {
 
                         let open_rec = memo.decrypt(&key, comm, &[]).unwrap();
 
-                        let nullifier = key.nullify(&freezer_keys.pub_key(), i as u64, comm.value());
+                        let nullifier =
+                            key.nullify(&freezer_keys.pub_key(), i as u64, comm.value());
                         if !state.nullifiers.contains(nullifier).0 {
                             in1 = i;
                             rec1 = Some((open_rec, kix));
@@ -506,7 +523,8 @@ mod tests {
 
                         let open_rec = memo.decrypt(&key, comm, &[]).unwrap();
 
-                        let nullifier = key.nullify(&freezer_keys.pub_key(), i as u64, comm.value());
+                        let nullifier =
+                            key.nullify(&freezer_keys.pub_key(), i as u64, comm.value());
                         if !state.nullifiers.contains(nullifier).0 {
                             rec2 = Some((open_rec, kix));
                             break;
@@ -571,11 +589,21 @@ mod tests {
 
                     let out_amt1 = out_amt1 - 1;
 
-                    let out_rec1 =
-                        RecordOpening::new(&mut prng, out_amt1, out_def1, k1.pub_key(), FreezeFlag::Unfrozen);
+                    let out_rec1 = RecordOpening::new(
+                        &mut prng,
+                        out_amt1,
+                        out_def1,
+                        k1.pub_key(),
+                        FreezeFlag::Unfrozen,
+                    );
 
-                    let out_rec2 =
-                        RecordOpening::new(&mut prng, out_amt2, out_def2, k2.pub_key(), FreezeFlag::Unfrozen);
+                    let out_rec2 = RecordOpening::new(
+                        &mut prng,
+                        out_amt2,
+                        out_def2,
+                        k2.pub_key(),
+                        FreezeFlag::Unfrozen,
+                    );
 
                     // state.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec1, &[]).unwrap());
                     // state.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec2, &[]).unwrap());
@@ -589,19 +617,37 @@ mod tests {
                     );
                     let now2 = Instant::now();
 
-                    let input1 =
-                        TransferNoteInput::create(rec1.clone(), in_key1, None, AccMemberWitness {
+                    let input1 = TransferNoteInput::create(
+                        rec1.clone(),
+                        in_key1,
+                        None,
+                        AccMemberWitness {
                             merkle_path: state.validator.record_merkle_frontier.prove(0).unwrap(),
-                            root: state.validator.record_merkle_frontier.get_root_value().clone(),
+                            root: state
+                                .validator
+                                .record_merkle_frontier
+                                .get_root_value()
+                                .clone(),
                             uid: 0,
-                        }).unwrap();
+                        },
+                    )
+                    .unwrap();
 
-                    let input2 =
-                        TransferNoteInput::create(rec2.clone(), in_key2, None, AccMemberWitness {
+                    let input2 = TransferNoteInput::create(
+                        rec2.clone(),
+                        in_key2,
+                        None,
+                        AccMemberWitness {
                             merkle_path: state.validator.record_merkle_frontier.prove(1).unwrap(),
-                            root: state.validator.record_merkle_frontier.get_root_value().clone(),
+                            root: state
+                                .validator
+                                .record_merkle_frontier
+                                .get_root_value()
+                                .clone(),
                             uid: 1,
-                        }).unwrap();
+                        },
+                    )
+                    .unwrap();
 
                     let (txn, owner_memos, _owner_memos_sig) = TransferNote::generate(
                         &mut prng,
@@ -681,7 +727,12 @@ mod tests {
             assert!(blk.validate_block(&state.validator));
             let new_state = blk.append_to(&state.validator).unwrap();
 
-            for n in blk.block.0.iter().flat_map(|x| x.0.inputs_nullifiers.iter()) {
+            for n in blk
+                .block
+                .0
+                .iter()
+                .flat_map(|x| x.0.inputs_nullifiers.iter())
+            {
                 assert!(!state.nullifiers.contains(*n).0);
                 state.nullifiers.insert(*n);
             }
@@ -722,7 +773,7 @@ mod tests {
         println!("generating universal parameters");
 
         let univ = jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
-        let (_prove, _verif) =
+        let (_prove, _verif, _constraint_count) =
             jf_txn::proof::transfer::preprocess(&mut prng, &univ, 1, 1, MERKLE_HEIGHT as usize)
                 .unwrap();
 
@@ -740,7 +791,7 @@ mod tests {
 
         let univ_setup =
             jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
-        let (prove_key, verif_key) = jf_txn::proof::transfer::preprocess(
+        let (prove_key, verif_key, _constraint_count) = jf_txn::proof::transfer::preprocess(
             &mut prng,
             &univ_setup,
             1,
@@ -758,7 +809,8 @@ mod tests {
         let coin = AssetDefinition::new(
             AssetCode::native(), /* other returns? */
             Default::default(),
-        );
+        )
+        .unwrap();
 
         let alice_rec_builder = RecordOpening::new(
             &mut prng,

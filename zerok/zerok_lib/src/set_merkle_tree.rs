@@ -490,7 +490,7 @@ mod tests {
 
         let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
         let elems = (1..1000)
-            .map(|_| Nullifier::rand(&mut prng))
+            .map(|_| Nullifier::random_for_test(&mut prng))
             .collect::<Vec<_>>();
         let pfs = elems
             .into_iter()
@@ -535,7 +535,7 @@ mod tests {
             .iter()
             .cloned()
             .chain(checks.iter().filter_map(|x| x.ok().clone()))
-            .map(|u| (u, Nullifier::rand(&mut prng)))
+            .map(|u| (u, Nullifier::random_for_test(&mut prng)))
             .collect::<HashMap<_, _>>();
         let mut hset = HashSet::new();
         let mut t = SetMerkleTree::default();
