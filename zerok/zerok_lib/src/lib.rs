@@ -13,9 +13,10 @@ use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
 use jf_txn::transfer::TransferNote;
 use jf_utils::serialize::CanonicalBytes;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 pub use set_merkle_tree::*;
 
-pub const MERKLE_HEIGHT: usize = 20 /*H*/;
+pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
 // TODO
 pub struct LedgerRecordCommitment(pub RecordCommitment);
@@ -50,11 +51,15 @@ impl BlockContents for ElaboratedBlock {
         _state: &ValidatorState,
         txn: &ElaboratedTransaction,
     ) -> Result<Self, ValidationError> {
-        // TODO: testing for nullifiers is not going to be straightforward. Need to talk to crypto team.
-
         let mut ret = self.clone();
 
-        // TODO: collect nullifiers once we have an accessible transaction API
+        let mut nulls = self.block.0.iter().flat_map(|x| x.0.inputs_nullifiers.iter()).collect::<HashSet<_>>();
+        for n in txn.txn.0.inputs_nullifiers.iter() {
+            if nulls.contains(n) {
+                return Err(ValidationError::ConflictingNullifiers());
+            }
+            nulls.insert(n);
+        }
 
         ret.block.0.push(txn.txn.clone());
         ret.proofs.push(txn.proofs.clone());
@@ -221,7 +226,7 @@ pub struct ValidatorState {
     pub prev_state: state_comm::LedgerStateCommitment,
     pub verif_crs: TransferVerifyingKey,
     pub record_merkle_root: merkle_tree::NodeValue,
-    pub record_merkle_frontier: merkle_tree::MerkleTree,
+    pub record_merkle_frontier: merkle_tree::MerkleTree<RecordCommitment>,
     pub nullifiers_root: set_hash::Hash,
     pub next_uid: u64,
     pub prev_block: Block,
@@ -244,10 +249,24 @@ impl ValidatorState {
 
     pub fn validate_block(
         &self,
-        _now: u64,
+        now: u64,
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
     ) -> Result<(Block, Vec<Vec<SetMerkleProof>>), ValidationError> {
+        let mut nulls = HashSet::new();
+        use ValidationError::*;
+        for (pf,n) in null_pfs.iter().zip(txns.0.iter()).flat_map(|(pfs,txn)| pfs.iter().zip(txn.0.inputs_nullifiers.iter())) {
+            if nulls.contains(n) || pf.check(*n,&self.nullifiers_root).map_err(|_| BadNullifierProof())? {
+                return Err(NullifierAlreadyExists(*n));
+            }
+
+            nulls.insert(n);
+        }
+
+        for txn in txns.0.iter() {
+            txn.0.verify(&self.verif_crs,self.record_merkle_frontier.get_root_value(),now).map_err(CryptoError)?;
+        }
+
         Ok((txns, null_pfs))
     }
 
@@ -258,7 +277,7 @@ impl ValidatorState {
         null_pfs: Vec<Vec<SetMerkleProof>>,
     ) -> Result<Vec<u64> /* new uids */, ValidationError> {
         let (txns, _null_pfs) = self.validate_block(now, txns, null_pfs.clone())?;
-        let _comm = self.commit();
+        let comm = self.commit();
         self.prev_commit_time = now;
         self.prev_block = txns.clone();
 
@@ -284,27 +303,29 @@ impl ValidatorState {
         let mut ret = vec![];
         for o in txns.0.iter().flat_map(|x| x.0.output_commitments.iter()) {
             let uid = self.next_uid;
-            self.record_merkle_frontier.insert(&(*o).into());
+            self.record_merkle_frontier.insert(*o);
+            self.record_merkle_frontier.forget(uid).unwrap().unwrap();
             ret.push(uid);
             self.next_uid += 1;
             assert_eq!(
-                self.next_uid as usize,
+                self.next_uid,
                 self.record_merkle_frontier.num_leaves()
             );
         }
 
-        // self.record_merkle_root = self.record_merkle_frontier.get_root_value();
-        // self.prev_state = comm;
+        self.record_merkle_root = self.record_merkle_frontier.get_root_value();
+        self.prev_state = comm;
         Ok(ret)
     }
 }
 
 pub struct TestState {
     pub keys: Vec<UserKeyPair>,
+    pub fee_records: Vec<u64>, // for each key
     pub owners: Vec<usize>, // for each record
     pub memos: Vec<ReceiverMemo>,
     pub nullifiers: SetMerkleTree,
-    pub record_merkle_vec: Vec<RecordCommitment>,
+    pub record_merkle_tree: merkle_tree::MerkleTree<RecordCommitment>,
     // pub asset_defs: Vec<AssetDefinition>,
     pub validator: ValidatorState,
 }
@@ -315,16 +336,15 @@ mod tests {
     use super::*;
     use jf_txn::keys::FreezerKeyPair;
     // use jf_txn::proof::transfer::TransferProvingKey;
-    use jf_txn::structs::{AssetCode, AssetDefinition, CommitmentValue, FreezeFlag, RecordOpening};
-    use merkle_tree::{AccMemberWitness, MerkleTree, MerkleTreeElem, NodeValue};
+    use jf_txn::structs::{AssetCode, AssetDefinition, FreezeFlag, RecordOpening};
+    use merkle_tree::{AccMemberWitness, MerkleTree};
     use quickcheck::QuickCheck;
     use rand_chacha::rand_core::SeedableRng;
     use rand_chacha::ChaChaRng;
     use rayon::prelude::*;
     use std::time::Instant;
     // use jf_txn::parameters::CacheableProverSrs;
-    use ark_ff::Field;
-    use ark_ff::UniformRand;
+    use core::iter::once;
     use jf_txn::transfer::TransferNoteInput;
 
     /*
@@ -351,22 +371,23 @@ mod tests {
         init_recs: Vec<(u8, u8, u64)>, // (def,key) -> amount
     ) {
         let now = Instant::now();
-        let file_name = format!("setup_params_2x2_mh{}", MERKLE_HEIGHT);
-        println!("loading params from file {}", &file_name);
+        println!("Generating params");
 
         // let mut prng = ChaChaRng::from_entropy();
-        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
+        let mut prng = ChaChaRng::from_seed([0x7au8; 32]);
 
         let univ_setup =
             jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
-        let (prove_key, verif_key) = jf_txn::proof::transfer::preprocess(
+        let (prove_key, verif_key, _) = jf_txn::proof::transfer::preprocess(
             &mut prng,
             &univ_setup,
-            1,
-            1,
-            MERKLE_HEIGHT as usize,
+            3,
+            3,
+            MERKLE_HEIGHT,
         )
         .unwrap();
+
+        let native_token = AssetDefinition::native();
 
         println!("CRS set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
@@ -377,21 +398,27 @@ mod tests {
 
         let freezer_keys = FreezerKeyPair::generate(&mut prng);
 
-        let asset_defs: Vec<_> = (0..=(ndefs as usize + 1))
-            .map(|_| AssetDefinition::new(AssetCode::random(&mut prng).0, Default::default()))
+        let asset_defs: Vec<_> = once(native_token).chain((0..=(ndefs as usize + 1))
+            .map(|_| AssetDefinition::new(AssetCode::random(&mut prng).0, Default::default()).unwrap()))
             .collect();
 
         let mut t = MerkleTree::new(MERKLE_HEIGHT);
-        let mut t_vec = vec![];
 
         let mut owners = vec![];
         let mut memos = vec![];
 
         println!("Keys and defs: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
+        let mut fee_records = vec![];
 
-        for (def, key, amt) in std::iter::once(init_rec).chain(init_recs.into_iter()) {
+        for (def, key, amt) in (0..keys.len() as u8).map(|i| (0,i,1000))
+                .chain(std::iter::once(init_rec).chain(init_recs.into_iter()).flat_map(|x| vec![x.clone(),x.clone()].into_iter())) {
             let amt = if amt < 2 { 2 } else { amt };
+            if fee_records.len() < keys.len() {
+                assert_eq!(def,0);
+                assert_eq!(key as usize,fee_records.len());
+                fee_records.push(t.num_leaves());
+            }
             let def = &asset_defs[def as usize % asset_defs.len()];
             let key = key as usize % keys.len();
             owners.push(key);
@@ -403,8 +430,7 @@ mod tests {
                 key.pub_key(),
                 FreezeFlag::Unfrozen,
             );
-            t.insert(&RecordCommitment::from_ro(&rec).into());
-            t_vec.push(RecordCommitment::from_ro(&rec).into());
+            t.insert(RecordCommitment::from_ro(&rec));
 
             memos.push(ReceiverMemo::from_ro(&mut prng, &rec, &[]).unwrap());
         }
@@ -419,14 +445,15 @@ mod tests {
 
         let mut state = TestState {
             keys,
+            fee_records,
             owners,
             memos,
             nullifiers, /*asset_defs,*/
-            record_merkle_vec: t_vec,
+            record_merkle_tree: t.clone(),
             validator: ValidatorState {
                 prev_commit_time: 0u64,
                 prev_state: *state_comm::INITIAL_PREV_COMM,
-                verif_crs: TransferVerifyingKey::from(verif_key.clone()),
+                verif_crs: verif_key.clone(),
                 record_merkle_root: first_root,
                 record_merkle_frontier: t,
                 nullifiers_root,
@@ -467,24 +494,39 @@ mod tests {
 
                     println!("Txn {}.{}/{}", i + 1, ix, num_txs);
 
+                    let mut fee_rec = None;
                     let mut rec1 = None;
                     let mut rec2 = None;
 
                     let mut in1 = in1 as usize % state.owners.len();
-                    let in2 = in2 as usize % state.owners.len();
+                    let mut in2 = in2 as usize % state.owners.len();
                     for i in (0..(state.owners.len() - in1)).rev() {
                         let memo = &state.memos[i];
                         let kix = state.owners[i];
+                        // it's their fee wallet
+                        if i as u64 == state.fee_records[kix] {
+                            continue;
+                        }
+
                         let key = &state.keys[kix];
 
-                        let comm = state.record_merkle_vec.get(i).unwrap();
+                        let comm = state.record_merkle_tree.get_leaf(i as u64).unwrap().unwrap().0;
 
-                        let open_rec = memo.decrypt(&key, comm, &[]).unwrap();
+                        let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
 
-                        let nullifier = key.nullify(&freezer_keys.pub_key(), i as u64, comm.value());
+                        let nullifier = key.nullify(&freezer_keys.pub_key(), i as u64, &comm);
                         if !state.nullifiers.contains(nullifier).0 {
                             in1 = i;
                             rec1 = Some((open_rec, kix));
+                            let fee_ix = state.fee_records[kix];
+                            fee_rec = Some((fee_ix,{
+                                let comm = state.record_merkle_tree.get_leaf(fee_ix as u64).unwrap().unwrap().0;
+                                let memo = state.memos[fee_ix as usize].clone();
+                                let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
+                                let nullifier = key.nullify(&freezer_keys.pub_key(), fee_ix as u64, &comm);
+                                assert!(!state.nullifiers.contains(nullifier).0);
+                                open_rec
+                            }));
                             break;
                         }
                     }
@@ -502,12 +544,25 @@ mod tests {
                         let kix = state.owners[i];
                         let key = &state.keys[kix];
 
-                        let comm = state.record_merkle_vec.get(i).unwrap();
+                        if i as u64 == state.fee_records[kix] {
+                            continue;
+                        }
 
-                        let open_rec = memo.decrypt(&key, comm, &[]).unwrap();
+                        let comm = state.record_merkle_tree.get_leaf(i as u64).unwrap().unwrap().0;
 
-                        let nullifier = key.nullify(&freezer_keys.pub_key(), i as u64, comm.value());
+                        let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
+
+                        if let Some((rec1,_)) = rec1.as_ref() {
+                            // TODO: re-add support for this when jellyfish supports multi-assets
+                            // transfers and/or exchanges
+                            if rec1.asset_def != open_rec.asset_def {
+                                continue;
+                            }
+                        }
+
+                        let nullifier = key.nullify(&freezer_keys.pub_key(), i as u64, &comm);
                         if !state.nullifiers.contains(nullifier).0 {
+                            in2 = i;
                             rec2 = Some((open_rec, kix));
                             break;
                         }
@@ -524,9 +579,13 @@ mod tests {
                         return None;
                     }
 
+                    let (fee_ix,fee_rec) = fee_rec.unwrap();
                     let ((rec1, in_key1), (rec2, in_key2)) = (rec1.unwrap(), rec2.unwrap());
                     let in_key1 = &state.keys[in_key1];
                     let in_key2 = &state.keys[in_key2];
+
+                    assert!(fee_ix != in1 as u64);
+                    assert!(fee_ix != in2 as u64);
 
                     let k1 = k1 as usize % state.keys.len();
                     let k1_ix = k1;
@@ -554,22 +613,16 @@ mod tests {
                             let amt2 = total - amt1;
                             (amt1, amt2)
                         } else {
-                            (rec1.amount - 1, rec2.amount)
+                            (rec1.amount, rec2.amount)
                         }
                     };
 
-                    if out_amt1 <= 1 {
-                        println!(
-                            "Txn {}.{}/{}: not enough for a fee, skipping {}s",
-                            i + 1,
-                            ix,
-                            num_txs,
-                            now.elapsed().as_secs_f32()
-                        );
-                        return None;
-                    }
+                    dbg!(&out_amt1);
+                    dbg!(&out_amt2);
+                    dbg!(&fee_rec.amount);
 
-                    let out_amt1 = out_amt1 - 1;
+                    let fee_out_rec =
+                        RecordOpening::new(&mut prng, fee_rec.amount-1, fee_rec.asset_def.clone(), k1.pub_key(), FreezeFlag::Unfrozen);
 
                     let out_rec1 =
                         RecordOpening::new(&mut prng, out_amt1, out_def1, k1.pub_key(), FreezeFlag::Unfrozen);
@@ -589,26 +642,42 @@ mod tests {
                     );
                     let now2 = Instant::now();
 
+                    let fee_input =
+                        TransferNoteInput::create(fee_rec.clone(), in_key1, None, AccMemberWitness {
+                            merkle_path: state.record_merkle_tree.get_leaf(fee_ix).unwrap().unwrap().1,
+                            root: state.validator.record_merkle_frontier.get_root_value().clone(),
+                            uid: fee_ix,
+                        }).unwrap();
+
                     let input1 =
                         TransferNoteInput::create(rec1.clone(), in_key1, None, AccMemberWitness {
-                            merkle_path: state.validator.record_merkle_frontier.prove(0).unwrap(),
+                            merkle_path: state.record_merkle_tree.get_leaf(in1 as u64).unwrap().unwrap().1,
                             root: state.validator.record_merkle_frontier.get_root_value().clone(),
-                            uid: 0,
+                            uid: in1 as u64,
                         }).unwrap();
 
                     let input2 =
                         TransferNoteInput::create(rec2.clone(), in_key2, None, AccMemberWitness {
-                            merkle_path: state.validator.record_merkle_frontier.prove(1).unwrap(),
+                            merkle_path: state.record_merkle_tree.get_leaf(in2 as u64).unwrap().unwrap().1,
                             root: state.validator.record_merkle_frontier.get_root_value().clone(),
-                            uid: 1,
+                            uid: in2 as u64,
                         }).unwrap();
+
+                    println!(
+                        "Txn {}.{}/{} inputs generated: {}",
+                        i + 1,
+                        ix,
+                        num_txs,
+                        now2.elapsed().as_secs_f32()
+                    );
+                    let now2 = Instant::now();
 
                     let (txn, owner_memos, _owner_memos_sig) = TransferNote::generate(
                         &mut prng,
-                        vec![input1, input2],
-                        &[out_rec1, out_rec2],
+                        vec![fee_input, input1, input2],
+                        &[fee_out_rec, out_rec1, out_rec2],
                         &prove_key,
-                        1024,
+                        state.validator.prev_commit_time+1,
                     )
                     .unwrap();
 
@@ -668,11 +737,13 @@ mod tests {
                 if let Ok(newblk) = blk.add_transaction(&state.validator, &txn) {
                     println!("Block {}/{} adding {}", i + 1, num_txs, ix);
                     state.memos.extend(owner_memos);
+                    state.fee_records[k1_ix] = state.record_merkle_tree.num_leaves();
+                    state.owners.push(k1_ix);
                     state.owners.push(k1_ix);
                     state.owners.push(k2_ix);
-                    state
-                        .record_merkle_vec
-                        .extend(txn.txn.0.output_commitments.iter());
+                    for comm in txn.txn.0.output_commitments.iter() {
+                        state.record_merkle_tree.insert(*comm);
+                    }
 
                     blk = newblk;
                 }
@@ -722,8 +793,8 @@ mod tests {
         println!("generating universal parameters");
 
         let univ = jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
-        let (_prove, _verif) =
-            jf_txn::proof::transfer::preprocess(&mut prng, &univ, 1, 1, MERKLE_HEIGHT as usize)
+        let (_prove, _verif, _) =
+            jf_txn::proof::transfer::preprocess(&mut prng, &univ, 1, 1, MERKLE_HEIGHT)
                 .unwrap();
 
         println!("CRS set up");
@@ -740,12 +811,12 @@ mod tests {
 
         let univ_setup =
             jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
-        let (prove_key, verif_key) = jf_txn::proof::transfer::preprocess(
+        let (prove_key, verif_key, _) = jf_txn::proof::transfer::preprocess(
             &mut prng,
             &univ_setup,
             1,
             1,
-            MERKLE_HEIGHT as usize,
+            MERKLE_HEIGHT,
         )
         .unwrap();
 
@@ -755,10 +826,7 @@ mod tests {
         let alice_key = UserKeyPair::generate(&mut prng);
         let bob_key = UserKeyPair::generate(&mut prng);
 
-        let coin = AssetDefinition::new(
-            AssetCode::native(), /* other returns? */
-            Default::default(),
-        );
+        let coin = AssetDefinition::native();
 
         let alice_rec_builder = RecordOpening::new(
             &mut prng,
@@ -771,22 +839,19 @@ mod tests {
         let alice_rec1 = alice_rec_builder;
 
         let mut t = MerkleTree::new(MERKLE_HEIGHT);
-        let mut t_vec: Vec<RecordCommitment> = vec![];
         assert_eq!(
             t.get_root_value(),
-            MerkleTree::new(MERKLE_HEIGHT).get_root_value()
+            MerkleTree::<RecordCommitment>::new(MERKLE_HEIGHT).get_root_value()
         );
-        let alice_rec_elem =
-            MerkleTreeElem::new(<_>::from(0), RecordCommitment::from_ro(&alice_rec1).into());
+        let alice_rec_elem = RecordCommitment::from_ro(&alice_rec1);
         dbg!(&RecordCommitment::from_ro(&alice_rec1));
         assert_eq!(
             RecordCommitment::from_ro(&alice_rec1),
             RecordCommitment::from_ro(&alice_rec1)
         );
-        t.insert(&RecordCommitment::from_ro(&alice_rec1).into());
-        t_vec.push(RecordCommitment::from_ro(&alice_rec1).into());
-        let alice_rec_path = t.prove(0).unwrap();
-        // assert_eq!(alice_rec_elem.arc,t.get_leaf_value(0).unwrap());
+        t.insert(RecordCommitment::from_ro(&alice_rec1));
+        let alice_rec_path = t.get_leaf(0).unwrap().unwrap().1;
+        assert_eq!(alice_rec_path.nodes.len(),MERKLE_HEIGHT as usize);
 
         let mut nullifiers: SetMerkleTree = Default::default();
 
@@ -807,6 +872,7 @@ mod tests {
         )
         .unwrap();
 
+        let mut wallet_merkle_tree = t.clone();
         let mut validator = ValidatorState {
             prev_commit_time: 0,
             prev_state: *state_comm::INITIAL_PREV_COMM,
@@ -835,11 +901,12 @@ mod tests {
         );
         let now = Instant::now();
 
-        assert!(MerkleTree::verify(
-            &validator.record_merkle_root,
-            &alice_rec_elem,
+        MerkleTree::check_proof(
+            validator.record_merkle_root,
+            0,
+            alice_rec_elem,
             &alice_rec_path
-        ));
+        ).unwrap();
 
         println!("Path checked: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
@@ -898,13 +965,14 @@ mod tests {
         let now = Instant::now();
 
         assert_eq!(&new_uids, &vec![1]);
+        wallet_merkle_tree.insert(RecordCommitment::from_ro(&bob_rec));
 
         let bob_rec = TransferNoteInput::create(
             bob_rec,
             &bob_key,
             None,
             AccMemberWitness {
-                merkle_path: validator.record_merkle_frontier.prove(1).unwrap(),
+                merkle_path: wallet_merkle_tree.get_leaf(1).unwrap().unwrap().1,
                 root: validator.record_merkle_frontier.get_root_value(),
                 uid: 1,
             },
@@ -926,13 +994,23 @@ mod tests {
         let now = Instant::now();
     }
 
+    fn pow3(x: u64) -> u64 {
+        let mut ret = 1u64;
+        for i in (0..64).rev() {
+            ret = ret.overflowing_mul(ret).0;
+            if ((x>>i)&1) == 1 {
+                ret = ret.overflowing_mul(3).0;
+            }
+        }
+        ret
+    }
+
     fn test_merkle_tree(updates: Vec<Result<u64, usize>>) {
         println!("Iter: {} updates", updates.len());
         let (mut t1, mut t2) = (
-            MerkleTree::new(MERKLE_HEIGHT),
-            MerkleTree::new(MERKLE_HEIGHT),
+            MerkleTree::<u64>::new(MERKLE_HEIGHT),
+            MerkleTree::<u64>::new(MERKLE_HEIGHT),
         );
-        let base_scalar = CommitmentValue::rand(&mut ChaChaRng::from_seed([0u8; 32]));
         for t in [&mut t1, &mut t2].iter_mut() {
             let mut map = Vec::new();
             for u in updates.iter() {
@@ -940,7 +1018,7 @@ mod tests {
                     Ok(val) => {
                         map.push(val);
 
-                        t.insert(&NodeValue::from(base_scalar.pow(&[*val])));
+                        t.insert(pow3(*val));
 
                         // check_path(t.hasher.as_ref(), &path.unwrap(), &leaf_val,
                         //         &leaf_hash, MERKLE_HEIGHT, &t.root_hash)
@@ -950,29 +1028,25 @@ mod tests {
                     }
                     Err(i) => {
                         match (
-                            map.get(*i).cloned().map(|x| base_scalar.pow(&[*x as u64])),
-                            t.get_leaf_value(*i),
-                            t.prove(*i),
+                            map.get(*i).cloned().map(|x| pow3(*x as u64)),
+                            t.get_leaf(*i as u64),
                         ) {
-                            (None, None, None) => {}
-                            (Some(map_val), Some(_tree_val), Some(tree_proof)) => {
+                            (None, Some(None)) => {}
+                            (Some(map_val), Some(Some((_tree_val,tree_proof)))) => {
                                 // assert_eq!(map_val,tree_val);
-                                assert!(
-                                    MerkleTree::verify(
-                                        &t.get_root_value(),
-                                        &MerkleTreeElem::new(
-                                            <_>::from(CommitmentValue::from(*i as u64)),
-                                            map_val.into()
-                                        ),
+                                    MerkleTree::check_proof(
+                                        t.get_root_value(),
+                                        *i as u64,
+                                        map_val,
                                         &tree_proof
-                                    ),
+                                    ).expect(
                                     "Merkle path verification failed"
                                 );
                             }
-                            (l, m, r) => {
+                            (l, r) => {
                                 panic!(
-                                    "Mismatch: map_val = {:?}, tree_val = {:?} tree_proof = {:?}",
-                                    l, m, r
+                                    "Mismatch: map_val = {:?}, tree_val,proof = {:?}",
+                                    l, r
                                 );
                             }
                         }
