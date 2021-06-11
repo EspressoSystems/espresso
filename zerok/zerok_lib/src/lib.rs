@@ -409,14 +409,14 @@ mod tests {
                         key.pub_key(),
                         FreezeFlag::Unfrozen,
                     )
-                }
+                },
                 false => RecordOpening::new(
                     &mut prng,
                     amt,
                     def.clone(),
                     key.pub_key(),
                     FreezeFlag::Unfrozen,
-                ),
+                )
             };
 
             t.insert(&RecordCommitment::from_ro(&rec).into());
@@ -806,11 +806,7 @@ mod tests {
         let alice_key = UserKeyPair::generate(&mut prng);
         let bob_key = UserKeyPair::generate(&mut prng);
 
-        let coin = AssetDefinition::new(
-            AssetCode::native(), /* other returns? */
-            Default::default(),
-        )
-        .unwrap();
+        let coin = AssetDefinition::native();
 
         let alice_rec_builder = RecordOpening::new(
             &mut prng,
