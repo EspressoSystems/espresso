@@ -8,9 +8,13 @@ repository = "https://gitlab.com/translucence/thread-example"
 license = "Copyright © 2021 Translucence Research, Inc. All rights reserved."
 
 [dependencies]
-hotstuff = { git = "ssh://git@gitlab.com/translucence/systems/hotstuff.git", branch = "main"}
+# hotstuff = { git = "ssh://git@gitlab.com/translucence/systems/hotstuff.git", branch = "main"}
+hotstuff = { path = "../../hotstuff" }
+rand = "0.7.3"
 serde = { version = "1.0.123", features = ["derive", "rc"] }
+snafu = { version = "0.6.10", features = ["backtraces"] }
 structopt = "0.3"
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
+threshold_crypto = "0.4.0"
 tracing = "0.1"
 tracing-subscriber = "0.2"
