@@ -402,7 +402,7 @@ mod tests {
             .map(|_| AssetDefinition::new(AssetCode::random(&mut prng).0, Default::default()).unwrap()))
             .collect();
 
-        let mut t = MerkleTree::new(MERKLE_HEIGHT);
+        let mut t = MerkleTree::new(MERKLE_HEIGHT).unwrap();
 
         let mut owners = vec![];
         let mut memos = vec![];
@@ -624,11 +624,21 @@ mod tests {
                     let fee_out_rec =
                         RecordOpening::new(&mut prng, fee_rec.amount-1, fee_rec.asset_def.clone(), k1.pub_key(), FreezeFlag::Unfrozen);
 
-                    let out_rec1 =
-                        RecordOpening::new(&mut prng, out_amt1, out_def1, k1.pub_key(), FreezeFlag::Unfrozen);
+                    let out_rec1 = RecordOpening::new(
+                        &mut prng,
+                        out_amt1,
+                        out_def1,
+                        k1.pub_key(),
+                        FreezeFlag::Unfrozen,
+                    );
 
-                    let out_rec2 =
-                        RecordOpening::new(&mut prng, out_amt2, out_def2, k2.pub_key(), FreezeFlag::Unfrozen);
+                    let out_rec2 = RecordOpening::new(
+                        &mut prng,
+                        out_amt2,
+                        out_def2,
+                        k2.pub_key(),
+                        FreezeFlag::Unfrozen,
+                    );
 
                     // state.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec1, &[]).unwrap());
                     // state.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec2, &[]).unwrap());
@@ -752,7 +762,12 @@ mod tests {
             assert!(blk.validate_block(&state.validator));
             let new_state = blk.append_to(&state.validator).unwrap();
 
-            for n in blk.block.0.iter().flat_map(|x| x.0.inputs_nullifiers.iter()) {
+            for n in blk
+                .block
+                .0
+                .iter()
+                .flat_map(|x| x.0.inputs_nullifiers.iter())
+            {
                 assert!(!state.nullifiers.contains(*n).0);
                 state.nullifiers.insert(*n);
             }
@@ -793,7 +808,7 @@ mod tests {
         println!("generating universal parameters");
 
         let univ = jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
-        let (_prove, _verif, _) =
+        let (_prove, _verif, _constraint_count) =
             jf_txn::proof::transfer::preprocess(&mut prng, &univ, 1, 1, MERKLE_HEIGHT)
                 .unwrap();
 
@@ -811,7 +826,7 @@ mod tests {
 
         let univ_setup =
             jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
-        let (prove_key, verif_key, _) = jf_txn::proof::transfer::preprocess(
+        let (prove_key, verif_key, _constraint_count) = jf_txn::proof::transfer::preprocess(
             &mut prng,
             &univ_setup,
             1,
@@ -838,10 +853,10 @@ mod tests {
 
         let alice_rec1 = alice_rec_builder;
 
-        let mut t = MerkleTree::new(MERKLE_HEIGHT);
+        let mut t = MerkleTree::new(MERKLE_HEIGHT).unwrap();
         assert_eq!(
             t.get_root_value(),
-            MerkleTree::<RecordCommitment>::new(MERKLE_HEIGHT).get_root_value()
+            MerkleTree::<RecordCommitment>::new(MERKLE_HEIGHT).unwrap().get_root_value()
         );
         let alice_rec_elem = RecordCommitment::from_ro(&alice_rec1);
         dbg!(&RecordCommitment::from_ro(&alice_rec1));
@@ -1008,8 +1023,8 @@ mod tests {
     fn test_merkle_tree(updates: Vec<Result<u64, usize>>) {
         println!("Iter: {} updates", updates.len());
         let (mut t1, mut t2) = (
-            MerkleTree::<u64>::new(MERKLE_HEIGHT),
-            MerkleTree::<u64>::new(MERKLE_HEIGHT),
+            MerkleTree::<u64>::new(MERKLE_HEIGHT).unwrap(),
+            MerkleTree::<u64>::new(MERKLE_HEIGHT).unwrap(),
         );
         for t in [&mut t1, &mut t2].iter_mut() {
             let mut map = Vec::new();
@@ -1073,7 +1088,7 @@ mod tests {
     #[ignore]
     fn quickcheck_multixfr() {
         QuickCheck::new()
-            .tests(10)
+            .tests(1)
             .quickcheck(test_multixfr as fn(Vec<_>, u8, u8, _, Vec<_>) -> ());
     }
 
