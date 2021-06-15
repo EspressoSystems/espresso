@@ -329,7 +329,7 @@ impl ValidatorState {
         for o in txns.0.iter().flat_map(|x| x.0.output_commitments.iter()) {
             let uid = self.next_uid;
             self.record_merkle_frontier.insert(*o);
-            self.record_merkle_frontier.forget(uid).unwrap().unwrap();
+            self.record_merkle_frontier.forget(uid).expect_ok();
             ret.push(uid);
             self.next_uid += 1;
             assert_eq!(self.next_uid, self.record_merkle_frontier.num_leaves());
@@ -358,8 +358,8 @@ mod tests {
     use super::*;
     use jf_txn::keys::FreezerKeyPair;
     // use jf_txn::proof::transfer::TransferProvingKey;
-    use jf_txn::structs::{AssetCode, AssetDefinition, FreezeFlag, RecordOpening};
-    use merkle_tree::{AccMemberWitness, MerkleTree};
+    use jf_txn::structs::{AssetCode, AssetDefinition, FreezeFlag, NoteType, RecordOpening};
+    use merkle_tree::{AccMemberWitness, LookupResult, MerkleTree};
     use quickcheck::QuickCheck;
     use rand_chacha::rand_core::SeedableRng;
     use rand_chacha::ChaChaRng;
@@ -368,6 +368,7 @@ mod tests {
     // use jf_txn::parameters::CacheableProverSrs;
     use core::iter::once;
     use jf_txn::transfer::TransferNoteInput;
+    use jf_txn::utils::compute_universal_param_size;
 
     /*
      * Test idea:
@@ -398,8 +399,11 @@ mod tests {
         // let mut prng = ChaChaRng::from_entropy();
         let mut prng = ChaChaRng::from_seed([0x7au8; 32]);
 
-        let univ_setup =
-            jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
+        let univ_setup = jf_txn::proof::universal_setup(
+            compute_universal_param_size(NoteType::Transfer, 3, 3, MERKLE_HEIGHT).unwrap(),
+            &mut prng,
+        )
+        .unwrap();
         let (prove_key, verif_key, _) =
             jf_txn::proof::transfer::preprocess(&mut prng, &univ_setup, 3, 3, MERKLE_HEIGHT)
                 .unwrap();
@@ -532,12 +536,7 @@ mod tests {
 
                         let key = &state.keys[kix];
 
-                        let comm = state
-                            .record_merkle_tree
-                            .get_leaf(i as u64)
-                            .unwrap()
-                            .unwrap()
-                            .0;
+                        let comm = state.record_merkle_tree.get_leaf(i as u64).expect_ok().0;
 
                         let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
 
@@ -550,8 +549,7 @@ mod tests {
                                 let comm = state
                                     .record_merkle_tree
                                     .get_leaf(fee_ix as u64)
-                                    .unwrap()
-                                    .unwrap()
+                                    .expect_ok()
                                     .0;
                                 let memo = state.memos[fee_ix as usize].clone();
                                 let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
@@ -581,12 +579,7 @@ mod tests {
                             continue;
                         }
 
-                        let comm = state
-                            .record_merkle_tree
-                            .get_leaf(i as u64)
-                            .unwrap()
-                            .unwrap()
-                            .0;
+                        let comm = state.record_merkle_tree.get_leaf(i as u64).expect_ok().0;
 
                         let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
 
@@ -700,12 +693,7 @@ mod tests {
                         in_key1,
                         None,
                         AccMemberWitness {
-                            merkle_path: state
-                                .record_merkle_tree
-                                .get_leaf(fee_ix)
-                                .unwrap()
-                                .unwrap()
-                                .1,
+                            merkle_path: state.record_merkle_tree.get_leaf(fee_ix).expect_ok().1,
                             root: state
                                 .validator
                                 .record_merkle_frontier
@@ -724,8 +712,7 @@ mod tests {
                             merkle_path: state
                                 .record_merkle_tree
                                 .get_leaf(in1 as u64)
-                                .unwrap()
-                                .unwrap()
+                                .expect_ok()
                                 .1,
                             root: state
                                 .validator
@@ -745,8 +732,7 @@ mod tests {
                             merkle_path: state
                                 .record_merkle_tree
                                 .get_leaf(in2 as u64)
-                                .unwrap()
-                                .unwrap()
+                                .expect_ok()
                                 .1,
                             root: state
                                 .validator
@@ -892,7 +878,11 @@ mod tests {
         let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
         println!("generating universal parameters");
 
-        let univ = jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
+        let univ = jf_txn::proof::universal_setup(
+            compute_universal_param_size(NoteType::Transfer, 1, 1, MERKLE_HEIGHT).unwrap(),
+            &mut prng,
+        )
+        .unwrap();
         let (_prove, _verif, _constraint_count) =
             jf_txn::proof::transfer::preprocess(&mut prng, &univ, 1, 1, MERKLE_HEIGHT).unwrap();
 
@@ -908,8 +898,11 @@ mod tests {
 
         let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
 
-        let univ_setup =
-            jf_txn::proof::universal_setup(jf_txn::MAX_UNIVERSAL_DEGREE, &mut prng).unwrap();
+        let univ_setup = jf_txn::proof::universal_setup(
+            compute_universal_param_size(NoteType::Transfer, 1, 1, MERKLE_HEIGHT).unwrap(),
+            &mut prng,
+        )
+        .unwrap();
         let (prove_key, verif_key, _constraint_count) =
             jf_txn::proof::transfer::preprocess(&mut prng, &univ_setup, 1, 1, MERKLE_HEIGHT)
                 .unwrap();
@@ -946,7 +939,7 @@ mod tests {
             RecordCommitment::from_ro(&alice_rec1)
         );
         t.insert(RecordCommitment::from_ro(&alice_rec1));
-        let alice_rec_path = t.get_leaf(0).unwrap().unwrap().1;
+        let alice_rec_path = t.get_leaf(0).expect_ok().1;
         assert_eq!(alice_rec_path.nodes.len(), MERKLE_HEIGHT as usize);
 
         let mut nullifiers: SetMerkleTree = Default::default();
@@ -1069,7 +1062,7 @@ mod tests {
             &bob_key,
             None,
             AccMemberWitness {
-                merkle_path: wallet_merkle_tree.get_leaf(1).unwrap().unwrap().1,
+                merkle_path: wallet_merkle_tree.get_leaf(1).expect_ok().1,
                 root: validator.record_merkle_frontier.get_root_value(),
                 uid: 1,
             },
@@ -1128,8 +1121,8 @@ mod tests {
                             map.get(*i).cloned().map(|x| pow3(*x as u64)),
                             t.get_leaf(*i as u64),
                         ) {
-                            (None, Some(None)) => {}
-                            (Some(map_val), Some(Some((_tree_val, tree_proof)))) => {
+                            (None, LookupResult::EmptyLeaf()) => {}
+                            (Some(map_val), LookupResult::Ok(_tree_val, tree_proof)) => {
                                 // assert_eq!(map_val,tree_val);
                                 MerkleTree::check_proof(
                                     t.get_root_value(),
