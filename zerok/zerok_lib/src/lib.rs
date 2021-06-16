@@ -328,7 +328,7 @@ impl ValidatorState {
         let mut ret = vec![];
         for o in txns.0.iter().flat_map(|x| x.0.output_commitments.iter()) {
             let uid = self.next_uid;
-            self.record_merkle_frontier.insert(*o);
+            self.record_merkle_frontier.push(*o);
             self.record_merkle_frontier.forget(uid).expect_ok();
             ret.push(uid);
             self.next_uid += 1;
@@ -456,7 +456,7 @@ mod tests {
                 key.pub_key(),
                 FreezeFlag::Unfrozen,
             );
-            t.insert(RecordCommitment::from_ro(&rec));
+            t.push(RecordCommitment::from_ro(&rec));
 
             memos.push(ReceiverMemo::from_ro(&mut prng, &rec, &[]).unwrap());
         }
@@ -823,7 +823,7 @@ mod tests {
                     state.owners.push(k1_ix);
                     state.owners.push(k2_ix);
                     for comm in txn.txn.0.output_commitments.iter() {
-                        state.record_merkle_tree.insert(*comm);
+                        state.record_merkle_tree.push(*comm);
                     }
 
                     blk = newblk;
@@ -938,7 +938,7 @@ mod tests {
             RecordCommitment::from_ro(&alice_rec1),
             RecordCommitment::from_ro(&alice_rec1)
         );
-        t.insert(RecordCommitment::from_ro(&alice_rec1));
+        t.push(RecordCommitment::from_ro(&alice_rec1));
         let alice_rec_path = t.get_leaf(0).expect_ok().1;
         assert_eq!(alice_rec_path.nodes.len(), MERKLE_HEIGHT as usize);
 
@@ -1055,7 +1055,7 @@ mod tests {
         let now = Instant::now();
 
         assert_eq!(&new_uids, &vec![1]);
-        wallet_merkle_tree.insert(RecordCommitment::from_ro(&bob_rec));
+        wallet_merkle_tree.push(RecordCommitment::from_ro(&bob_rec));
 
         let bob_rec = TransferNoteInput::create(
             bob_rec,
@@ -1108,7 +1108,7 @@ mod tests {
                     Ok(val) => {
                         map.push(val);
 
-                        t.insert(pow3(*val));
+                        t.push(pow3(*val));
 
                         // check_path(t.hasher.as_ref(), &path.unwrap(), &leaf_val,
                         //         &leaf_hash, MERKLE_HEIGHT, &t.root_hash)
