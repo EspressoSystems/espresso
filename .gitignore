@@ -21,6 +21,7 @@ Cargo.lock
 *~
 \#*\#
 .\#*
+.envrc
 
 # Python Files
 integration-tests/.pytest_cache

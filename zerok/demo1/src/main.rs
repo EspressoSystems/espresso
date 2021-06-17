@@ -6,20 +6,12 @@
 
 #![feature(proc_macro_hygiene, decl_macro)]
 
-
-use jf_txn::parameters::CacheableProverSrs;
-use jf_txn::structs::RecordCommitment;
-use jf_txn::proof::transfer::{TransferProvingKey, TransferVerifyingKey};
-use jf_primitives::merkle_tree::MerkleTree;
 use jf_txn::keys::UserKeyPair;
 
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
-use std::path::Path;
 use structopt::StructOpt;
 use tracing::info;
-use zerok_lib::state_comm;
-use zerok_lib::*;
 
 #[macro_use]
 extern crate rocket;
@@ -86,15 +78,14 @@ async fn main() {
     info!("Generated {} user key pairs", keys.len());
 
     // def0 and key0 are indices; amt0 is an arbitrary amount of asset units.
-    let (def0, key0, amt0) = (0u8, 0u8, 1000u64);
-    let (def1, key1, amt1) = (1u8, 1u8, 2000u64);
+    // let (def0, key0, amt0) = (0u8, 0u8, 1000u64);
+    // let (def1, key1, amt1) = (1u8, 1u8, 2000u64);
 
     let time_delta = 0;
     let (input00, input01, key00, key01, amt_diff0) = (0, 1, 0, 1, -200);
     let (input10, input11, key10, key11, amt_diff1) = (1, 0, 1, 0, 5000);
-    let txs = vec![
+    let _txs = vec![
         (time_delta, input00, input01, key00, key01, amt_diff0),
         (time_delta, input10, input11, key10, key11, amt_diff1),
     ];
-
 }
