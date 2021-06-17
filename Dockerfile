@@ -8,4 +8,4 @@ RUN cargo fmt --all -- --check
 RUN --mount=type=ssh cargo build --workspace --release
 RUN cargo test --workspace --release
 FROM debian:buster
-COPY --from=builder /app/zerok/target/release/libzerok_lib* /app/
+COPY --from=builder /app/target/release/libzerok_lib* /app/
