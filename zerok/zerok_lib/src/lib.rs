@@ -456,7 +456,7 @@ mod tests {
                 key.pub_key(),
                 FreezeFlag::Unfrozen,
             );
-            t.push(RecordCommitment::from_ro(&rec));
+            t.push(RecordCommitment::from(&rec));
 
             memos.push(ReceiverMemo::from_ro(&mut prng, &rec, &[]).unwrap());
         }
@@ -676,8 +676,8 @@ mod tests {
                         FreezeFlag::Unfrozen,
                     );
 
-                    // state.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec1, &[]).unwrap());
-                    // state.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec2, &[]).unwrap());
+                    // state.memos.push(ReceiverMemo::from(&mut prng, &out_rec1, &[]).unwrap());
+                    // state.memos.push(ReceiverMemo::from(&mut prng, &out_rec2, &[]).unwrap());
 
                     println!(
                         "Txn {}.{}/{} inputs chosen: {}",
@@ -932,13 +932,13 @@ mod tests {
                 .unwrap()
                 .get_root_value()
         );
-        let alice_rec_elem = RecordCommitment::from_ro(&alice_rec1);
-        dbg!(&RecordCommitment::from_ro(&alice_rec1));
+        let alice_rec_elem = RecordCommitment::from(&alice_rec1);
+        dbg!(&RecordCommitment::from(&alice_rec1));
         assert_eq!(
-            RecordCommitment::from_ro(&alice_rec1),
-            RecordCommitment::from_ro(&alice_rec1)
+            RecordCommitment::from(&alice_rec1),
+            RecordCommitment::from(&alice_rec1)
         );
-        t.push(RecordCommitment::from_ro(&alice_rec1));
+        t.push(RecordCommitment::from(&alice_rec1));
         let alice_rec_path = t.get_leaf(0).expect_ok().1;
         assert_eq!(alice_rec_path.nodes.len(), MERKLE_HEIGHT as usize);
 
@@ -1055,7 +1055,7 @@ mod tests {
         let now = Instant::now();
 
         assert_eq!(&new_uids, &vec![1]);
-        wallet_merkle_tree.push(RecordCommitment::from_ro(&bob_rec));
+        wallet_merkle_tree.push(RecordCommitment::from(&bob_rec));
 
         let bob_rec = TransferNoteInput::create(
             bob_rec,
