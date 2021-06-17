@@ -24,9 +24,7 @@ stdenv.mkDerivation {
 
     # Add some extra dependencies from `pkgs`
     openssl
-    zlib
     pkgconfig openssl binutils-unwrapped
-    protobuf
     cargo-udeps
 
     alloy5
@@ -36,14 +34,9 @@ stdenv.mkDerivation {
 
   # Set Environment Variables
   RUST_BACKTRACE  = 1;
-  LD_LIBRARY_PATH = "${zlib}/lib";
-  PROTOC          = "${protobuf}/bin/protoc";
-  PROTOC_INCLUDE  = "${protobuf}/include";
 
    shellHook = ''
       export PATH="$PATH:./target/debug"
     '';
-  LIBCLANG_PATH = "${llvmPackages.libclang}/lib";
-  ROCKSDB_LIB_DIR = "${rocksdb}/lib";
 }
 
