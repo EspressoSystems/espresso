@@ -676,8 +676,8 @@ mod tests {
                         FreezeFlag::Unfrozen,
                     );
 
-                    // state.memos.push(ReceiverMemo::from(&mut prng, &out_rec1, &[]).unwrap());
-                    // state.memos.push(ReceiverMemo::from(&mut prng, &out_rec2, &[]).unwrap());
+                    // state.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec1, &[]).unwrap());
+                    // state.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec2, &[]).unwrap());
 
                     println!(
                         "Txn {}.{}/{} inputs chosen: {}",
