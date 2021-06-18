@@ -1121,7 +1121,7 @@ mod tests {
                             map.get(*i).cloned().map(|x| pow3(*x as u64)),
                             t.get_leaf(*i as u64),
                         ) {
-                            (None, LookupResult::EmptyLeaf()) => {}
+                            (None, LookupResult::EmptyLeaf) => {}
                             (Some(map_val), LookupResult::Ok(_tree_val, tree_proof)) => {
                                 // assert_eq!(map_val,tree_val);
                                 MerkleTree::check_proof(
