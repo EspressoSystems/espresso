@@ -1,7 +1,0 @@
-[workspace]
-members = [
-    "zerok_lib",
-    "zerok_client",
-    "zerok_validator",
-    "demo1",
-    ]
