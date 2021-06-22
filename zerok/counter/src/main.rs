@@ -4,11 +4,11 @@ use futures::future::join_all;
 
 use threshold_crypto as tc;
 
+use counter::block::{CounterBlock, CounterTransaction};
+use counter::{gen_keys, set_to_keys, try_hotstuff, try_network};
+use hotstuff::demos::counter;
 use hotstuff::networking::w_network::WNetwork;
 use hotstuff::{HotStuff, HotStuffConfig, PubKey};
-use hotstuff::demos::counter;
-use counter::{gen_keys, try_network, set_to_keys, try_hotstuff};
-use counter::block::{CounterBlock, CounterTransaction};
 
 #[async_std::main]
 async fn main() {
@@ -65,7 +65,7 @@ async fn main() {
             join_all(hotstuffs.iter().map(|(h, _, _, _)| h.get_state())).await
         );
         // Propose a new transaction
-        println!("Proposing to increment from {} -> {}",i,i+1);
+        println!("Proposing to increment from {} -> {}", i, i + 1);
         hotstuffs[0]
             .0
             .publish_transaction_async(CounterTransaction::Inc { previous: i })
@@ -75,16 +75,19 @@ async fn main() {
         println!("Issuing new view messages");
         join_all(hotstuffs.iter().map(|(h, _, _, _)| h.next_view(i, None))).await;
         // Running a round of consensus
-        println!("Running round {}",i+1);
-        join_all(hotstuffs.iter().map(|(h, _, _, _)| h.run_round(i+1, None)))
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .expect(&format!("Round {} failed",i+1));
+        println!("Running round {}", i + 1);
+        join_all(
+            hotstuffs
+                .iter()
+                .map(|(h, _, _, _)| h.run_round(i + 1, None)),
+        )
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .expect(&format!("Round {} failed", i + 1));
     }
     println!(
         "Current states: {:?}",
         join_all(hotstuffs.iter().map(|(h, _, _, _)| h.get_state())).await
     );
 }
-
