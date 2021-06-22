@@ -107,19 +107,21 @@ impl BlockContents for ElaboratedBlock {
     }
 
     fn hash(&self) -> [u8; 32] {
-        use blake2::crypto_mac::Mac;
+        use blake2::digest::Update;
+        use blake2::digest::VariableOutput;
         use std::convert::TryInto;
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "ElaboratedBlock Hash".as_bytes());
+        let mut hasher =
+            blake2::VarBlake2b::with_params(&[], &[], "ElaboratedBlock".as_bytes(), 32);
         hasher.update(&"Block contents".as_bytes());
         hasher.update(&block_comm::block_commit(&self.block));
         hasher.update(&"Block proofs".as_bytes());
         hasher.update(&serde_json::to_string(&self.proofs).unwrap().as_bytes());
-        hasher
-            .finalize()
-            .into_bytes()
-            .as_slice()
-            .try_into()
-            .unwrap()
+        hasher.update("Slightly elongating the contents for personalization".as_bytes());
+        let mut ret = [0u8; 32];
+        hasher.finalize_variable(|res| {
+            ret = res.try_into().unwrap();
+        });
+        ret
     }
 
     fn hash_transaction(txn: &ElaboratedTransaction) -> [u8; 32] {
@@ -194,6 +196,7 @@ mod block_comm {
         for t in p.0.iter() {
             hasher.update(&txn_comm::txn_commit(&t));
         }
+        hasher.update("Slightly elongating the contents for personalization".as_bytes());
         hasher.finalize().into_bytes()
     }
 }
@@ -264,7 +267,7 @@ impl ValidatorState {
             next_uid: self.next_uid,
             prev_block: block_comm::block_commit(&self.prev_block),
         };
-        dbg!(&inputs);
+        // dbg!(&inputs);
         inputs.commit()
     }
 
@@ -656,9 +659,9 @@ impl MultiXfrTestState {
                     }
                 };
 
-                dbg!(&out_amt1);
-                dbg!(&out_amt2);
-                dbg!(&fee_rec.amount);
+                // dbg!(&out_amt1);
+                // dbg!(&out_amt2);
+                // dbg!(&fee_rec.amount);
 
                 let fee_out_rec = RecordOpening::new(
                     &mut prng,
@@ -1046,7 +1049,7 @@ mod tests {
                 .get_root_value()
         );
         let alice_rec_elem = RecordCommitment::from(&alice_rec1);
-        dbg!(&RecordCommitment::from(&alice_rec1));
+        // dbg!(&RecordCommitment::from(&alice_rec1));
         assert_eq!(
             RecordCommitment::from(&alice_rec1),
             RecordCommitment::from(&alice_rec1)
