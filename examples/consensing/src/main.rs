@@ -1,81 +1,169 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
-use std::time::SystemTime;
+// Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
-const VALIDATOR_COUNT: u8 = 4;
+//! This program demonstrates use of Hot Stuff in a trivial application.
+//!
+//! TODO - Add transaction validity checking.
 
-type Transaction = u32;
+use async_std::task::spawn;
+use futures::channel::oneshot;
+use futures::future::join_all;
+use tracing::{debug, error, info};
 
-fn load_crs() {
-    println!("Loading common reference string");
+use counter::block::{CounterBlock, CounterTransaction};
+use counter::{gen_keys, try_hotstuff};
+use hotstuff::demos::counter;
+use hotstuff::message::Message;
+use hotstuff::networking::w_network::WNetwork;
+use hotstuff::{HotStuff, PubKey};
+
+const VALIDATOR_COUNT: usize = 5;
+const TRANSACTION_COUNT: u64 = 50;
+
+type TransactionSpecification = u64;
+type CounterValidator = (
+    HotStuff<CounterBlock>,
+    PubKey,
+    u16,
+    WNetwork<Message<CounterBlock, CounterTransaction>>,
+);
+
+fn load_ignition_keys() {
+    info!("Loading universal parameters and stuff");
 }
 
-fn build_transaction(specification: Transaction) -> Transaction {
-    println!("Building transaction");
-    specification
+/// Calculates the number of signatures required to meet the
+/// threshold for threshold cryptography.
+///
+/// Note, the threshold_crypto crate internally adds one to this
+/// value. It takes one more signature than the threshold to
+/// generate a threshold signature.
+fn calc_signature_threshold(validator_count: usize) -> usize {
+    (2 * validator_count) / 3 + 1
 }
 
-fn submit_transaction(tx: Sender<bool>, transaction: Transaction) {
-    println!("Submitting transaction to {} validators", VALIDATOR_COUNT);
-    for id in 0..VALIDATOR_COUNT {
-        propose_transaction(id, tx.clone(), transaction);
+async fn start_consensus() -> Vec<CounterValidator> {
+    let keys = gen_keys(3);
+    let threshold = calc_signature_threshold(VALIDATOR_COUNT);
+    // Create the hotstuffs and spawn their tasks
+    let hotstuffs: Vec<CounterValidator> =
+        join_all((0..VALIDATOR_COUNT).map(|x| try_hotstuff(&keys, VALIDATOR_COUNT, threshold, x)))
+            .await;
+    // Boot up all the low level networking implementations
+    for (_, _, _, network) in &hotstuffs {
+        let (x, sync) = oneshot::channel();
+        match network.generate_task(x) {
+            Some(task) => {
+                spawn(task);
+                sync.await.expect("sync.await failed");
+            }
+            None => {
+                error!("generate_task(x) returned None");
+                panic!();
+            }
+        }
+    }
+    // Connect the hotstuffs
+    for (i, (_, key, port, _)) in hotstuffs.iter().enumerate() {
+        let socket = format!("localhost:{}", port);
+        // Loop through all the other hotstuffs and connect it to this one
+        for (_, key_2, port_2, network_2) in &hotstuffs[i..] {
+            debug!("Connecting {} to {}", port_2, port);
+            if key != key_2 {
+                network_2
+                    .connect_to(key.clone(), &socket)
+                    .await
+                    .expect("Unable to connect to node");
+            }
+        }
+    }
+    // Boot up all the high level implementations
+    for (hotstuff, _, _, _) in &hotstuffs {
+        hotstuff.spawn_networking_tasks().await;
+    }
+    // Wait for all nodes to connect to each other
+    debug!("Waiting for nodes to fully connect");
+    for (_, _, _, w) in &hotstuffs {
+        while w.connection_table_size().await < VALIDATOR_COUNT - 1 {
+            async_std::task::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        while w.nodes_table_size().await < VALIDATOR_COUNT - 1 {
+            async_std::task::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+    info!("Consensus validators are connected");
+
+    hotstuffs
+}
+
+fn build_transaction(specification: TransactionSpecification) -> CounterTransaction {
+    info!("Building transaction");
+    CounterTransaction::Inc {
+        previous: specification,
     }
 }
 
-fn propose_transaction(id: u8, tx: Sender<bool>, transaction: Transaction) {
-    println!(
-        "Proposing transaction value: {} to validator {}",
-        transaction, &id
+async fn propose_transaction(
+    id: usize,
+    hotstuff: &HotStuff<CounterBlock>,
+    transaction: CounterTransaction,
+) {
+    info!("Proposing to increment from {} -> {}", id, id + 1);
+    hotstuff
+        .publish_transaction_async(transaction)
+        .await
+        .unwrap();
+}
+
+async fn consense(id: usize, hotstuffs: &[CounterValidator]) {
+    info!("Consensing");
+
+    // Issuing new views
+    debug!("Issuing new view messages");
+    join_all(
+        hotstuffs
+            .iter()
+            .map(|(h, _, _, _)| h.next_view(id as u64, None)),
+    )
+    .await;
+
+    // Running a round of consensus
+    debug!("Running round {}", id + 1);
+    join_all(
+        hotstuffs
+            .iter()
+            .map(|(h, _, _, _)| h.run_round(id as u64 + 1, None)),
+    )
+    .await
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .unwrap_or_else(|_| panic!("Round {} failed", id + 1));
+}
+
+async fn log_transaction(hotstuffs: &[CounterValidator]) {
+    info!(
+        "Current states: {:?}",
+        join_all(hotstuffs.iter().map(|(h, _, _, _)| h.get_state())).await
     );
-    thread::spawn(move || {
-        println!("  Validator {} received {}", id, &transaction);
-        let validity = validate_transaction(transaction);
-        tx.send(validity).unwrap();
-    });
 }
 
-fn validate_transaction(_transaction: Transaction) -> bool {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("Time is such a pain")
-        .as_micros();
-    // Occasionally reject the transaction so failure handling can be observed.
-    now % 10 != 0
-}
+#[async_std::main]
+async fn main() {
+    tracing_subscriber::fmt::init();
+    load_ignition_keys();
+    let hotstuffs = start_consensus().await;
 
-fn consense(rx: Receiver<bool>) -> bool {
-    println!("Consensing");
+    for i in 0..TRANSACTION_COUNT {
+        info!(
+            "Current states: {:?}",
+            join_all(hotstuffs.iter().map(|(h, _, _, _)| h.get_state())).await
+        );
+        // Build a new transaction
+        let transaction = build_transaction(i);
 
-    let mut unanimous = true;
+        // Propose the transaction
+        propose_transaction(i as usize, &hotstuffs[0].0, transaction).await;
 
-    for _ in 0..VALIDATOR_COUNT {
-        let next = rx.recv().unwrap();
-        println!("  Validity is {}", &next);
-        if !&next {
-            unanimous = false;
-        }
+        consense(i as usize, &hotstuffs).await;
     }
-
-    unanimous
-}
-
-fn log_transaction(transaction: Transaction) {
-    println!("Recording transaction value: {}", transaction);
-}
-
-fn main() {
-    load_crs();
-
-    for i in 0..2 {
-        let transaction = build_transaction(i + 42);
-        let (tx, rx) = channel();
-        submit_transaction(tx, transaction);
-        if consense(rx) {
-            println!("Consensus was achieved");
-            log_transaction(transaction);
-        } else {
-            println!("Consensus was not achieved");
-            println!("Rejecting transaction");
-        }
-    }
+    log_transaction(&hotstuffs).await;
 }
