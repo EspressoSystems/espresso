@@ -1,13 +1,15 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
-use std::time::SystemTime;
+// Copyright © 2021 Translucence Research, Inc. All rights reserved.
+
+//! This program demonstrates use of Hot Stuff in a trivial application.
+//!
+//! TODO - Add transaction validity checking.
 
 use async_std::task::spawn;
 use futures::channel::oneshot;
 use futures::future::join_all;
 
 use counter::block::{CounterBlock, CounterTransaction};
-use counter::{gen_keys, try_hotstuff, try_network};
+use counter::{gen_keys, try_hotstuff};
 use hotstuff::demos::counter;
 use hotstuff::message::Message;
 use hotstuff::networking::w_network::WNetwork;
@@ -19,7 +21,7 @@ const TRANSACTION_COUNT: u64 = 2;
 type TransactionSpecification = u64;
 
 fn load_ignition_keys() {
-    println!("Loading common reference string");
+    println!("Loading universal parameters and stuff");
 }
 
 async fn start_consensus() -> Vec<(
@@ -86,52 +88,76 @@ fn build_transaction(specification: TransactionSpecification) -> CounterTransact
     }
 }
 
-fn submit_transaction(tx: Sender<bool>, transaction: CounterTransaction) {
-    println!("Submitting transaction to {} validators", VALIDATOR_COUNT);
-    for id in 0..VALIDATOR_COUNT {
-        propose_transaction(id, tx.clone(), transaction.clone());
-    }
+async fn propose_transaction(
+    id: usize,
+    hotstuff: &HotStuff<CounterBlock>,
+    transaction: CounterTransaction,
+) {
+    println!("Proposing to increment from {} -> {}", id, id + 1);
+    hotstuff
+        .publish_transaction_async(transaction)
+        .await
+        .unwrap();
 }
 
-fn propose_transaction(id: usize, tx: Sender<bool>, transaction: CounterTransaction) {
-    println!(
-        "Proposing transaction value: {:?} to validator {}",
-        transaction, &id
-    );
-    thread::spawn(move || {
-        println!("  Validator {} received {:?}", id, &transaction);
-        let validity = validate_transaction(transaction);
-        tx.send(validity).unwrap();
-    });
-}
-
-fn validate_transaction(_transaction: CounterTransaction) -> bool {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("Time is such a pain")
-        .as_micros();
-    // Occasionally reject the transaction so failure handling can be observed.
-    now % 10 != 0
-}
-
-fn consense(rx: Receiver<bool>) -> bool {
+async fn consense(
+    id: usize,
+    hotstuffs: &Vec<(
+        HotStuff<CounterBlock>,
+        PubKey,
+        u16,
+        WNetwork<Message<CounterBlock, CounterTransaction>>,
+    )>,
+) -> bool {
     println!("Consensing");
+    /*
+        let mut unanimous = true;
 
-    let mut unanimous = true;
-
-    for _ in 0..VALIDATOR_COUNT {
-        let next = rx.recv().unwrap();
-        println!("  Validity is {}", &next);
-        if !&next {
-            unanimous = false;
+        for _ in 0..VALIDATOR_COUNT {
+            let next = rx.recv().unwrap();
+            println!("  Validity is {}", &next);
+            if !&next {
+                unanimous = false;
+            }
         }
-    }
 
-    unanimous
+        unanimous
+    */
+    // issuing new views
+    println!("Issuing new view messages");
+    join_all(
+        hotstuffs
+            .iter()
+            .map(|(h, _, _, _)| h.next_view(id as u64, None)),
+    )
+    .await;
+
+    // Running a round of consensus
+    println!("Running round {}", id + 1);
+    join_all(
+        hotstuffs
+            .iter()
+            .map(|(h, _, _, _)| h.run_round(id as u64 + 1, None)),
+    )
+    .await
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .expect(&format!("Round {} failed", id + 1));
+    true
 }
 
-fn log_transaction(transaction: CounterTransaction) {
-    println!("Recording transaction value: {:?}", transaction);
+async fn log_transaction(
+    hotstuffs: &Vec<(
+        HotStuff<CounterBlock>,
+        PubKey,
+        u16,
+        WNetwork<Message<CounterBlock, CounterTransaction>>,
+    )>,
+) {
+    println!(
+        "Current states: {:?}",
+        join_all(hotstuffs.iter().map(|(h, _, _, _)| h.get_state())).await
+    );
 }
 
 #[async_std::main]
@@ -148,44 +174,9 @@ async fn main() {
         let transaction = build_transaction(i);
 
         // Propose the transaction
-        println!("Proposing to increment from {} -> {}", i, i + 1);
-        hotstuffs[0]
-            .0
-            .publish_transaction_async(transaction)
-            .await
-            .unwrap();
-        // issuing new views
-        println!("Issuing new view messages");
-        join_all(hotstuffs.iter().map(|(h, _, _, _)| h.next_view(i, None))).await;
+        propose_transaction(i as usize, &hotstuffs[0].0, transaction).await;
 
-        // Running a round of consensus
-        println!("Running round {}", i + 1);
-        join_all(
-            hotstuffs
-                .iter()
-                .map(|(h, _, _, _)| h.run_round(i + 1, None)),
-        )
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .expect(&format!("Round {} failed", i + 1));
+        consense(i as usize, &hotstuffs).await;
     }
-    println!(
-        "Current states: {:?}",
-        join_all(hotstuffs.iter().map(|(h, _, _, _)| h.get_state())).await
-    );
-
-    /*    for i in 0..TRANSACTION_COUNT {
-            let transaction = build_transaction(i + 42);
-            let (tx, rx) = channel();
-            submit_transaction(tx, transaction);
-            if consense(rx) {
-                println!("Consensus was achieved");
-                log_transaction(transaction);
-            } else {
-                println!("Consensus was not achieved");
-                println!("Rejecting transaction");
-            }
-        }
-    */
+    log_transaction(&hotstuffs).await;
 }
