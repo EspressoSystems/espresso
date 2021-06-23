@@ -14,7 +14,7 @@ use hotstuff::{HotStuff, HotStuffConfig, PubKey};
 async fn main() {
     let keys = gen_keys(3);
     // Create the hotstuffs and spawn their tasks
-    let hotstuffs: Vec<(HotStuff<CounterBlock>, PubKey, u16, WNetwork<_>)> =
+    let hotstuffs: Vec<(HotStuff<CounterBlock, 32>, PubKey, u16, WNetwork<_>)> =
         join_all((0..5).map(|x| try_hotstuff(&keys, 5, 4, x))).await;
     // Boot up all the low level networking implementations
     for (_, _, _, network) in &hotstuffs {

@@ -51,24 +51,21 @@ pub async fn try_hotstuff(
     node_number: usize,
     initial_state: ValidatorState,
 ) -> (
-    HotStuff<ElaboratedBlock>,
+    HotStuff<ElaboratedBlock, 64>,
     PubKey,
     u16,
-    WNetwork<Message<ElaboratedBlock, ElaboratedTransaction>>,
+    WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
 ) {
     let genesis = ElaboratedBlock::default();
     let pub_key_set = keys.public_keys();
-    let tc_pub_key = pub_key_set.public_key_share(node_number);
-    let pub_key = PubKey {
-        set: pub_key_set.clone(),
-        node: tc_pub_key,
-        nonce: node_number as u64,
-    };
+    let pub_key = PubKey::from_secret_key_set_escape_hatch(keys, node_number as u64);
     let config = HotStuffConfig {
         total_nodes: total as u32,
         thershold: threshold as u32,
         max_transactions: 100,
         known_nodes: set_to_keys(total, &pub_key_set),
+        next_view_timeout: 40_000,
+        timeout_ratio: (2, 1),
     };
     let (networking, port) = try_network(pub_key.clone()).await;
     let hotstuff = HotStuff::new(
@@ -88,10 +85,10 @@ const TRANSACTION_COUNT: u64 = 50;
 
 type TransactionSpecification = u64;
 type MultiXfrValidator = (
-    HotStuff<ElaboratedBlock>,
+    HotStuff<ElaboratedBlock, 64>,
     PubKey,
     u16,
-    WNetwork<Message<ElaboratedBlock, ElaboratedTransaction>>,
+    WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
 );
 
 fn load_ignition_keys() {
@@ -189,7 +186,7 @@ async fn start_consensus() -> (MultiXfrTestState, Vec<MultiXfrValidator>) {
 
 async fn propose_transaction(
     id: usize,
-    hotstuff: &HotStuff<ElaboratedBlock>,
+    hotstuff: &HotStuff<ElaboratedBlock, 64>,
     transaction: ElaboratedTransaction,
 ) {
     info!("Proposing transacton {}", id);

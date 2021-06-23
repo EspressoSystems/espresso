@@ -52,7 +52,7 @@ pub struct ElaboratedBlock {
     pub proofs: Vec<Vec<SetMerkleProof>>,
 }
 
-impl BlockContents for ElaboratedBlock {
+impl BlockContents<64> for ElaboratedBlock {
     type State = ValidatorState;
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
@@ -106,25 +106,40 @@ impl BlockContents for ElaboratedBlock {
         Ok(state)
     }
 
-    fn hash(&self) -> [u8; 32] {
-        use blake2::digest::Update;
-        use blake2::digest::VariableOutput;
+    fn hash(&self) -> hotstuff::BlockHash<64> {
+        use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
-        let mut hasher =
-            blake2::VarBlake2b::with_params(&[], &[], "ElaboratedBlock".as_bytes(), 32);
+        let mut hasher = blake2::Blake2b::with_params(&[], &[], "ElaboratedBlock".as_bytes());
         hasher.update(&"Block contents".as_bytes());
         hasher.update(&block_comm::block_commit(&self.block));
         hasher.update(&"Block proofs".as_bytes());
         hasher.update(&serde_json::to_string(&self.proofs).unwrap().as_bytes());
-        hasher.update("Slightly elongating the contents for personalization".as_bytes());
-        let mut ret = [0u8; 32];
-        hasher.finalize_variable(|res| {
-            ret = res.try_into().unwrap();
-        });
-        ret
+        hotstuff::BlockHash::<64>::from_array(
+            hasher
+                .finalize()
+                .into_bytes()
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        )
     }
 
-    fn hash_transaction(txn: &ElaboratedTransaction) -> [u8; 32] {
+    fn hash_bytes(bytes: &[u8]) -> hotstuff::BlockHash<64> {
+        use blake2::crypto_mac::Mac;
+        use std::convert::TryInto;
+        let mut hasher = blake2::Blake2b::with_params(&[], &[], "HotStuff bytes".as_bytes());
+        hasher.update(bytes);
+        hotstuff::BlockHash::<64>::from_array(
+            hasher
+                .finalize()
+                .into_bytes()
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    fn hash_transaction(txn: &ElaboratedTransaction) -> hotstuff::BlockHash<64> {
         use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
         let mut hasher =
@@ -133,12 +148,14 @@ impl BlockContents for ElaboratedBlock {
         hasher.update(&txn_comm::txn_commit(&txn.txn));
         hasher.update(&"Txn proofs".as_bytes());
         hasher.update(&serde_json::to_string(&txn.proofs).unwrap().as_bytes());
-        hasher
-            .finalize()
-            .into_bytes()
-            .as_slice()
-            .try_into()
-            .unwrap()
+        hotstuff::BlockHash::<64>::from_array(
+            hasher
+                .finalize()
+                .into_bytes()
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        )
     }
 }
 
@@ -196,7 +213,6 @@ mod block_comm {
         for t in p.0.iter() {
             hasher.update(&txn_comm::txn_commit(&t));
         }
-        hasher.update("Slightly elongating the contents for personalization".as_bytes());
         hasher.finalize().into_bytes()
     }
 }
