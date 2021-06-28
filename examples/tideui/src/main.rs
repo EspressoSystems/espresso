@@ -1,4 +1,4 @@
-//
+// Copyright © 2021 Translucence Research, Inc. All rights reserved.
 use tide::Request;
 
 async fn echo(req: Request<()>) -> tide::Result<String> {
