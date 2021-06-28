@@ -1,0 +1,12 @@
+[package]
+name = "tideui"
+version = "0.1.0"
+authors = ["John D. Corbett <corbett@pictographer.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tide = "0.16.0"
+async-std = { version = "1.8.0", features = ["attributes"] }
+serde = { version = "1.0", features = ["derive"] }
