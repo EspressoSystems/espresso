@@ -392,7 +392,7 @@ dependencies = [
  "memchr",
  "num_cpus",
  "once_cell",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
  "pin-utils",
  "slab",
  "wasm-bindgen-futures",
@@ -460,7 +460,7 @@ dependencies = [
  "futures-io",
  "futures-util",
  "log",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
  "tungstenite",
 ]
 
@@ -1161,9 +1161,9 @@ dependencies = [
 
 [[package]]
 name = "figment"
-version = "0.10.5"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ca029e813a72b7526d28273d25f3e4a2f365d1b7a1018a6f93ec9053a119763"
+checksum = "790b4292c72618abbab50f787a477014fe15634f96291de45672ce46afe122df"
 dependencies = [
  "atomic",
  "pear",
@@ -1267,7 +1267,7 @@ dependencies = [
  "futures-io",
  "memchr",
  "parking",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
  "waker-fn",
 ]
 
@@ -1310,7 +1310,7 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "memchr",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
  "pin-utils",
  "proc-macro-hack",
  "proc-macro-nested",
@@ -1452,9 +1452,9 @@ dependencies = [
 
 [[package]]
 name = "hermit-abi"
-version = "0.1.18"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "322f4de77956e22ed0e5032c359a0f1273f1f7f0d79bfa3b8ffbc730d7fbcc5c"
+checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
 dependencies = [
  "libc",
 ]
@@ -1468,7 +1468,7 @@ checksum = "b07f60793ff0a4d9cef0f18e63b5357e06209987153a64648c972c1e5aff336f"
 [[package]]
 name = "hotstuff"
 version = "0.0.0"
-source = "git+ssh://git@gitlab.com/translucence/systems/hotstuff.git?branch=main#b7853dca152dacd25193bff6d552386d75ef7654"
+source = "git+ssh://git@gitlab.com/translucence/systems/hotstuff.git?branch=main#3f279fb23db989f914e29ffeeb4578cfd9fc3557"
 dependencies = [
  "async-lock",
  "async-std",
@@ -1511,7 +1511,7 @@ checksum = "60daa14be0e0786db0f03a9e57cb404c9d756eed2b6c62b9ea98ec5743ec75a9"
 dependencies = [
  "bytes 1.0.1",
  "http",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
 ]
 
 [[package]]
@@ -1542,7 +1542,7 @@ dependencies = [
  "httparse",
  "httpdate",
  "itoa",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
  "socket2",
  "tokio 1.7.1",
  "tower-service",
@@ -1614,7 +1614,7 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#cdfae502d5e91d63bf8714a11bb8efcfae389ed8"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1636,7 +1636,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#cdfae502d5e91d63bf8714a11bb8efcfae389ed8"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1658,7 +1658,7 @@ dependencies = [
 [[package]]
 name = "jf-txn"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#cdfae502d5e91d63bf8714a11bb8efcfae389ed8"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1686,7 +1686,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#cdfae502d5e91d63bf8714a11bb8efcfae389ed8"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
 dependencies = [
  "ark-serialize",
  "serde",
@@ -2143,9 +2143,9 @@ checksum = "257b64915a082f7811703966789728173279bdebb956b143dbcd23f6f970a777"
 
 [[package]]
 name = "pin-project-lite"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc0e1f259c92177c30a4c9d177246edd0a3568b25756a977d0632cf8fa37e905"
+checksum = "8d31d11c69a6b52a174b42bdc0c30e5e11670f90788b2c471c31c1d17d449443"
 
 [[package]]
 name = "pin-utils"
@@ -2486,7 +2486,7 @@ dependencies = [
 [[package]]
 name = "rocket"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#abf996b026b601abb193d2f2081887b1de5e6ced"
+source = "git+https://github.com/SergioBenitez/Rocket.git#ca9e3da5b636eea77f5c55f50b7c0c8002355671"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2503,7 +2503,7 @@ dependencies = [
  "multer",
  "num_cpus",
  "parking_lot",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
  "rand 0.8.4",
  "ref-cast",
  "rocket_codegen",
@@ -2523,7 +2523,7 @@ dependencies = [
 [[package]]
 name = "rocket_codegen"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#abf996b026b601abb193d2f2081887b1de5e6ced"
+source = "git+https://github.com/SergioBenitez/Rocket.git#ca9e3da5b636eea77f5c55f50b7c0c8002355671"
 dependencies = [
  "devise",
  "glob",
@@ -2538,7 +2538,7 @@ dependencies = [
 [[package]]
 name = "rocket_http"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#abf996b026b601abb193d2f2081887b1de5e6ced"
+source = "git+https://github.com/SergioBenitez/Rocket.git#ca9e3da5b636eea77f5c55f50b7c0c8002355671"
 dependencies = [
  "cookie",
  "either",
@@ -2551,7 +2551,7 @@ dependencies = [
  "parking_lot",
  "pear",
  "percent-encoding",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
  "ref-cast",
  "serde",
  "smallvec",
@@ -3220,7 +3220,7 @@ dependencies = [
  "mio",
  "num_cpus",
  "once_cell",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
  "signal-hook-registry",
  "tokio-macros",
  "winapi",
@@ -3244,7 +3244,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8864d706fdb3cc0843a49647ac892720dac98a6eeb818b77190592cf4994066"
 dependencies = [
  "futures-core",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
  "tokio 1.7.1",
 ]
 
@@ -3258,7 +3258,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "log",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
  "tokio 1.7.1",
 ]
 
@@ -3293,7 +3293,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09adeb8c97449311ccd28a427f96fb563e7fd31aabf994189879d9da2394b89d"
 dependencies = [
  "cfg-if 1.0.0",
- "pin-project-lite 0.2.6",
+ "pin-project-lite 0.2.7",
  "tracing-attributes",
  "tracing-core",
 ]
@@ -3361,9 +3361,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.2.18"
+version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa5553bf0883ba7c9cbe493b085c29926bd41b66afc31ff72cf17ff4fb60dcd5"
+checksum = "ab69019741fca4d98be3c62d2b75254528b5432233fd8a4d2739fec20278de48"
 dependencies = [
  "ansi_term 0.12.1",
  "chrono",
