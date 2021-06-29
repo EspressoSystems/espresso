@@ -1,7 +1,6 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 use async_std::task::block_on;
 use std::{net::TcpListener, thread::spawn};
-use tide;
 use tungstenite::{
     accept_hdr,
     handshake::server::{Request, Response},
@@ -47,7 +46,7 @@ async fn main() -> Result<(), std::io::Error> {
                     websocket
                         .write_message(format!("{}: {}", counter, msg).into())
                         .unwrap();
-                    counter = counter + 1;
+                    counter += 1;
                 }
             }
         });
