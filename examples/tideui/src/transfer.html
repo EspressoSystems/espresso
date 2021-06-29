@@ -1,5 +1,6 @@
 <html>
   <head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
     <style>
       body {
           font-family: Arial, Helvetica, sans-serif;
@@ -16,17 +17,46 @@
       }
     </style>
     <script type="text/javascript">
-      function redirect_clean(){
+      function redirectClean(){
           console.log('oh, hey');
           var value_1 = document.getElementById("raddr").value;
           var value_2 = document.getElementById("amt").value;
           window.location = '/transfer/'+value_1+'/'+value_2;
           return false;
-}
-</script>
-    
+      }
+
+      // Websocket
+      function uilog(msg) {
+          console.log(msg);
+          var ta = document.getElementById('events');
+          if (ta.value.length) { ta.value += '\n'; }
+          ta.value += msg;
+          ta.scrollTop = ta.scrollHeight;
+      }
+
+      var protocol = window.location.protocol === 'http:' ? 'ws://' : 'wss://';
+      var host = '127.0.0.1:3012';
+      var address = protocol + host;
+      var socket = new WebSocket(address);
+      console.log('looking for server at ' + address);
+      console.log('host: ' + window.location.host);
+
+      function initialize() {
+          (function() {
+              socket.onmessage = function(msg) {
+                  uilog(msg.data);
+              };
+              uilog('Web Socket enabled.');
+          })();
+      }
+      function onSend(){
+	  socket.send('Web Socket Send button pressed');
+      }
+
+      window.addEventListener("load", initialize);
+    </script>
   </head>
-  <body>
+  <body> 
     <h1>Transfer</h1>
     <p>Payer Account: LA~fe9350s ⧉</p>
     <p>Account Balance: 100 jellybeans</p>
@@ -47,16 +77,18 @@
             <div align="right" style="float:right">
               <input type="button"
                      name="submit"
-                     onclick="redirect_clean()"
+                     onclick="redirectClean()"
                      value="Send">
+              <input type="button"
+                     name="submit"
+                     onclick="onSend()"
+                     value="Web Socket Send">
             </div><br>
           </fieldset>
         </form>
       </div>
     <h2>Status</h2>
-    <textarea id="events" name="events" rows="10" style="width:100%;min-width:300px;margin:16px;padding:4px">
-Awaiting submission.
-    </textarea>
+    <textarea id="events" name="events" rows="10" style="width:100%;min-width:300px;margin:16px;padding:4px"></textarea>
     </div>
     <h1>TODO</h1>
     <ul>
