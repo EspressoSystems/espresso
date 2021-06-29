@@ -4,7 +4,7 @@
 //
 // This code builds and validates transactions with two inputs and two outputs.
 
-#![feature(proc_macro_hygiene, decl_macro)]
+//#![feature(proc_macro_hygiene, decl_macro)]
 
 use jf_txn::keys::UserKeyPair;
 

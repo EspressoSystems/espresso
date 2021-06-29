@@ -2,13 +2,11 @@ use async_std::task::spawn;
 use futures::channel::oneshot;
 use futures::future::join_all;
 
-use threshold_crypto as tc;
-
 use counter::block::{CounterBlock, CounterTransaction};
-use counter::{gen_keys, set_to_keys, try_hotstuff, try_network};
+use counter::{gen_keys, try_hotstuff};
 use hotstuff::demos::counter;
 use hotstuff::networking::w_network::WNetwork;
-use hotstuff::{HotStuff, HotStuffConfig, PubKey};
+use hotstuff::{HotStuff, PubKey};
 
 #[async_std::main]
 async fn main() {
@@ -84,7 +82,7 @@ async fn main() {
         .await
         .into_iter()
         .collect::<Result<Vec<_>, _>>()
-        .expect(&format!("Round {} failed", i + 1));
+        .unwrap_or_else(|_| panic!("Round {} failed", i + 1));
     }
     println!(
         "Current states: {:?}",
