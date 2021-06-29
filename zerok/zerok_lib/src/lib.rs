@@ -427,7 +427,7 @@ impl MultiXfrTestState {
             &mut prng,
         )?));
         let (prove_key, verif_key, _) =
-            jf_txn::proof::transfer::preprocess(&mut prng, univ_setup, 3, 3, MERKLE_HEIGHT)?;
+            jf_txn::proof::transfer::preprocess(univ_setup, 3, 3, MERKLE_HEIGHT)?;
 
         let native_token = AssetDefinition::native();
 
@@ -1016,7 +1016,7 @@ mod tests {
         )
         .unwrap();
         let (_prove, _verif, _constraint_count) =
-            jf_txn::proof::transfer::preprocess(&mut prng, &univ, 1, 1, MERKLE_HEIGHT).unwrap();
+            jf_txn::proof::transfer::preprocess(&univ, 1, 1, MERKLE_HEIGHT).unwrap();
 
         println!("CRS set up");
     }
@@ -1036,8 +1036,7 @@ mod tests {
         )
         .unwrap();
         let (prove_key, verif_key, _constraint_count) =
-            jf_txn::proof::transfer::preprocess(&mut prng, &univ_setup, 1, 1, MERKLE_HEIGHT)
-                .unwrap();
+            jf_txn::proof::transfer::preprocess(&univ_setup, 1, 1, MERKLE_HEIGHT).unwrap();
 
         println!("CRS set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
