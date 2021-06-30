@@ -44,3 +44,6 @@ package-lock.json
 
 # The cache for chain data in container
 .local
+
+# Help prevent accidental credential adds.
+cargo-system-config.toml
