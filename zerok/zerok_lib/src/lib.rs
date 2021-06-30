@@ -8,9 +8,14 @@ use hotstuff::BlockContents;
 use jf_primitives::merkle_tree;
 use jf_txn::errors::TxnApiError;
 use jf_txn::keys::UserKeyPair;
-use jf_txn::proof::transfer::TransferVerifyingKey;
+//use jf_txn::proof::transfer::TransferVerifyingKey;
 use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
-use jf_txn::transfer::TransferNote;
+// use jf_txn::transfer::TransferNote;
+// use jf_txn::freeze::FreezeNote;
+//use jf_txn::mint::MintNote;
+use jf_txn::txn_batch_verify;
+use jf_txn::TransactionNote;
+use jf_txn::TransactionVerifyingKey;
 use jf_utils::serialize::CanonicalBytes;
 use serde::{Deserialize, Serialize};
 pub use set_merkle_tree::*;
@@ -24,16 +29,16 @@ pub struct LedgerRecordCommitment(pub RecordCommitment);
 
 // TODO
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct Transaction(pub TransferNote);
+pub struct Transaction(pub TransactionNote);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ElaboratedTransaction {
-    pub txn: Transaction,
+    pub txn: TransactionNote,
     pub proofs: Vec<SetMerkleProof>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct Block(pub Vec<Transaction>);
+pub struct Block(pub Vec<TransactionNote>);
 
 // A block with nullifier set non-membership proofs
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -62,9 +67,9 @@ impl BlockContents for ElaboratedBlock {
             .block
             .0
             .iter()
-            .flat_map(|x| x.0.inputs_nullifiers.iter())
+            .flat_map(|x| x.nullifiers().iter())
             .collect::<HashSet<_>>();
-        for n in txn.txn.0.inputs_nullifiers.iter() {
+        for n in txn.txn.nullifiers().iter() {
             if nulls.contains(n) {
                 return Err(ValidationError::ConflictingNullifiers {});
             }
@@ -152,7 +157,7 @@ mod verif_crs_comm {
     use generic_array::GenericArray;
     pub type VerifCRSCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
 
-    pub fn verif_crs_commit(p: &TransferVerifyingKey) -> VerifCRSCommitment {
+    pub fn verif_crs_commit(p: &TransactionVerifyingKey) -> VerifCRSCommitment {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "VerifCRS Comm".as_bytes());
         hasher.update(&serde_json::to_string(p).unwrap().as_bytes());
         hasher.finalize().into_bytes()
@@ -165,9 +170,13 @@ mod txn_comm {
     use generic_array::GenericArray;
     pub type TxnCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
 
-    pub fn txn_commit(p: &Transaction) -> TxnCommitment {
+    pub fn txn_commit(p: &TransactionNote) -> TxnCommitment {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "Txn Comm".as_bytes());
-        hasher.update(&jf_utils::serialize::CanonicalBytes::from(p.0.clone()).0);
+        match p {
+            TransactionNote::Transfer(t) => { hasher.update(&jf_utils::serialize::CanonicalBytes::from(*t.clone()).0); }
+            TransactionNote::Freeze(f) => { hasher.update(&jf_utils::serialize::CanonicalBytes::from(*f.clone()).0); }
+            TransactionNote::Mint(m) => { hasher.update(&jf_utils::serialize::CanonicalBytes::from(*m.clone()).0); }
+        }
         hasher.finalize().into_bytes()
     }
 }
@@ -235,7 +244,7 @@ pub mod state_comm {
 pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: state_comm::LedgerStateCommitment,
-    pub verif_crs: TransferVerifyingKey,
+    pub verif_crs: TransactionVerifyingKey,
     pub record_merkle_root: merkle_tree::NodeValue,
     pub record_merkle_frontier: merkle_tree::MerkleTree<RecordCommitment>,
     pub nullifiers_root: set_hash::Hash,
@@ -269,7 +278,7 @@ impl ValidatorState {
         for (pf, n) in null_pfs
             .iter()
             .zip(txns.0.iter())
-            .flat_map(|(pfs, txn)| pfs.iter().zip(txn.0.inputs_nullifiers.iter()))
+            .flat_map(|(pfs, txn)| pfs.iter().zip(txn.nullifiers().iter()))
         {
             if nulls.contains(n)
                 || pf
@@ -282,15 +291,12 @@ impl ValidatorState {
             nulls.insert(n);
         }
 
-        for txn in txns.0.iter() {
-            txn.0
-                .verify(
-                    &self.verif_crs,
-                    self.record_merkle_frontier.get_root_value(),
-                    now,
-                )
-                .map_err(|err| CryptoError { err })?;
-        }
+        txn_batch_verify(
+            &txns.0,
+            &[self.record_merkle_frontier.get_root_value()],
+            now,
+            &[&self.verif_crs],
+        ).map_err(|err| CryptoError { err })?;
 
         Ok((txns, null_pfs))
     }
@@ -313,8 +319,8 @@ impl ValidatorState {
             .iter()
             .zip(null_pfs.into_iter())
             .flat_map(|(txn, null_pfs)| {
-                txn.0
-                    .inputs_nullifiers
+                txn
+                    .nullifiers()
                     .iter()
                     .cloned()
                     .zip(null_pfs.into_iter())
@@ -326,7 +332,7 @@ impl ValidatorState {
             .0;
 
         let mut ret = vec![];
-        for o in txns.0.iter().flat_map(|x| x.0.output_commitments.iter()) {
+        for o in txns.0.iter().flat_map(|x| x.output_commitments().iter()) {
             let uid = self.next_uid;
             self.record_merkle_frontier.push(*o);
             self.record_merkle_frontier.forget(uid).expect_ok();
@@ -753,7 +759,7 @@ mod tests {
                     );
                     let now2 = Instant::now();
 
-                    let (txn, owner_memos, _owner_memos_sig) = TransferNote::generate(
+                    let (transfer, owner_memos, _owner_memos_sig) = TransferNote::generate(
                         &mut prng,
                         vec![fee_input, input1, input2],
                         &[fee_out_rec, out_rec1, out_rec2],
@@ -774,7 +780,7 @@ mod tests {
                     );
                     let now2 = Instant::now();
 
-                    let nullifier_pfs = txn
+                    let nullifier_pfs = transfer
                         .inputs_nullifiers
                         .iter()
                         .map(|n| state.nullifiers.contains(*n).1)
@@ -792,7 +798,7 @@ mod tests {
                         ix,
                         (owner_memos, k1_ix, k2_ix),
                         ElaboratedTransaction {
-                            txn: Transaction(txn),
+                            txn: TransactionNote::from(transfer),
                             proofs: nullifier_pfs,
                         },
                     ))
@@ -837,7 +843,7 @@ mod tests {
                 .block
                 .0
                 .iter()
-                .flat_map(|x| x.0.inputs_nullifiers.iter())
+                .flat_map(|x| x.0.nullifiers().iter())
             {
                 assert!(!state.nullifiers.contains(*n).0);
                 state.nullifiers.insert(*n);
@@ -1045,7 +1051,7 @@ mod tests {
         let now = Instant::now();
 
         let new_uids = validator
-            .validate_and_apply(1, Block(vec![Transaction(txn1)]), vec![nullifier_pfs])
+            .validate_and_apply(1, Block(vec![TransactionNote(txn1)]), vec![nullifier_pfs])
             .unwrap();
 
         println!(
