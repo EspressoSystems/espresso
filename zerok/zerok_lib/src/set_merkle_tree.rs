@@ -42,9 +42,40 @@ pub mod set_hash {
 
 #[derive(Debug, Clone)]
 pub enum SetMerkleTree {
-    Empty(),
-    Leaf(set_hash::Hash, Nullifier),
-    Branch(set_hash::Hash, Box<SetMerkleTree>, Box<SetMerkleTree>),
+    EmptySubtree,
+    ForgottenSubtree { value: set_hash::Hash },
+    Leaf{ value: set_hash::Hash,
+          /// how far above the "true" leaf level this leaf is
+          height: usize,
+          elem: Nullifier },
+    Branch{ value: set_hash::Hash, l: Box<SetMerkleTree>, r: Box<SetMerkleTree> },
+}
+
+impl SetMerkleTree {
+    fn new_leaf(height: usize, elem: Nullifier) -> Self {
+        let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
+        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
+        let elem_bits = elem_bit_vec.into_iter();
+
+        let mut h = set_hash::leaf_hash(elem);
+        for sib_is_left in elem_bits.into_iter().take(height) {
+            let (l,r) = if sib_is_left {
+                (set_hash::EMPTY_HASH,h)
+            } else {
+                (h,set_hash::EMPTY_HASH)
+            }
+            h = set_hash::branch_hash(l,r)
+        }
+
+        Self::Leaf { value: h, height, elem }
+    }
+
+    fn new_branch(l: Box<Self>, r: Box<Self>) -> Self {
+        Self::Branch {
+            value: set_hash::branch_hash(l.hash(), r.hash()),
+            l, r,
+        }
+    }
 }
 
 impl Default for SetMerkleTree {
@@ -54,317 +85,82 @@ impl Default for SetMerkleTree {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SetMerkleTerminalNode {
+    EmptySubtree,
+    Leaf{ /// how far above the "true" leaf level this leaf is
+          height: usize,
+          elem: Nullifier },
+}
+
+impl SetMerkleTerminalNode {
+    fn value(&self) -> set_hash::Hash {
+        use SetMerkleNode::*;
+        match self {
+            EmptySubtree => *set_hash::EMPTY_HASH,
+            Leaf { height, elem } => {
+                let elem_bit_vec = byte_array_to_bits(set_hash::elem_hash(elem));
+
+                // the path only goes until a terminal node is reached, so skip
+                // part of the bit-vec
+                let elem_bits = elem_bit_vec.into_iter();
+
+                let mut running_hash = set_hash::leaf_hash(elem);
+
+                // if the height is too large, keep hashing
+                for sib_is_left in elem_bits.chain(repeat(false)).take(height) {
+                    let sib = *set_hash::EMPTY_HASH;
+                    running_hash = {
+                        let l = if sib_is_left { sib } else { running_hash };
+                        let r = if sib_is_left { running_hash } else { sib };
+                        set_hash::branch_hash(l, r)
+                    };
+                }
+
+                running_hash
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SetMerkleProof {
-    is_present: bool,
+    terminal_node: SetMerkleTerminalNode,
     path: Vec<set_hash::Hash>,
 }
 
-// TODO: an optimization can be done where instead of expanding the whole tree for each element,
-// you expand until that element would be the only element in that subtree. This requires different
-// logic in the proof checking to distinguish between "Not in the tree because the path to the
-// element ends in Empty" and "Not in the tree because the path to the element abruptly ends at a
-// different element". I think it requires a slightly different proof structure as well -- for
-// example, instead of `is_present`, you have something with 3 options: Present, EmptyPath, and
-// NonemptyPath(Nullifier).
 impl SetMerkleProof {
     pub fn check(&self, elem: Nullifier, root: &set_hash::Hash) -> Result<bool, set_hash::Hash> {
-        let mut running_hash = if self.is_present {
-            set_hash::leaf_hash(elem)
-        } else {
-            *set_hash::EMPTY_HASH
-        };
+        let mut running_hash = self.terminal_node.value();
 
         let elem_bit_vec = byte_array_to_bits(set_hash::elem_hash(elem));
 
-        // For non-membership proofs, the path only goes until an empty
-        // subtree is reached, so skip part of the bit-vec
+        // the path only goes until a terminal node is reached, so skip
+        // part of the bit-vec
         let start_bit = elem_bit_vec.len() - self.path.len();
         let elem_bits = elem_bit_vec.into_iter().skip(start_bit);
 
         for (sib, sib_is_left) in self.path.iter().zip(elem_bits) {
             let sib = *sib;
-            // dbg!(&sib_is_left);
-            // dbg!(&format!("{:x?}",running_hash));
-            // dbg!(&format!("{:x?}",sib));
             running_hash = {
                 let l = if sib_is_left { sib } else { running_hash };
                 let r = if sib_is_left { running_hash } else { sib };
                 set_hash::branch_hash(l, r)
             };
         }
-        // dbg!(&format!("{:x?}",running_hash));
 
         if &running_hash == root {
+            Ok(match &self.terminal_node {
+                SetMerkleTerminalNode::EmptySubtree {} => false,
+                SetMerkleTerminalNode::Leaf { elem: leaf_elem, .. }
+                    => (leaf_elem == elem),
+
+            })
             Ok(self.is_present)
         } else {
             Err(running_hash)
         }
     }
 
-    pub fn lightweight_insert(
-        &self,
-        elem: Nullifier,
-        root: &set_hash::Hash,
-    ) -> Result<(set_hash::Hash, Self), set_hash::Hash> {
-        let mut running_hash = if self.is_present {
-            set_hash::leaf_hash(elem)
-        } else {
-            *set_hash::EMPTY_HASH
-        };
-
-        let mut running_new_hash = set_hash::leaf_hash(elem);
-
-        let elem_bit_vec = byte_array_to_bits(set_hash::elem_hash(elem));
-
-        // For non-membership proofs, the path only goes until an empty
-        // subtree is reached, so skip part of the bit-vec
-        let start_bit = elem_bit_vec.len() - self.path.len();
-
-        let elem_bits_before_start = elem_bit_vec.clone().into_iter().take(start_bit);
-        let elem_bits = elem_bit_vec.into_iter().skip(start_bit);
-        let mut new_path = vec![];
-
-        for sib_is_left in elem_bits_before_start {
-            let sib = *set_hash::EMPTY_HASH;
-            running_new_hash = {
-                let l = if sib_is_left { sib } else { running_new_hash };
-                let r = if sib_is_left { running_new_hash } else { sib };
-                set_hash::branch_hash(l, r)
-            };
-            new_path.push(sib);
-        }
-
-        for (sib, sib_is_left) in self.path.iter().zip(elem_bits) {
-            let sib = *sib;
-            // dbg!(&sib_is_left);
-            // dbg!(&format!("{:x?}",running_hash));
-            // dbg!(&format!("{:x?}",sib));
-            running_hash = {
-                let l = if sib_is_left { sib } else { running_hash };
-                let r = if sib_is_left { running_hash } else { sib };
-                set_hash::branch_hash(l, r)
-            };
-            running_new_hash = {
-                let l = if sib_is_left { sib } else { running_new_hash };
-                let r = if sib_is_left { running_new_hash } else { sib };
-                set_hash::branch_hash(l, r)
-            };
-            new_path.push(sib);
-        }
-        // dbg!(&format!("{:x?}",running_hash));
-
-        if &running_hash == root {
-            Ok((
-                running_new_hash,
-                Self {
-                    is_present: true,
-                    path: new_path,
-                },
-            ))
-        } else {
-            Err(running_hash)
-        }
-    }
-
-    pub fn update_proof_for_lw_insert(
-        &self,
-        elem: Nullifier,
-        other: Self,
-        other_elem: Nullifier,
-        root: &set_hash::Hash,
-    ) -> Result<(set_hash::Hash, Self), set_hash::Hash> {
-        if elem == other_elem {
-            other.check(elem, root)?;
-            return self.lightweight_insert(elem, root);
-        }
-
-        let elem_bit_vec = byte_array_to_bits(set_hash::elem_hash(elem));
-        let other_bit_vec = byte_array_to_bits(set_hash::elem_hash(other_elem));
-
-        // the lowest value i such that elem_bit_vec[i:] == other_bit_vec[i:]
-        let unique_prefix_len = {
-            assert_eq!(elem_bit_vec.len(), other_bit_vec.len());
-
-            let mut i = elem_bit_vec.len();
-
-            while i > 0 && elem_bit_vec[i - 1] == other_bit_vec[i - 1] {
-                i -= 1;
-            }
-            i
-        };
-
-        let mut running_old_hash = if self.is_present {
-            set_hash::leaf_hash(elem)
-        } else {
-            *set_hash::EMPTY_HASH
-        };
-
-        let mut running_old_other_hash = if other.is_present {
-            set_hash::leaf_hash(other_elem)
-        } else {
-            *set_hash::EMPTY_HASH
-        };
-
-        let mut running_new_hash = set_hash::leaf_hash(elem);
-        let mut running_new_other_hash = running_old_other_hash;
-
-        // which bit our old proof starts on
-        let start_bit = elem_bit_vec.len() - self.path.len();
-        // which bit other's old proof starts on
-        let other_start_bit = other_bit_vec.len() - other.path.len();
-
-        let mut new_path = vec![];
-
-        let loop_iter = elem_bit_vec
-            .into_iter()
-            .zip(other_bit_vec.into_iter())
-            .enumerate();
-
-        for (i, (sib_is_left, other_sib_is_left)) in loop_iter {
-            // update our running old hash
-            let next_old_hash = if i < start_bit {
-                running_old_hash
-            } else {
-                let sib = self.path[i - start_bit];
-                let l = if sib_is_left { sib } else { running_old_hash };
-                let r = if sib_is_left { running_old_hash } else { sib };
-                set_hash::branch_hash(l, r)
-            };
-
-            // update our running new hash
-            let next_new_hash = if i < start_bit {
-                let sib = *set_hash::EMPTY_HASH;
-                let l = if sib_is_left { sib } else { running_new_hash };
-                let r = if sib_is_left { running_new_hash } else { sib };
-                set_hash::branch_hash(l, r)
-            } else {
-                let sib = self.path[i - start_bit];
-                let l = if sib_is_left { sib } else { running_new_hash };
-                let r = if sib_is_left { running_new_hash } else { sib };
-                set_hash::branch_hash(l, r)
-            };
-
-            // update other's running old hash
-            let next_old_other_hash = if i < other_start_bit {
-                running_old_other_hash
-            } else {
-                let sib = other.path[i - other_start_bit];
-                let sib_is_left = other_sib_is_left;
-                let l = if sib_is_left {
-                    sib
-                } else {
-                    running_old_other_hash
-                };
-                let r = if sib_is_left {
-                    running_old_other_hash
-                } else {
-                    sib
-                };
-                set_hash::branch_hash(l, r)
-            };
-
-            // update other's running new hash
-            let next_new_other_hash = match (i < other_start_bit, (i + 1).cmp(&unique_prefix_len)) {
-                (true, std::cmp::Ordering::Less) => {
-                    // Proof in an undisturbed empty subtree
-                    running_new_other_hash
-                }
-                (false, std::cmp::Ordering::Less) => {
-                    // Proof in an undisturbed subtree
-                    let sib = other.path[i - other_start_bit];
-                    let sib_is_left = other_sib_is_left;
-                    let l = if sib_is_left {
-                        sib
-                    } else {
-                        running_new_other_hash
-                    };
-                    let r = if sib_is_left {
-                        running_new_other_hash
-                    } else {
-                        sib
-                    };
-                    new_path.push(sib);
-                    set_hash::branch_hash(l, r)
-                }
-                (_, std::cmp::Ordering::Equal) => {
-                    assert_eq!(!sib_is_left, other_sib_is_left);
-                    // this insert disturbs our path.
-                    let sib_is_left = other_sib_is_left;
-                    let sib = running_new_hash;
-                    let l = if sib_is_left {
-                        sib
-                    } else {
-                        running_new_other_hash
-                    };
-                    let r = if sib_is_left {
-                        running_new_other_hash
-                    } else {
-                        sib
-                    };
-                    let ret = set_hash::branch_hash(l, r);
-                    // assert_eq!(ret,next_new_hash);
-                    // if i >= start_bit {
-                    //     assert_eq!(running_old_other_hash,self.path[i-start_bit]);
-                    // }
-                    new_path.push(sib);
-                    ret
-                }
-                (_, std::cmp::Ordering::Greater) => {
-                    // TODO: this seems wrong?
-                    let sib = if i < start_bit {
-                        *set_hash::EMPTY_HASH
-                    } else {
-                        self.path[i - start_bit]
-                    };
-                    new_path.push(sib);
-                    next_new_hash
-                }
-            };
-
-            running_old_hash = next_old_hash;
-            running_new_hash = next_new_hash;
-            running_old_other_hash = next_old_other_hash;
-            running_new_other_hash = next_new_other_hash;
-        }
-
-        if &running_old_hash != root {
-            dbg!("fail1");
-            Err(running_old_hash)
-        } else if &running_old_other_hash != root {
-            dbg!("fail2");
-            Err(running_old_other_hash)
-        } else {
-            Ok((
-                running_new_hash,
-                Self {
-                    is_present: other.is_present,
-                    path: new_path,
-                },
-            ))
-        }
-    }
-}
-
-pub fn set_merkle_lw_multi_insert(
-    inserts: Vec<(Nullifier, SetMerkleProof)>,
-    mut root: set_hash::Hash,
-) -> Result<(set_hash::Hash, Vec<SetMerkleProof>), set_hash::Hash> {
-    let elems: Vec<_> = inserts.iter().map(|(x, _)| *x).collect();
-    let mut pfs: Vec<_> = inserts.into_iter().map(|(_, y)| y).collect();
-    for i in 0..pfs.len() {
-        let old_pf = pfs[i].clone();
-        let (new_root, new_pf) = old_pf.lightweight_insert(elems[i], &root)?;
-        pfs[i] = new_pf;
-
-        for j in (0..i).chain((i + 1)..pfs.len()) {
-            let old_other_pf = pfs[j].clone();
-            let (_, new_other_pf) =
-                old_pf.update_proof_for_lw_insert(elems[i], old_other_pf, elems[j], &root)?;
-            pfs[j] = new_other_pf;
-        }
-        root = new_root;
-    }
-    Ok((root, pfs))
 }
 
 impl SetMerkleTree {
@@ -372,12 +168,14 @@ impl SetMerkleTree {
         use SetMerkleTree::*;
         match self {
             Empty() => *set_hash::EMPTY_HASH,
+            SoloSubtree(h, _)
             Leaf(h, _) => *h,
             Branch(h, _, _) => *h,
         }
     }
 
-    pub fn contains(&self, elem: Nullifier) -> (bool, SetMerkleProof) {
+    /// Returns `None` if the element is in a forgotten subtree
+    pub fn contains(&self, elem: Nullifier) -> Option<(bool, SetMerkleProof)> {
         use SetMerkleTree::*;
         let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
         let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
@@ -387,79 +185,77 @@ impl SetMerkleTree {
         let mut end_branch = self;
         for sib_is_left in elem_bits {
             match end_branch {
-                Branch(_, l, r) => {
+                Branch{ l, r, .. } => {
                     path.push(if sib_is_left { l.hash() } else { r.hash() });
                     end_branch = if sib_is_left { r.as_ref() } else { l.as_ref() };
                 }
-                Empty() => {
-                    path.reverse();
-                    return (
-                        false,
-                        SetMerkleProof {
-                            is_present: false,
-                            path,
-                        },
-                    );
-                }
-                Leaf(_, _) => {
-                    panic!("This tree has an occupied leaf in a branch position");
-                }
+                _ => { break; }
             }
         }
 
         match end_branch {
+            ForgottenSubtree { .. } => None,
             Empty() => {
                 path.reverse();
-                (
+                Some((
                     false,
                     SetMerkleProof {
-                        is_present: false,
+                        terminal_node: SetMerkleTerminalNode::EmptySubtree,
                         path,
                     },
-                )
-            }
-            Leaf(_, leaf_elem) => {
-                assert_eq!(leaf_elem, &elem);
+                ))
+            },
+            Leaf { height, elem: leaf_elem } => {
                 path.reverse();
-                (
-                    true,
+                Some((
+                    elem == leaf_elem,
                     SetMerkleProof {
-                        is_present: true,
+                        terminal_node: SetMerkleTerminalNode::Leaf { height, elem: leaf_elem },
                         path,
                     },
-                )
-            }
-            Branch(_, _, _) => panic!("This tree has more levels than my hash has bits!"),
+                ))
+            },
+            Branch { .. } => panic!("This tree has more levels than my hash has bits!"),
         }
     }
 
-    pub fn insert(&mut self, elem: Nullifier) {
+    pub fn insert(&mut self, elem: Nullifier) -> Result<(),()> {
         use SetMerkleTree::*;
         let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
         let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
         let elem_bits = elem_bit_vec.into_iter().rev();
 
         let mut siblings = vec![];
-        let mut end_branch = mem::replace(self, Empty());
+        let mut end_branch = mem::replace(self, EmptySubtree);
+        let mut end_height = elem_bits.len();
         for sib_is_left in elem_bits {
             let sib = match end_branch {
-                Empty() => {
-                    end_branch = Empty();
-                    Box::new(Empty())
-                }
-                Branch(_, l, r) => {
+                ForgottenSubtree { .. } => { break; }
+                EmptySubtree => { break; }
+                Branch { l, r, .. } => {
                     let (sib, next) = if sib_is_left { (l, r) } else { (r, l) };
                     end_branch = *next;
                     sib
                 }
-                Leaf(_, _) => {
-                    panic!("This tree has fewer levels than my hash has bits!")
+                Leaf { height, elem } => {
+                    debug_assert_eq!(height,end_heighT);
+                    end_branch = EmptySubtree;
+                    Leaf { height: height-1, elem }
                 }
             };
+            end_height -= 1;
 
             siblings.push((sib_is_left, sib));
         }
-        end_branch = Leaf(set_hash::leaf_hash(elem), elem);
+
+        let mut ret = Ok(());
+
+        end_branch = match end_branch {
+            ForgottenSubtree { .. } => { ret = Err(()); ForgottenSubtree },
+            EmptySubtree => Self::new_leaf(end_height,elem),
+            Branch { .. } => panic!("This tree has more levels than my hash has bits!"),
+            Leaf { .. } => unreachable!(),
+        };
 
         siblings.reverse();
         for (sib_is_left, sib) in siblings {
@@ -468,11 +264,160 @@ impl SetMerkleTree {
             } else {
                 (Box::new(end_branch), sib)
             };
-            let h = set_hash::branch_hash(l.hash(), r.hash());
-            end_branch = Branch(h, l, r);
+
+            end_branch = Self::new_branch(l,r);
         }
         *self = end_branch;
+
+        ret
     }
+
+    pub fn forget(&mut self, elem: Nullifier) -> Option<SetMerkleProof> {
+        use SetMerkleTree::*;
+        let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
+        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
+        let elem_bits = elem_bit_vec.into_iter().rev();
+
+        let mut siblings = vec![];
+        let mut end_branch = mem::replace(self, EmptySubtree);
+        let mut end_height = elem_bits.len();
+        for sib_is_left in elem_bits {
+            let sib = match end_branch {
+                ForgottenSubtree { .. } => { break; }
+                EmptySubtree => { break; }
+                Branch { l, r, .. } => {
+                    let (sib, next) = if sib_is_left { (l, r) } else { (r, l) };
+                    end_branch = *next;
+                    sib
+                }
+                Leaf { .. } => {
+                    break;
+                }
+            };
+
+            siblings.push((sib_is_left, sib));
+        }
+
+        let mut ret = None;
+        if let Leaf { height, leaf_elem } = end_branch {
+            if leaf_elem == elem {
+                ret = Some(SetMerkleProof {
+                    terminal_node: SetMerkleTerminalNode::Leaf {
+                        height, elem: leaf_elem,
+                    },
+                    path: siblings.iter().map(|(_,s)| s.hash()).rev().collect(),
+                });
+                end_branch = ForgottenSubtree { value: end_branch.hash() };
+            }
+        }
+
+        siblings.reverse();
+        for (sib_is_left, sib) in siblings {
+            let (l, r) = if sib_is_left {
+                (sib, Box::new(end_branch))
+            } else {
+                (Box::new(end_branch), sib)
+            };
+            end_branch = match (l,r) {
+                (ForgottenSubtree { .. }, ForgottenSubtree { .. }) =>
+                    ForgottenSubtree { value: Self::new_branch(l,r).hash() },
+                _ => Self::new_branch(l,r)
+            };
+        }
+        *self = end_branch;
+
+        ret
+    }
+
+    pub fn remember(&mut self, elem: Nullifier, proof: SetMerkleProof) -> Result<(), set_hash::Hash> {
+        // Check the proof before we do anything. After checking, we can
+        // safely assume that all the values along the path match.
+        let elem_in_set = proof.check(elem, &self.hash())?;
+
+        use SetMerkleTree::*;
+        let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
+        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
+
+        let mut siblings = vec![];
+        let mut end_branch = mem::replace(self, EmptySubtree);
+        let mut end_height = elem_bits.len();
+
+        // TODO: this is redundant with the checking
+        let path_hashes = {
+
+            let running_hash = proof.terminal_node.value();
+
+            let mut ret = vec![];
+            ret.reserve(proof.path.len()+1);
+
+            for (sib_is_left,sib_hash) in elem_bit_vec.iter().rev().zip(proof.path.iter().rev()).rev() {
+                let (l,r) = if sib_is_left { (sib_hash,running_hash) } else { (running_hash,sib_hash) };
+                ret.push((running_hash, sib_hash));
+                running_hash = Self::new_branch(
+                    Box::new(ForgottenSubtree { value: l }),
+                    Box::new(ForgottenSubtree { value: r })).hash();
+            }
+
+            ret.reverse();
+            ret
+        };
+
+        let elem_bits = elem_bit_vec.into_iter().rev();
+
+        for (sib_is_left,(node_hash,sib_hash)) in elem_bits.zip(path_hashes.into_iter()) {
+            let sib = match end_branch {
+                ForgottenSubtree { .. } => {
+                    end_branch = ForgottenSubtree { value: node_hash };
+                    ForgottenSubtree { value: sib_hash }
+                },
+                EmptySubtree => { unreachable!(); } // TODO: is this unreachable?
+                Branch { l, r, .. } => {
+                    let (sib, next) = if sib_is_left { (l, r) } else { (r, l) };
+                    end_branch = *next;
+                    sib
+                },
+                Leaf { height, leaf_elem } => {
+                    assert!(!elem_in_set);
+                    end_branch = EmptySubtree;
+                    Self::new_leaf(height-1,leaf_elem)
+                },
+            };
+
+            siblings.push((sib_is_left, sib));
+        }
+
+        end_branch = match end_branch {
+            ForgottenSubtree { value } => {
+                match proof.terminal_node {
+                    SetMerkleTerminalNode::EmptySubtree => {
+                        // TODO: should this be possible????? it feels like it
+                        // shouldn't be
+                        assert_eq!(value, set_hash::EMPTY_HASH);
+                        EmptySubtree
+                    }
+
+                    SetMerkleTerminalNode::Leaf { height, elem } => {
+                        Leaf { height, elem }
+                    }
+                }
+            },
+            _ => end_branch,
+        };
+
+        siblings.reverse();
+        for (sib_is_left, sib) in siblings {
+            let (l, r) = if sib_is_left {
+                (sib, Box::new(end_branch))
+            } else {
+                (Box::new(end_branch), sib)
+            };
+            end_branch = Self::new_branch(l,r);
+        }
+        *self = end_branch;
+
+        ret
+    }
+
 }
 
 #[cfg(test)]
