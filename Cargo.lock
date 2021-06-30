@@ -3646,12 +3646,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "tide-tracing"
+version = "0.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9737dbee8b322744e5c0fb4d7baf1e1fae332056cbc1f8a356162a6211b853f4"
+dependencies = [
+ "async-trait",
+ "tide",
+ "tracing",
+ "tracing-futures",
+]
+
+[[package]]
 name = "tideui"
 version = "0.1.0"
 dependencies = [
  "async-std",
  "serde",
  "tide",
+ "tide-tracing",
+ "tracing",
+ "tracing-futures",
+ "tracing-subscriber",
  "tungstenite",
 ]
 
