@@ -1,4 +1,4 @@
-FROM 279906117593.dkr.ecr.us-east-2.amazonaws.com/rust:2021-03-24 as builder
+FROM 279906117593.dkr.ecr.us-east-2.amazonaws.com/rust:stable as builder
 RUN mkdir /app
 WORKDIR /app
 COPY . /app/
