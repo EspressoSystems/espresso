@@ -198,11 +198,8 @@ mod txn_comm {
 
     pub fn txn_commit(p: &TransactionNote) -> TxnCommitment {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "Txn Comm".as_bytes());
-        match p {
-            TransactionNote::Transfer(t) => { hasher.update(&jf_utils::serialize::CanonicalBytes::from(*t.clone()).0); }
-            TransactionNote::Freeze(f) => { hasher.update(&jf_utils::serialize::CanonicalBytes::from(*f.clone()).0); }
-            TransactionNote::Mint(m) => { hasher.update(&jf_utils::serialize::CanonicalBytes::from(*m.clone()).0); }
-        }
+        let byte_stream = bincode::serialize(&p).unwrap_or_else(|_|[].to_vec());
+        hasher.update(&byte_stream);
         hasher.finalize().into_bytes()
     }
 }
@@ -511,7 +508,7 @@ impl MultiXfrTestState {
             validator: ValidatorState {
                 prev_commit_time: 0u64,
                 prev_state: *state_comm::INITIAL_PREV_COMM,
-                verif_crs: verif_key,
+                verif_crs: TransactionVerifyingKey::Transfer(verif_key),
                 record_merkle_root: first_root,
                 record_merkle_frontier: t,
                 nullifiers_root,
@@ -802,7 +799,7 @@ impl MultiXfrTestState {
                     ix,
                     (owner_memos, k1_ix, k2_ix),
                     ElaboratedTransaction {
-                        txn: Transaction(txn),
+                        txn: TransactionNote::Transfer(Box::new(txn)),
                         proofs: nullifier_pfs,
                     },
                 ))
@@ -835,7 +832,7 @@ impl MultiXfrTestState {
         self.owners.push(k1_ix);
         self.owners.push(k1_ix);
         self.owners.push(k2_ix);
-        for comm in txn.txn.0.output_commitments.iter() {
+        for comm in txn.txn.output_commitments().iter() {
             self.record_merkle_tree.push(*comm);
         }
 
@@ -861,7 +858,7 @@ impl MultiXfrTestState {
             .block
             .0
             .iter()
-            .flat_map(|x| x.0.inputs_nullifiers.iter())
+            .flat_map(|x| x.nullifiers().iter())
         {
             assert!(!self.nullifiers.contains(*n).0);
             self.nullifiers.insert(*n);

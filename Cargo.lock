@@ -229,7 +229,7 @@ dependencies = [
  "ark-serialize",
  "ark-std",
  "derivative",
- "hashbrown 0.11.2",
+ "hashbrown",
  "rayon",
 ]
 
@@ -404,12 +404,11 @@ dependencies = [
 
 [[package]]
 name = "async-io"
-version = "1.4.1"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bbfd5cf2794b1e908ea8457e6c45f8f8f1f6ec5f74617bf4662623f47503c3b"
+checksum = "a811e6a479f2439f0c04038796b5cfb3d2ad56c230e0f2d3f7b04d68cfee607b"
 dependencies = [
  "concurrent-queue",
- "fastrand",
  "futures-lite",
  "libc",
  "log",
@@ -1693,12 +1692,6 @@ checksum = "62aca2aba2d62b4a7f5b33f3712cb1b0692779a56fb510499d5c0aa594daeaf3"
 
 [[package]]
 name = "hashbrown"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7afe4a420e3fe79967a00898cc1f4db7c8a49a9333a29f8a4bd76a253d5cd04"
-
-[[package]]
-name = "hashbrown"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
@@ -1763,9 +1756,8 @@ dependencies = [
 [[package]]
 name = "hotstuff"
 version = "0.0.0"
-source = "git+ssh://git@gitlab.com/translucence/systems/hotstuff.git?branch=main#3f279fb23db989f914e29ffeeb4578cfd9fc3557"
+source = "git+ssh://git@gitlab.com/translucence/systems/hotstuff.git?branch=main#52f8c7aa3d57e4a55e38cb81c1caa4dd11881167"
 dependencies = [
- "async-lock",
  "async-std",
  "async-tls",
  "async-tungstenite",
@@ -1893,12 +1885,12 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "1.6.2"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "824845a0bf897a9042383849b02c1bc219c2383772efcd5c6f9766fa4b81aef3"
+checksum = "bc633605454125dec4b66843673f01c7df2b89479b32e0ed634e43a91cff62a5"
 dependencies = [
  "autocfg",
- "hashbrown 0.9.1",
+ "hashbrown",
  "serde",
 ]
 
@@ -1950,7 +1942,7 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7d7b96816d02467d262a128d8971af12e8669132"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1972,7 +1964,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7d7b96816d02467d262a128d8971af12e8669132"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1994,7 +1986,7 @@ dependencies = [
 [[package]]
 name = "jf-txn"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7d7b96816d02467d262a128d8971af12e8669132"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -2022,7 +2014,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7d7b96816d02467d262a128d8971af12e8669132"
 dependencies = [
  "ark-serialize",
  "serde",
@@ -2890,7 +2882,7 @@ dependencies = [
 [[package]]
 name = "rocket"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#ca9e3da5b636eea77f5c55f50b7c0c8002355671"
+source = "git+https://github.com/SergioBenitez/Rocket.git#9d20c57d91d6351c0860eacb4302d937393e6200"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2927,7 +2919,7 @@ dependencies = [
 [[package]]
 name = "rocket_codegen"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#ca9e3da5b636eea77f5c55f50b7c0c8002355671"
+source = "git+https://github.com/SergioBenitez/Rocket.git#9d20c57d91d6351c0860eacb4302d937393e6200"
 dependencies = [
  "devise",
  "glob",
@@ -2942,7 +2934,7 @@ dependencies = [
 [[package]]
 name = "rocket_http"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#ca9e3da5b636eea77f5c55f50b7c0c8002355671"
+source = "git+https://github.com/SergioBenitez/Rocket.git#9d20c57d91d6351c0860eacb4302d937393e6200"
 dependencies = [
  "cookie 0.15.0",
  "either",
@@ -3531,7 +3523,7 @@ dependencies = [
 [[package]]
 name = "tagged-base64"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.com/translucence/common/tagged-base64.git?branch=main#c4aa5189e00d092d863c6c6e30d873772e45ad6c"
+source = "git+ssh://git@gitlab.com/translucence/common/tagged-base64.git?branch=main#ec47f37d72406b94f27712738a52fe448bfc51ae"
 dependencies = [
  "base64 0.13.0",
  "console_error_panic_hook",
@@ -4319,6 +4311,7 @@ dependencies = [
  "ark-ff",
  "ark-serialize",
  "ark-std",
+ "bincode",
  "bitvec",
  "blake2",
  "generic-array",
