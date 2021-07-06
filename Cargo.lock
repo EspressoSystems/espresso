@@ -957,25 +957,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea221b5284a47e40033bf9b66f35f984ec0ea2931eb03505246cd27a963f981b"
 
 [[package]]
-name = "counter"
-version = "0.1.0"
-dependencies = [
- "async-lock",
- "async-std",
- "async-tls",
- "futures",
- "hotstuff",
- "rand 0.7.3",
- "serde",
- "threshold_crypto",
- "tokio 0.2.25",
- "tracing",
- "tracing-error",
- "tracing-futures",
- "tracing-unwrap",
-]
-
-[[package]]
 name = "cpufeatures"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -6,5 +6,4 @@ members = [
     "zerok/demo1",
     "examples/consensing",
     "examples/tideui",
-    "zerok/counter",
     ]
