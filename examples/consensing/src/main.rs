@@ -10,7 +10,6 @@ use futures::future::join_all;
 use futures::FutureExt;
 use tracing::{debug, error, info};
 
-use hotstuff::demos::counter::set_to_keys;
 use hotstuff::message::Message;
 use hotstuff::networking::w_network::WNetwork;
 use hotstuff::{HotStuff, HotStuffConfig, PubKey};
@@ -36,7 +35,7 @@ pub async fn try_network<
     // TODO: Actually attempt to open the port and find a new one if it doens't work
     let port = rand::thread_rng().gen_range(2000, 5000);
     (
-        WNetwork::new_from_strings(key, vec![], port, None)
+        WNetwork::new(key, port, None)
             .await
             .expect("Failed to create network"),
         port,
@@ -58,12 +57,15 @@ pub async fn try_hotstuff(
 ) {
     let genesis = ElaboratedBlock::default();
     let pub_key_set = keys.public_keys();
+    let known_nodes = (0..total as u64)
+        .map(|i| PubKey::from_secret_key_set_escape_hatch(keys, i))
+        .collect();
     let pub_key = PubKey::from_secret_key_set_escape_hatch(keys, node_number as u64);
     let config = HotStuffConfig {
         total_nodes: total as u32,
         thershold: threshold as u32,
         max_transactions: 100,
-        known_nodes: set_to_keys(total, &pub_key_set),
+        known_nodes,
         next_view_timeout: 40_000,
         timeout_ratio: (2, 1),
     };
@@ -142,7 +144,9 @@ async fn start_consensus() -> (MultiXfrTestState, Vec<MultiXfrValidator>) {
         let (x, sync) = oneshot::channel();
         match network.generate_task(x) {
             Some(task) => {
-                spawn(task);
+                for t in task {
+                    spawn(t);
+                }
                 sync.await.expect("sync.await failed");
             }
             None => {
@@ -175,7 +179,7 @@ async fn start_consensus() -> (MultiXfrTestState, Vec<MultiXfrValidator>) {
         while w.connection_table_size().await < VALIDATOR_COUNT - 1 {
             async_std::task::sleep(std::time::Duration::from_millis(10)).await;
         }
-        while w.nodes_table_size().await < VALIDATOR_COUNT - 1 {
+        while w.connection_table_size().await < VALIDATOR_COUNT - 1 {
             async_std::task::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
