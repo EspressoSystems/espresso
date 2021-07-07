@@ -229,7 +229,7 @@ dependencies = [
  "ark-serialize",
  "ark-std",
  "derivative",
- "hashbrown 0.11.2",
+ "hashbrown",
  "rayon",
 ]
 
@@ -404,12 +404,11 @@ dependencies = [
 
 [[package]]
 name = "async-io"
-version = "1.4.1"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bbfd5cf2794b1e908ea8457e6c45f8f8f1f6ec5f74617bf4662623f47503c3b"
+checksum = "a811e6a479f2439f0c04038796b5cfb3d2ad56c230e0f2d3f7b04d68cfee607b"
 dependencies = [
  "concurrent-queue",
- "fastrand",
  "futures-lite",
  "libc",
  "log",
@@ -1661,7 +1660,7 @@ dependencies = [
  "http",
  "indexmap",
  "slab",
- "tokio 1.7.1",
+ "tokio 1.8.1",
  "tokio-util",
  "tracing",
 ]
@@ -1671,12 +1670,6 @@ name = "half"
 version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62aca2aba2d62b4a7f5b33f3712cb1b0692779a56fb510499d5c0aa594daeaf3"
-
-[[package]]
-name = "hashbrown"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7afe4a420e3fe79967a00898cc1f4db7c8a49a9333a29f8a4bd76a253d5cd04"
 
 [[package]]
 name = "hashbrown"
@@ -1744,9 +1737,8 @@ dependencies = [
 [[package]]
 name = "hotstuff"
 version = "0.0.0"
-source = "git+ssh://git@gitlab.com/translucence/systems/hotstuff.git?branch=main#3f279fb23db989f914e29ffeeb4578cfd9fc3557"
+source = "git+ssh://git@gitlab.com/translucence/systems/hotstuff.git?branch=main#3091295340083f193257c03f2578bfbba1399241"
 dependencies = [
- "async-lock",
  "async-std",
  "async-tls",
  "async-tungstenite",
@@ -1855,7 +1847,7 @@ dependencies = [
  "itoa",
  "pin-project-lite 0.2.7",
  "socket2",
- "tokio 1.7.1",
+ "tokio 1.8.1",
  "tower-service",
  "tracing",
  "want",
@@ -1874,12 +1866,12 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "1.6.2"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "824845a0bf897a9042383849b02c1bc219c2383772efcd5c6f9766fa4b81aef3"
+checksum = "bc633605454125dec4b66843673f01c7df2b89479b32e0ed634e43a91cff62a5"
 dependencies = [
  "autocfg",
- "hashbrown 0.9.1",
+ "hashbrown",
  "serde",
 ]
 
@@ -1931,7 +1923,7 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1953,7 +1945,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1975,7 +1967,7 @@ dependencies = [
 [[package]]
 name = "jf-txn"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -2003,7 +1995,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#7f0391cf7345ddea9819d21902911abdeea8968c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
 dependencies = [
  "ark-serialize",
  "serde",
@@ -2066,9 +2058,9 @@ dependencies = [
 
 [[package]]
 name = "loom"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7aa5348dc45fa5f2419b6dd4ea20345e6b01b1fcc9d176a322eada1ac3f382ba"
+checksum = "2111607c723d7857e0d8299d5ce7a0bf4b844d3e44f8de136b13da513eaf8fc4"
 dependencies = [
  "cfg-if 1.0.0",
  "generator",
@@ -2172,7 +2164,7 @@ dependencies = [
  "log",
  "mime",
  "spin 0.9.1",
- "tokio 1.7.1",
+ "tokio 1.8.1",
  "tokio-util",
  "twoway",
  "version_check",
@@ -2871,7 +2863,7 @@ dependencies = [
 [[package]]
 name = "rocket"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#ca9e3da5b636eea77f5c55f50b7c0c8002355671"
+source = "git+https://github.com/SergioBenitez/Rocket.git#efce2bc958d25065584ce01982ff4f1dd9c84750"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2897,7 +2889,7 @@ dependencies = [
  "state",
  "tempfile",
  "time 0.2.27",
- "tokio 1.7.1",
+ "tokio 1.8.1",
  "tokio-stream",
  "tokio-util",
  "ubyte",
@@ -2908,7 +2900,7 @@ dependencies = [
 [[package]]
 name = "rocket_codegen"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#ca9e3da5b636eea77f5c55f50b7c0c8002355671"
+source = "git+https://github.com/SergioBenitez/Rocket.git#efce2bc958d25065584ce01982ff4f1dd9c84750"
 dependencies = [
  "devise",
  "glob",
@@ -2923,7 +2915,7 @@ dependencies = [
 [[package]]
 name = "rocket_http"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#ca9e3da5b636eea77f5c55f50b7c0c8002355671"
+source = "git+https://github.com/SergioBenitez/Rocket.git#efce2bc958d25065584ce01982ff4f1dd9c84750"
 dependencies = [
  "cookie 0.15.0",
  "either",
@@ -2943,7 +2935,7 @@ dependencies = [
  "stable-pattern",
  "state",
  "time 0.2.27",
- "tokio 1.7.1",
+ "tokio 1.8.1",
  "uncased",
 ]
 
@@ -3404,9 +3396,9 @@ checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
 
 [[package]]
 name = "structopt"
-version = "0.3.21"
+version = "0.3.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5277acd7ee46e63e5168a80734c9f6ee81b1367a7d8772a2d765df2a3705d28c"
+checksum = "69b041cdcb67226aca307e6e7be44c8806423d83e018bd662360a93dabce4d71"
 dependencies = [
  "clap",
  "lazy_static",
@@ -3416,9 +3408,9 @@ dependencies = [
 
 [[package]]
 name = "structopt-derive"
-version = "0.4.14"
+version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ba9cdfda491b814720b6b06e0cac513d922fc407582032e8706e9f137976f90"
+checksum = "7813934aecf5f51a54775e00068c237de98489463968231a51746bbbc03f9c10"
 dependencies = [
  "heck",
  "proc-macro-error",
@@ -3512,7 +3504,7 @@ dependencies = [
 [[package]]
 name = "tagged-base64"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.com/translucence/common/tagged-base64.git?branch=main#c4aa5189e00d092d863c6c6e30d873772e45ad6c"
+source = "git+ssh://git@gitlab.com/translucence/common/tagged-base64.git?branch=main#ec47f37d72406b94f27712738a52fe448bfc51ae"
 dependencies = [
  "base64 0.13.0",
  "console_error_panic_hook",
@@ -3556,18 +3548,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.25"
+version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa6f76457f59514c7eeb4e59d891395fab0b2fd1d40723ae737d64153392e9c6"
+checksum = "93119e4feac1cbe6c798c34d3a53ea0026b0b1de6a120deef895137c0529bfe2"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.25"
+version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a36768c0fbf1bb15eca10defa29526bda730a2376c2ab4393ccfa16fb1a318d"
+checksum = "060d69a0afe7796bf42e9e2ff91f5ee691fb15c53d38b4b62a9a53eb23164745"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3721,9 +3713,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.7.1"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fb2ed024293bb19f7a5dc54fe83bf86532a44c12a2bb8ba40d64a4509395ca2"
+checksum = "98c8b05dc14c75ea83d63dd391100353789f5f24b8b3866542a5e85c8be8e985"
 dependencies = [
  "autocfg",
  "bytes 1.0.1",
@@ -3757,7 +3749,7 @@ checksum = "f8864d706fdb3cc0843a49647ac892720dac98a6eeb818b77190592cf4994066"
 dependencies = [
  "futures-core",
  "pin-project-lite 0.2.7",
- "tokio 1.7.1",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -3771,7 +3763,7 @@ dependencies = [
  "futures-sink",
  "log",
  "pin-project-lite 0.2.7",
- "tokio 1.7.1",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -3996,9 +3988,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-segmentation"
-version = "1.7.1"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb0d2e7be6ae3a5fa87eed5fb451aff96f2573d2694942e40543ae0bbe19c796"
+checksum = "8895849a949e7845e06bd6dc1aa51731a103c42707010a5b591c0038fb73385b"
 
 [[package]]
 name = "unicode-width"
@@ -4300,6 +4292,7 @@ dependencies = [
  "ark-ff",
  "ark-serialize",
  "ark-std",
+ "bincode",
  "bitvec",
  "blake2",
  "generic-array",
@@ -4317,7 +4310,6 @@ dependencies = [
  "serde",
  "serde_cbor",
  "serde_derive",
- "serde_json",
  "snafu",
 ]
 
