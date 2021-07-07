@@ -5,5 +5,5 @@ members = [
     "zerok/zerok_validator",
     "zerok/demo1",
     "examples/consensing",
-    "zerok/counter",
+    "examples/tideui",
     ]

@@ -283,9 +283,30 @@ you to update other proofs -- if I have proofs that `x` and `y` are not in
 not. The mechanisms of "remember" and "forget" let us generalize this
 strategy.
 
-First, we add a new constructor for `PT`: `PTForgottenSubtree(subtree_hash)`.
+First, let's define our "forgetful tree", `FT(height,arr)`:
+    FTEmptySubtree is FT(height,arr) if:
+        arr == [<EMPTY>,<EMPTY>,...,<EMPTY>], and
+        length(arr) == 2^height
+    FTLeaf(height,elem) is FT(height,arr) if:
+        arr == [<EMPTY>,...,<EMPTY>,elem,...,<EMPTY>] (ie, arr only
+            contains `elem`), and
+        length(arr) == 2^height
+    FTBranch(l,r) is FT(height,arr) if:
+        length(arr) == 2^height, and
+        l is not FTEmptySubtree and
+        r is not FTEmptySubtree and
+        l is FT(height-1,arr[0..(length(arr)/2)]), and
+        r is FT(height-1,arr[(length(arr)/2)..length(arr)]))
+    FTForgottenSubtree(h) is FT(height,arr) if:
+        there exists some pt: PT(height,arr) such that h == hash(pt)
+
+
+
+First, we add a new constructor: `PTForgottenSubtree(subtree_hash)`.
 `PTForgottenSubtree(subtree_hash)` stands in for a (non-empty) subtree
 which hashes to `subtree_hash`.
+
+
 
 (TODO: spec out `remember`/`forget`, define `ForgetfulPT`, and prove that
 `remember`/`forget` can't change the `arr_S` represented by the `PT`)

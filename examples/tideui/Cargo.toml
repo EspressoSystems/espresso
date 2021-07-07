@@ -1,0 +1,11 @@
+[package]
+name = "tideui"
+version = "0.1.0"
+authors = ["John D. Corbett <corbett@pictographer.com>"]
+edition = "2018"
+
+[dependencies]
+async-std = { version = "1.8.0", features = ["attributes"] }
+serde = { version = "1.0", features = ["derive"] }
+tide = "0.16.0"
+tungstenite = "0.13.0"

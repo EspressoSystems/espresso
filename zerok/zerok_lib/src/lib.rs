@@ -10,12 +10,17 @@ use jf_primitives::merkle_tree;
 use jf_txn::errors::TxnApiError;
 use jf_txn::keys::FreezerKeyPair;
 use jf_txn::keys::UserKeyPair;
-use jf_txn::proof::transfer::{TransferProvingKey, TransferVerifyingKey};
+use jf_txn::proof::freeze::FreezeProvingKey;
+use jf_txn::proof::mint::MintProvingKey;
+use jf_txn::proof::transfer::TransferProvingKey;
 use jf_txn::structs::{AssetCode, AssetDefinition, FreezeFlag, NoteType, RecordOpening};
 use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
-use jf_txn::transfer::TransferNote;
-use jf_txn::transfer::TransferNoteInput;
+use jf_txn::transfer::{TransferNote, TransferNoteInput};
+use jf_txn::txn_batch_verify;
 use jf_txn::utils::compute_universal_param_size;
+use jf_txn::FeeInput;
+use jf_txn::TransactionNote;
+use jf_txn::TransactionVerifyingKey;
 use jf_utils::serialize::CanonicalBytes;
 use merkle_tree::{AccMemberWitness, MerkleTree};
 use rand_chacha::rand_core::SeedableRng;
@@ -34,16 +39,16 @@ pub struct LedgerRecordCommitment(pub RecordCommitment);
 
 // TODO
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct Transaction(pub TransferNote);
+pub struct Transaction(pub TransactionNote);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ElaboratedTransaction {
-    pub txn: Transaction,
+    pub txn: TransactionNote,
     pub proofs: Vec<SetMerkleProof>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct Block(pub Vec<Transaction>);
+pub struct Block(pub Vec<TransactionNote>);
 
 // A block with nullifier set non-membership proofs
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -72,13 +77,13 @@ impl BlockContents<64> for ElaboratedBlock {
             .block
             .0
             .iter()
-            .flat_map(|x| x.0.inputs_nullifiers.iter())
+            .flat_map(|x| x.nullifiers().into_iter())
             .collect::<HashSet<_>>();
-        for n in txn.txn.0.inputs_nullifiers.iter() {
+        for n in txn.txn.nullifiers().iter() {
             if nulls.contains(n) {
                 return Err(ValidationError::ConflictingNullifiers {});
             }
-            nulls.insert(n);
+            nulls.insert(*n);
         }
 
         ret.block.0.push(txn.txn.clone());
@@ -113,7 +118,7 @@ impl BlockContents<64> for ElaboratedBlock {
         hasher.update(&"Block contents".as_bytes());
         hasher.update(&block_comm::block_commit(&self.block));
         hasher.update(&"Block proofs".as_bytes());
-        hasher.update(&serde_json::to_string(&self.proofs).unwrap().as_bytes());
+        hasher.update(&bincode::serialize(&self.proofs).unwrap());
         hotstuff::BlockHash::<64>::from_array(
             hasher
                 .finalize()
@@ -147,7 +152,7 @@ impl BlockContents<64> for ElaboratedBlock {
         hasher.update(&"Txn contents".as_bytes());
         hasher.update(&txn_comm::txn_commit(&txn.txn));
         hasher.update(&"Txn proofs".as_bytes());
-        hasher.update(&serde_json::to_string(&txn.proofs).unwrap().as_bytes());
+        hasher.update(&bincode::serialize(&txn.proofs).unwrap());
         hotstuff::BlockHash::<64>::from_array(
             hasher
                 .finalize()
@@ -157,6 +162,21 @@ impl BlockContents<64> for ElaboratedBlock {
                 .unwrap(),
         )
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProverKey<'a> {
+    pub mint: MintProvingKey<'a>,
+    pub xfr: TransferProvingKey<'a>,
+    pub freeze: FreezeProvingKey<'a>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifierKey {
+    // TODO: is there a way to keep these types distinct?
+    pub mint: TransactionVerifyingKey,
+    pub xfr: TransactionVerifyingKey,
+    pub freeze: TransactionVerifyingKey,
 }
 
 // TODO
@@ -181,9 +201,9 @@ mod verif_crs_comm {
     use generic_array::GenericArray;
     pub type VerifCRSCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
 
-    pub fn verif_crs_commit(p: &TransferVerifyingKey) -> VerifCRSCommitment {
+    pub fn verif_crs_commit(p: &VerifierKey) -> VerifCRSCommitment {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "VerifCRS Comm".as_bytes());
-        hasher.update(&serde_json::to_string(p).unwrap().as_bytes());
+        hasher.update(&bincode::serialize(&p).unwrap());
         hasher.finalize().into_bytes()
     }
 }
@@ -194,9 +214,10 @@ mod txn_comm {
     use generic_array::GenericArray;
     pub type TxnCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
 
-    pub fn txn_commit(p: &Transaction) -> TxnCommitment {
+    pub fn txn_commit(p: &TransactionNote) -> TxnCommitment {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "Txn Comm".as_bytes());
-        hasher.update(&jf_utils::serialize::CanonicalBytes::from(p.0.clone()).0);
+        let byte_stream = bincode::serialize(&p).unwrap_or_else(|_| [].to_vec());
+        hasher.update(&byte_stream);
         hasher.finalize().into_bytes()
     }
 }
@@ -264,7 +285,7 @@ pub mod state_comm {
 pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: state_comm::LedgerStateCommitment,
-    pub verif_crs: TransferVerifyingKey,
+    pub verif_crs: VerifierKey,
     pub record_merkle_root: merkle_tree::NodeValue,
     pub record_merkle_frontier: merkle_tree::MerkleTree<RecordCommitment>,
     pub nullifiers_root: set_hash::Hash,
@@ -298,28 +319,36 @@ impl ValidatorState {
         for (pf, n) in null_pfs
             .iter()
             .zip(txns.0.iter())
-            .flat_map(|(pfs, txn)| pfs.iter().zip(txn.0.inputs_nullifiers.iter()))
+            .flat_map(|(pfs, txn)| pfs.iter().zip(txn.nullifiers().into_iter()))
         {
-            if nulls.contains(n)
+            if nulls.contains(&n)
                 || pf
-                    .check(*n, &self.nullifiers_root)
+                    .check(n, &self.nullifiers_root)
                     .map_err(|_| BadNullifierProof {})?
             {
-                return Err(NullifierAlreadyExists { nullifier: *n });
+                return Err(NullifierAlreadyExists { nullifier: n });
             }
 
             nulls.insert(n);
         }
 
-        for txn in txns.0.iter() {
-            txn.0
-                .verify(
-                    &self.verif_crs,
-                    self.record_merkle_frontier.get_root_value(),
-                    now,
-                )
-                .map_err(|err| CryptoError { err })?;
-        }
+        let verif_keys: Vec<_> = txns
+            .0
+            .iter()
+            .map(|txn| match txn {
+                TransactionNote::Mint(_) => &self.verif_crs.mint,
+                TransactionNote::Transfer(_) => &self.verif_crs.xfr,
+                TransactionNote::Freeze(_) => &self.verif_crs.freeze,
+            })
+            .collect();
+
+        txn_batch_verify(
+            &txns.0,
+            &[self.record_merkle_frontier.get_root_value()],
+            now,
+            &verif_keys,
+        )
+        .map_err(|err| CryptoError { err })?;
 
         Ok((txns, null_pfs))
     }
@@ -341,13 +370,7 @@ impl ValidatorState {
             .0
             .iter()
             .zip(null_pfs.into_iter())
-            .flat_map(|(txn, null_pfs)| {
-                txn.0
-                    .inputs_nullifiers
-                    .iter()
-                    .cloned()
-                    .zip(null_pfs.into_iter())
-            })
+            .flat_map(|(txn, null_pfs)| txn.nullifiers().into_iter().zip(null_pfs.into_iter()))
             .collect();
 
         self.nullifiers_root = set_merkle_lw_multi_insert(nullifiers, self.nullifiers_root)
@@ -355,10 +378,14 @@ impl ValidatorState {
             .0;
 
         let mut ret = vec![];
-        for o in txns.0.iter().flat_map(|x| x.0.output_commitments.iter()) {
+        for o in txns
+            .0
+            .iter()
+            .flat_map(|x| x.output_commitments().into_iter())
+        {
             let uid = self.next_uid;
-            self.record_merkle_frontier.push(*o);
-            self.record_merkle_frontier.forget(uid).expect_ok();
+            self.record_merkle_frontier.push(o);
+            self.record_merkle_frontier.forget(uid).expect_ok().unwrap();
             ret.push(uid);
             self.next_uid += 1;
             assert_eq!(self.next_uid, self.record_merkle_frontier.num_leaves());
@@ -374,8 +401,8 @@ pub struct MultiXfrTestState {
     pub prng: ChaChaRng,
 
     pub univ_setup: &'static jf_txn::proof::UniversalParam,
-    pub prove_key: TransferProvingKey<'static>,
-    pub verif_key: TransferVerifyingKey,
+    pub prove_key: ProverKey<'static>,
+    pub verif_key: VerifierKey,
 
     pub native_token: AssetDefinition,
 
@@ -423,11 +450,22 @@ impl MultiXfrTestState {
         let mut prng = ChaChaRng::from_seed(seed);
 
         let univ_setup = Box::leak(Box::new(jf_txn::proof::universal_setup(
-            compute_universal_param_size(NoteType::Transfer, 3, 3, MERKLE_HEIGHT)?,
+            *[
+                compute_universal_param_size(NoteType::Transfer, 3, 3, MERKLE_HEIGHT)?,
+                compute_universal_param_size(NoteType::Mint, 0, 0, MERKLE_HEIGHT)?,
+                compute_universal_param_size(NoteType::Freeze, 2, 2, MERKLE_HEIGHT)?,
+            ]
+            .iter()
+            .max()
+            .unwrap(),
             &mut prng,
         )?));
-        let (prove_key, verif_key, _) =
+        let (xfr_prove_key, xfr_verif_key, _) =
             jf_txn::proof::transfer::preprocess(univ_setup, 3, 3, MERKLE_HEIGHT)?;
+        let (mint_prove_key, mint_verif_key, _) =
+            jf_txn::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT)?;
+        let (freeze_prove_key, freeze_verif_key, _) =
+            jf_txn::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT)?;
 
         let native_token = AssetDefinition::native();
 
@@ -491,10 +529,20 @@ impl MultiXfrTestState {
         let nullifiers: SetMerkleTree = Default::default();
         let nullifiers_root = nullifiers.hash();
 
+        let verif_key = VerifierKey {
+            mint: TransactionVerifyingKey::Mint(mint_verif_key),
+            xfr: TransactionVerifyingKey::Transfer(xfr_verif_key),
+            freeze: TransactionVerifyingKey::Freeze(freeze_verif_key),
+        };
+
         Ok(Self {
             univ_setup,
             prng,
-            prove_key,
+            prove_key: ProverKey {
+                mint: mint_prove_key,
+                xfr: xfr_prove_key,
+                freeze: freeze_prove_key,
+            },
             verif_key: verif_key.clone(),
             freezer_key,
             native_token,
@@ -563,7 +611,12 @@ impl MultiXfrTestState {
 
                     let key = &self.keys[kix];
 
-                    let comm = self.record_merkle_tree.get_leaf(i as u64).expect_ok().0;
+                    let comm = self
+                        .record_merkle_tree
+                        .get_leaf(i as u64)
+                        .expect_ok()
+                        .unwrap()
+                        .0;
 
                     let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
 
@@ -577,6 +630,7 @@ impl MultiXfrTestState {
                                 .record_merkle_tree
                                 .get_leaf(fee_ix as u64)
                                 .expect_ok()
+                                .unwrap()
                                 .0;
                             let memo = self.memos[fee_ix as usize].clone();
                             let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
@@ -606,7 +660,12 @@ impl MultiXfrTestState {
                         continue;
                     }
 
-                    let comm = self.record_merkle_tree.get_leaf(i as u64).expect_ok().0;
+                    let comm = self
+                        .record_merkle_tree
+                        .get_leaf(i as u64)
+                        .expect_ok()
+                        .unwrap()
+                        .0;
 
                     let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
 
@@ -679,14 +738,6 @@ impl MultiXfrTestState {
                 // dbg!(&out_amt2);
                 // dbg!(&fee_rec.amount);
 
-                let fee_out_rec = RecordOpening::new(
-                    &mut prng,
-                    fee_rec.amount - 1,
-                    fee_rec.asset_def.clone(),
-                    k1.pub_key(),
-                    FreezeFlag::Unfrozen,
-                );
-
                 let out_rec1 = RecordOpening::new(
                     &mut prng,
                     out_amt1,
@@ -715,41 +766,52 @@ impl MultiXfrTestState {
                 );
                 let now = Instant::now();
 
-                let fee_input = TransferNoteInput::create(
-                    fee_rec,
-                    in_key1,
-                    None,
-                    AccMemberWitness {
-                        merkle_path: self.record_merkle_tree.get_leaf(fee_ix).expect_ok().1,
+                let fee_input = FeeInput {
+                    ro: fee_rec,
+                    owner_keypair: in_key1,
+                    acc_member_witness: AccMemberWitness {
+                        merkle_path: self
+                            .record_merkle_tree
+                            .get_leaf(fee_ix)
+                            .expect_ok()
+                            .unwrap()
+                            .1,
                         root: self.validator.record_merkle_frontier.get_root_value(),
                         uid: fee_ix,
                     },
-                )
-                .unwrap();
+                };
 
-                let input1 = TransferNoteInput::create(
-                    rec1,
-                    in_key1,
-                    None,
-                    AccMemberWitness {
-                        merkle_path: self.record_merkle_tree.get_leaf(in1 as u64).expect_ok().1,
+                let input1 = TransferNoteInput {
+                    ro: rec1,
+                    owner_keypair: in_key1,
+                    cred: None,
+                    acc_member_witness: AccMemberWitness {
+                        merkle_path: self
+                            .record_merkle_tree
+                            .get_leaf(in1 as u64)
+                            .expect_ok()
+                            .unwrap()
+                            .1,
                         root: self.validator.record_merkle_frontier.get_root_value(),
                         uid: in1 as u64,
                     },
-                )
-                .unwrap();
+                };
 
-                let input2 = TransferNoteInput::create(
-                    rec2,
-                    in_key2,
-                    None,
-                    AccMemberWitness {
-                        merkle_path: self.record_merkle_tree.get_leaf(in2 as u64).expect_ok().1,
+                let input2 = TransferNoteInput {
+                    ro: rec2,
+                    owner_keypair: in_key2,
+                    cred: None,
+                    acc_member_witness: AccMemberWitness {
+                        merkle_path: self
+                            .record_merkle_tree
+                            .get_leaf(in2 as u64)
+                            .expect_ok()
+                            .unwrap()
+                            .1,
                         root: self.validator.record_merkle_frontier.get_root_value(),
                         uid: in2 as u64,
                     },
-                )
-                .unwrap();
+                };
 
                 println!(
                     "Txn {}.{}/{} inputs generated: {}",
@@ -760,12 +822,14 @@ impl MultiXfrTestState {
                 );
                 let now = Instant::now();
 
-                let (txn, owner_memos, _owner_memos_sig) = TransferNote::generate(
+                let (txn, owner_memos, _owner_memos_sig) = TransferNote::generate_non_native(
                     &mut prng,
-                    vec![fee_input, input1, input2],
-                    &[fee_out_rec, out_rec1, out_rec2],
-                    &self.prove_key,
+                    vec![input1, input2],
+                    &[out_rec1, out_rec2],
+                    fee_input,
+                    1,
                     self.validator.prev_commit_time + 1,
+                    &self.prove_key.xfr,
                 )
                 .unwrap();
 
@@ -799,7 +863,7 @@ impl MultiXfrTestState {
                     ix,
                     (owner_memos, k1_ix, k2_ix),
                     ElaboratedTransaction {
-                        txn: Transaction(txn),
+                        txn: TransactionNote::Transfer(Box::new(txn)),
                         proofs: nullifier_pfs,
                     },
                 ))
@@ -832,7 +896,7 @@ impl MultiXfrTestState {
         self.owners.push(k1_ix);
         self.owners.push(k1_ix);
         self.owners.push(k2_ix);
-        for comm in txn.txn.0.output_commitments.iter() {
+        for comm in txn.txn.output_commitments().iter() {
             self.record_merkle_tree.push(*comm);
         }
 
@@ -854,14 +918,9 @@ impl MultiXfrTestState {
         }
         let new_state = blk.append_to(&self.validator).unwrap();
 
-        for n in blk
-            .block
-            .0
-            .iter()
-            .flat_map(|x| x.0.inputs_nullifiers.iter())
-        {
-            assert!(!self.nullifiers.contains(*n).unwrap().0);
-            self.nullifiers.insert(*n);
+        for n in blk.block.0.iter().flat_map(|x| x.nullifiers().into_iter()) {
+            assert!(!self.nullifiers.contains(n).unwrap().0);
+            self.nullifiers.insert(n);
         }
         self.validator = new_state;
 
@@ -1035,8 +1094,25 @@ mod tests {
             &mut prng,
         )
         .unwrap();
-        let (prove_key, verif_key, _constraint_count) =
+
+        let (xfr_prove_key, xfr_verif_key, _) =
             jf_txn::proof::transfer::preprocess(&univ_setup, 1, 1, MERKLE_HEIGHT).unwrap();
+        let (mint_prove_key, mint_verif_key, _) =
+            jf_txn::proof::mint::preprocess(&univ_setup, MERKLE_HEIGHT).unwrap();
+        let (freeze_prove_key, freeze_verif_key, _) =
+            jf_txn::proof::freeze::preprocess(&univ_setup, 2, MERKLE_HEIGHT).unwrap();
+
+        let prove_key = ProverKey {
+            mint: mint_prove_key,
+            xfr: xfr_prove_key,
+            freeze: freeze_prove_key,
+        };
+
+        let verif_key = VerifierKey {
+            mint: TransactionVerifyingKey::Mint(mint_verif_key),
+            xfr: TransactionVerifyingKey::Transfer(xfr_verif_key),
+            freeze: TransactionVerifyingKey::Freeze(freeze_verif_key),
+        };
 
         println!("CRS set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
@@ -1070,7 +1146,7 @@ mod tests {
             RecordCommitment::from(&alice_rec1)
         );
         t.push(RecordCommitment::from(&alice_rec1));
-        let alice_rec_path = t.get_leaf(0).expect_ok().1;
+        let alice_rec_path = t.get_leaf(0).expect_ok().unwrap().1;
         assert_eq!(alice_rec_path.nodes.len(), MERKLE_HEIGHT as usize);
 
         let mut nullifiers: SetMerkleTree = Default::default();
@@ -1080,17 +1156,16 @@ mod tests {
 
         let first_root = t.get_root_value();
 
-        let alice_rec_final = TransferNoteInput::create(
-            alice_rec1.clone(),
-            &alice_key,
-            None,
-            AccMemberWitness {
+        let alice_rec_final = TransferNoteInput {
+            ro: alice_rec1.clone(),
+            owner_keypair: &alice_key,
+            cred: None,
+            acc_member_witness: AccMemberWitness {
                 merkle_path: alice_rec_path.clone(),
                 root: first_root.clone(),
                 uid: 0,
             },
-        )
-        .unwrap();
+        };
 
         let mut wallet_merkle_tree = t.clone();
         let mut validator = ValidatorState {
@@ -1140,12 +1215,12 @@ mod tests {
                 bob_key.pub_key(),
                 FreezeFlag::Unfrozen,
             );
-            let txn = TransferNote::generate(
+            let txn = TransferNote::generate_native(
                 &mut prng,
                 /* inputs:         */ vec![alice_rec_final],
                 /* outputs:        */ &[bob_rec.clone()],
-                /* proving_key:    */ &prove_key,
                 /* valid_until:    */ 2,
+                /* proving_key:    */ &prove_key.xfr,
             )
             .unwrap();
             (txn, bob_rec)
@@ -1176,7 +1251,11 @@ mod tests {
         let now = Instant::now();
 
         let new_uids = validator
-            .validate_and_apply(1, Block(vec![Transaction(txn1)]), vec![nullifier_pfs])
+            .validate_and_apply(
+                1,
+                Block(vec![TransactionNote::Transfer(Box::new(txn1))]),
+                vec![nullifier_pfs],
+            )
             .unwrap();
 
         println!(
@@ -1188,17 +1267,16 @@ mod tests {
         assert_eq!(&new_uids, &vec![1]);
         wallet_merkle_tree.push(RecordCommitment::from(&bob_rec));
 
-        let bob_rec = TransferNoteInput::create(
-            bob_rec,
-            &bob_key,
-            None,
-            AccMemberWitness {
-                merkle_path: wallet_merkle_tree.get_leaf(1).expect_ok().1,
+        let bob_rec = TransferNoteInput {
+            ro: bob_rec,
+            owner_keypair: &bob_key,
+            cred: None,
+            acc_member_witness: AccMemberWitness {
+                merkle_path: wallet_merkle_tree.get_leaf(1).expect_ok().unwrap().1,
                 root: validator.record_merkle_frontier.get_root_value(),
                 uid: 1,
             },
-        )
-        .unwrap();
+        };
 
         assert_eq!(nullifiers.hash(), validator.nullifiers_root);
 
