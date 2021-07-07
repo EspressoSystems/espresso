@@ -1660,7 +1660,7 @@ dependencies = [
  "http",
  "indexmap",
  "slab",
- "tokio 1.8.0",
+ "tokio 1.8.1",
  "tokio-util",
  "tracing",
 ]
@@ -1847,7 +1847,7 @@ dependencies = [
  "itoa",
  "pin-project-lite 0.2.7",
  "socket2",
- "tokio 1.8.0",
+ "tokio 1.8.1",
  "tower-service",
  "tracing",
  "want",
@@ -1923,7 +1923,7 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#176223cccc6d987c6856f2a41886f44c17dba059"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1945,7 +1945,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#176223cccc6d987c6856f2a41886f44c17dba059"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1967,7 +1967,7 @@ dependencies = [
 [[package]]
 name = "jf-txn"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#176223cccc6d987c6856f2a41886f44c17dba059"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1995,7 +1995,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#176223cccc6d987c6856f2a41886f44c17dba059"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
 dependencies = [
  "ark-serialize",
  "serde",
@@ -2164,7 +2164,7 @@ dependencies = [
  "log",
  "mime",
  "spin 0.9.1",
- "tokio 1.8.0",
+ "tokio 1.8.1",
  "tokio-util",
  "twoway",
  "version_check",
@@ -2889,7 +2889,7 @@ dependencies = [
  "state",
  "tempfile",
  "time 0.2.27",
- "tokio 1.8.0",
+ "tokio 1.8.1",
  "tokio-stream",
  "tokio-util",
  "ubyte",
@@ -2935,7 +2935,7 @@ dependencies = [
  "stable-pattern",
  "state",
  "time 0.2.27",
- "tokio 1.8.0",
+ "tokio 1.8.1",
  "uncased",
 ]
 
@@ -3713,9 +3713,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.8.0"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "570c2eb13b3ab38208130eccd41be92520388791207fde783bda7c1e8ace28d4"
+checksum = "98c8b05dc14c75ea83d63dd391100353789f5f24b8b3866542a5e85c8be8e985"
 dependencies = [
  "autocfg",
  "bytes 1.0.1",
@@ -3749,7 +3749,7 @@ checksum = "f8864d706fdb3cc0843a49647ac892720dac98a6eeb818b77190592cf4994066"
 dependencies = [
  "futures-core",
  "pin-project-lite 0.2.7",
- "tokio 1.8.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -3763,7 +3763,7 @@ dependencies = [
  "futures-sink",
  "log",
  "pin-project-lite 0.2.7",
- "tokio 1.8.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]

@@ -12,13 +12,13 @@ use jf_txn::{
     keys::{FreezerKeyPair, UserKeyPair},
     proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
     structs::{
-        AssetCode, AssetDefinition, FreezeFlag, NoteType, Nullifier, ReceiverMemo,
+        AssetCode, AssetDefinition, FeeInput, FreezeFlag, NoteType, Nullifier, ReceiverMemo,
         RecordCommitment, RecordOpening,
     },
     transfer::{TransferNote, TransferNoteInput},
     txn_batch_verify,
     utils::compute_universal_param_size,
-    FeeInput, TransactionNote, TransactionVerifyingKey,
+    TransactionNote, TransactionVerifyingKey,
 };
 use jf_utils::serialize::CanonicalBytes;
 use merkle_tree::{AccMemberWitness, MerkleTree};
