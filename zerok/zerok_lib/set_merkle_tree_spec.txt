@@ -37,6 +37,9 @@ In the implementation:
  - `H_branch(nul)` is `h("l"||l||"r"||r)` where `h` is `Blake2B`
    personalized with "AAPSet Branch"
 
+We also assume that any sparse array `arr` of size `2^N` has less than
+`negl(N)` non-empty elements.
+
 Ideal Trees
 -----------
 
@@ -175,6 +178,17 @@ Proof:
          `H_leaf`
     each of which violates our cryptographic assumptions.
 
+Corollary: For any t1: IT(arr_S1), t2: IT(arr_S2),
+    if hash(t1) == hash(t2), then under our computational assumptions,
+    arr_S1 == arr_S2.
+
+Proof:
+    Let `n1` be the number of non-empty slots in `arr_S1` and `n2` the
+    same for `arr_S2`. By assumption, `n1 < negl(N)` and
+    `n2 < negl(N)`. If there is any slot which differs between
+    `arr_S1` and `arr_S2`, we can calculate a proof of inclusion
+    relative to the other, violating computational soundness.
+
 NOTE: because we're assuming that collisions are infeasible, N needs to be
 large enough that |S| is much less than 2^(N/2), since at ~2^(N/2) you will
 start encountering birthday-bound collisions.
@@ -190,7 +204,7 @@ by an inductive predicate instead of as a function:
         arr == [<EMPTY>,<EMPTY>,...,<EMPTY>], and
         length(arr) == 2^height
     PTLeaf(height,elem) is PT(height,arr) if:
-        arr == [<EMPTY>,...,<EMPTY>,elem,...,<EMPTY>] (ie, arr only
+        arr == [<EMPTY>,...,<EMPTY>,elem,<EMPTY>,...,<EMPTY>] (ie, arr only
             contains `elem`), and
         length(arr) == 2^height
     PTBranch(l,r) is PT(height,arr) if:
@@ -256,6 +270,9 @@ Hashing the tree is done by copying the ideal tree pattern:
             = H_branch(hash(PTLeaf(height-1,elem)),EMPTY_HASH)
  - hash(PTBranch(l,r)) = H_branch(hash(l),hash(r))
 
+By induction, if `pt: PT(height,arr_S)`, then
+hash(pt) == hash(PT_idealize(pt)).
+
 Proofs of inclusion/exclusion now can either be a path to an empty subtree,
 or a path to a singleton subtree. If the singleton subtree is
 PTLeaf(height,leaf_elem) and leaf_elem == elem, it is a proof of inclusion.
@@ -300,14 +317,130 @@ First, let's define our "forgetful tree", `FT(height,arr)`:
     FTForgottenSubtree(h) is FT(height,arr) if:
         there exists some pt: PT(height,arr) such that h == hash(pt)
 
+Any pt: PT(height,arr) can be mapped canonically to some
+ft: FT(height,arr) by mapping PTEmptySubtree, PTLeaf, and PTBranch to
+FTEmptySubtree, FTLeaf, and FTBranch respectively.
+
+Hashing FTs is the same as with PTs, except that:
+    - hash(FTForgottenSubtree(h)) = h
+
+Insertion into an FT can fail if the value would go into a
+`FTForgottenSubtree`. However, if it does not, then insertion behaves
+exactly identically to insertion into a PT.
+
+We'll call `ft: FT(height,arr_S)` "well-formed" if there is some
+`pt: PT(height,arr_S)` such that `hash(ft) == hash(pt)`.
+
+Mapping a `pt: PT(height,arr_S)` to its canonical FT clearly creates a
+well-formed tree.
+
+Inserting into a well-formed FT also preserves a well-formed FT, since
+insertion only succeeds when it would exactly mimic the PT operation.
+
+The last 2 operations are `FT_remember(ft, elem, proof)` and
+`FT_forget(ft, elem)`:
+    FT_forget(t: FT(height,arr_S), nul: Nullifier)
+            -> (FT(height,arr_S), is_present: bool, presence_proof):
+        let b_0,...,b_{N-1} = H_elem(nul);
+        return FT_forget_inner(t,nul,[b_{N-1},b_{N-2},...,b_0])
+
+    FT_forget_inner(t: FT(height,arr_S), nul: Nullifier, path: [bit])
+            -> (FT(height,arr_S), is_present: {true,false,unknown}, presence_proof):
+        match t {
+            FTEmptySubtree => {
+                assert(path == []);
+                return (FTEmptySubtree,false,[]);
+            }
+            FTLeaf(height,elem) => {
+                assert(path == []);
+                if elem == nul {
+                    return (FTForgottenSubtree(hash(t)),
+                            true,
+                            [FTLeaf(height,elem)])
+                } else {
+                    return (t,false,[FTLeaf(height,elem)]);
+                }
+            }
+            FTBranch(l,r) => {
+                if path[0] == 1 {
+                    let (new_r,is_present,proof) =
+                        FT_forget_inner(r,nul,path[1..]);
+                    return (ITBranch(l,new_r),
+                            is_present,
+                            proof + [hash(l)]);
+                } else {
+                    let (new_l,is_present,proof) =
+                        FT_forget_inner(l,nul,path[1..]);
+                    return (ITBranch(r,new_l),
+                            is_present,
+                            proof + [hash(r)]);
+                }
+            }
+            FTForgottenSubtree(h) => {
+                return (t, unknown, []);
+            }
+        }
+
+    FT_remember(t: FT(height,arr_S), nul: Nullifier, proof)
+            -> FT(height,arr_S):
+        Check (proof,nul) relative to hash(t);
+        let b_0,...,b_{N-1} = H_elem(nul);
+        return FT_remember_inner(t,nul,proof,[b_{N-1},b_{N-2},...,b_0])
+
+    FT_remember_inner(t: FT(height,arr_S), nul: Nullifier, proof, path: [bit])
+            -> FT(height,arr_S):
+        match t {
+            FTEmptySubtree => {
+                assert(false);
+            }
+            FTLeaf(height,elem) => {
+                // in this case, `proof` must be a non-inclusion
+                // proof. No action is necessary.
+                return t;
+            }
+            FTBranch(l,r) => {
+                if path[0] == 1 {
+                    let new_r = FT_remember_inner(
+                        r, nul, proof[..length(proof)-1], path[1..]
+                        );
+                    return ITBranch(l,new_r);
+                } else {
+                    let new_l = FT_remember_inner(
+                        l, nul, proof[..length(proof)-1], path[1..]
+                        );
+                    return ITBranch(new_l,r);
+                }
+            }
+            FTForgottenSubtree(h) => {
+                if length(proof) == 1 {
+                    // proof[0] is either FTLeaf(height,elem) or
+                    // FTEmptySubtree
+                    return proof[0];
+                } else {
+                    let sib_hash = path[length(path)-1];
+                    // the exact hash value we use here isn't
+                    // used, so default it to 0.
+                    let my_subtree = FT_remember_inner(
+                        FTForgottenSubtree(0), nul,
+                        proof[..length(proof)-1], path[1..]);
+                    if path[0] == 1 {
+                        return FTBranch(FTForgottenSubtree(sib_hash),
+                                        my_subtree);
+                    } else {
+                        return FTBranch(my_subtree,
+                                        FTForgottenSubtree(sib_hash));
+                    }
+                }
+            }
+        }
+
+The last correctness property is that:
+    - `forget`/`remember` preserve well-formedness
+    - `remember` will always succeed given a correct proof
+    - `forget` yields correct proofs
+    - `forget` and `remember` do not change the hash of the tree.
+    - `forget` removes the relevant path from the "in-memory" tree,
+      and `remember` restores it
 
 
-First, we add a new constructor: `PTForgottenSubtree(subtree_hash)`.
-`PTForgottenSubtree(subtree_hash)` stands in for a (non-empty) subtree
-which hashes to `subtree_hash`.
-
-
-
-(TODO: spec out `remember`/`forget`, define `ForgetfulPT`, and prove that
-`remember`/`forget` can't change the `arr_S` represented by the `PT`)
 
