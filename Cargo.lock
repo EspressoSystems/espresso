@@ -1157,7 +1157,7 @@ dependencies = [
  "async-std",
  "async-tls",
  "futures",
- "hotstuff",
+ "phaselock",
  "rand 0.7.3",
  "serde",
  "structopt",
@@ -1735,32 +1735,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hotstuff"
-version = "0.0.0"
-source = "git+ssh://git@gitlab.com/translucence/systems/hotstuff.git?branch=main#3091295340083f193257c03f2578bfbba1399241"
-dependencies = [
- "async-std",
- "async-tls",
- "async-tungstenite",
- "bincode",
- "blake3",
- "byteorder",
- "dashmap",
- "flume",
- "futures",
- "hex_fmt",
- "rand 0.7.3",
- "serde",
- "snafu",
- "threshold_crypto",
- "tokio 0.2.25",
- "tracing",
- "tracing-error",
- "tracing-futures",
- "tracing-unwrap",
-]
-
-[[package]]
 name = "http"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1831,9 +1805,9 @@ checksum = "6456b8a6c8f33fee7d958fcd1b60d55b11940a79e63ae87013e6d22e26034440"
 
 [[package]]
 name = "hyper"
-version = "0.14.9"
+version = "0.14.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07d6baa1b441335f3ce5098ac421fb6547c46dda735ca1bc6d0153c838f9dd83"
+checksum = "7728a72c4c7d72665fde02204bcbd93b247721025b222ef78606f14513e0fd03"
 dependencies = [
  "bytes 1.0.1",
  "futures-channel",
@@ -1923,7 +1897,7 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#78ab024905acc8a1b087f180eb59d19a1ed26c5c"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1945,7 +1919,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#78ab024905acc8a1b087f180eb59d19a1ed26c5c"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1967,7 +1941,7 @@ dependencies = [
 [[package]]
 name = "jf-txn"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#78ab024905acc8a1b087f180eb59d19a1ed26c5c"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1995,7 +1969,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#fa039a969b20786ba10ff571ea2449d2a46decf9"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?branch=main#78ab024905acc8a1b087f180eb59d19a1ed26c5c"
 dependencies = [
  "ark-serialize",
  "serde",
@@ -2033,9 +2007,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.97"
+version = "0.2.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12b8adadd720df158f4d70dfe7ccc6adb0472d7c55ca83445f6a5ab3e36f8fb6"
+checksum = "320cfe77175da3a483efed4bc0adc1968ca050b098ce4f2f1c13a56626128790"
 
 [[package]]
 name = "lock_api"
@@ -2473,6 +2447,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10f4872ae94d7b90ae48754df22fd42ad52ce740b8f370b03da4835417403e53"
 dependencies = [
  "ucd-trie",
+]
+
+[[package]]
+name = "phaselock"
+version = "0.0.0"
+source = "registry+https://dl.cloudsmith.io/zYGygqFhb9UI1DOH/translucence/tl/cargo/index.git"
+checksum = "6ee05ef0b01ffdace2b73b62635f00a9e1d923d9505431a078964d8906c47d28"
+dependencies = [
+ "async-std",
+ "async-tls",
+ "async-tungstenite",
+ "bincode",
+ "blake3",
+ "byteorder",
+ "dashmap",
+ "flume",
+ "futures",
+ "hex_fmt",
+ "rand 0.7.3",
+ "serde",
+ "snafu",
+ "threshold_crypto",
+ "tokio 0.2.25",
+ "tracing",
+ "tracing-error",
+ "tracing-futures",
+ "tracing-unwrap",
 ]
 
 [[package]]
@@ -3477,12 +3478,12 @@ name = "system"
 version = "0.1.0"
 dependencies = [
  "bitvec",
- "hotstuff",
  "jf-plonk",
  "jf-primitives",
  "jf-txn",
  "jf-utils",
  "log",
+ "phaselock",
  "quickcheck",
  "quickcheck_macros",
  "rand 0.8.4",
@@ -3732,9 +3733,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "1.2.0"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c49e3df43841dafb86046472506755d8501c5615673955f6aa17181125d13c37"
+checksum = "54473be61f4ebe4efd09cec9bd5d16fa51d70ea0192213d754d2d500457db110"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3743,9 +3744,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8864d706fdb3cc0843a49647ac892720dac98a6eeb818b77190592cf4994066"
+checksum = "7b2f3f698253f03119ac0102beaa64f67a67e08074d03a22d18784104543727f"
 dependencies = [
  "futures-core",
  "pin-project-lite 0.2.7",
@@ -4296,12 +4297,12 @@ dependencies = [
  "bitvec",
  "blake2",
  "generic-array",
- "hotstuff",
  "jf-plonk",
  "jf-primitives",
  "jf-txn",
  "jf-utils",
  "lazy_static",
+ "phaselock",
  "quickcheck",
  "quickcheck_macros",
  "rand 0.8.4",
