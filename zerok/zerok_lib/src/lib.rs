@@ -7,20 +7,19 @@ use core::fmt::Debug;
 use core::iter::once;
 use hotstuff::BlockContents;
 use jf_primitives::merkle_tree;
-use jf_txn::errors::TxnApiError;
-use jf_txn::keys::FreezerKeyPair;
-use jf_txn::keys::UserKeyPair;
-use jf_txn::proof::freeze::FreezeProvingKey;
-use jf_txn::proof::mint::MintProvingKey;
-use jf_txn::proof::transfer::TransferProvingKey;
-use jf_txn::structs::{AssetCode, AssetDefinition, FreezeFlag, NoteType, RecordOpening};
-use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
-use jf_txn::transfer::{TransferNote, TransferNoteInput};
-use jf_txn::txn_batch_verify;
-use jf_txn::utils::compute_universal_param_size;
-use jf_txn::FeeInput;
-use jf_txn::TransactionNote;
-use jf_txn::TransactionVerifyingKey;
+use jf_txn::{
+    errors::TxnApiError,
+    keys::{FreezerKeyPair, UserKeyPair},
+    proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
+    structs::{
+        AssetCode, AssetDefinition, FeeInput, FreezeFlag, NoteType, Nullifier, ReceiverMemo,
+        RecordCommitment, RecordOpening,
+    },
+    transfer::{TransferNote, TransferNoteInput},
+    txn_batch_verify,
+    utils::compute_universal_param_size,
+    TransactionNote, TransactionVerifyingKey,
+};
 use jf_utils::serialize::CanonicalBytes;
 use merkle_tree::{AccMemberWitness, MerkleTree};
 use rand_chacha::rand_core::SeedableRng;
@@ -342,13 +341,19 @@ impl ValidatorState {
             })
             .collect();
 
-        txn_batch_verify(
-            &txns.0,
-            &[self.record_merkle_frontier.get_root_value()],
-            now,
-            &verif_keys,
-        )
-        .map_err(|err| CryptoError { err })?;
+        if !txns.0.is_empty() {
+            txn_batch_verify(
+                &txns.0,
+                &txns
+                    .0
+                    .iter()
+                    .map(|_| self.record_merkle_frontier.get_root_value())
+                    .collect::<Vec<_>>(),
+                now,
+                &verif_keys,
+            )
+            .map_err(|err| CryptoError { err })?;
+        }
 
         Ok((txns, null_pfs))
     }
@@ -914,6 +919,11 @@ impl MultiXfrTestState {
         Self::update_timer(&mut self.inner_timer, |_| ());
 
         if !blk.validate_block(&self.validator) {
+            self.validator.validate_block(
+                self.validator.prev_commit_time + 1,
+                blk.block.clone(),
+                blk.proofs,
+            )?;
             return Err(ValidationError::Failed {});
         }
         let new_state = blk.append_to(&self.validator).unwrap();
@@ -1355,6 +1365,7 @@ mod tests {
 
     #[test]
     fn quickcheck_multixfr_regressions() {
+        test_multixfr(vec![vec![]], 0, 0, (0, 0, 0), vec![]);
         test_multixfr(
             vec![vec![(0, 0, 0, 0, -2), (0, 0, 0, 0, 0)]],
             0,
