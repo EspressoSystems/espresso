@@ -1,4 +1,0 @@
-## If you need to test docker builds locally
-## Replace PRIVATEREPO with your http auth URL
-[registries]
-translucence = { index = "PRIVATEREPO" }

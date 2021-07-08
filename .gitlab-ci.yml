@@ -1,32 +1,22 @@
+image: rust:latest
+
 stages:
   - build
 
-variables:
-  BRANCH: $CI_COMMIT_BRANCH
-  CONTAINER_IMAGE: zerok_lib
-  DOCKER_REGISTRY: 279906117593.dkr.ecr.us-east-2.amazonaws.com
-
 before_script:
-  - docker info
-  - bash ./scripts/private-repo.sh
+  - 'command -v ssh-agent >/dev/null || ( apt-get update -y && apt-get install openssh-client -y )'
+  - eval $(ssh-agent -s)
+  - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+  - mkdir -p ~/.ssh
+  - chmod 700 ~/.ssh
+  - mkdir -p /opt
+  - 'echo "username=token\npassword=$CLOUDSMITH_ENTITLEMENT" > /opt/git-creds.sh'
+  - chmod +x /opt/git-creds.sh
+  - git config --global credential.helper /opt/git-creds.sh
   
 build:
-  tags:
-    - shell
-  rules:
-    - if: $CI_MERGE_REQUEST_ID
   stage: build
   script:
-    - eval `keychain --eval id_rsa`
-    - DOCKER_BUILDKIT=1 docker build --ssh default --pull -t $DOCKER_REGISTRY/$CONTAINER_IMAGE:$CI_MERGE_REQUEST_ID .
+    - cargo check
 
-build:
-  tags:
-    - shell
-  rules:
-    - if: $CI_COMMIT_BRANCH
-  stage: build
-  script:
-    - eval `keychain --eval id_rsa`
-    - DOCKER_BUILDKIT=1 docker build --ssh default --pull -t $DOCKER_REGISTRY/$CONTAINER_IMAGE:$CI_COMMIT_BRANCH .
-    - docker push $DOCKER_REGISTRY/$CONTAINER_IMAGE:$CI_COMMIT_BRANCH
+    
