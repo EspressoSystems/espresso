@@ -5,6 +5,7 @@ mod util;
 
 use core::fmt::Debug;
 use core::iter::once;
+use hotstuff::BlockContents;
 use jf_primitives::merkle_tree;
 use jf_txn::{
     errors::TxnApiError,
@@ -21,7 +22,6 @@ use jf_txn::{
 };
 use jf_utils::serialize::CanonicalBytes;
 use merkle_tree::{AccMemberWitness, MerkleTree};
-use phaselock::BlockContents;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
@@ -110,7 +110,7 @@ impl BlockContents<64> for ElaboratedBlock {
         Ok(state)
     }
 
-    fn hash(&self) -> phaselock::BlockHash<64> {
+    fn hash(&self) -> hotstuff::BlockHash<64> {
         use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "ElaboratedBlock".as_bytes());
@@ -118,7 +118,7 @@ impl BlockContents<64> for ElaboratedBlock {
         hasher.update(&block_comm::block_commit(&self.block));
         hasher.update(&"Block proofs".as_bytes());
         hasher.update(&bincode::serialize(&self.proofs).unwrap());
-        phaselock::BlockHash::<64>::from_array(
+        hotstuff::BlockHash::<64>::from_array(
             hasher
                 .finalize()
                 .into_bytes()
@@ -128,12 +128,12 @@ impl BlockContents<64> for ElaboratedBlock {
         )
     }
 
-    fn hash_bytes(bytes: &[u8]) -> phaselock::BlockHash<64> {
+    fn hash_bytes(bytes: &[u8]) -> hotstuff::BlockHash<64> {
         use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "PhaseLock bytes".as_bytes());
+        let mut hasher = blake2::Blake2b::with_params(&[], &[], "HotStuff bytes".as_bytes());
         hasher.update(bytes);
-        phaselock::BlockHash::<64>::from_array(
+        hotstuff::BlockHash::<64>::from_array(
             hasher
                 .finalize()
                 .into_bytes()
@@ -143,7 +143,7 @@ impl BlockContents<64> for ElaboratedBlock {
         )
     }
 
-    fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<64> {
+    fn hash_transaction(txn: &ElaboratedTransaction) -> hotstuff::BlockHash<64> {
         use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
         let mut hasher =
@@ -152,7 +152,7 @@ impl BlockContents<64> for ElaboratedBlock {
         hasher.update(&txn_comm::txn_commit(&txn.txn));
         hasher.update(&"Txn proofs".as_bytes());
         hasher.update(&bincode::serialize(&txn.proofs).unwrap());
-        phaselock::BlockHash::<64>::from_array(
+        hotstuff::BlockHash::<64>::from_array(
             hasher
                 .finalize()
                 .into_bytes()
