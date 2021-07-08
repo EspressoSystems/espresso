@@ -2452,7 +2452,7 @@ dependencies = [
 [[package]]
 name = "phaselock"
 version = "0.0.0"
-source = "registry+https://dl.cloudsmith.io/basic/translucence/tl/cargo/index.git"
+source = "registry+https://dl.cloudsmith.io/zYGygqFhb9UI1DOH/translucence/tl/cargo/index.git"
 checksum = "6ee05ef0b01ffdace2b73b62635f00a9e1d923d9505431a078964d8906c47d28"
 dependencies = [
  "async-std",
