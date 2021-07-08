@@ -39,8 +39,5 @@ stack.yaml.lock
 node_modules
 package-lock.json
 
-# The cache for docker container dependency
-.cargo
-
 # The cache for chain data in container
 .local
