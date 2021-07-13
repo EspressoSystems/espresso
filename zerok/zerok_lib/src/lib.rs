@@ -9,10 +9,11 @@ use jf_primitives::merkle_tree;
 use jf_txn::{
     errors::TxnApiError,
     keys::{FreezerKeyPair, UserKeyPair},
+    mint::MintNote,
     proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
     structs::{
-        AssetCode, AssetDefinition, FeeInput, FreezeFlag, NoteType, Nullifier, ReceiverMemo,
-        RecordCommitment, RecordOpening,
+        AssetCode, AssetCodeSeed, AssetDefinition, FeeInput, FreezeFlag, NoteType, Nullifier,
+        ReceiverMemo, RecordCommitment, RecordOpening,
     },
     transfer::{TransferNote, TransferNoteInput},
     txn_batch_verify,
@@ -414,6 +415,7 @@ pub struct MultiXfrTestState {
     pub keys: Vec<UserKeyPair>,
     pub freezer_key: FreezerKeyPair,
 
+    pub asset_seeds: Vec<(AssetCodeSeed, Vec<u8>)>,
     pub asset_defs: Vec<AssetDefinition>,
 
     pub fee_records: Vec<u64>, // for each key
@@ -482,35 +484,33 @@ impl MultiXfrTestState {
 
         let freezer_key = FreezerKeyPair::generate(&mut prng);
 
-        let asset_defs: Vec<AssetDefinition> =
-            once(Ok(native_token.clone()))
-                .chain((0..=(num_asset_defs as usize + 1)).map(|_| {
-                    AssetDefinition::new(AssetCode::random(&mut prng).0, Default::default())
-                }))
-                .collect::<Result<Vec<_>, _>>()?;
-
-        let mut t = MerkleTree::new(MERKLE_HEIGHT).ok_or(ValidationError::Failed {})?;
+        let asset_seeds: Vec<(AssetCodeSeed, Vec<u8>)> = (0..=(num_asset_defs as usize))
+            .map(|i| {
+                (
+                    AssetCodeSeed::generate(&mut prng),
+                    format!("Def {}", i).as_bytes().to_vec(),
+                )
+            })
+            .collect();
+        let asset_defs: Vec<AssetDefinition> = once(Ok(native_token.clone()))
+            .chain(asset_seeds.iter().map(|(seed, desc)| {
+                AssetDefinition::new(AssetCode::new(*seed, desc), Default::default())
+            }))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut owners = vec![];
         let mut memos = vec![];
 
         Self::update_timer(&mut timer, |t| println!("Keys and defs: {}s", t));
 
+        let mut t = MerkleTree::new(MERKLE_HEIGHT).ok_or(ValidationError::Failed {})?;
+
         let mut fee_records = vec![];
 
-        for (def, key, amt) in (0..keys.len() as u8).map(|i| (0, i, 1000)).chain(
-            std::iter::once(initial_records.0)
-                .chain((initial_records.1).into_iter())
-                .flat_map(|x| vec![x, x].into_iter())
-                .map(|spec| (spec.asset_def_ix, spec.owner_key_ix, spec.asset_amount)),
-        ) {
-            let amt = if amt < 2 { 2 } else { amt };
-            if fee_records.len() < keys.len() {
-                assert_eq!(def, 0);
-                assert_eq!(key as usize, fee_records.len());
-                fee_records.push(t.num_leaves());
-            }
-            let def = &asset_defs[def as usize % asset_defs.len()];
+        for key in 0..keys.len() as u8 {
+            let amt = 1000;
+            fee_records.push(t.num_leaves());
+            let def = &asset_defs[0];
             let key = key as usize % keys.len();
             owners.push(key);
             let key = &keys[key];
@@ -521,14 +521,15 @@ impl MultiXfrTestState {
                 key.pub_key(),
                 FreezeFlag::Unfrozen,
             );
+
             t.push(RecordCommitment::from(&rec));
 
             memos.push(ReceiverMemo::from_ro(&mut prng, &rec, &[])?);
         }
 
-        let first_root = t.get_root_value();
+        Self::update_timer(&mut timer, |t| println!("Native token records: {}s", t));
 
-        Self::update_timer(&mut timer, |t| println!("initial records: {}s", t));
+        let first_root = t.get_root_value();
 
         let next_uid = owners.len() as u64;
         let nullifiers: SetMerkleTree = Default::default();
@@ -540,7 +541,9 @@ impl MultiXfrTestState {
             freeze: TransactionVerifyingKey::Freeze(freeze_verif_key),
         };
 
-        Ok(Self {
+        Self::update_timer(&mut timer, |t| println!("Verify Keys: {}s", t));
+
+        let mut ret = Self {
             univ_setup,
             prng,
             prove_key: ProverKey {
@@ -553,6 +556,7 @@ impl MultiXfrTestState {
             native_token,
             keys,
             fee_records,
+            asset_seeds,
             asset_defs,
             owners,
             memos,
@@ -570,7 +574,118 @@ impl MultiXfrTestState {
             },
             outer_timer: timer,
             inner_timer: Instant::now(),
-        })
+        };
+
+        let mut setup_block = ElaboratedBlock::next_block(&ret.validator);
+
+        let mut keys_in_block = HashSet::<usize>::new();
+
+        for (def_ix, key, amt) in std::iter::once(initial_records.0)
+            .chain((initial_records.1).into_iter())
+            .flat_map(|x| vec![x, x].into_iter())
+            .map(|spec| (spec.asset_def_ix, spec.owner_key_ix, spec.asset_amount))
+        {
+            let amt = if amt < 2 { 2 } else { amt };
+            let def_ix = def_ix as usize % ret.asset_defs.len();
+            // We can't mint native tokens
+            let def_ix = if def_ix < 1 { 1 } else { def_ix };
+            let def = ret.asset_defs[def_ix].clone();
+            let kix = key as usize % ret.keys.len();
+
+            if keys_in_block.contains(&kix) {
+                keys_in_block.clear();
+                ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
+                    .unwrap();
+
+                setup_block = ElaboratedBlock::next_block(&ret.validator);
+            }
+            keys_in_block.insert(kix);
+
+            let key = &ret.keys[kix];
+
+            let rec =
+                RecordOpening::new(&mut ret.prng, amt, def, key.pub_key(), FreezeFlag::Unfrozen);
+
+            /*
+                         *
+                         * pub fn generate<R>(
+                rng: &mut R,
+                mint_ro: RecordOpening,
+                ac_seed: AssetCodeSeed,
+                ac_description: &[u8],
+                fee_input: FeeInput<'_>,
+                fee: u64,
+                proving_key: &MintProvingKey<'_>
+            ) -> Result<(Self, [ReceiverMemo; 2], Signature, RecordOpening), TxnApiError>
+                         */
+
+            let fee_ix = ret.fee_records[kix];
+            let fee_rec = {
+                let comm = ret
+                    .record_merkle_tree
+                    .get_leaf(fee_ix as u64)
+                    .expect_ok()
+                    .unwrap()
+                    .0;
+                let memo = ret.memos[fee_ix as usize].clone();
+                let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
+                let nullifier = key.nullify(&ret.freezer_key.pub_key(), fee_ix as u64, &comm);
+                assert!(!ret.nullifiers.contains(nullifier).unwrap().0);
+                open_rec
+            };
+
+            assert_eq!(
+                ret.record_merkle_tree.get_root_value(),
+                ret.validator.record_merkle_frontier.get_root_value()
+            );
+            let fee_input = FeeInput {
+                ro: fee_rec,
+                owner_keypair: key,
+                acc_member_witness: AccMemberWitness {
+                    merkle_path: ret
+                        .record_merkle_tree
+                        .get_leaf(fee_ix)
+                        .expect_ok()
+                        .unwrap()
+                        .1,
+                    root: ret.validator.record_merkle_frontier.get_root_value(),
+                    uid: fee_ix,
+                },
+            };
+
+            let (note, memos, _memos_sig, _change_ro) = MintNote::generate(
+                &mut ret.prng,
+                rec,
+                ret.asset_seeds[def_ix - 1].0,
+                &ret.asset_seeds[def_ix - 1].1,
+                fee_input,
+                1,
+                &ret.prove_key.mint,
+            )
+            .unwrap();
+
+            let nul = ret.nullifiers.contains(note.input_nullifier).unwrap().1;
+
+            let ix = setup_block.block.0.len();
+            ret.try_add_transaction(
+                &mut setup_block,
+                ElaboratedTransaction {
+                    txn: TransactionNote::Mint(Box::new(note)),
+                    proofs: vec![nul],
+                },
+                0,
+                ix,
+                0,
+                memos.to_vec(),
+                vec![kix, kix],
+            )
+            .unwrap();
+        }
+
+        ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
+            .unwrap();
+
+        Ok(ret)
     }
 
     #[allow(clippy::type_complexity)]
@@ -889,21 +1004,15 @@ impl MultiXfrTestState {
         ix: usize,
         num_txs: usize,
         owner_memos: Vec<ReceiverMemo>,
-        k1_ix: usize,
-        k2_ix: usize,
+        kixs: Vec<usize>,
     ) -> Result<(), ValidationError> {
         println!("Block {}/{} trying to add {}", i + 1, num_txs, ix);
 
         let newblk = blk.add_transaction(&self.validator, &txn)?;
         println!("Block {}/{} adding {}", i + 1, num_txs, ix);
         self.memos.extend(owner_memos);
-        self.fee_records[k1_ix] = self.record_merkle_tree.num_leaves();
-        self.owners.push(k1_ix);
-        self.owners.push(k1_ix);
-        self.owners.push(k2_ix);
-        for comm in txn.txn.output_commitments().iter() {
-            self.record_merkle_tree.push(*comm);
-        }
+        self.fee_records[kixs[0]] = self.record_merkle_tree.num_leaves();
+        self.owners.extend(kixs);
 
         *blk = newblk;
         Ok(())
@@ -932,6 +1041,15 @@ impl MultiXfrTestState {
             assert!(!self.nullifiers.contains(n).unwrap().0);
             self.nullifiers.insert(n);
         }
+        for comm in blk
+            .block
+            .0
+            .iter()
+            .flat_map(|x| x.output_commitments().into_iter())
+        {
+            self.record_merkle_tree.push(comm);
+        }
+
         self.validator = new_state;
 
         let mut checking_time: f32 = 0.0;
@@ -1047,8 +1165,7 @@ mod tests {
                     ix,
                     num_txs,
                     owner_memos,
-                    k1_ix,
-                    k2_ix,
+                    vec![k1_ix, k1_ix, k2_ix],
                 );
             }
 
