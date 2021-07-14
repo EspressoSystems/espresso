@@ -508,7 +508,7 @@ impl MultiXfrTestState {
         let mut fee_records = vec![];
 
         for key in 0..keys.len() as u8 {
-            let amt = 1000;
+            let amt = 1u64<<32;
             fee_records.push(t.num_leaves());
             let def = &asset_defs[0];
             let key = key as usize % keys.len();
