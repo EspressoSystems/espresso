@@ -2145,6 +2145,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "multi_machine"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "futures",
+ "phaselock",
+ "rand 0.7.3",
+ "serde",
+ "structopt",
+ "tagged-base64",
+ "threshold_crypto",
+ "tracing",
+ "zerok_lib",
+]
+
+[[package]]
 name = "nanorand"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
