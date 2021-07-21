@@ -230,7 +230,7 @@ async fn main() {
         }
 
         // Start consensus
-        println!("Starting consense");
+        println!("Starting consensus");
         let mut event: Event<ElaboratedBlock, ValidatorState> = phaselock
             .next_event()
             .await
