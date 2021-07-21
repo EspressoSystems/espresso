@@ -508,7 +508,7 @@ impl MultiXfrTestState {
         let mut fee_records = vec![];
 
         for key in 0..keys.len() as u8 {
-            let amt = 1u64<<32;
+            let amt = 1u64 << 32;
             fee_records.push(t.num_leaves());
             let def = &asset_defs[0];
             let key = key as usize % keys.len();
@@ -1008,10 +1008,17 @@ impl MultiXfrTestState {
     ) -> Result<(), ValidationError> {
         println!("Block {}/{} trying to add {}", i + 1, num_txs, ix);
 
+        let base_ix = self.record_merkle_tree.num_leaves()
+            + blk
+                .block
+                .0
+                .iter()
+                .map(|x| x.output_commitments().len() as u64)
+                .sum::<u64>();
         let newblk = blk.add_transaction(&self.validator, &txn)?;
         println!("Block {}/{} adding {}", i + 1, num_txs, ix);
         self.memos.extend(owner_memos);
-        self.fee_records[kixs[0]] = self.record_merkle_tree.num_leaves();
+        self.fee_records[kixs[0]] = base_ix;
         self.owners.extend(kixs);
 
         *blk = newblk;
@@ -1481,8 +1488,11 @@ mod tests {
     }
 
     #[test]
-    fn quickcheck_multixfr_regressions() {
-        test_multixfr(vec![vec![]], 0, 0, (0, 0, 0), vec![]);
+    fn quickcheck_multixfr_regression1() {
+        test_multixfr(vec![vec![]], 0, 0, (0, 0, 0), vec![])
+    }
+    #[test]
+    fn quickcheck_multixfr_regression2() {
         test_multixfr(
             vec![vec![(0, 0, 0, 0, -2), (0, 0, 0, 0, 0)]],
             0,
@@ -1490,6 +1500,11 @@ mod tests {
             (0, 0, 0),
             vec![(0, 0, 0)],
         )
+    }
+
+    #[test]
+    fn quickcheck_multixfr_regression3() {
+        test_multixfr(vec![], 0, 0, (0, 0, 0), vec![(0, 3, 0)])
     }
 
     #[test]
