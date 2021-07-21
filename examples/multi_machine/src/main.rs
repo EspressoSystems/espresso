@@ -1,6 +1,5 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
-use futures::FutureExt;
 use phaselock::message::Message;
 use phaselock::{
     event::{Event, EventType},
@@ -17,7 +16,7 @@ use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use threshold_crypto as tc;
 use toml::Value;
-use tracing::{debug, info};
+use tracing::debug;
 use zerok_lib::{
     ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
 };
@@ -119,7 +118,7 @@ async fn init_state_and_phaselock(
 
     let config = PhaseLockConfig {
         total_nodes: nodes as u32,
-        threshold: threshold as u32,
+        thershold: threshold as u32,
         max_transactions: 100,
         known_nodes,
         next_view_timeout: 10000,
@@ -179,7 +178,7 @@ async fn main() {
         get_networking(&sks, own_id, get_host(node_config.clone(), own_id).1).await;
     #[allow(clippy::type_complexity)]
     let mut other_nodes: Vec<(u64, PubKey, String, u16)> = Vec::new();
-    for id in 0..(nodes) {
+    for id in 0..nodes {
         if id != own_id {
             let (ip, port) = get_host(node_config.clone(), id);
             let pub_key = PubKey::from_secret_key_set_escape_hatch(&sks, id);
@@ -194,7 +193,7 @@ async fn main() {
             debug!("  - Retrying");
             async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
         }
-        debug!("  - Connected to node {}", id);
+        println!("  - Connected to node {}", id);
     }
 
     // Wait for the networking implementations to connect
@@ -224,7 +223,10 @@ async fn main() {
                 .unwrap();
             txn = Some(transactions.remove(0));
             println!("Proposing a transaction");
-            phaselock.submit_transaction(txn.clone().unwrap().2).await.unwrap();
+            phaselock
+                .submit_transaction(txn.clone().unwrap().2)
+                .await
+                .unwrap();
         }
 
         // Start consensus
@@ -233,14 +235,24 @@ async fn main() {
             .next_event()
             .await
             .expect("PhaseLock unexpectedly closed");
-        // TODO: fix the loop below.
+        // TODO: fix the while loop.
+        //      With the timeout check, the last node times out.
+        //      Without the check, the node never reaches the decision.
         while !matches!(event.event, EventType::Decide { .. }) {
+            // if matches!(event.event, EventType::ViewTimeout { .. }) {
+            //     panic!("Round timed out");
+            // }
             event = phaselock
                 .next_event()
                 .await
                 .expect("PhaseLock unexpectedly closed");
         }
-
+        if let EventType::Decide { block: _, state } = event.event {
+            let commitment = TaggedBase64::new("LEDG", &state.commit())
+                .unwrap()
+                .to_string();
+            println!("Current commitment: {}", commitment);
+        }
         // Add the transaction if the node ID is 0
         if let Some((ix, (owner_memos, k1_ix, k2_ix), t)) = txn {
             println!("Adding the transaction");
