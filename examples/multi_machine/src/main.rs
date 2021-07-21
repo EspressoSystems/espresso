@@ -31,7 +31,7 @@ const TRANSACTION_COUNT: u64 = 3;
     about = "Simulates consensus among multiple machines"
 )]
 struct NodeOpt {
-    /// Path to the node configuration file
+    /// Path to the node configuration file.
     #[structopt(
         long = "config",
         short = "c",
@@ -39,13 +39,10 @@ struct NodeOpt {
     )]
     config: String,
 
-    /// Id of the current node
+    /// Id of the current node.
+    /// If the node ID is 0, it will propose and try to add transactions.
     #[structopt(long = "id", short = "i", default_value = "0")]
     id: u64,
-
-    /// Whether this node will propose transactions
-    #[structopt(long = "propose_txn", short = "t")]
-    propose_transaction: bool,
 }
 
 /// Gets IP address and port number of a node from node configuration file.
@@ -104,12 +101,12 @@ async fn init_state_and_phaselock(
             MultiXfrRecordSpec {
                 asset_def_ix: 0,
                 owner_key_ix: 0,
-                asset_amount: 100,
+                asset_amount: 0,
             },
             vec![MultiXfrRecordSpec {
                 asset_def_ix: 0,
                 owner_key_ix: 0,
-                asset_amount: 100,
+                asset_amount: 0,
             }],
         ),
     )
@@ -122,7 +119,7 @@ async fn init_state_and_phaselock(
 
     let config = PhaseLockConfig {
         total_nodes: nodes as u32,
-        thershold: threshold as u32,
+        threshold: threshold as u32,
         max_transactions: 100,
         known_nodes,
         next_view_timeout: 10000,
@@ -215,18 +212,19 @@ async fn main() {
     for round in 0..TRANSACTION_COUNT {
         println!("Starting round {}", round);
 
-        // Generate a transaction
-        let mut transactions = state
-            .generate_transactions(
-                round as usize,
-                vec![(0, 0, 0, 0, -2)],
-                TRANSACTION_COUNT as usize,
-            )
-            .unwrap();
-        let txn = transactions.remove(0);
-        if NodeOpt::from_args().propose_transaction {
+        // Generate a transaction if the node ID is 0
+        let mut txn = None;
+        if own_id == 0 {
+            let mut transactions = state
+                .generate_transactions(
+                    round as usize,
+                    vec![(0, 0, 0, 0, -2)],
+                    TRANSACTION_COUNT as usize,
+                )
+                .unwrap();
+            txn = Some(transactions.remove(0));
             println!("Proposing a transaction");
-            phaselock.submit_transaction(txn.clone().2).await.unwrap();
+            phaselock.submit_transaction(txn.clone().unwrap().2).await.unwrap();
         }
 
         // Start consensus
@@ -236,7 +234,6 @@ async fn main() {
             .await
             .expect("PhaseLock unexpectedly closed");
         // TODO: fix the loop below.
-        // The while loop never ends for the last node (id: 6).
         while !matches!(event.event, EventType::Decide { .. }) {
             event = phaselock
                 .next_event()
@@ -244,25 +241,26 @@ async fn main() {
                 .expect("PhaseLock unexpectedly closed");
         }
 
-        // Add the transaction
-        let (ix, (owner_memos, k1_ix, k2_ix), t) = txn;
-        println!("Adding the transaction");
-        let mut blk = ElaboratedBlock::default();
-        state
-            .try_add_transaction(
-                &mut blk,
-                t,
-                round as usize,
-                ix,
-                TRANSACTION_COUNT as usize,
-                owner_memos,
-                k1_ix,
-                k2_ix,
-            )
-            .unwrap();
-        state
-            .validate_and_apply(blk, round as usize, TRANSACTION_COUNT as usize, 0.0)
-            .unwrap();
+        // Add the transaction if the node ID is 0
+        if let Some((ix, (owner_memos, k1_ix, k2_ix), t)) = txn {
+            println!("Adding the transaction");
+            let mut blk = ElaboratedBlock::default();
+            state
+                .try_add_transaction(
+                    &mut blk,
+                    t,
+                    round as usize,
+                    ix,
+                    TRANSACTION_COUNT as usize,
+                    owner_memos,
+                    k1_ix,
+                    k2_ix,
+                )
+                .unwrap();
+            state
+                .validate_and_apply(blk, round as usize, TRANSACTION_COUNT as usize, 0.0)
+                .unwrap();
+        }
 
         let mut line = String::new();
         println!("Hit any key to start the next round...");
