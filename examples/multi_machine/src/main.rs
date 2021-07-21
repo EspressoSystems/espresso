@@ -1,23 +1,28 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
-use async_std::task::spawn;
-use futures::channel::oneshot;
-use futures::future::join_all;
 use futures::FutureExt;
-use tracing::{debug, error, info};
-use structopt::StructOpt;
 use phaselock::message::Message;
-use phaselock::networking::w_network::WNetwork;
-use phaselock::{PhaseLock, PhaseLockConfig, PubKey};
-use rand::Rng;
+use phaselock::{
+    event::{Event, EventType},
+    handle::PhaseLockHandle,
+    networking::w_network::WNetwork,
+    PhaseLock, PhaseLockConfig, PubKey,
+};
+use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
 use serde::{de::DeserializeOwned, Serialize};
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use threshold_crypto as tc;
+use toml::Value;
+use tracing::{debug, info};
 use zerok_lib::{
     ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
 };
-// use demo_1::*;
 
+const STATE_SEED: [u8; 32] = [0x7au8; 32];
 const TRANSACTION_COUNT: u64 = 3;
 
 #[derive(Debug, StructOpt)]
@@ -30,13 +35,17 @@ struct NodeOpt {
     #[structopt(
         long = "config",
         short = "c",
-        default_value = "../../../examples/node-config.toml"
+        default_value = "../../examples/multi_machine/src/node-config.toml"
     )]
     config: String,
 
     /// Id of the current node
-    #[structopt(long = "id", short = "i", default_value = "1")]
+    #[structopt(long = "id", short = "i", default_value = "0")]
     id: u64,
+
+    /// Whether this node will propose transactions
+    #[structopt(long = "propose_txn", short = "t")]
+    propose_transaction: bool,
 }
 
 /// Gets IP address and port number of a node from node configuration file.
@@ -84,23 +93,27 @@ async fn init_state_and_phaselock(
     nodes: u64,
     threshold: u64,
     node_id: u64,
-    networking: WNetwork<Message<DEntryBlock, Transaction, H_256>>,
-) -> (State, PhaseLockHandle<DEntryBlock, H_256>) {
+    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
+) -> (MultiXfrTestState, PhaseLockHandle<ElaboratedBlock, 64>) {
     // Create the initial state
-    let balances: BTreeMap<Account, Balance> = vec![
-        ("Joe", 1_000_000),
-        ("Nathan M", 500_000),
-        ("John", 400_000),
-        ("Nathan Y", 600_000),
-        ("Ian", 0),
-    ]
-    .into_iter()
-    .map(|(x, y)| (x.to_string(), y))
-    .collect();
-    let state = State {
-        balances,
-        nonces: BTreeSet::default(),
-    };
+    let state = MultiXfrTestState::initialize(
+        STATE_SEED,
+        10,
+        10,
+        (
+            MultiXfrRecordSpec {
+                asset_def_ix: 0,
+                owner_key_ix: 0,
+                asset_amount: 100,
+            },
+            vec![MultiXfrRecordSpec {
+                asset_def_ix: 0,
+                owner_key_ix: 0,
+                asset_amount: 100,
+            }],
+        ),
+    )
+    .unwrap();
 
     // Create the initial phaselock
     let known_nodes: Vec<_> = (0..nodes)
@@ -109,52 +122,38 @@ async fn init_state_and_phaselock(
 
     let config = PhaseLockConfig {
         total_nodes: nodes as u32,
-        threshold: threshold as u32,
+        thershold: threshold as u32,
         max_transactions: 100,
         known_nodes,
         next_view_timeout: 10000,
         timeout_ratio: (11, 10),
-        round_start_delay: 1,
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
-    let phaselock = PhaseLock::new(
+    let (_, phaselock) = PhaseLock::init(
         genesis,
-        &sks,
+        sks,
         node_id,
         config,
-        state,
+        state.validator.clone(),
         networking,
-    );
+    )
+    .await;
     debug!("phaselock launched");
 
     (state, phaselock)
 }
 
-async fn consense(round: u64, phaselock: PhaseLock<ElaboratedBlock, 64>) {
-    info!("Consensing");
-
-    // Issuing new views
-    debug!("Issuing new view messages");
-    phaselock.next_view(round, None).await;
-
-    // Running a round of consensus
-    debug!("Running round {}", round + 1);
-    phaselock.run_round(id + 1, None)
-    .await
-    .unwrap_or_else(|_| panic!("Round {} failed", id + 1));
-}
-
 #[async_std::main]
 async fn main() {
-    // Setup tracing listener
-    common::setup_tracing();
+    // Setup tracing
+    tracing_subscriber::fmt::init();
 
     // Read configuration file path and node id from options
     let config_path_str = NodeOpt::from_args().config;
     let path = Path::new(&config_path_str);
     let own_id = NodeOpt::from_args().id;
-    println!("  - Spawning network for node {}", own_id);
+    println!("Spawning network for node {}", own_id);
 
     // Read node info from node configuration file
     let mut config_file =
@@ -163,7 +162,6 @@ async fn main() {
     config_file
         .read_to_string(&mut config_str)
         .unwrap_or_else(|err| panic!("Error while reading node config: [{}]", err));
-
     let node_config: Value =
         toml::from_str(&config_str).expect("Error while reading node config file");
 
@@ -184,7 +182,7 @@ async fn main() {
         get_networking(&sks, own_id, get_host(node_config.clone(), own_id).1).await;
     #[allow(clippy::type_complexity)]
     let mut other_nodes: Vec<(u64, PubKey, String, u16)> = Vec::new();
-    for id in 1..(nodes + 1) {
+    for id in 0..(nodes) {
         if id != own_id {
             let (ip, port) = get_host(node_config.clone(), id);
             let pub_key = PubKey::from_secret_key_set_escape_hatch(&sks, id);
@@ -196,12 +194,10 @@ async fn main() {
     for (id, key, ip, port) in other_nodes {
         let socket = format!("{}:{}", ip, port);
         while own_network.connect_to(key.clone(), &socket).await.is_err() {
-            println!("  - Retrying");
-            debug!("Retrying");
+            debug!("  - Retrying");
             async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
         }
-        println!("  - Connected to node {}", id);
-        debug!("Connected to node {}", id);
+        debug!("  - Connected to node {}", id);
     }
 
     // Wait for the networking implementations to connect
@@ -209,38 +205,54 @@ async fn main() {
         async_std::task::sleep(std::time::Duration::from_millis(10)).await;
     }
     println!("All nodes connected to network");
-    debug!("All nodes connected to network");
 
     // Initialize the state and phaselock
-    let (mut own_state, mut phaselock) =
+    let (mut state, mut phaselock) =
         init_state_and_phaselock(&sks, nodes, threshold, own_id, own_network).await;
     phaselock.start().await;
 
-    // Build transactions
-    let mut transactions = test_state
-    .generate_transactions(
-        i as usize,
-        vec![(0, 0, 0, 0, -2)],
-        TRANSACTION_COUNT as usize,
-    )
-    .unwrap();
-
     // Start consensus
     for round in 0..TRANSACTION_COUNT {
-        let transaction = transactions.remove(0);
+        println!("Starting round {}", round);
 
-        // Propose the transaction
-        propose_transaction(i as usize, phaselock, transaction.2.clone()).await;
+        // Generate a transaction
+        let mut transactions = state
+            .generate_transactions(
+                round as usize,
+                vec![(0, 0, 0, 0, -2)],
+                TRANSACTION_COUNT as usize,
+            )
+            .unwrap();
+        let txn = transactions.remove(0);
+        if NodeOpt::from_args().propose_transaction {
+            println!("Proposing a transaction");
+            phaselock.submit_transaction(txn.clone().2).await.unwrap();
+        }
 
-        consense(round, &phaselocks).await;
+        // Start consensus
+        println!("Starting consense");
+        let mut event: Event<ElaboratedBlock, ValidatorState> = phaselock
+            .next_event()
+            .await
+            .expect("PhaseLock unexpectedly closed");
+        // TODO: fix the loop below.
+        // The while loop never ends for the last node (id: 6).
+        while !matches!(event.event, EventType::Decide { .. }) {
+            event = phaselock
+                .next_event()
+                .await
+                .expect("PhaseLock unexpectedly closed");
+        }
 
-        let (ix, (owner_memos, k1_ix, k2_ix), txn) = transaction;
+        // Add the transaction
+        let (ix, (owner_memos, k1_ix, k2_ix), t) = txn;
+        println!("Adding the transaction");
         let mut blk = ElaboratedBlock::default();
-        test_state
+        state
             .try_add_transaction(
                 &mut blk,
-                txn,
-                i as usize,
+                t,
+                round as usize,
                 ix,
                 TRANSACTION_COUNT as usize,
                 owner_memos,
@@ -248,9 +260,14 @@ async fn main() {
                 k2_ix,
             )
             .unwrap();
-        test_state
-            .validate_and_apply(blk, i as usize, TRANSACTION_COUNT as usize, 0.0)
+        state
+            .validate_and_apply(blk, round as usize, TRANSACTION_COUNT as usize, 0.0)
             .unwrap();
+
+        let mut line = String::new();
+        println!("Hit any key to start the next round...");
+        std::io::stdin().read_line(&mut line).unwrap();
     }
-    log_transaction(&phaselocks).await;
+
+    println!("All rounds completed.");
 }
