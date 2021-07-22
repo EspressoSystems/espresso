@@ -205,15 +205,15 @@ async fn main() {
     // Initialize the state and phaselock
     let (mut state, mut phaselock) =
         init_state_and_phaselock(&sks, nodes, threshold, own_id, own_network).await;
-    phaselock.start().await;
 
-    // Start consensus
+    // Start consensus for each transaction
     for round in 0..TRANSACTION_COUNT {
-        println!("Starting round {}", round);
+        println!("Starting round {}", round + 1);
 
         // Generate a transaction if the node ID is 0
         let mut txn = None;
         if own_id == 0 {
+            println!("  - Proposing a transaction");
             let mut transactions = state
                 .generate_transactions(
                     round as usize,
@@ -222,7 +222,6 @@ async fn main() {
                 )
                 .unwrap();
             txn = Some(transactions.remove(0));
-            println!("Proposing a transaction");
             phaselock
                 .submit_transaction(txn.clone().unwrap().2)
                 .await
@@ -230,18 +229,18 @@ async fn main() {
         }
 
         // Start consensus
-        println!("Starting consensus");
+        // Note: wait until the transaction is proposed before starting consensus. Otherwise,
+        // the node will never reaches decision.
+        let mut line = String::new();
+        println!("Hit any key when ready to start the consensus...");
+        std::io::stdin().read_line(&mut line).unwrap();
+        phaselock.start().await;
+        println!("  - Starting consensus");
         let mut event: Event<ElaboratedBlock, ValidatorState> = phaselock
             .next_event()
             .await
             .expect("PhaseLock unexpectedly closed");
-        // TODO: fix the while loop.
-        //      With the timeout check, the last node times out.
-        //      Without the check, the node never reaches the decision.
         while !matches!(event.event, EventType::Decide { .. }) {
-            // if matches!(event.event, EventType::ViewTimeout { .. }) {
-            //     panic!("Round timed out");
-            // }
             event = phaselock
                 .next_event()
                 .await
@@ -251,11 +250,14 @@ async fn main() {
             let commitment = TaggedBase64::new("LEDG", &state.commit())
                 .unwrap()
                 .to_string();
-            println!("Current commitment: {}", commitment);
+            println!("  - Current commitment: {}", commitment);
+        } else {
+            unreachable!();
         }
+
         // Add the transaction if the node ID is 0
         if let Some((ix, (owner_memos, k1_ix, k2_ix), t)) = txn {
-            println!("Adding the transaction");
+            println!("  - Adding the transaction");
             let mut blk = ElaboratedBlock::default();
             state
                 .try_add_transaction(
@@ -274,9 +276,7 @@ async fn main() {
                 .unwrap();
         }
 
-        let mut line = String::new();
-        println!("Hit any key to start the next round...");
-        std::io::stdin().read_line(&mut line).unwrap();
+        println!("  - Round {} completed.", round + 1);
     }
 
     println!("All rounds completed.");
