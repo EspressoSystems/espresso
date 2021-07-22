@@ -152,8 +152,8 @@ async fn main() {
     println!("Spawning network for node {}", own_id);
 
     // Read node info from node configuration file
-    let mut config_file =
-        File::open(&path).expect(&format!("Cannot find node config file: {}", path.display()));
+    let mut config_file = File::open(&path)
+        .unwrap_or_else(|_| panic!("Cannot find node config file: {}", path.display()));
     let mut config_str = String::new();
     config_file
         .read_to_string(&mut config_str)
