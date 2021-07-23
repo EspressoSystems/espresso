@@ -1,8 +1,10 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 use async_std::sync::{Arc, RwLock};
+use async_std::task;
 use futures_util::StreamExt;
 use serde_json::json;
 use std::collections::hash_map::{Entry, HashMap};
+use std::time::Duration;
 use tide::{Body, Request};
 use tide_websockets::{Message as WSMessage, WebSocket, WebSocketConnection};
 
@@ -68,6 +70,8 @@ async fn main() -> Result<(), std::io::Error> {
                 let state = req.state().clone();
                 state.add_connection(nid, wsc.clone()).await?;
                 state.send_message(nid, "REPORT", "hi, there").await?;
+                // TODO !corbett Hmm. Are there other results that are
+                // getting dropped, like someone leaving?
                 while let Some(Ok(WSMessage::Text(message))) = wsc.next().await {
                     println!("main.rs:WebSocket message: {:?}", message);
                     wsc.send_json(&json!({
@@ -76,11 +80,27 @@ async fn main() -> Result<(), std::io::Error> {
                         "msg": "A great day for initialization!"
                     }))
                     .await?;
+                    task::sleep(Duration::from_secs(2)).await;
+                    wsc.send_json(&json!({
+                        "cmd": "RECV",
+                        "client_id": id,
+                        "msg": "Transaction received"
+                    }))
+                    .await?;
+                    task::sleep(Duration::from_secs(2)).await;
+                    wsc.send_json(&json!({
+                        "cmd": "RECV",
+                        "client_id": id,
+                        "msg": "Transaction accepted"
+                    }))
+                    .await?;
                 }
                 Ok(())
             },
         ))
         .get(|_| async { Ok(Body::from_file("./public/index.html").await?) });
+    // TODO !corbett Reply with the form filled in.
+    // app.at("/transfer/:recipient/:amount")
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     let addr = format!("127.0.0.1:{}", port);
