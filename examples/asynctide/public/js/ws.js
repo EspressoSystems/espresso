@@ -26,8 +26,13 @@ async function ioSend(msg) {
         // TODO Why half a second? There must be a better condition.
         await new Promise(r => setTimeout(r, 500)); // wait half second to connect
     }
-    uilog('ioSend ' + msg);
-    socket.send(msg);
+    if (isOpen()) {
+        uilog('ioSend ' + msg);
+        socket.send(msg);
+    } else {
+        // TODO !corbett Happens when browsing to http://127.0.0.1:8080/
+        uilog('Unable to open WebSocket connection.');
+    }
 }
 
 // TODO leftover
