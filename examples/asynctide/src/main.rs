@@ -7,9 +7,7 @@ use std::collections::hash_map::{Entry, HashMap};
 use std::time::Duration;
 use tide::{Body, Error, Request, StatusCode};
 use tide_websockets::async_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-//use tide_websockets::async_tungstenite::tungstenite::protocol::CloseFrame;
-use tide_websockets::Message::Close;
-use tide_websockets::{/*Message as WSMessage, */ WebSocket, WebSocketConnection};
+use tide_websockets::{Message::Close, WebSocket, WebSocketConnection};
 use tracing::{event, Level};
 
 #[derive(Clone)]
@@ -28,6 +26,21 @@ impl State {
         Self {
             connections: Default::default(),
         }
+    }
+
+    async fn add_connection(&self, id: u64, wsc: WebSocketConnection) -> tide::Result<()> {
+        event!(Level::DEBUG, "main.rs: Adding connection {}", id);
+        let mut connections = self.connections.write().await;
+        let connection = Connection { id, wsc };
+        connections.insert(id, connection);
+        Ok(())
+    }
+
+    async fn remove_connection(&self, id: u64) -> tide::Result<()> {
+        event!(Level::DEBUG, "main.rs: Removing connection {}", id);
+        let mut connections = self.connections.write().await;
+        connections.remove(&id);
+        Ok(())
     }
 
     async fn send_message(&self, id: u64, cmd: &str, message: &str) -> tide::Result<()> {
@@ -52,20 +65,26 @@ impl State {
         Ok(())
     }
 
-    async fn add_connection(&self, id: u64, wsc: WebSocketConnection) -> tide::Result<()> {
-        event!(Level::DEBUG, "main.rs: Adding connection {}", id);
-        let mut connections = self.connections.write().await;
-        let connection = Connection { id, wsc };
-        connections.insert(id, connection);
+    /// Currently a demonstration of messages with delays to suggest processing time.
+    async fn report_transaction_status(&self, id: u64) -> tide::Result<()> {
+        task::sleep(Duration::from_secs(2)).await;
+        self.send_message(id, "FOO", "Here it is.").await?;
+        self.send_message(id, "INIT", "Something something").await?;
+        task::sleep(Duration::from_secs(2)).await;
+        self.send_message(id, "RECV", "Transaction received")
+            .await?;
+        task::sleep(Duration::from_secs(2)).await;
+        self.send_message(id, "RECV", "Transaction accepted")
+            .await?;
         Ok(())
     }
 }
 
-/*async fn get_transfer_html(_: Request<State>) -> Result<Body, tide::Error> {
+async fn landing_page(_: Request<State>) -> Result<Body, tide::Error> {
     Ok(Body::from_file("./public/index.html").await?)
 }
 
-async fn get_index_html(req: Request<State>) -> Result<String, tide::Error> {
+async fn index_page(req: Request<State>) -> Result<String, tide::Error> {
     let amount: u64 = req
         .param("amount")?
         .parse()
@@ -76,7 +95,52 @@ async fn get_index_html(req: Request<State>) -> Result<String, tide::Error> {
         amount
     ))
 }
-*/
+
+async fn handle_web_socket(req: Request<State>, mut wsc: WebSocketConnection) -> tide::Result<()> {
+    event!(Level::DEBUG, "main.rs: id: {}", &req.param("id")?);
+    let id: u64 = req
+        .param("id")
+        .expect("Route must include :id parameter.")
+        .parse()
+        .expect("id should be an ordinal number.");
+    let state = req.state().clone();
+    state.add_connection(id, wsc.clone()).await?;
+    state
+        .send_message(id, "RPT", "Server says, \"Hi!\"")
+        .await?;
+    loop {
+        let opt_message = wsc.next().await;
+        match opt_message {
+            Some(result_message) => match result_message {
+                Ok(message) => {
+                    event!(Level::DEBUG, "main.rs:WebSocket message: {:?}", message);
+                    if let Close(Some(cf)) = message {
+                        // See https://docs.rs/tungstenite/0.14.0/tungstenite/protocol/frame/coding/enum.CloseCode.html
+                        if cf.code == CloseCode::Away {
+                            event!(Level::DEBUG, "main.rs:cf Client said goodbye.");
+                            state.remove_connection(id).await?;
+                            break;
+                        } else {
+                            event!(Level::DEBUG, "main.rs:cf {:?}", &cf.code);
+                        }
+                    }
+
+                    // Demonstration
+                    state.report_transaction_status(id).await?;
+                }
+                Err(err) => {
+                    event!(Level::ERROR, "WebSocket stream: {:?}", err)
+                }
+            },
+            None => {
+                event!(Level::ERROR, "main.rs: Client left without saying goodbye.");
+                state.remove_connection(id).await?;
+                break;
+            }
+        };
+    }
+    Ok(())
+}
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
@@ -85,85 +149,12 @@ async fn main() -> Result<(), std::io::Error> {
         .init();
     let mut app = tide::with_state(State::new());
     app.at("/public").serve_dir("./public/")?;
-    app.at("/")
-        .get(|_| async { Ok(Body::from_file("./public/index.html").await?) });
+    app.at("/").get(landing_page);
     app.at("/:id")
-        .with(WebSocket::new(
-            |req: Request<State>, mut wsc: WebSocketConnection| async move {
-                let id = req.param("id")?;
-                event!(Level::DEBUG, "main.rs: id: {}", &id);
-                let nid: u64 = id.parse().expect("id should be an ordinal number.");
-                let state = req.state().clone();
-                state.add_connection(nid, wsc.clone()).await?;
-                state.send_message(nid, "REPORT", "hi, there").await?;
-                // TODO !corbett Hmm. Are there other results that are
-                // getting dropped, like someone leaving?
-
-                // while let Some(Ok(WSMessage::Text(message))) = wsc.next().await {
-                loop {
-                    let opt_message = wsc.next().await;
-                    match opt_message {
-                        Some(result_message) => match result_message {
-                            Ok(message) => {
-                                event!(Level::DEBUG, "main.rs:WebSocket message: {:?}", message);
-                                if let Close(Some(cf)) = message {
-                                    // See https://docs.rs/tungstenite/0.14.0/tungstenite/protocol/frame/coding/enum.CloseCode.html
-                                    if cf.code == CloseCode::Away {
-                                        event!(Level::DEBUG, "main.rs:cf Client went away.");
-                                        break;
-                                    } else {
-                                        event!(Level::DEBUG, "main.rs:cf {:?}", &cf.code);
-                                    }
-                                }
-
-                                // Demonstration
-                                wsc.send_json(&json!({
-                                    "cmd": "INIT",
-                                    "client_id": id,
-                                    "msg": "A great day for initialization!"
-                                }))
-                                .await?;
-                                task::sleep(Duration::from_secs(2)).await;
-                                wsc.send_json(&json!({
-                                    "cmd": "RECV",
-                                    "client_id": id,
-                                    "msg": "Transaction received"
-                                }))
-                                .await?;
-                                task::sleep(Duration::from_secs(2)).await;
-                                wsc.send_json(&json!({
-                                    "cmd": "RECV",
-                                    "client_id": id,
-                                    "msg": "Transaction accepted"
-                                }))
-                                .await?;
-                            }
-                            Err(err) => {
-                                event!(Level::ERROR, "{:?}", err)
-                            }
-                        },
-                        None => {
-                            event!(Level::ERROR, "opt_messages is None.")
-                        }
-                    };
-                }
-                Ok(())
-            },
-        ))
+        .with(WebSocket::new(handle_web_socket))
         .get(|_| async { Ok(Body::from_file("./public/index.html").await?) });
     // TODO !corbett Reply with the form filled in.
-    app.at("/transfer/:recipient/:amount")
-        .get(|req: Request<_>| async move {
-            let amount: u64 = req
-                .param("amount")?
-                .parse()
-                .map_err(|err| Error::new(StatusCode::BadRequest, err))?;
-            Ok(format!(
-                "Recipient: {}, Amount: {}",
-                req.param("recipient")?,
-                amount
-            ))
-        });
+    app.at("/transfer/:recipient/:amount").get(index_page);
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     let addr = format!("127.0.0.1:{}", port);
     app.listen(addr).await?;

@@ -20,14 +20,17 @@
     </style>
   </head>
   <body>
-    <h1>Transfer</h1>
-    <p>Payer Account: LA~fe9350s ⧉</p>
-    <p>Account Balance: 100 jellybeans</p>
+    <h1>Spectrum Transfer</h1>
     <div style="width:50%;min-width:300px">
       <div style="background-color:#f4f4f4;margin:16px;padding:16px;border:1px solid black;box-shadow:4px 4px lightgray">
         <form action="/transfer/" method="get">
           <fieldset style="background-color:#f6f6f6">
             <legend >Anonymous Jellybean Transfer</legend>
+            <div align="right">
+              <label for="saddr">Payer's address:</label>
+              <input type="text" id="saddr" name="saddr" value="LA~fe9350s"><br>
+            </div>
+            <br>
             <div align="right">
               <label for="raddr">Recipient's address:</label>
               <input type="text" id="raddr" name="raddr" value="LA~whatever"><br>
@@ -36,29 +39,24 @@
             <div align="right">
               <label for="amt">Amount:</label>
               <input type="text" id="amt" name="amt" value="2"><br><br>
+              <p>Account Balance: 100 jellybeans</p>
             </div>
             <div align="right" style="float:right">
               <input type="button"
                      name="submit"
                      onclick="redirectClean()"
                      value="Send">
-              <input type="button"
-                     name="submit"
-                     onclick="onSend()"
-                     value="Web Socket Send">
             </div><br>
           </fieldset>
         </form>
       </div>
     <h2>Status</h2>
+    <input type="button"
+           name="submit"
+           onclick="onSend()"
+           value="Web Socket Send">
     <textarea id="events" name="events" rows="10" style="width:100%;min-width:300px;margin:16px;padding:4px"></textarea>
     </div>
-    <h1>TODO</h1>
-    <ul>
-      <li>Hard code addresses</li>
-      <li>Hard code initial balances</li>
-      <li>Event stream from the ledger</li>
-    </ul>
     <script src="public/js/ws.js"></script>
   </body>
 </html>
