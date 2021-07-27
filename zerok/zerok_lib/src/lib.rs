@@ -626,7 +626,7 @@ impl MultiXfrTestState {
                     let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
 
                     let nullifier = key.nullify(&self.freezer_key.pub_key(), i as u64, &comm);
-                    if !self.nullifiers.contains(nullifier).0 {
+                    if !self.nullifiers.contains(nullifier).unwrap().0 {
                         in1 = i;
                         rec1 = Some((open_rec, kix));
                         let fee_ix = self.fee_records[kix];
@@ -641,7 +641,7 @@ impl MultiXfrTestState {
                             let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
                             let nullifier =
                                 key.nullify(&self.freezer_key.pub_key(), fee_ix as u64, &comm);
-                            assert!(!self.nullifiers.contains(nullifier).0);
+                            assert!(!self.nullifiers.contains(nullifier).unwrap().0);
                             open_rec
                         }));
                         break;
@@ -683,7 +683,7 @@ impl MultiXfrTestState {
                     }
 
                     let nullifier = key.nullify(&self.freezer_key.pub_key(), i as u64, &comm);
-                    if !self.nullifiers.contains(nullifier).0 {
+                    if !self.nullifiers.contains(nullifier).unwrap().0 {
                         in2 = i;
                         rec2 = Some((open_rec, kix));
                         break;
@@ -853,7 +853,7 @@ impl MultiXfrTestState {
                 let nullifier_pfs = txn
                     .inputs_nullifiers
                     .iter()
-                    .map(|n| self.nullifiers.contains(*n).1)
+                    .map(|n| self.nullifiers.contains(*n).unwrap().1)
                     .collect();
 
                 println!(
@@ -929,7 +929,7 @@ impl MultiXfrTestState {
         let new_state = blk.append_to(&self.validator).unwrap();
 
         for n in blk.block.0.iter().flat_map(|x| x.nullifiers().into_iter()) {
-            assert!(!self.nullifiers.contains(n).0);
+            assert!(!self.nullifiers.contains(n).unwrap().0);
             self.nullifiers.insert(n);
         }
         self.validator = new_state;
@@ -1248,7 +1248,7 @@ mod tests {
         let nullifier_pfs = txn1
             .inputs_nullifiers
             .iter()
-            .map(|n| nullifiers.contains(*n).1)
+            .map(|n| nullifiers.contains(*n).unwrap().1)
             .collect();
         for n in txn1.inputs_nullifiers.iter() {
             nullifiers.insert(*n);
