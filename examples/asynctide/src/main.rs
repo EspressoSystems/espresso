@@ -5,20 +5,20 @@ use futures_util::StreamExt;
 use serde_json::json;
 use std::collections::hash_map::{Entry, HashMap};
 use std::time::Duration;
-use tide::{Body, Error, Request, StatusCode};
+use tide::{Body, Request};
 use tide_websockets::async_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tide_websockets::{Message::Close, WebSocket, WebSocketConnection};
 use tracing::{event, Level};
 
 #[derive(Clone)]
 struct Connection {
-    id: u64,
+    id: String,
     wsc: WebSocketConnection,
 }
 
 #[derive(Clone)]
 struct State {
-    connections: Arc<RwLock<HashMap<u64, Connection>>>,
+    connections: Arc<RwLock<HashMap<String, Connection>>>,
 }
 
 impl State {
@@ -28,24 +28,27 @@ impl State {
         }
     }
 
-    async fn add_connection(&self, id: u64, wsc: WebSocketConnection) -> tide::Result<()> {
-        event!(Level::DEBUG, "main.rs: Adding connection {}", id);
+    async fn add_connection(&self, id: &str, wsc: WebSocketConnection) -> tide::Result<()> {
+        event!(Level::DEBUG, "main.rs: Adding connection {}", &id);
         let mut connections = self.connections.write().await;
-        let connection = Connection { id, wsc };
-        connections.insert(id, connection);
+        let connection = Connection {
+            id: id.to_string(),
+            wsc,
+        };
+        connections.insert(id.to_string(), connection);
         Ok(())
     }
 
-    async fn remove_connection(&self, id: u64) -> tide::Result<()> {
+    async fn remove_connection(&self, id: &str) -> tide::Result<()> {
         event!(Level::DEBUG, "main.rs: Removing connection {}", id);
         let mut connections = self.connections.write().await;
-        connections.remove(&id);
+        connections.remove(id);
         Ok(())
     }
 
-    async fn send_message(&self, id: u64, cmd: &str, message: &str) -> tide::Result<()> {
+    async fn send_message(&self, id: &str, cmd: &str, message: &str) -> tide::Result<()> {
         let mut connections = self.connections.write().await;
-        match connections.entry(id) {
+        match connections.entry(id.to_string()) {
             Entry::Vacant(_) => {
                 event!(
                     Level::DEBUG,
@@ -58,7 +61,7 @@ impl State {
                 id_connections
                     .get_mut()
                     .wsc
-                    .send_json(&json!({"client_id": id, "cmd": cmd, "msg": message }))
+                    .send_json(&json!({"clientId": id, "cmd": cmd, "msg": message }))
                     .await?
             }
         }
@@ -66,7 +69,7 @@ impl State {
     }
 
     /// Currently a demonstration of messages with delays to suggest processing time.
-    async fn report_transaction_status(&self, id: u64) -> tide::Result<()> {
+    async fn report_transaction_status(&self, id: &str) -> tide::Result<()> {
         task::sleep(Duration::from_secs(2)).await;
         self.send_message(id, "FOO", "Here it is.").await?;
         self.send_message(id, "INIT", "Something something").await?;
@@ -84,25 +87,9 @@ async fn landing_page(_: Request<State>) -> Result<Body, tide::Error> {
     Ok(Body::from_file("./public/index.html").await?)
 }
 
-async fn index_page(req: Request<State>) -> Result<String, tide::Error> {
-    let amount: u64 = req
-        .param("amount")?
-        .parse()
-        .map_err(|err| Error::new(StatusCode::BadRequest, err))?;
-    Ok(format!(
-        "Recipient: {}, Amount: {}",
-        req.param("recipient")?,
-        amount
-    ))
-}
-
 async fn handle_web_socket(req: Request<State>, mut wsc: WebSocketConnection) -> tide::Result<()> {
     event!(Level::DEBUG, "main.rs: id: {}", &req.param("id")?);
-    let id: u64 = req
-        .param("id")
-        .expect("Route must include :id parameter.")
-        .parse()
-        .expect("id should be an ordinal number.");
+    let id = req.param("id").expect("Route must include :id parameter.");
     let state = req.state().clone();
     state.add_connection(id, wsc.clone()).await?;
     state
@@ -152,9 +139,12 @@ async fn main() -> Result<(), std::io::Error> {
     app.at("/").get(landing_page);
     app.at("/:id")
         .with(WebSocket::new(handle_web_socket))
-        .get(|_| async { Ok(Body::from_file("./public/index.html").await?) });
+        .get(landing_page);
     // TODO !corbett Reply with the form filled in.
-    app.at("/transfer/:recipient/:amount").get(index_page);
+    app.at("/transfer/:id/:recipient/:amount")
+        .with(WebSocket::new(handle_web_socket))
+        // .get(index_page);
+        .get(landing_page);
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     let addr = format!("127.0.0.1:{}", port);
     app.listen(addr).await?;
