@@ -584,6 +584,7 @@ impl MultiXfrTestState {
     ///     and tries to have the difference in value between the records be `diff`.
     ///
     /// Note: `round` and `num_txs` are for `println!`s only.
+    // Issue: https://gitlab.com/translucence/systems/system/-/issues/16.
     #[allow(clippy::type_complexity)]
     pub fn generate_transactions(
         &mut self,
@@ -894,6 +895,7 @@ impl MultiXfrTestState {
     /// Tries to add a transaction to a block.
     ///
     /// Note: `round` and `num_txs` are for `println!`s only.
+    // Issue: https://gitlab.com/translucence/systems/system/-/issues/16.
     #[allow(clippy::too_many_arguments)]
     pub fn try_add_transaction(
         &mut self,
@@ -926,6 +928,7 @@ impl MultiXfrTestState {
     /// Validates and applys a block.
     ///
     /// Note: `round` and `num_txs` are for `println!`s only.
+    // Issue: https://gitlab.com/translucence/systems/system/-/issues/16.
     pub fn validate_and_apply(
         &mut self,
         blk: ElaboratedBlock,
