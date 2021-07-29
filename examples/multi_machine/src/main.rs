@@ -102,15 +102,18 @@ async fn init_state_and_phaselock(
                 owner_key_ix: 0,
                 asset_amount: 100,
             },
-            vec![MultiXfrRecordSpec {
-                asset_def_ix: 1,
-                owner_key_ix: 0,
-                asset_amount: 50,
-            },MultiXfrRecordSpec {
-                asset_def_ix: 0,
-                owner_key_ix: 0,
-                asset_amount: 70,
-            }],
+            vec![
+                MultiXfrRecordSpec {
+                    asset_def_ix: 1,
+                    owner_key_ix: 0,
+                    asset_amount: 50,
+                },
+                MultiXfrRecordSpec {
+                    asset_def_ix: 0,
+                    owner_key_ix: 0,
+                    asset_amount: 70,
+                },
+            ],
         ),
     )
     .unwrap();
