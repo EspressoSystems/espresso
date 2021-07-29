@@ -40,7 +40,7 @@ struct NodeOpt {
 
     /// Id of the current node.
     /// If the node ID is 0, it will propose and try to add transactions.
-    #[structopt(long = "id", short = "i", default_value = "0")]
+    #[structopt(long = "id", short = "i")]
     id: u64,
 }
 
@@ -100,12 +100,16 @@ async fn init_state_and_phaselock(
             MultiXfrRecordSpec {
                 asset_def_ix: 0,
                 owner_key_ix: 0,
-                asset_amount: 0,
+                asset_amount: 100,
             },
             vec![MultiXfrRecordSpec {
+                asset_def_ix: 1,
+                owner_key_ix: 0,
+                asset_amount: 50,
+            },MultiXfrRecordSpec {
                 asset_def_ix: 0,
                 owner_key_ix: 0,
-                asset_amount: 0,
+                asset_amount: 70,
             }],
         ),
     )
@@ -231,6 +235,7 @@ async fn main() {
         // Start consensus
         // Note: wait until the transaction is proposed before starting consensus. Otherwise,
         // the node will never reaches decision.
+        // Issue: https://gitlab.com/translucence/systems/system/-/issues/15.
         let mut line = String::new();
         println!("Hit any key when ready to start the consensus...");
         std::io::stdin().read_line(&mut line).unwrap();
