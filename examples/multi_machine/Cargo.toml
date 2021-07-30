@@ -1,0 +1,20 @@
+[package]
+name = "multi_machine"
+version = "0.1.0"
+authors = ["Keyao Shen <keyao@translucence.net>"]
+edition = "2018"
+license = "Copyright © 2021 Translucence Research, Inc. All rights reserved."
+
+[dependencies]
+async-std = { version = "1.9.0", features = ["unstable", "attributes"] }
+futures = "0.3.0"
+phaselock = { version = "0.0.0", registry = "translucence" }
+rand_xoshiro = "0.4.0"
+serde = { version = "1.0.123", features = ["derive", "rc"] }
+structopt = "0.3"
+tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
+threshold_crypto = "0.4.0"
+toml = "0.4.2"
+tracing = "0.1.26"
+tracing-subscriber = "0.2"
+zerok_lib = { path = "../../zerok/zerok_lib/" }
