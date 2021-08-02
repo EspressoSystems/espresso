@@ -444,6 +444,10 @@ impl MultiXfrTestState {
         *now = Instant::now();
     }
 
+    /// Creates test state with initial records.
+    ///
+    /// Notes: `initial_records` must have at least one record, which is the first element of the tuple, `MultiXfrRecordSpec`.
+    /// The second element, `Vec<MultiXfrRecordSpec>`, may store additional elements or be `None`.
     pub fn initialize(
         seed: [u8; 32],
         num_keys: u8,
@@ -573,10 +577,18 @@ impl MultiXfrTestState {
         })
     }
 
+    /// Generates transactions with the specified block information.
+    ///
+    /// For each transaction `(rec1, rec2, key1, key2, diff)` in `block`,
+    ///     takes the the records `rec1` and `rec2`, transfers them to `key1` and `key2`,
+    ///     and tries to have the difference in value between the records be `diff`.
+    ///
+    /// Note: `round` and `num_txs` are for `println!`s only.
+    // Issue: https://gitlab.com/translucence/systems/system/-/issues/16.
     #[allow(clippy::type_complexity)]
     pub fn generate_transactions(
         &mut self,
-        i: usize,
+        round: usize,
         block: Vec<(u16, u16, u8, u8, i32)>,
         num_txs: usize,
     ) -> Result<
@@ -598,7 +610,7 @@ impl MultiXfrTestState {
             .map(|((ix, (in1, in2, k1, k2, amt_diff)), mut prng)| {
                 let now = Instant::now();
 
-                println!("Txn {}.{}/{}", i + 1, ix, num_txs);
+                println!("Txn {}.{}/{}", round + 1, ix, num_txs);
 
                 let mut fee_rec = None;
                 let mut rec1 = None;
@@ -693,7 +705,7 @@ impl MultiXfrTestState {
                 if rec1.is_none() || rec2.is_none() {
                     println!(
                         "Txn {}.{}/{}: No records found, {}s",
-                        i + 1,
+                        round + 1,
                         ix,
                         num_txs,
                         now.elapsed().as_secs_f32()
@@ -764,7 +776,7 @@ impl MultiXfrTestState {
 
                 println!(
                     "Txn {}.{}/{} inputs chosen: {}",
-                    i + 1,
+                    round + 1,
                     ix,
                     num_txs,
                     now.elapsed().as_secs_f32()
@@ -820,7 +832,7 @@ impl MultiXfrTestState {
 
                 println!(
                     "Txn {}.{}/{} inputs generated: {}",
-                    i + 1,
+                    round + 1,
                     ix,
                     num_txs,
                     now.elapsed().as_secs_f32()
@@ -843,7 +855,7 @@ impl MultiXfrTestState {
                 //     &owner_memos_sig)?;
                 println!(
                     "Txn {}.{}/{} note generated: {}",
-                    i + 1,
+                    round + 1,
                     ix,
                     num_txs,
                     now.elapsed().as_secs_f32()
@@ -858,7 +870,7 @@ impl MultiXfrTestState {
 
                 println!(
                     "Txn {}.{}/{} nullifier proofs generated: {}s",
-                    i + 1,
+                    round + 1,
                     ix,
                     num_txs,
                     now.elapsed().as_secs_f32()
@@ -880,22 +892,26 @@ impl MultiXfrTestState {
         Ok(txns)
     }
 
+    /// Tries to add a transaction to a block.
+    ///
+    /// Note: `round` and `num_txs` are for `println!`s only.
+    // Issue: https://gitlab.com/translucence/systems/system/-/issues/16.
     #[allow(clippy::too_many_arguments)]
     pub fn try_add_transaction(
         &mut self,
         blk: &mut ElaboratedBlock,
         txn: ElaboratedTransaction,
-        i: usize,
+        round: usize,
         ix: usize,
         num_txs: usize,
         owner_memos: Vec<ReceiverMemo>,
         k1_ix: usize,
         k2_ix: usize,
     ) -> Result<(), ValidationError> {
-        println!("Block {}/{} trying to add {}", i + 1, num_txs, ix);
+        println!("Block {}/{} trying to add {}", round + 1, num_txs, ix);
 
         let newblk = blk.add_transaction(&self.validator, &txn)?;
-        println!("Block {}/{} adding {}", i + 1, num_txs, ix);
+        println!("Block {}/{} adding {}", round + 1, num_txs, ix);
         self.memos.extend(owner_memos);
         self.fee_records[k1_ix] = self.record_merkle_tree.num_leaves();
         self.owners.push(k1_ix);
@@ -909,10 +925,14 @@ impl MultiXfrTestState {
         Ok(())
     }
 
+    /// Validates and applys a block.
+    ///
+    /// Note: `round` and `num_txs` are for `println!`s only.
+    // Issue: https://gitlab.com/translucence/systems/system/-/issues/16.
     pub fn validate_and_apply(
         &mut self,
         blk: ElaboratedBlock,
-        i: usize,
+        round: usize,
         num_txs: usize,
         generation_time: f32,
     ) -> Result<(), ValidationError> {
@@ -942,7 +962,7 @@ impl MultiXfrTestState {
         Self::update_timer(&mut self.outer_timer, |t| {
             println!(
                 "Block {}/{}: {} transactions, {}s ({}s generation, {}s checking)",
-                i + 1,
+                round + 1,
                 num_txs,
                 blk.block.0.len(),
                 t,

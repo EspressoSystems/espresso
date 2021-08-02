@@ -200,7 +200,7 @@ async fn propose_transaction(
         .unwrap();
 }
 
-async fn consense(id: usize, phaselocks: &[MultiXfrValidator]) {
+async fn consense(round: usize, phaselocks: &[MultiXfrValidator]) {
     info!("Consensing");
 
     // Issuing new views
@@ -208,21 +208,21 @@ async fn consense(id: usize, phaselocks: &[MultiXfrValidator]) {
     join_all(
         phaselocks
             .iter()
-            .map(|(h, _, _, _)| h.next_view(id as u64, None)),
+            .map(|(h, _, _, _)| h.next_view(round as u64, None)),
     )
     .await;
 
     // Running a round of consensus
-    debug!("Running round {}", id + 1);
+    debug!("Running round {}", round + 1);
     join_all(
         phaselocks
             .iter()
-            .map(|(h, _, _, _)| h.run_round(id as u64 + 1, None)),
+            .map(|(h, _, _, _)| h.run_round(round as u64 + 1, None)),
     )
     .await
     .into_iter()
     .collect::<Result<Vec<_>, _>>()
-    .unwrap_or_else(|_| panic!("Round {} failed", id + 1));
+    .unwrap_or_else(|_| panic!("Round {} failed", round + 1));
 }
 
 async fn log_transaction(phaselocks: &[MultiXfrValidator]) {
