@@ -2801,7 +2801,8 @@ dependencies = [
 [[package]]
 name = "rocket"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#786db9b832b7edd91f143b24835677c69121a9bb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a71c18c42a0eb15bf3816831caf0dad11e7966f2a41aaf486a701979c4dd1f2"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2838,7 +2839,8 @@ dependencies = [
 [[package]]
 name = "rocket_codegen"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#786db9b832b7edd91f143b24835677c69121a9bb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66f5fa462f7eb958bba8710c17c5d774bbbd59809fa76fb1957af7e545aea8bb"
 dependencies = [
  "devise",
  "glob",
@@ -2853,7 +2855,8 @@ dependencies = [
 [[package]]
 name = "rocket_http"
 version = "0.5.0-rc.1"
-source = "git+https://github.com/SergioBenitez/Rocket.git#786db9b832b7edd91f143b24835677c69121a9bb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23c8b7d512d2fcac2316ebe590cde67573844b99e6cc9ee0f53375fa16e25ebd"
 dependencies = [
  "cookie 0.15.1",
  "either",
