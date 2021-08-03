@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "examples/asynctide",
     "zerok/zerok_lib",
     "zerok/zerok_client",
     "zerok/zerok_validator",
