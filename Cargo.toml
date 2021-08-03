@@ -1,10 +1,12 @@
 [workspace]
 members = [
+    "examples/asynctide",
     "zerok/zerok_lib",
     "zerok/zerok_client",
     "zerok/zerok_validator",
     "zerok/demo1",
-    "examples/consensing",
+    "examples/demo_1",
+    "examples/multi_machine",
     "examples/tideui",
     ]
 [profile.dev]

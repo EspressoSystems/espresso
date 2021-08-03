@@ -35,7 +35,7 @@
       }
 
       var protocol = window.location.protocol === 'http:' ? 'ws://' : 'wss://';
-      var host = '127.0.0.1:3012';
+      var host = '127.0.0.1:8080';
       var address = protocol + host;
       var socket = new WebSocket(address);
       console.log('looking for server at ' + address);
@@ -50,6 +50,7 @@
           })();
       }
       function onSend(){
+          uilog('Web Socket Send button pressed');
 	  socket.send('Web Socket Send button pressed');
       }
 
