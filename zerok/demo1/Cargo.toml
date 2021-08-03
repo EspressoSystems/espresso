@@ -10,7 +10,6 @@ license = "Copyright © 2021 Translucence Research, Inc. All rights reserved."
 [dependencies]
 bitvec = "0.21.1"
 log = "0.4"
-rand = ""
 rand_chacha = "0.2.2"
 rocket = { git = "https://github.com/SergioBenitez/Rocket.git" }
 serde = { version = "1.0.123", features = ["derive", "rc"] }
