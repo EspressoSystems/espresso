@@ -11,3 +11,5 @@ members = [
     ]
 [profile.dev]
 opt-level = 1
+# [profile.release]
+# lto = "thin"
