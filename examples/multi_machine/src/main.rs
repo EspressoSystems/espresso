@@ -240,7 +240,7 @@ async fn main() {
         // the node will never reaches decision.
         // Issue: https://gitlab.com/translucence/systems/system/-/issues/15.
         let mut line = String::new();
-        println!("Hit any key when ready to start the consensus...");
+        println!("Hit the enter key when ready to start the consensus...");
         std::io::stdin().read_line(&mut line).unwrap();
         phaselock.start().await;
         println!("  - Starting consensus");
