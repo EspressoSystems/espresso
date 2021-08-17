@@ -470,6 +470,7 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
     .unwrap_or_else(|err| panic!("Error while setting up the universal parameter: {}", err));
     let param_bytes = bincode::serialize(&universal_param)
         .unwrap_or_else(|err| panic!("Error while serializing the universal parameter: {}", err));
+    // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
     let mut file = File::create(format!("../../zerok/zerok_lib/src/universal_param"))
         .unwrap_or_else(|err| panic!("Error while creating a universal parameter file: {}", err));
     file.write(&param_bytes).unwrap_or_else(|err| {
@@ -483,6 +484,7 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
 /// Reads universal parameter from file if it exists. If not, generates the universal parameter, stores
 /// it to file, and returns it.
 pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalParam {
+    // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
     let path_str = format!("../../zerok/zerok_lib/src/universal_param");
     let path = Path::new(&path_str);
     let mut file = match File::open(&path) {
