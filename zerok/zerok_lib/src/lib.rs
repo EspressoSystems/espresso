@@ -8,7 +8,7 @@ use core::iter::once;
 use jf_primitives::merkle_tree;
 use jf_txn::{
     errors::TxnApiError,
-    keys::{FreezerKeyPair, UserKeyPair},
+    keys::UserKeyPair,
     mint::MintNote,
     proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
     structs::{
@@ -281,7 +281,7 @@ pub mod state_comm {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: state_comm::LedgerStateCommitment,
@@ -413,7 +413,6 @@ pub struct MultiXfrTestState {
     pub native_token: AssetDefinition,
 
     pub keys: Vec<UserKeyPair>,
-    pub freezer_key: FreezerKeyPair,
 
     pub asset_seeds: Vec<(AssetCodeSeed, Vec<u8>)>,
     pub asset_defs: Vec<AssetDefinition>,
@@ -486,8 +485,6 @@ impl MultiXfrTestState {
             .map(|_| UserKeyPair::generate(&mut prng))
             .collect();
 
-        let freezer_key = FreezerKeyPair::generate(&mut prng);
-
         let asset_seeds: Vec<(AssetCodeSeed, Vec<u8>)> = (0..=(num_asset_defs as usize))
             .map(|i| {
                 (
@@ -556,7 +553,6 @@ impl MultiXfrTestState {
                 freeze: freeze_prove_key,
             },
             verif_key: verif_key.clone(),
-            freezer_key,
             native_token,
             keys,
             fee_records,
@@ -633,7 +629,11 @@ impl MultiXfrTestState {
                     .0;
                 let memo = ret.memos[fee_ix as usize].clone();
                 let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
-                let nullifier = key.nullify(&ret.freezer_key.pub_key(), fee_ix as u64, &comm);
+                let nullifier = key.nullify(
+                    open_rec.asset_def.policy_ref().freezer_pub_key(),
+                    fee_ix as u64,
+                    &comm,
+                );
                 assert!(!ret.nullifiers.contains(nullifier).unwrap().0);
                 open_rec
             };
@@ -752,7 +752,11 @@ impl MultiXfrTestState {
 
                     let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
 
-                    let nullifier = key.nullify(&self.freezer_key.pub_key(), i as u64, &comm);
+                    let nullifier = key.nullify(
+                        open_rec.asset_def.policy_ref().freezer_pub_key(),
+                        i as u64,
+                        &comm,
+                    );
                     if !self.nullifiers.contains(nullifier).unwrap().0 {
                         in1 = i;
                         rec1 = Some((open_rec, kix));
@@ -766,8 +770,11 @@ impl MultiXfrTestState {
                                 .0;
                             let memo = self.memos[fee_ix as usize].clone();
                             let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
-                            let nullifier =
-                                key.nullify(&self.freezer_key.pub_key(), fee_ix as u64, &comm);
+                            let nullifier = key.nullify(
+                                open_rec.asset_def.policy_ref().freezer_pub_key(),
+                                fee_ix as u64,
+                                &comm,
+                            );
                             assert!(!self.nullifiers.contains(nullifier).unwrap().0);
                             open_rec
                         }));
@@ -809,7 +816,11 @@ impl MultiXfrTestState {
                         }
                     }
 
-                    let nullifier = key.nullify(&self.freezer_key.pub_key(), i as u64, &comm);
+                    let nullifier = key.nullify(
+                        open_rec.asset_def.policy_ref().freezer_pub_key(),
+                        i as u64,
+                        &comm,
+                    );
                     if !self.nullifiers.contains(nullifier).unwrap().0 {
                         in2 = i;
                         rec2 = Some((open_rec, kix));
@@ -1256,6 +1267,14 @@ mod tests {
         let (freeze_prove_key, freeze_verif_key, _) =
             jf_txn::proof::freeze::preprocess(&univ_setup, 2, MERKLE_HEIGHT).unwrap();
 
+        for k in vec![
+            CanonicalBytes::from(xfr_verif_key.clone()),
+            CanonicalBytes::from(mint_verif_key.clone()),
+            CanonicalBytes::from(freeze_verif_key.clone()),
+        ] {
+            println!("{}", k.0.len());
+        }
+
         let prove_key = ProverKey {
             mint: mint_prove_key,
             xfr: xfr_prove_key,
@@ -1525,6 +1544,11 @@ mod tests {
     #[test]
     fn quickcheck_multixfr_regression3() {
         test_multixfr(vec![], 0, 0, (0, 0, 0), vec![(0, 3, 0)])
+    }
+
+    #[test]
+    fn quickcheck_multixfr_regression4() {
+        test_multixfr(vec![vec![(3, 0, 0, 0, 0)]], 0, 0, (0, 0, 0), vec![])
     }
 
     #[test]
