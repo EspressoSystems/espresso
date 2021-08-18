@@ -580,110 +580,145 @@ impl MultiXfrTestState {
 
         let mut keys_in_block = HashSet::<usize>::new();
 
-        for (def_ix, key, amt) in std::iter::once(initial_records.0)
+        let mut to_add = std::iter::once(initial_records.0)
             .chain((initial_records.1).into_iter())
             .flat_map(|x| vec![x, x].into_iter())
             .map(|spec| (spec.asset_def_ix, spec.owner_key_ix, spec.asset_amount))
-        {
-            let amt = if amt < 2 { 2 } else { amt };
-            let def_ix = def_ix as usize % ret.asset_defs.len();
-            // We can't mint native tokens
-            let def_ix = if def_ix < 1 { 1 } else { def_ix };
-            let def = ret.asset_defs[def_ix].clone();
-            let kix = key as usize % ret.keys.len();
+            .collect::<Vec<_>>();
 
-            if keys_in_block.contains(&kix) {
-                keys_in_block.clear();
-                ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
+        while !to_add.is_empty() {
+            let mut this_block = vec![];
+            for (def_ix, key, amt) in core::mem::replace(&mut to_add, vec![]).into_iter() {
+                let amt = if amt < 2 { 2 } else { amt };
+                let def_ix = def_ix as usize % ret.asset_defs.len();
+                // We can't mint native tokens
+                let def_ix = if def_ix < 1 { 1 } else { def_ix };
+                let kix = key as usize % ret.keys.len();
+
+                if keys_in_block.contains(&kix) {
+                    to_add.push((def_ix as u8, key, amt));
+                    continue;
+                } else {
+                    keys_in_block.insert(kix);
+                    this_block.push((def_ix as u8, key, amt));
+                }
+            }
+
+            let this_block = this_block
+                .into_iter()
+                .map(|x| ChaChaRng::from_rng(&mut ret.prng).map(|y| (x, y)))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let txns = this_block
+                .into_par_iter()
+                .map(|((def_ix, key, amt), mut prng)| {
+                    let amt = if amt < 2 { 2 } else { amt };
+                    let def_ix = def_ix as usize % ret.asset_defs.len();
+                    // We can't mint native tokens
+                    let def_ix = if def_ix < 1 { 1 } else { def_ix };
+                    let def = ret.asset_defs[def_ix].clone();
+                    let kix = key as usize % ret.keys.len();
+
+                    let key = &ret.keys[kix];
+
+                    let rec = RecordOpening::new(
+                        &mut prng,
+                        amt,
+                        def,
+                        key.pub_key(),
+                        FreezeFlag::Unfrozen,
+                    );
+
+                    /*
+                                *
+                                * pub fn generate<R>(
+                        rng: &mut R,
+                        mint_ro: RecordOpening,
+                        ac_seed: AssetCodeSeed,
+                        ac_description: &[u8],
+                        fee_input: FeeInput<'_>,
+                        fee: u64,
+                        proving_key: &MintProvingKey<'_>
+                    ) -> Result<(Self, [ReceiverMemo; 2], Signature, RecordOpening), TxnApiError>
+                                */
+
+                    let fee_ix = ret.fee_records[kix];
+                    let fee_rec = {
+                        let comm = ret
+                            .record_merkle_tree
+                            .get_leaf(fee_ix as u64)
+                            .expect_ok()
+                            .unwrap()
+                            .0;
+                        let memo = ret.memos[fee_ix as usize].clone();
+                        let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
+                        let nullifier = key.nullify(
+                            open_rec.asset_def.policy_ref().freezer_pub_key(),
+                            fee_ix as u64,
+                            &comm,
+                        );
+                        assert!(!ret.nullifiers.contains(nullifier).unwrap().0);
+                        open_rec
+                    };
+
+                    assert_eq!(
+                        ret.record_merkle_tree.get_root_value(),
+                        ret.validator.record_merkle_frontier.get_root_value()
+                    );
+                    let fee_input = FeeInput {
+                        ro: fee_rec,
+                        owner_keypair: key,
+                        acc_member_witness: AccMemberWitness {
+                            merkle_path: ret
+                                .record_merkle_tree
+                                .get_leaf(fee_ix)
+                                .expect_ok()
+                                .unwrap()
+                                .1,
+                            root: ret.validator.record_merkle_frontier.get_root_value(),
+                            uid: fee_ix,
+                        },
+                    };
+
+                    let (note, memos, _memos_sig, _change_ro) = MintNote::generate(
+                        &mut prng,
+                        rec,
+                        ret.asset_seeds[def_ix - 1].0,
+                        &ret.asset_seeds[def_ix - 1].1,
+                        fee_input,
+                        1,
+                        &ret.prove_key.mint,
+                    )
                     .unwrap();
 
-                setup_block = ElaboratedBlock::next_block(&ret.validator);
+                    (kix, note, memos)
+                })
+                .collect::<Vec<_>>();
+
+            for (kix, note, memos) in txns {
+                let nul = ret.nullifiers.contains(note.input_nullifier).unwrap().1;
+
+                let ix = setup_block.block.0.len();
+                ret.try_add_transaction(
+                    &mut setup_block,
+                    ElaboratedTransaction {
+                        txn: TransactionNote::Mint(Box::new(note)),
+                        proofs: vec![nul],
+                    },
+                    0,
+                    ix,
+                    0,
+                    memos.to_vec(),
+                    vec![kix, kix],
+                )
+                .unwrap();
             }
-            keys_in_block.insert(kix);
 
-            let key = &ret.keys[kix];
+            keys_in_block.clear();
+            ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
+                .unwrap();
 
-            let rec =
-                RecordOpening::new(&mut ret.prng, amt, def, key.pub_key(), FreezeFlag::Unfrozen);
-
-            /*
-                         *
-                         * pub fn generate<R>(
-                rng: &mut R,
-                mint_ro: RecordOpening,
-                ac_seed: AssetCodeSeed,
-                ac_description: &[u8],
-                fee_input: FeeInput<'_>,
-                fee: u64,
-                proving_key: &MintProvingKey<'_>
-            ) -> Result<(Self, [ReceiverMemo; 2], Signature, RecordOpening), TxnApiError>
-                         */
-
-            let fee_ix = ret.fee_records[kix];
-            let fee_rec = {
-                let comm = ret
-                    .record_merkle_tree
-                    .get_leaf(fee_ix as u64)
-                    .expect_ok()
-                    .unwrap()
-                    .0;
-                let memo = ret.memos[fee_ix as usize].clone();
-                let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
-                let nullifier = key.nullify(
-                    open_rec.asset_def.policy_ref().freezer_pub_key(),
-                    fee_ix as u64,
-                    &comm,
-                );
-                assert!(!ret.nullifiers.contains(nullifier).unwrap().0);
-                open_rec
-            };
-
-            assert_eq!(
-                ret.record_merkle_tree.get_root_value(),
-                ret.validator.record_merkle_frontier.get_root_value()
-            );
-            let fee_input = FeeInput {
-                ro: fee_rec,
-                owner_keypair: key,
-                acc_member_witness: AccMemberWitness {
-                    merkle_path: ret
-                        .record_merkle_tree
-                        .get_leaf(fee_ix)
-                        .expect_ok()
-                        .unwrap()
-                        .1,
-                    root: ret.validator.record_merkle_frontier.get_root_value(),
-                    uid: fee_ix,
-                },
-            };
-
-            let (note, memos, _memos_sig, _change_ro) = MintNote::generate(
-                &mut ret.prng,
-                rec,
-                ret.asset_seeds[def_ix - 1].0,
-                &ret.asset_seeds[def_ix - 1].1,
-                fee_input,
-                1,
-                &ret.prove_key.mint,
-            )
-            .unwrap();
-
-            let nul = ret.nullifiers.contains(note.input_nullifier).unwrap().1;
-
-            let ix = setup_block.block.0.len();
-            ret.try_add_transaction(
-                &mut setup_block,
-                ElaboratedTransaction {
-                    txn: TransactionNote::Mint(Box::new(note)),
-                    proofs: vec![nul],
-                },
-                0,
-                ix,
-                0,
-                memos.to_vec(),
-                vec![kix, kix],
-            )
-            .unwrap();
+            setup_block = ElaboratedBlock::next_block(&ret.validator);
         }
 
         ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
