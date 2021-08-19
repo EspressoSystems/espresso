@@ -1,7 +1,8 @@
 #![deny(warnings)]
 
 #[cfg(test)]
-#[macro_use] extern crate proptest;
+#[macro_use]
+extern crate proptest;
 
 mod set_merkle_tree;
 mod util;
@@ -1216,7 +1217,6 @@ const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN
 const RECORD_HOLD_TIME: u64 = 1;
 
 impl<'a> UserWallet<'a> {
-
     pub fn transfer_native(
         &mut self,
         receivers: &[(UserPubKey, u64)],
@@ -1379,7 +1379,7 @@ impl<'a> UserWallet<'a> {
                     FreezeFlag::Unfrozen,
                 ));
                 outputs.len() < self.max_outputs - 1
-            } {};
+            } {}
         }
 
         let (fee_ro, fee_uid) = self.find_record_for_fee(fee)?;
@@ -1502,8 +1502,10 @@ impl<'a> UserWallet<'a> {
             .map(|n| {
                 // hold the record corresponding to this nullifier until the transaction is
                 // committed, rejected, or expired.
-                self.owned_records.get_mut(&self.nullifier_records[n]).unwrap().hold_until =
-                    Some(now + RECORD_HOLD_TIME);
+                self.owned_records
+                    .get_mut(&self.nullifier_records[n])
+                    .unwrap()
+                    .hold_until = Some(now + RECORD_HOLD_TIME);
                 self.nullifiers.contains(*n).unwrap().1
             })
             .collect();
@@ -1528,20 +1530,20 @@ impl<'a> UserWallet<'a> {
             .entry(ro.asset_def.code)
             .or_insert_with(BTreeSet::new)
             .insert((ro.amount, uid));
-        self.nullifier_records
-            .insert(self.nullify(&ro, uid), uid);
-        self.owned_records.insert(uid, OwnedRecord {
-            ro,
+        self.nullifier_records.insert(self.nullify(&ro, uid), uid);
+        self.owned_records.insert(
             uid,
-            hold_until: None,
-        });
+            OwnedRecord {
+                ro,
+                uid,
+                hold_until: None,
+            },
+        );
     }
 
     fn mark_spent_if_owned(&mut self, nullifier: Nullifier) {
         if let Some(uid) = self.nullifier_records.remove(&nullifier) {
-            let record = self.owned_records
-                .remove(&uid)
-                .unwrap();
+            let record = self.owned_records.remove(&uid).unwrap();
             self.asset_records
                 .get_mut(&record.ro.asset_def.code)
                 .unwrap()
@@ -1683,7 +1685,7 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
                         self.mark_spent_if_owned(*nullifier);
                     }
                 }
-            },
+            }
 
             LedgerEvent::Reject(block) => {
                 // Remove the hold on input nullifiers we own.
@@ -1694,7 +1696,7 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
                         }
                     }
                 }
-            },
+            }
         };
 
         Ok(())
@@ -1780,7 +1782,9 @@ impl<'a> IssuerWallet<'a> {
             fee,
             &self.proving_key,
         )?;
-        let txn = self.wallet.submit_transaction(TransactionNote::Mint(Box::new(mint_note)));
+        let txn = self
+            .wallet
+            .submit_transaction(TransactionNote::Mint(Box::new(mint_note)));
 
         Ok((txn, recv_memos.to_vec(), signature))
     }
@@ -1971,13 +1975,20 @@ pub mod test_helpers {
             block: Block(txn.iter().map(|(txn, _, _)| txn.txn.clone()).collect()),
             proofs: txn.iter().map(|(txn, _, _)| txn.proofs.clone()).collect(),
         };
-        if let Err(err) = validator.validate_and_apply(1, block.block.clone(), block.proofs.clone()) {
-            println!("Validation failed: {:?}: {}s", err, now.elapsed().as_secs_f32());
+        if let Err(err) = validator.validate_and_apply(1, block.block.clone(), block.proofs.clone())
+        {
+            println!(
+                "Validation failed: {:?}: {}s",
+                err,
+                now.elapsed().as_secs_f32()
+            );
             *now = Instant::now();
 
             // Alert subscribes that the block was rejected.
             for subscriber in subscribers {
-                subscriber.handle_event(LedgerEvent::Reject(block.clone())).unwrap();
+                subscriber
+                    .handle_event(LedgerEvent::Reject(block.clone()))
+                    .unwrap();
             }
 
             return Err(Box::new(err));
@@ -2009,7 +2020,6 @@ pub mod test_helpers {
         Ok(())
     }
 
-
     /*
      * This test is very similar to test_two_wallets, but it is parameterized on the number of users,
      * number of asset types, initial ledger state, and transactions to do, so it can be used with
@@ -2025,11 +2035,16 @@ pub mod test_helpers {
         init_rec: (u8, u8, u64),
         init_recs: Vec<(u8, u8, u64)>,
     ) {
-        println!("multixfr_wallet test: {} users, {} assets, {} records, {} transfers",
-            nkeys, ndefs, init_recs.len() + 1, txs.iter().flatten().count());
+        println!(
+            "multixfr_wallet test: {} users, {} assets, {} records, {} transfers",
+            nkeys,
+            ndefs,
+            init_recs.len() + 1,
+            txs.iter().flatten().count()
+        );
 
         let mut now = Instant::now();
-    
+
         let num_inputs = 2; // non-native transfers have a separate fee input
         let num_outputs = 3; // non-native transfers have an extra change output
 
@@ -2046,14 +2061,17 @@ pub mod test_helpers {
         )
         .unwrap();
 
-        println!("universal params generated: {}s", now.elapsed().as_secs_f32());
+        println!(
+            "universal params generated: {}s",
+            now.elapsed().as_secs_f32()
+        );
         now = Instant::now();
 
-        let grants = 
+        let grants =
             // The issuer (wallet 0) gets 1 coin per initial record, to pay transaction fees while
             // it mints and distributes the records, and 1 coin per transaction, to pay transaction
             // fees while minting additional records if test wallets run out of balance during the test.
-            once((1 + init_recs.len() + txs.iter().flatten().count()) as u64).chain( 
+            once((1 + init_recs.len() + txs.iter().flatten().count()) as u64).chain(
                 // The remaining wallets (the test wallets) get 1 coin for each transaction in which
                 // they are the sender, to pay transaction fees.
                 (0..nkeys)
@@ -2067,26 +2085,25 @@ pub mod test_helpers {
                     })
             ).collect();
 
-        let (mut validator, mut wallets) = 
+        let (mut validator, mut wallets) =
             mock_ceremony::<IssuerWallet>(&univ_param, num_inputs, num_outputs, grants, &mut now);
 
-        println!("ceremony complete, minting initial records: {}s", now.elapsed().as_secs_f32());
+        println!(
+            "ceremony complete, minting initial records: {}s",
+            now.elapsed().as_secs_f32()
+        );
         now = Instant::now();
 
         // Define all of the test assets and mint initial records.
-        let assets: Vec<AssetDefinition> = (0..ndefs).map(|i| {
-            wallets[0].define_asset(format!("Asset {}", i).as_bytes(), Default::default())
-        }).collect();
+        let assets: Vec<AssetDefinition> = (0..ndefs)
+            .map(|i| wallets[0].define_asset(format!("Asset {}", i).as_bytes(), Default::default()))
+            .collect();
         let mut balances = vec![vec![0; ndefs as usize]; nkeys as usize];
         for (asset, owner, amount) in once(init_rec).chain(init_recs) {
             let address = wallets[(owner % nkeys) as usize + 1].address();
             balances[(owner % nkeys) as usize][(asset % ndefs) as usize] += amount;
             let txn = wallets[0]
-                .mint(
-                    1, 
-                    &assets[(asset % ndefs) as usize].code, 
-                    amount, 
-                    address)
+                .mint(1, &assets[(asset % ndefs) as usize].code, amount, address)
                 .unwrap();
             mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
         }
@@ -2100,7 +2117,10 @@ pub mod test_helpers {
                 let wallet = &wallets[i as usize + 1];
                 let balance = &balances[i as usize];
                 for j in 0..ndefs {
-                    assert_eq!(wallet.balance(&assets[j as usize].code), balance[j as usize]);
+                    assert_eq!(
+                        wallet.balance(&assets[j as usize].code),
+                        balance[j as usize]
+                    );
                 }
             }
         };
@@ -2108,13 +2128,24 @@ pub mod test_helpers {
 
         // Run the test transactions.
         for (i, block) in txs.iter().enumerate() {
-            println!("Starting block {}/{}: {}s", i + 1, txs.len(), now.elapsed().as_secs_f32());
+            println!(
+                "Starting block {}/{}: {}s",
+                i + 1,
+                txs.len(),
+                now.elapsed().as_secs_f32()
+            );
             now = Instant::now();
 
             // TODO process block as a batch. For now, do txs one by one.
             for (j, (asset_ix, sender_ix, receiver_ix, amount)) in block.iter().enumerate() {
-                println!("Starting txn {}.{}/{}:{:?}: {}s",
-                    i + 1, j + 1, block.len(), (asset_ix, sender_ix, receiver_ix, amount), now.elapsed().as_secs_f32());
+                println!(
+                    "Starting txn {}.{}/{}:{:?}: {}s",
+                    i + 1,
+                    j + 1,
+                    block.len(),
+                    (asset_ix, sender_ix, receiver_ix, amount),
+                    now.elapsed().as_secs_f32()
+                );
 
                 let asset_ix = (asset_ix % ndefs) as usize;
                 let sender_ix = (sender_ix % nkeys) as usize;
@@ -2130,17 +2161,29 @@ pub mod test_helpers {
                     // If we don't have enough to make the whole transfer, but we have some,
                     // transfer half of what we have.
                     let new_amount = std::cmp::max(sender_balance / 2, 1);
-                    println!("decreasing transfer amount due to insufficient balance: {} -> {}: {}s",
-                        *amount, new_amount, now.elapsed().as_secs_f32());
+                    println!(
+                        "decreasing transfer amount due to insufficient balance: {} -> {}: {}s",
+                        *amount,
+                        new_amount,
+                        now.elapsed().as_secs_f32()
+                    );
                     now = Instant::now();
                     new_amount
                 } else {
                     // If we don't have any of this asset type, mint more.
-                    println!("minting {} more of asset {:?}: {}s", *amount, &asset.code, now.elapsed().as_secs_f32());
+                    println!(
+                        "minting {} more of asset {:?}: {}s",
+                        *amount,
+                        &asset.code,
+                        now.elapsed().as_secs_f32()
+                    );
                     now = Instant::now();
-                    let txn = wallets[0].mint(1, &asset.code, 2*amount, sender_address).unwrap();
-                    balances[sender_ix][asset_ix] += 2*amount;
-                    mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
+                    let txn = wallets[0]
+                        .mint(1, &asset.code, 2 * amount, sender_address)
+                        .unwrap();
+                    balances[sender_ix][asset_ix] += 2 * amount;
+                    mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now)
+                        .unwrap();
 
                     println!("asset minted: {}s", now.elapsed().as_secs_f32());
                     now = Instant::now();
@@ -2151,7 +2194,9 @@ pub mod test_helpers {
                 let txn = match sender.transfer(asset, &[(receiver.clone(), amount)], 1) {
                     Ok(txn) => txn,
                     Err(err) => match err.downcast_ref::<WalletError>() {
-                        Some(WalletError::Fragmentation {suggested_amount, ..}) => {
+                        Some(WalletError::Fragmentation {
+                            suggested_amount, ..
+                        }) => {
                             // Allow fragmentation. Without merge transactions, there's not much we
                             // can do to prevent it, and merge transactions require multiple
                             // transaction arities, which requires either dummy records or multiple
@@ -2166,14 +2211,17 @@ pub mod test_helpers {
                                 amount = *suggested_amount;
                                 sender.transfer(asset, &[(receiver, amount)], 1).unwrap()
                             } else {
-                                println!("skipping transfer due to fragmentation: {}s", now.elapsed().as_secs_f32());
+                                println!(
+                                    "skipping transfer due to fragmentation: {}s",
+                                    now.elapsed().as_secs_f32()
+                                );
                                 now = Instant::now();
                                 continue;
                             }
-                        },
+                        }
                         _ => {
                             panic!("transaction failed: {:?}", err)
-                        },
+                        }
                     },
                 };
                 println!("transaction generated: {}s", now.elapsed().as_secs_f32());
@@ -2193,8 +2241,13 @@ pub mod test_helpers {
                 mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
                 check_balances(&wallets, &balances);
 
-                println!("Finished txn {}.{}/{}: {}s",
-                    i + 1, j + 1, block.len(), now.elapsed().as_secs_f32());
+                println!(
+                    "Finished txn {}.{}/{}: {}s",
+                    i + 1,
+                    j + 1,
+                    block.len(),
+                    now.elapsed().as_secs_f32()
+                );
             }
         }
     }
@@ -2208,9 +2261,9 @@ mod tests {
 
     // use jf_txn::proof::transfer::TransferProvingKey;
     use merkle_tree::LookupResult;
-    use quickcheck::QuickCheck;
     use proptest::collection::vec;
     use proptest::strategy::Strategy;
+    use quickcheck::QuickCheck;
 
     /*
      * Test idea:
@@ -2727,8 +2780,8 @@ mod tests {
         let mut rng = ChaChaRng::from_seed([0x8au8; 32]);
 
         // Native transfers have extra fee/change inputs/outputs.
-        let num_inputs = if native {1} else {2};
-        let num_outputs = if native {2} else {3};
+        let num_inputs = if native { 1 } else { 2 };
+        let num_outputs = if native { 2 } else { 3 };
         let univ_setup = jf_txn::proof::universal_setup(
             compute_universal_param_size(
                 NoteType::Transfer,
@@ -2753,19 +2806,27 @@ mod tests {
         // RECORD_HOLD_TIME transfers while a transfer from wallets[0] is pending, causing the
         // transfer to time out.
         let (mut validator, mut wallets) = mock_ceremony::<IssuerWallet>(
-            &univ_setup, 
-            num_inputs, 
-            num_outputs, 
+            &univ_setup,
+            num_inputs,
+            num_outputs,
             // If native, wallets[0] gets 1 coin to transfer and 1 for a transaction fee. Otherwise,
-            // it gets 
+            // it gets
             //  * 1 transaction fee
             //  * 1 mint fee for its initial non-native record, if the test itself is not minting
             //    that record
             //  * 1 mint fee for wallets[2]'s initial non-native record in the timeout test.
-            vec![if native{2} else {1 + !mint as u64 + timeout as u64}, 0, 2*RECORD_HOLD_TIME], 
+            vec![
+                if native {
+                    2
+                } else {
+                    1 + !mint as u64 + timeout as u64
+                },
+                0,
+                2 * RECORD_HOLD_TIME,
+            ],
             &mut now,
         );
-        
+
         let asset = if native {
             AssetDefinition::native()
         } else {
@@ -2784,13 +2845,15 @@ mod tests {
                 // transactions to cause wallets[0]'s transaction to timeout) gets RECORD_HOLD_TIME
                 // coins.
                 let dst = wallets[2].address();
-                let txn = wallets[0].mint(1, &asset.code, RECORD_HOLD_TIME, dst).unwrap();
+                let txn = wallets[0]
+                    .mint(1, &asset.code, RECORD_HOLD_TIME, dst)
+                    .unwrap();
                 mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
             }
 
             asset
         };
-        
+
         let make_txn = |src: &mut IssuerWallet, dst: &UserPubKey| {
             if mint {
                 src.mint(1, &asset.code, 1, dst.clone()).unwrap()
@@ -2800,7 +2863,10 @@ mod tests {
         };
 
         // Start a transfer that will ultimately get rejected.
-        println!("generating a transfer which will fail: {}s", now.elapsed().as_secs_f32());
+        println!(
+            "generating a transfer which will fail: {}s",
+            now.elapsed().as_secs_f32()
+        );
         now = Instant::now();
         let receiver = wallets[1].address();
         let txn = make_txn(&mut wallets[0], &receiver);
@@ -2814,14 +2880,20 @@ mod tests {
         // Now do something that causes the sender's transaction to not go through
         if timeout {
             // Generated RECORD_HOLD_TIME transactions to cause `txn` to time out.
-            println!("generating {} transfers to time out the original transfer: {}s", RECORD_HOLD_TIME, now.elapsed().as_secs_f32());
+            println!(
+                "generating {} transfers to time out the original transfer: {}s",
+                RECORD_HOLD_TIME,
+                now.elapsed().as_secs_f32()
+            );
             now = Instant::now();
             for _ in 0..RECORD_HOLD_TIME {
                 // Check that the sender's balance is still on hold.
                 assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
                 assert_eq!(wallets[0].balance(&asset.code), 0);
 
-                let txn = wallets[2].transfer(&asset, &[(receiver.clone(), 1)], 1).unwrap();
+                let txn = wallets[2]
+                    .transfer(&asset, &[(receiver.clone(), 1)], 1)
+                    .unwrap();
                 mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
             }
         } else {
@@ -2829,11 +2901,14 @@ mod tests {
             // validator state) will fail to validate.
             let old_nullifiers_root = validator.nullifiers_root;
             validator.nullifiers_root = set_hash::elem_hash(Nullifier::random_for_test(&mut rng));
-            
-            println!("validating invalid transaction: {}s", now.elapsed().as_secs_f32());
+
+            println!(
+                "validating invalid transaction: {}s",
+                now.elapsed().as_secs_f32()
+            );
             now = Instant::now();
             mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap_err();
-       
+
             // The sender gets back in sync with the validator after their transaction is rejected.
             validator.nullifiers_root = old_nullifiers_root;
         }
@@ -2843,20 +2918,30 @@ mod tests {
             assert_eq!(wallets[0].balance(&AssetCode::native()), 2);
         } else {
             assert_eq!(wallets[0].balance(&AssetCode::native()), 1);
-            if !mint { // in the mint case we never had a non-native balance to start with
+            if !mint {
+                // in the mint case we never had a non-native balance to start with
                 assert_eq!(wallets[0].balance(&asset.code), 1);
             }
         }
-        assert_eq!(wallets[1].balance(&asset.code), if timeout {RECORD_HOLD_TIME} else {0});
+        assert_eq!(
+            wallets[1].balance(&asset.code),
+            if timeout { RECORD_HOLD_TIME } else { 0 }
+        );
 
         // Now check that they can use the un-held record if their state gets back in sync with the
         // validator.
-        println!("transferring un-held record: {}s", now.elapsed().as_secs_f32());
+        println!(
+            "transferring un-held record: {}s",
+            now.elapsed().as_secs_f32()
+        );
         let txn = make_txn(&mut wallets[0], &receiver);
         mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
         assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
         assert_eq!(wallets[0].balance(&asset.code), 0);
-        assert_eq!(wallets[1].balance(&asset.code), 1 + if timeout {RECORD_HOLD_TIME} else {0});
+        assert_eq!(
+            wallets[1].balance(&asset.code),
+            1 + if timeout { RECORD_HOLD_TIME } else { 0 }
+        );
     }
 
     #[test]
@@ -2904,7 +2989,7 @@ mod tests {
     struct MultiXfrParams {
         max_txns: usize,
         max_blocks: usize,
-        max_keys: u8, 
+        max_keys: u8,
         max_defs: u8,
         max_amt: u64,
         max_recs: usize,
@@ -2913,14 +2998,14 @@ mod tests {
     impl MultiXfrParams {
         const fn new(txns: usize, max_amt: u64) -> Self {
             // divide txns into 5 blocks
-            let max_txns = if txns > 5 {txns/5} else {1};
-            let max_blocks = if txns > 5 {5} else {txns};
+            let max_txns = if txns > 5 { txns / 5 } else { 1 };
+            let max_blocks = if txns > 5 { 5 } else { txns };
             // fewer users than txns so we get multiple txns with same key
-            let max_keys = (txns/2 + 2) as u8;
+            let max_keys = (txns / 2 + 2) as u8;
             // fewer defs than txns so we get multiple txns with same def
-            let max_defs = (txns/2 + 1) as u8;
+            let max_defs = (txns / 2 + 1) as u8;
             // enough records to give everyone 1 of each type, on average
-            // Reasoning for /4: 
+            // Reasoning for /4:
             //      E[nkeys] = max_keys/2
             //      E[ndefs] = max_defs/2
             // So
@@ -2937,41 +3022,47 @@ mod tests {
             }
         }
 
-        fn def(&self) -> impl Strategy<Value=u8> {
-            0..self.max_defs-1
+        fn def(&self) -> impl Strategy<Value = u8> {
+            0..self.max_defs - 1
         }
 
-        fn key(&self) -> impl Strategy<Value=u8> {
-            0..self.max_keys-1
+        fn key(&self) -> impl Strategy<Value = u8> {
+            0..self.max_keys - 1
         }
 
-        fn txn_amt(&self) -> impl Strategy<Value=u64> {
+        fn txn_amt(&self) -> impl Strategy<Value = u64> {
             // Transaction amounts are smaller than record amounts because we don't want to burn a
             // whole record in one transaction.
-            1..std::cmp::max(self.max_amt/5, 2)
+            1..std::cmp::max(self.max_amt / 5, 2)
         }
 
-        fn amt(&self) -> impl Strategy<Value=u64> {
+        fn amt(&self) -> impl Strategy<Value = u64> {
             1..self.max_amt
         }
 
-        fn txs(&self) -> impl Strategy<Value=Vec<Vec<(u8, u8, u8, u64)>>> {
-            vec(vec((self.def(), self.key(), self.key(), self.txn_amt()), self.max_txns), self.max_blocks)
+        fn txs(&self) -> impl Strategy<Value = Vec<Vec<(u8, u8, u8, u64)>>> {
+            vec(
+                vec(
+                    (self.def(), self.key(), self.key(), self.txn_amt()),
+                    self.max_txns,
+                ),
+                self.max_blocks,
+            )
         }
 
-        fn nkeys(&self) -> impl Strategy<Value=u8> {
+        fn nkeys(&self) -> impl Strategy<Value = u8> {
             2..self.max_keys
         }
 
-        fn ndefs(&self) -> impl Strategy<Value=u8> {
+        fn ndefs(&self) -> impl Strategy<Value = u8> {
             1..self.max_defs
         }
 
-        fn rec(&self) -> impl Strategy<Value=(u8, u8, u64)> {
+        fn rec(&self) -> impl Strategy<Value = (u8, u8, u64)> {
             (self.def(), self.key(), self.amt())
         }
 
-        fn recs(&self) -> impl Strategy<Value=Vec<(u8, u8, u64)>> {
+        fn recs(&self) -> impl Strategy<Value = Vec<(u8, u8, u64)>> {
             vec(self.rec(), self.max_recs)
         }
     }
