@@ -33,7 +33,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 pub use set_merkle_tree::*;
 use snafu::Snafu;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Instant;
 
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
@@ -1196,9 +1196,10 @@ pub struct UserWallet<'a> {
     max_outputs: usize,
     // all records we own, indexed by uid
     owned_records: HashMap<u64, OwnedRecord>,
-    // record uids indexed by asset type, for easy allocation as transfer inputs
-    // TODO order by size for best-fit allocation?
-    asset_records: HashMap<AssetCode, HashSet<u64>>,
+    // record (size, uid) indexed by asset type, for easy allocation as transfer inputs. The records
+    // for each asset are ordered by increasing size, which makes it easy to implement a worst-fit
+    // allocator that minimizes fragmentation.
+    asset_records: HashMap<AssetCode, BTreeSet<(u64, u64)>>,
     // record uids indexed by nullifier, for easy removal when confirmed as transfer inputs
     nullifier_records: HashMap<Nullifier, u64>,
     // sparse record Merkle tree mirrored from validators
@@ -1416,8 +1417,6 @@ impl<'a> UserWallet<'a> {
         amount: u64,
         max_records: Option<isize>,
     ) -> Result<(Vec<(RecordOpening, u64)>, u64), Box<dyn std::error::Error>> {
-        let mut result = vec![];
-        let mut current_amount = 0u64;
         let unspent_records = self.asset_records.get(asset).ok_or_else(|| {
             Box::new(WalletError::InsufficientBalance {
                 asset: *asset,
@@ -1432,10 +1431,35 @@ impl<'a> UserWallet<'a> {
             None => self.max_inputs,
         };
 
-        // TODO try to find the fewest/best fitting records, instead of just the first that are sufficient
         let now = self.validator.prev_commit_time;
-        for uid in unspent_records {
+
+        // If we have a record with the exact size required, use it to avoid fragmenting big records
+        // into smaller change records.
+        let exact_matches = unspent_records.range((amount, 0)..(amount + 1, 0));
+        for (match_amount, uid) in exact_matches {
+            assert_eq!(*match_amount, amount);
             let record = &self.owned_records[uid];
+            assert_eq!(record.ro.amount, amount);
+            if record.on_hold(now) {
+                continue;
+            }
+            return Ok((vec![(record.ro.clone(), *uid)], 0));
+        }
+
+        // Take the biggest records we have until they exceed the required amount, as a heuristic to
+        // try and get the biggest possible change record. This is a simple algorithm that
+        // guarantees we will always return the minimum number of blocks, and thus we always succeed
+        // in making a transaction if it is possible to do so within the allowed number of inputs.
+        //
+        // This algorithm is not optimal, though. For instance, it's possible we might be able to
+        // make exact change using combinations of larger and smaller blocks. We can replace this
+        // with something more sophisticated later.
+        let mut result = vec![];
+        let mut current_amount = 0u64;
+        let mut all_records = unspent_records.range((0, 0)..(u64::MAX, u64::MAX));
+        while let Some((match_amount, uid)) = all_records.next_back() {
+            let record = &self.owned_records[uid];
+            assert_eq!(record.ro.amount, *match_amount);
             if record.ro.amount == 0 || record.on_hold(now) {
                 // Skip useless dummy records and records that are on hold
                 continue;
@@ -1502,8 +1526,8 @@ impl<'a> UserWallet<'a> {
     fn add_record_opening(&mut self, ro: RecordOpening, uid: u64) {
         self.asset_records
             .entry(ro.asset_def.code)
-            .or_insert_with(HashSet::new)
-            .insert(uid);
+            .or_insert_with(BTreeSet::new)
+            .insert((ro.amount, uid));
         self.nullifier_records
             .insert(self.nullify(&ro, uid), uid);
         self.owned_records.insert(uid, OwnedRecord {
@@ -1521,7 +1545,7 @@ impl<'a> UserWallet<'a> {
             self.asset_records
                 .get_mut(&record.ro.asset_def.code)
                 .unwrap()
-                .remove(&uid);
+                .remove(&(record.ro.amount, uid));
         }
     }
 
@@ -1590,12 +1614,13 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
             .get(asset)
             .into_iter()
             .flatten()
-            .map(|uid| {
+            .map(|(amount, uid)| {
                 let record = &self.owned_records[uid];
+                assert_eq!(*amount, record.ro.amount);
                 if record.on_hold(now) {
                     0
                 } else {
-                    self.owned_records[uid].ro.amount
+                    *amount
                 }
             })
             .sum()
