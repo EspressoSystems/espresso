@@ -1133,13 +1133,14 @@ pub enum WalletError {
     },
 }
 
-// Interface for events consumed by the wallet produced by the backend (which potentially
-// includes validators, query servers, bulletin boards, etc.). Eventually we may want the
-// wallet to subscribe itself to these events transparently, but this part of the system is
-// underspecified, so for now the wallet simply has a public method for receiving mocked
-// versions of these events.
-pub trait LedgerEvent {
-    fn committed_block(&self) -> Option<(ElaboratedBlock, Vec<Vec<ReceiverMemo>>)>;
+// Events consumed by the wallet produced by the backend (which potentially includes validators,
+// query servers, bulletin boards, etc.). Eventually we may want the wallet to subscribe itself to
+// these events transparently, but this part of the system is underspecified, so for now the wallet
+// simply has a public method for receiving mocked versions of these events.
+#[derive(Clone)]
+pub enum LedgerEvent {
+    Commit(ElaboratedBlock, Vec<Vec<ReceiverMemo>>),
+    Reject(ElaboratedBlock),
 }
 
 pub trait Wallet<'a> {
@@ -1157,13 +1158,27 @@ pub trait Wallet<'a> {
     ) -> Self;
     fn address(&self) -> UserPubKey;
     fn balance(&self, asset: &AssetCode) -> u64;
-    fn handle_event(&mut self, event: &impl LedgerEvent) -> Result<(), Box<dyn std::error::Error>>;
+    fn handle_event(&mut self, event: LedgerEvent) -> Result<(), Box<dyn std::error::Error>>;
     fn transfer(
         &mut self,
         asset: &AssetDefinition,
         receivers: &[(UserPubKey, u64)],
         fee: u64,
     ) -> Result<(ElaboratedTransaction, Vec<ReceiverMemo>, Signature), Box<dyn std::error::Error>>;
+}
+
+struct OwnedRecord {
+    ro: RecordOpening,
+    uid: u64,
+    // if Some(t), this record is on hold until the validator timestamp surpasses `t`, because this
+    // record has been used as an input to a transaction that is not yet confirmed.
+    hold_until: Option<u64>,
+}
+
+impl OwnedRecord {
+    fn on_hold(&self, now: u64) -> bool {
+        matches!(self.hold_until, Some(t) if t > now)
+    }
 }
 
 pub struct UserWallet<'a> {
@@ -1179,11 +1194,13 @@ pub struct UserWallet<'a> {
     max_inputs: usize,
     // maximum number of output records permitted by `proving_key`
     max_outputs: usize,
-    // owned records not spent yet, maps asset code to (record_opening, uid)
+    // all records we own, indexed by uid
+    owned_records: HashMap<u64, OwnedRecord>,
+    // record uids indexed by asset type, for easy allocation as transfer inputs
     // TODO order by size for best-fit allocation?
-    unspent_records: HashMap<AssetCode, HashSet<(RecordOpening, u64)>>,
-    // owned records not spent yet, maps nullifier to (record_opening, uid)
-    unspent_records_by_nullifier: HashMap<Nullifier, (RecordOpening, u64)>,
+    asset_records: HashMap<AssetCode, HashSet<u64>>,
+    // record uids indexed by nullifier, for easy removal when confirmed as transfer inputs
+    nullifier_records: HashMap<Nullifier, u64>,
     // sparse record Merkle tree mirrored from validators
     record_merkle_tree: MerkleTree<RecordCommitment>,
     // sparse nullifier set Merkle tree mirrored from validators
@@ -1192,8 +1209,13 @@ pub struct UserWallet<'a> {
 
 // a never expired target
 const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
+// how long (in number of validator states) a record used as an input to an unconfirmed transaction
+// should be kept on hold before the transaction is considered timed out. This should be the number
+// of validator states after which the transaction's proof can no longer be verified.
+const RECORD_HOLD_TIME: u64 = 1;
 
 impl<'a> UserWallet<'a> {
+
     pub fn transfer_native(
         &mut self,
         receivers: &[(UserPubKey, u64)],
@@ -1271,15 +1293,7 @@ impl<'a> UserWallet<'a> {
             UNEXPIRED_VALID_UNTIL,
             &self.proving_key,
         )?;
-        let nullifier_pfs = note
-            .inputs_nullifiers
-            .iter()
-            .map(|n| self.nullifiers.contains(*n).unwrap().1)
-            .collect();
-        let txn = ElaboratedTransaction {
-            txn: TransactionNote::Transfer(Box::new(note)),
-            proofs: nullifier_pfs,
-        };
+        let txn = self.submit_transaction(TransactionNote::Transfer(Box::new(note)));
 
         Ok((txn, recv_memos, sig))
     }
@@ -1390,15 +1404,7 @@ impl<'a> UserWallet<'a> {
             UNEXPIRED_VALID_UNTIL,
             &self.proving_key,
         )?;
-        let nullifier_pfs = note
-            .inputs_nullifiers
-            .iter()
-            .map(|n| self.nullifiers.contains(*n).unwrap().1)
-            .collect();
-        let txn = ElaboratedTransaction {
-            txn: TransactionNote::Transfer(Box::new(note)),
-            proofs: nullifier_pfs,
-        };
+        let txn = self.submit_transaction(TransactionNote::Transfer(Box::new(note)));
 
         Ok((txn, recv_memos, sig))
     }
@@ -1412,7 +1418,7 @@ impl<'a> UserWallet<'a> {
     ) -> Result<(Vec<(RecordOpening, u64)>, u64), Box<dyn std::error::Error>> {
         let mut result = vec![];
         let mut current_amount = 0u64;
-        let unspent_records = self.unspent_records.get(asset).ok_or_else(|| {
+        let unspent_records = self.asset_records.get(asset).ok_or_else(|| {
             Box::new(WalletError::InsufficientBalance {
                 asset: *asset,
                 required: amount,
@@ -1427,9 +1433,11 @@ impl<'a> UserWallet<'a> {
         };
 
         // TODO try to find the fewest/best fitting records, instead of just the first that are sufficient
-        for unspent_record in unspent_records {
-            if unspent_record.0.amount == 0 {
-                // Skip useless dummy records
+        let now = self.validator.prev_commit_time;
+        for uid in unspent_records {
+            let record = &self.owned_records[uid];
+            if record.ro.amount == 0 || record.on_hold(now) {
+                // Skip useless dummy records and records that are on hold
                 continue;
             }
             if result.len() >= max_records {
@@ -1448,8 +1456,8 @@ impl<'a> UserWallet<'a> {
                     max_records,
                 }));
             }
-            current_amount += unspent_record.0.amount;
-            result.push(unspent_record.clone());
+            current_amount += record.ro.amount;
+            result.push((record.ro.clone(), record.uid));
             if current_amount >= amount {
                 return Ok((result, current_amount - amount));
             }
@@ -1460,6 +1468,25 @@ impl<'a> UserWallet<'a> {
             required: amount,
             actual: current_amount,
         }))
+    }
+
+    fn submit_transaction(&mut self, note: TransactionNote) -> ElaboratedTransaction {
+        let now = self.validator.prev_commit_time;
+        let nullifier_pfs = note
+            .nullifiers()
+            .iter()
+            .map(|n| {
+                // hold the record corresponding to this nullifier until the transaction is
+                // committed, rejected, or expired.
+                self.owned_records.get_mut(&self.nullifier_records[n]).unwrap().hold_until =
+                    Some(now + RECORD_HOLD_TIME);
+                self.nullifiers.contains(*n).unwrap().1
+            })
+            .collect();
+        ElaboratedTransaction {
+            txn: note,
+            proofs: nullifier_pfs,
+        }
     }
 
     /// find a record and corresponding uid on the native asset type with enough
@@ -1473,20 +1500,28 @@ impl<'a> UserWallet<'a> {
     }
 
     fn add_record_opening(&mut self, ro: RecordOpening, uid: u64) {
-        self.unspent_records
+        self.asset_records
             .entry(ro.asset_def.code)
             .or_insert_with(HashSet::new)
-            .insert((ro.clone(), uid));
-        self.unspent_records_by_nullifier
-            .insert(self.nullify(&ro, uid), (ro, uid));
+            .insert(uid);
+        self.nullifier_records
+            .insert(self.nullify(&ro, uid), uid);
+        self.owned_records.insert(uid, OwnedRecord {
+            ro,
+            uid,
+            hold_until: None,
+        });
     }
 
     fn mark_spent_if_owned(&mut self, nullifier: Nullifier) {
-        if let Some((ro, uid)) = self.unspent_records_by_nullifier.remove(&nullifier) {
-            self.unspent_records
-                .get_mut(&ro.asset_def.code)
+        if let Some(uid) = self.nullifier_records.remove(&nullifier) {
+            let record = self.owned_records
+                .remove(&uid)
+                .unwrap();
+            self.asset_records
+                .get_mut(&record.ro.asset_def.code)
                 .unwrap()
-                .remove(&(ro, uid));
+                .remove(&uid);
         }
     }
 
@@ -1531,8 +1566,9 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
             proving_key: proving_key.xfr,
             max_inputs,
             max_outputs,
-            unspent_records: HashMap::new(),
-            unspent_records_by_nullifier: HashMap::new(),
+            owned_records: HashMap::new(),
+            asset_records: HashMap::new(),
+            nullifier_records: HashMap::new(),
             record_merkle_tree,
             nullifiers,
         };
@@ -1549,69 +1585,91 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
     }
 
     fn balance(&self, asset: &AssetCode) -> u64 {
-        self.unspent_records
+        let now = self.validator.prev_commit_time;
+        self.asset_records
             .get(asset)
             .into_iter()
             .flatten()
-            .map(|(ro, _)| ro.amount)
+            .map(|uid| {
+                let record = &self.owned_records[uid];
+                if record.on_hold(now) {
+                    0
+                } else {
+                    self.owned_records[uid].ro.amount
+                }
+            })
             .sum()
     }
 
-    fn handle_event(&mut self, event: &impl LedgerEvent) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some((block, receiver_memos)) = event.committed_block() {
-            // Don't trust the network connection that provided us this event; validate it against
-            // our local mirror of the ledger and bail out if it is invalid.
-            if let Err(val_err) = self.validator.validate_and_apply(
-                self.validator.prev_commit_time + 1,
-                block.block.clone(),
-                block.proofs,
-            ) {
-                return Err(Box::new(WalletError::InvalidBlock { val_err }));
-            }
+    fn handle_event(&mut self, event: LedgerEvent) -> Result<(), Box<dyn std::error::Error>> {
+        match event {
+            LedgerEvent::Commit(block, receiver_memos) => {
+                // Don't trust the network connection that provided us this event; validate it
+                // against our local mirror of the ledger and bail out if it is invalid.
+                if let Err(val_err) = self.validator.validate_and_apply(
+                    self.validator.prev_commit_time + 1,
+                    block.block.clone(),
+                    block.proofs,
+                ) {
+                    return Err(Box::new(WalletError::InvalidBlock { val_err }));
+                }
 
-            for (txn, receiver_memos) in block.block.0.iter().zip(receiver_memos) {
-                let output_commitments = match txn {
-                    TransactionNote::Transfer(xfr) => xfr.output_commitments.clone(),
-                    TransactionNote::Mint(mint) => vec![mint.chg_comm, mint.mint_comm],
-                    TransactionNote::Freeze(freeze) => freeze.output_commitments.clone(),
-                };
-                assert_eq!(output_commitments.len(), receiver_memos.len());
-                for (record_commitment, memo) in
-                    output_commitments.iter().zip(receiver_memos.iter())
-                {
-                    let uid = self.record_merkle_tree.num_leaves();
-                    self.record_merkle_tree.push(*record_commitment);
+                for (txn, receiver_memos) in block.block.0.iter().zip(receiver_memos) {
+                    let output_commitments = match txn {
+                        TransactionNote::Transfer(xfr) => xfr.output_commitments.clone(),
+                        TransactionNote::Mint(mint) => vec![mint.chg_comm, mint.mint_comm],
+                        TransactionNote::Freeze(freeze) => freeze.output_commitments.clone(),
+                    };
+                    assert_eq!(output_commitments.len(), receiver_memos.len());
+                    for (record_commitment, memo) in
+                        output_commitments.iter().zip(receiver_memos.iter())
+                    {
+                        let uid = self.record_merkle_tree.num_leaves();
+                        self.record_merkle_tree.push(*record_commitment);
 
-                    match memo.decrypt(&self.key_pair, record_commitment, &[]) {
-                        Ok(record_opening) => {
-                            // If this record is for us (i.e. its corresponding memo decrypts under
-                            // our key) and it is unfrozen, then add it to our owned records.
-                            match record_opening.freeze_flag {
-                                FreezeFlag::Unfrozen => {
-                                    self.add_record_opening(record_opening, uid);
-                                }
-                                FreezeFlag::Frozen => {
-                                    // We are the owner of this record, but it is frozen. We will
-                                    // never be able to spend this record; we need to wait for the
-                                    // freezer to create a new, unfrozen version. So we can safely
-                                    // forget this commitment.
-                                    self.record_merkle_tree.forget(uid);
+                        match memo.decrypt(&self.key_pair, record_commitment, &[]) {
+                            Ok(record_opening) => {
+                                // If this record is for us (i.e. its corresponding memo decrypts
+                                // under our key) and it is unfrozen, then add it to our owned
+                                // records.
+                                match record_opening.freeze_flag {
+                                    FreezeFlag::Unfrozen => {
+                                        self.add_record_opening(record_opening, uid);
+                                    }
+                                    FreezeFlag::Frozen => {
+                                        // We are the owner of this record, but it is frozen. We
+                                        // will never be able to spend this record; we need to wait
+                                        // for the freezer to create a new, unfrozen version. So we
+                                        // can safely forget this commitment.
+                                        self.record_merkle_tree.forget(uid);
+                                    }
                                 }
                             }
+                            Err(_) => {
+                                // Record is for somebody else, prune it.
+                                self.record_merkle_tree.forget(uid);
+                            }
                         }
-                        Err(_) => {
-                            // Record is for somebody else, prune it.
-                            self.record_merkle_tree.forget(uid);
+                    }
+
+                    for nullifier in txn.nullifiers().iter() {
+                        self.nullifiers.insert(*nullifier);
+                        // TODO prune nullifiers that we don't need for our non-inclusion proofs
+                        self.mark_spent_if_owned(*nullifier);
+                    }
+                }
+            },
+
+            LedgerEvent::Reject(block) => {
+                // Remove the hold on input nullifiers we own.
+                for txn in block.block.0 {
+                    for nullifier in txn.nullifiers().iter() {
+                        if let Some(uid) = self.nullifier_records.get(nullifier) {
+                            self.owned_records.get_mut(uid).unwrap().hold_until = None;
                         }
                     }
                 }
-
-                for nullifier in txn.nullifiers().iter() {
-                    self.nullifiers.insert(*nullifier);
-                    // TODO prune nullifiers that we don't need for our non-inclusion proofs
-                    self.mark_spent_if_owned(*nullifier);
-                }
-            }
+            },
         };
 
         Ok(())
@@ -1697,17 +1755,7 @@ impl<'a> IssuerWallet<'a> {
             fee,
             &self.proving_key,
         )?;
-        let nullifier_pfs = vec![
-            self.wallet
-                .nullifiers
-                .contains(mint_note.input_nullifier)
-                .unwrap()
-                .1,
-        ];
-        let txn = ElaboratedTransaction {
-            txn: TransactionNote::Mint(Box::new(mint_note)),
-            proofs: nullifier_pfs,
-        };
+        let txn = self.wallet.submit_transaction(TransactionNote::Mint(Box::new(mint_note)));
 
         Ok((txn, recv_memos.to_vec(), signature))
     }
@@ -1752,7 +1800,7 @@ impl<'a> Wallet<'a> for IssuerWallet<'a> {
         self.wallet.balance(asset)
     }
 
-    fn handle_event(&mut self, event: &impl LedgerEvent) -> Result<(), Box<dyn std::error::Error>> {
+    fn handle_event(&mut self, event: LedgerEvent) -> Result<(), Box<dyn std::error::Error>> {
         self.wallet.handle_event(event)
     }
 
@@ -1770,23 +1818,6 @@ impl<'a> Wallet<'a> for IssuerWallet<'a> {
 #[cfg(any(test, fuzzing))]
 pub mod test_helpers {
     use super::*;
-
-    struct MockLedgerEvent {
-        block: ElaboratedBlock,
-        memos: Vec<Vec<ReceiverMemo>>,
-    }
-
-    impl MockLedgerEvent {
-        fn new(block: ElaboratedBlock, memos: Vec<Vec<ReceiverMemo>>) -> Self {
-            Self { block, memos }
-        }
-    }
-
-    impl LedgerEvent for MockLedgerEvent {
-        fn committed_block(&self) -> Option<(ElaboratedBlock, Vec<Vec<ReceiverMemo>>)> {
-            Some((self.block.clone(), self.memos.clone()))
-        }
-    }
 
     pub fn mock_ceremony<'a, W>(
         univ_param: &'a jf_txn::proof::UniversalParam,
@@ -1899,7 +1930,7 @@ pub mod test_helpers {
         txn: Vec<(ElaboratedTransaction, Vec<ReceiverMemo>, Signature)>,
         subscribers: &mut [impl Wallet<'a>],
         now: &mut Instant,
-    ) {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Our mock validator.
         //
         // Validate the transaction and post the event that
@@ -1915,14 +1946,16 @@ pub mod test_helpers {
             block: Block(txn.iter().map(|(txn, _, _)| txn.txn.clone()).collect()),
             proofs: txn.iter().map(|(txn, _, _)| txn.proofs.clone()).collect(),
         };
-        match validator.validate_and_apply(1, block.block.clone(), block.proofs.clone()) {
-            Ok(_) => {}
-            Err(err) => match err {
-                ValidationError::CryptoError { err: txn_err } => {
-                    panic!("Validation failed: CryptoError({})", txn_err)
-                }
-                _ => panic!("Validation failed: {}", err),
-            },
+        if let Err(err) = validator.validate_and_apply(1, block.block.clone(), block.proofs.clone()) {
+            println!("Validation failed: {:?}: {}s", err, now.elapsed().as_secs_f32());
+            *now = Instant::now();
+
+            // Alert subscribes that the block was rejected.
+            for subscriber in subscribers {
+                subscriber.handle_event(LedgerEvent::Reject(block.clone())).unwrap();
+            }
+
+            return Err(Box::new(err));
         }
 
         let comm = validator.commit();
@@ -1943,11 +1976,12 @@ pub mod test_helpers {
         }
 
         // Simulate the event being posted asynchronously to all subscribed wallets.
-        let event = MockLedgerEvent::new(block, memos);
+        let event = LedgerEvent::Commit(block, memos);
         for subscriber in subscribers {
-            subscriber.handle_event(&event).unwrap();
+            subscriber.handle_event(event.clone()).unwrap();
         }
         println!("Ledger event processed: {}s", now.elapsed().as_secs_f32());
+        Ok(())
     }
 
 
@@ -2029,7 +2063,7 @@ pub mod test_helpers {
                     amount, 
                     address)
                 .unwrap();
-            mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now);
+            mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
         }
 
         println!("assets minted: {}s", now.elapsed().as_secs_f32());
@@ -2081,7 +2115,7 @@ pub mod test_helpers {
                     now = Instant::now();
                     let txn = wallets[0].mint(1, &asset.code, 2*amount, sender_address).unwrap();
                     balances[sender_ix][asset_ix] += 2*amount;
-                    mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now);
+                    mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
 
                     println!("asset minted: {}s", now.elapsed().as_secs_f32());
                     now = Instant::now();
@@ -2122,7 +2156,16 @@ pub mod test_helpers {
 
                 balances[sender_ix][asset_ix] -= amount;
                 balances[receiver_ix][asset_ix] += amount;
-                mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now);
+
+                // The sending wallet should report the new balance immediately, even before a
+                // validator has confirmed the transaction, because the transferred records are
+                // placed on hold until the transfer is confirmed or rejected.
+                //
+                // Note that the sender may report less than the final balance if it is waiting on a
+                // change output to be confirmed.
+                assert!(sender.balance(&asset.code) <= balances[sender_ix][asset_ix]);
+
+                mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
                 check_balances(&wallets, &balances);
 
                 println!("Finished txn {}.{}/{}: {}s",
@@ -2563,7 +2606,7 @@ mod tests {
             let txn = wallets[0]
                 .mint(1, &coin.code, 5, alice_address.clone())
                 .unwrap();
-            mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now);
+            mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
             println!("Asset minted: {}s", now.elapsed().as_secs_f32());
             now = Instant::now();
 
@@ -2583,7 +2626,7 @@ mod tests {
 
         // Validate the transaction and post it to the ledger, emitting an event which in a
         // real system would be streamed to all subscribed wallets.
-        mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now);
+        mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
         println!(
             "Transfer validated & applied: {}s",
             now.elapsed().as_secs_f32()
@@ -2621,7 +2664,7 @@ mod tests {
         println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
-        mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now);
+        mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
         println!(
             "Transfer validated & applied: {}s",
             now.elapsed().as_secs_f32()
@@ -2640,6 +2683,185 @@ mod tests {
     #[test]
     fn test_two_wallets_non_native() {
         test_two_wallets(false);
+    }
+
+    // Test transactions that fail to complete.
+    //
+    // If `native`, the transaction is a native asset transfer.
+    // If `!native && !mint`, the trnasaction is a non-native asset transfer.
+    // If `!native && mint`, the transaction is a non-native asset mint.
+    //
+    // If `timeout`, the failed transaction times out with no explicit rejection event. Otherwise,
+    // the failed transaction fails to verify and a Reject event is emitted.
+    fn test_wallet_rejected(native: bool, mint: bool, timeout: bool) {
+        assert!(!(native && mint));
+
+        let mut now = Instant::now();
+        println!("generating params");
+
+        let mut rng = ChaChaRng::from_seed([0x8au8; 32]);
+
+        // Native transfers have extra fee/change inputs/outputs.
+        let num_inputs = if native {1} else {2};
+        let num_outputs = if native {2} else {3};
+        let univ_setup = jf_txn::proof::universal_setup(
+            compute_universal_param_size(
+                NoteType::Transfer,
+                num_inputs,
+                num_outputs,
+                MERKLE_HEIGHT,
+            )
+            .unwrap(),
+            &mut rng,
+        )
+        .unwrap();
+
+        println!(
+            "Universal params generated: {}s",
+            now.elapsed().as_secs_f32()
+        );
+        now = Instant::now();
+
+        // The sender wallet (wallets[0]) gets an initial grant of 2 for a transaction fee and a
+        // payment (or, for non-native transfers, a transaction fee and a mint fee). wallets[1] will
+        // act as the receiver, and wallets[2] will be a third party which generates
+        // RECORD_HOLD_TIME transfers while a transfer from wallets[0] is pending, causing the
+        // transfer to time out.
+        let (mut validator, mut wallets) = mock_ceremony::<IssuerWallet>(
+            &univ_setup, 
+            num_inputs, 
+            num_outputs, 
+            // If native, wallets[0] gets 1 coin to transfer and 1 for a transaction fee. Otherwise,
+            // it gets 
+            //  * 1 transaction fee
+            //  * 1 mint fee for its initial non-native record, if the test itself is not minting
+            //    that record
+            //  * 1 mint fee for wallets[2]'s initial non-native record in the timeout test.
+            vec![if native{2} else {1 + !mint as u64 + timeout as u64}, 0, 2*RECORD_HOLD_TIME], 
+            &mut now,
+        );
+        
+        let asset = if native {
+            AssetDefinition::native()
+        } else {
+            let asset = wallets[0].define_asset("test asset".as_bytes(), Default::default());
+
+            if !mint {
+                // wallets[0] gets 1 coin to transfer to wallets[1]. We only need this if the test
+                // itself is not minting the asset later on.
+                let dst = wallets[0].address();
+                let txn = wallets[0].mint(1, &asset.code, 1, dst).unwrap();
+                mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
+            }
+
+            if timeout {
+                // If doing a timeout test, wallets[2] (the sender that will generate enough
+                // transactions to cause wallets[0]'s transaction to timeout) gets RECORD_HOLD_TIME
+                // coins.
+                let dst = wallets[2].address();
+                let txn = wallets[0].mint(1, &asset.code, RECORD_HOLD_TIME, dst).unwrap();
+                mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
+            }
+
+            asset
+        };
+        
+        let make_txn = |src: &mut IssuerWallet, dst: &UserPubKey| {
+            if mint {
+                src.mint(1, &asset.code, 1, dst.clone()).unwrap()
+            } else {
+                src.transfer(&asset, &[(dst.clone(), 1)], 1).unwrap()
+            }
+        };
+
+        // Start a transfer that will ultimately get rejected.
+        println!("generating a transfer which will fail: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+        let receiver = wallets[1].address();
+        let txn = make_txn(&mut wallets[0], &receiver);
+        println!("transfer generated: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+
+        // Check that the sender's balance is on hold (for the fee and the payment).
+        assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
+        assert_eq!(wallets[0].balance(&asset.code), 0);
+
+        // Now do something that causes the sender's transaction to not go through
+        if timeout {
+            // Generated RECORD_HOLD_TIME transactions to cause `txn` to time out.
+            println!("generating {} transfers to time out the original transfer: {}s", RECORD_HOLD_TIME, now.elapsed().as_secs_f32());
+            now = Instant::now();
+            for _ in 0..RECORD_HOLD_TIME {
+                // Check that the sender's balance is still on hold.
+                assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
+                assert_eq!(wallets[0].balance(&asset.code), 0);
+
+                let txn = wallets[2].transfer(&asset, &[(receiver.clone(), 1)], 1).unwrap();
+                mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
+            }
+        } else {
+            // Change the validator state, so that the wallet's transaction (built against the old
+            // validator state) will fail to validate.
+            let old_nullifiers_root = validator.nullifiers_root;
+            validator.nullifiers_root = set_hash::elem_hash(Nullifier::random_for_test(&mut rng));
+            
+            println!("validating invalid transaction: {}s", now.elapsed().as_secs_f32());
+            now = Instant::now();
+            mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap_err();
+       
+            // The sender gets back in sync with the validator after their transaction is rejected.
+            validator.nullifiers_root = old_nullifiers_root;
+        }
+
+        // Check that the sender got their balance back.
+        if native {
+            assert_eq!(wallets[0].balance(&AssetCode::native()), 2);
+        } else {
+            assert_eq!(wallets[0].balance(&AssetCode::native()), 1);
+            if !mint { // in the mint case we never had a non-native balance to start with
+                assert_eq!(wallets[0].balance(&asset.code), 1);
+            }
+        }
+        assert_eq!(wallets[1].balance(&asset.code), if timeout {RECORD_HOLD_TIME} else {0});
+
+        // Now check that they can use the un-held record if their state gets back in sync with the
+        // validator.
+        println!("transferring un-held record: {}s", now.elapsed().as_secs_f32());
+        let txn = make_txn(&mut wallets[0], &receiver);
+        mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
+        assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
+        assert_eq!(wallets[0].balance(&asset.code), 0);
+        assert_eq!(wallets[1].balance(&asset.code), 1 + if timeout {RECORD_HOLD_TIME} else {0});
+    }
+
+    #[test]
+    fn test_wallet_rejected_native_xfr_invalid() {
+        test_wallet_rejected(true, false, false)
+    }
+
+    #[test]
+    fn test_wallet_rejected_native_xfr_timeout() {
+        test_wallet_rejected(true, false, true)
+    }
+
+    #[test]
+    fn test_wallet_rejected_non_native_xfr_invalid() {
+        test_wallet_rejected(false, false, false)
+    }
+
+    #[test]
+    fn test_wallet_rejected_non_native_xfr_timeout() {
+        test_wallet_rejected(false, false, true)
+    }
+
+    #[test]
+    fn test_wallet_rejected_non_native_mint_invalid() {
+        test_wallet_rejected(false, true, false)
+    }
+
+    #[test]
+    fn test_wallet_rejected_non_native_mint_timeout() {
+        test_wallet_rejected(false, true, true)
     }
 
     #[test]
