@@ -742,11 +742,7 @@ impl MultiXfrTestState {
         block: Vec<(u16, u16, u8, u8, i32)>,
         num_txs: usize,
     ) -> Result<
-        Vec<(
-            usize,
-            (Vec<ReceiverMemo>, usize, usize),
-            ElaboratedTransaction,
-        )>,
+        Vec<(usize, Vec<(usize, ReceiverMemo)>, ElaboratedTransaction)>,
         Box<dyn std::error::Error>,
     > {
         let splits = block
@@ -876,6 +872,7 @@ impl MultiXfrTestState {
 
                 let (fee_ix, fee_rec) = fee_rec?;
                 let ((rec1, in_key1), (rec2, in_key2)) = (rec1?, rec2?);
+                let in_key1_ix = in_key1;
                 let in_key1 = &self.keys[in_key1];
                 let in_key2 = &self.keys[in_key2];
 
@@ -1037,9 +1034,15 @@ impl MultiXfrTestState {
                     now.elapsed().as_secs_f32()
                 );
 
+                assert_eq!(owner_memos.len(), 3);
+                let keys_and_memos = vec![in_key1_ix, k1_ix, k2_ix]
+                    .into_iter()
+                    .zip(owner_memos.into_iter())
+                    .collect();
+
                 Some((
                     ix,
-                    (owner_memos, k1_ix, k2_ix),
+                    keys_and_memos,
                     ElaboratedTransaction {
                         txn: TransactionNote::Transfer(Box::new(txn)),
                         proofs: nullifier_pfs,
@@ -1230,16 +1233,19 @@ mod tests {
             });
 
             let mut blk = ElaboratedBlock::default();
-            for (ix, (owner_memos, k1_ix, k2_ix), txn) in txns {
-                let _ = state.try_add_transaction(
-                    &mut blk,
-                    txn,
-                    i,
-                    ix,
-                    num_txs,
-                    owner_memos,
-                    vec![k1_ix, k1_ix, k2_ix],
-                );
+            for (ix, keys_and_memos, txn) in txns {
+                let (owner_memos, kixs) = {
+                    let mut owner_memos = vec![];
+                    let mut kixs = vec![];
+
+                    for (kix, memo) in keys_and_memos {
+                        kixs.push(kix);
+                        owner_memos.push(memo);
+                    }
+                    (owner_memos, kixs)
+                };
+
+                let _ = state.try_add_transaction(&mut blk, txn, i, ix, num_txs, owner_memos, kixs);
             }
 
             state
@@ -1584,6 +1590,17 @@ mod tests {
     #[test]
     fn quickcheck_multixfr_regression4() {
         test_multixfr(vec![vec![(3, 0, 0, 0, 0)]], 0, 0, (0, 0, 0), vec![])
+    }
+
+    #[test]
+    fn quickcheck_multixfr_regression5() {
+        test_multixfr(
+            vec![vec![(0, 0, 1, 1, 0)], vec![(0, 0, 0, 0, 0)]],
+            1,
+            0,
+            (0, 0, 0),
+            vec![],
+        )
     }
 
     #[test]
