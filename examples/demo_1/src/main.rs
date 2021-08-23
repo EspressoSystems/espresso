@@ -257,7 +257,7 @@ async fn main() {
         let mut transactions = test_state
             .generate_transactions(
                 i as usize,
-                vec![(0, 0, 0, 0, -2)],
+                vec![(true, 0, 0, 0, 0, -2)],
                 TRANSACTION_COUNT as usize,
             )
             .unwrap();
@@ -268,7 +268,7 @@ async fn main() {
 
         consense(i as usize, &phaselocks).await;
 
-        let (ix, (owner_memos, k1_ix, k2_ix), txn) = transaction;
+        let (ix, (owner_memos, recv_keys), txn) = transaction;
         let mut blk = ElaboratedBlock::default();
         test_state
             .try_add_transaction(
@@ -278,7 +278,7 @@ async fn main() {
                 ix,
                 TRANSACTION_COUNT as usize,
                 owner_memos,
-                vec![k1_ix, k2_ix, k2_ix],
+                recv_keys,
             )
             .unwrap();
         test_state

@@ -224,7 +224,7 @@ async fn main() {
             let mut transactions = state
                 .generate_transactions(
                     round as usize,
-                    vec![(0, 0, 0, 0, -2)],
+                    vec![(true, 0, 0, 0, 0, -2)],
                     TRANSACTION_COUNT as usize,
                 )
                 .unwrap();
@@ -264,7 +264,7 @@ async fn main() {
         }
 
         // Add the transaction if the node ID is 0
-        if let Some((ix, (owner_memos, k1_ix, k2_ix), t)) = txn {
+        if let Some((ix, (owner_memos, recv_keys), t)) = txn {
             println!("  - Adding the transaction");
             let mut blk = ElaboratedBlock::default();
             state
@@ -275,7 +275,7 @@ async fn main() {
                     ix,
                     TRANSACTION_COUNT as usize,
                     owner_memos,
-                    vec![k1_ix, k2_ix],
+                    recv_keys,
                 )
                 .unwrap();
             state
