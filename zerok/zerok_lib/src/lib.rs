@@ -34,7 +34,8 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 pub use set_merkle_tree::*;
 use snafu::Snafu;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ops::Bound::*;
 use std::time::Instant;
 
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
@@ -170,43 +171,40 @@ impl BlockContents<64> for ElaboratedBlock {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KeySet<Size, K> {
-    keys: Vec<(Size, K)>,
+pub struct KeySet<Size: Ord, K> {
+    keys: BTreeMap<Size, K>,
 }
 
 impl<Size: Ord + Copy, K> KeySet<Size, K> {
-    pub fn new(mut keys: Vec<(Size, K)>) -> Self {
-        assert!(keys.len() > 0);
-        keys.sort_by_key(|(size, _)| *size);
-        Self { keys }
+    pub fn new(keys: impl Iterator<Item = (Size, K)>) -> Self {
+        let mut map = BTreeMap::new();
+        for (size, key) in keys {
+            assert!(
+                !map.contains_key(&size),
+                "cannot create a KeySet with two keys of the same size"
+            );
+            map.insert(size, key);
+        }
+        assert!(map.len() > 0);
+        Self { keys: map }
     }
 
     pub fn max_size(&self) -> Size {
-        self.keys.last().unwrap().0
+        *self.keys.iter().next_back().unwrap().0
     }
 
     pub fn key_for_size(&self, size: Size) -> Option<&K> {
-        let index = self
-            .keys
-            .binary_search_by_key(&size, |(size, _)| *size)
-            .ok()?;
-        Some(&self.keys[index].1)
+        self.keys.get(&size)
     }
 
     // Return the smallest key whose size is at least `size`. If no such key is available, the error
     // contains the largest size that could have been supported.
     pub fn best_fit_key(&self, size: Size) -> Result<(Size, &K), Size> {
-        let index = match self.keys.binary_search_by_key(&size, |(size, _)| *size) {
-            // exact match
-            Ok(index) => Ok(index),
-            // index of insertion point, which, if in range of the vector, points to the samllest
-            // element with size greater than `size`
-            Err(index) if index < self.keys.len() => Ok(index),
-            _ => Err(self.max_size()),
-        }?;
-
-        let (size, key) = &self.keys[index];
-        Ok((*size, key))
+        self.keys
+            .range((Included(size), Unbounded))
+            .next()
+            .map(|(size, key)| (*size, key))
+            .ok_or(self.max_size())
     }
 }
 
@@ -613,11 +611,16 @@ impl MultiXfrTestState {
 
         let verif_key = VerifierKey {
             mint: TransactionVerifyingKey::Mint(mint_verif_key),
-            xfr: KeySet::new(vec![
-                ((2, 2), TransactionVerifyingKey::Transfer(xfr_verif_key_22)),
-                ((3, 3), TransactionVerifyingKey::Transfer(xfr_verif_key_33)),
-            ]),
-            freeze: KeySet::new(vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))]),
+            xfr: KeySet::new(
+                vec![
+                    ((2, 2), TransactionVerifyingKey::Transfer(xfr_verif_key_22)),
+                    ((3, 3), TransactionVerifyingKey::Transfer(xfr_verif_key_33)),
+                ]
+                .into_iter(),
+            ),
+            freeze: KeySet::new(
+                vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))].into_iter(),
+            ),
         };
 
         Self::update_timer(&mut timer, |t| println!("Verify Keys: {}s", t));
@@ -627,8 +630,10 @@ impl MultiXfrTestState {
             prng,
             prove_key: ProverKey {
                 mint: mint_prove_key,
-                xfr: KeySet::new(vec![((2, 2), xfr_prove_key_22), ((3, 3), xfr_prove_key_33)]),
-                freeze: KeySet::new(vec![(2, freeze_prove_key)]),
+                xfr: KeySet::new(
+                    vec![((2, 2), xfr_prove_key_22), ((3, 3), xfr_prove_key_33)].into_iter(),
+                ),
+                freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter()),
             },
             verif_key: verif_key.clone(),
             native_token,
@@ -2243,9 +2248,11 @@ pub mod test_helpers {
             prev_commit_time: 0,
             prev_state: *state_comm::INITIAL_PREV_COMM,
             verif_crs: VerifierKey {
-                xfr: KeySet::new(xfr_verif_keys),
+                xfr: KeySet::new(xfr_verif_keys.into_iter()),
                 mint: TransactionVerifyingKey::Mint(mint_verif_key),
-                freeze: KeySet::new(vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))]),
+                freeze: KeySet::new(
+                    vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))].into_iter(),
+                ),
             },
             record_merkle_root: record_merkle_tree.get_root_value(),
             record_merkle_frontier: record_merkle_tree.clone(),
@@ -2265,9 +2272,9 @@ pub mod test_helpers {
         // Create a wallet for each user based on the validator and the per-user information
         // computed above.
         let prover_key = ProverKey {
-            xfr: KeySet::new(xfr_prove_keys),
+            xfr: KeySet::new(xfr_prove_keys.into_iter()),
             mint: mint_prove_key,
-            freeze: KeySet::new(vec![(2, freeze_prove_key)]),
+            freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter()),
         };
         let wallets = users
             .into_iter()
@@ -2829,35 +2836,26 @@ mod tests {
                 prev_state: *state_comm::INITIAL_PREV_COMM,
                 verif_crs: VerifierKey {
                     mint: TransactionVerifyingKey::Mint(mint.clone()),
-                    xfr: KeySet::new(
-                        xfrs.iter()
-                            .map(|size| {
-                                (
-                                    *size,
-                                    TransactionVerifyingKey::Transfer(match size {
-                                        (1, 1) => xfr11.clone(),
-                                        (2, 2) => xfr22.clone(),
-                                        _ => panic!("invalid xfr size"),
-                                    }),
-                                )
-                            })
-                            .collect(),
-                    ),
-                    freeze: KeySet::new(
-                        freezes
-                            .iter()
-                            .map(|size| {
-                                (
-                                    *size,
-                                    TransactionVerifyingKey::Freeze(match size {
-                                        2 => freeze2.clone(),
-                                        3 => freeze3.clone(),
-                                        _ => panic!("invalid freeze size"),
-                                    }),
-                                )
-                            })
-                            .collect(),
-                    ),
+                    xfr: KeySet::new(xfrs.iter().map(|size| {
+                        (
+                            *size,
+                            TransactionVerifyingKey::Transfer(match size {
+                                (1, 1) => xfr11.clone(),
+                                (2, 2) => xfr22.clone(),
+                                _ => panic!("invalid xfr size"),
+                            }),
+                        )
+                    })),
+                    freeze: KeySet::new(freezes.iter().map(|size| {
+                        (
+                            *size,
+                            TransactionVerifyingKey::Freeze(match size {
+                                2 => freeze2.clone(),
+                                3 => freeze3.clone(),
+                                _ => panic!("invalid freeze size"),
+                            }),
+                        )
+                    })),
                 },
                 record_merkle_root: record_merkle_tree.get_root_value(),
                 record_merkle_frontier: record_merkle_tree,
@@ -2918,17 +2916,18 @@ mod tests {
 
         let prove_key = ProverKey {
             mint: mint_prove_key,
-            xfr: KeySet::new(vec![((1, 1), xfr_prove_key)]),
-            freeze: KeySet::new(vec![(2, freeze_prove_key)]),
+            xfr: KeySet::new(vec![((1, 1), xfr_prove_key)].into_iter()),
+            freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter()),
         };
 
         let verif_key = VerifierKey {
             mint: TransactionVerifyingKey::Mint(mint_verif_key),
-            xfr: KeySet::new(vec![(
-                (1, 1),
-                TransactionVerifyingKey::Transfer(xfr_verif_key),
-            )]),
-            freeze: KeySet::new(vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))]),
+            xfr: KeySet::new(
+                vec![((1, 1), TransactionVerifyingKey::Transfer(xfr_verif_key))].into_iter(),
+            ),
+            freeze: KeySet::new(
+                vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))].into_iter(),
+            ),
         };
 
         println!("CRS set up: {}s", now.elapsed().as_secs_f32());
