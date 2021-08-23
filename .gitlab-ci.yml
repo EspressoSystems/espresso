@@ -53,7 +53,7 @@ lint:audit:
       - .cargo/
       - target/
   allow_failure: true
-  
+
 check:
   stage: check
   tags:
@@ -76,7 +76,7 @@ build:
     key: build-cache
     paths:
       - .cargo/
-      - target/    
+      - target/
 
 test:
   stage: test
@@ -88,6 +88,4 @@ test:
     key: test-cache
     paths:
       - .cargo/
-      - target/    
-
-    
+      - target/
