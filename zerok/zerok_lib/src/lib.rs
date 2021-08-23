@@ -364,11 +364,12 @@ impl ValidatorState {
         Ok((txns, null_pfs))
     }
 
-    pub fn validate_and_apply(
+    pub fn validate_and_apply_by(
         &mut self,
         now: u64,
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
+        mut remember_comm: impl FnMut(RecordCommitment, u64) -> bool,
     ) -> Result<Vec<u64> /* new uids */, ValidationError> {
         let (txns, _null_pfs) = self.validate_block(now, txns, null_pfs.clone())?;
         let comm = self.commit();
@@ -396,7 +397,9 @@ impl ValidatorState {
         {
             let uid = self.next_uid;
             self.record_merkle_frontier.push(o);
-            self.record_merkle_frontier.forget(uid).expect_ok().unwrap();
+            if !remember_comm(o, uid) {
+                self.record_merkle_frontier.forget(uid).expect_ok().unwrap();
+            }
             ret.push(uid);
             self.next_uid += 1;
             assert_eq!(self.next_uid, self.record_merkle_frontier.num_leaves());
@@ -405,6 +408,15 @@ impl ValidatorState {
         self.record_merkle_root = self.record_merkle_frontier.get_root_value();
         self.prev_state = comm;
         Ok(ret)
+    }
+
+    pub fn validate_and_apply(
+        &mut self,
+        now: u64,
+        txns: Block,
+        null_pfs: Vec<Vec<SetMerkleProof>>,
+    ) -> Result<Vec<u64> /* new uids */, ValidationError> {
+        self.validate_and_apply_by(now, txns, null_pfs, |_, _| false)
     }
 }
 
@@ -1153,7 +1165,7 @@ pub trait Wallet<'a> {
         max_outputs: usize,
         key_pair: UserKeyPair,
         initial_grant: Vec<(RecordOpening, u64)>,
-        record_merkle_tree: MerkleTree<RecordCommitment>,
+        record_merkle_tree: &MerkleTree<RecordCommitment>,
         nullifiers: SetMerkleTree,
         validator: ValidatorState,
     ) -> Self;
@@ -1180,6 +1192,112 @@ impl OwnedRecord {
     fn on_hold(&self, now: u64) -> bool {
         matches!(self.hold_until, Some(t) if t > now)
     }
+
+    fn hold_until(&mut self, until: u64) {
+        self.hold_until = Some(until);
+    }
+
+    fn unhold(&mut self) {
+        self.hold_until = None;
+    }
+}
+
+pub struct RecordDatabase {
+    owned_records: HashMap<u64, OwnedRecord>,
+    // record (size, uid) indexed by asset type, for easy allocation as transfer inputs. The records
+    // for each asset are ordered by increasing size, which makes it easy to implement a worst-fit
+    // allocator that minimizes fragmentation.
+    asset_records: HashMap<AssetCode, BTreeSet<(u64, u64)>>,
+    // record uids indexed by nullifier, for easy removal when confirmed as transfer inputs
+    nullifier_records: HashMap<Nullifier, u64>,
+}
+
+impl RecordDatabase {
+    fn new() -> Self {
+        Self {
+            owned_records: HashMap::new(),
+            asset_records: HashMap::new(),
+            nullifier_records: HashMap::new(),
+        }
+    }
+
+    fn spendable_records<'a>(
+        &'a self,
+        asset: &AssetCode,
+        now: u64,
+    ) -> impl Iterator<Item = &'a OwnedRecord> {
+        self.asset_records
+            .get(asset)
+            .into_iter()
+            .flatten()
+            .rev()
+            .filter_map(move |(_, uid)| {
+                let record = &self.owned_records[uid];
+                if record.ro.amount == 0 || record.on_hold(now) {
+                    // Skip useless dummy records and records that are on hold
+                    None
+                } else {
+                    Some(record)
+                }
+            })
+    }
+
+    fn spendable_record_with_amount(
+        &self,
+        asset: &AssetCode,
+        amount: u64,
+        now: u64,
+    ) -> Option<&OwnedRecord> {
+        let unspent_records = self.asset_records.get(asset)?;
+        let exact_matches = unspent_records.range((amount, 0)..(amount + 1, 0));
+        for (match_amount, uid) in exact_matches {
+            assert_eq!(*match_amount, amount);
+            let record = &self.owned_records[uid];
+            assert_eq!(record.ro.amount, amount);
+            if record.on_hold(now) {
+                continue;
+            }
+            return Some(record);
+        }
+
+        None
+    }
+
+    fn record_with_nullifier_mut(&mut self, nullifier: &Nullifier) -> Option<&mut OwnedRecord> {
+        let uid = self.nullifier_records.get(nullifier)?;
+        self.owned_records.get_mut(uid)
+    }
+
+    fn insert(&mut self, ro: RecordOpening, uid: u64, key_pair: &UserKeyPair) {
+        let nullifier = key_pair.nullify(
+            ro.asset_def.policy_ref().freezer_pub_key(),
+            uid,
+            &RecordCommitment::from(&ro),
+        );
+        self.asset_records
+            .entry(ro.asset_def.code)
+            .or_insert_with(BTreeSet::new)
+            .insert((ro.amount, uid));
+        self.nullifier_records.insert(nullifier, uid);
+        self.owned_records.insert(
+            uid,
+            OwnedRecord {
+                ro,
+                uid,
+                hold_until: None,
+            },
+        );
+    }
+
+    fn remove_by_nullifier(&mut self, nullifier: Nullifier) {
+        if let Some(uid) = self.nullifier_records.remove(&nullifier) {
+            let record = self.owned_records.remove(&uid).unwrap();
+            self.asset_records
+                .get_mut(&record.ro.asset_def.code)
+                .unwrap()
+                .remove(&(record.ro.amount, uid));
+        }
+    }
 }
 
 pub struct UserWallet<'a> {
@@ -1195,16 +1313,8 @@ pub struct UserWallet<'a> {
     max_inputs: usize,
     // maximum number of output records permitted by `proving_key`
     max_outputs: usize,
-    // all records we own, indexed by uid
-    owned_records: HashMap<u64, OwnedRecord>,
-    // record (size, uid) indexed by asset type, for easy allocation as transfer inputs. The records
-    // for each asset are ordered by increasing size, which makes it easy to implement a worst-fit
-    // allocator that minimizes fragmentation.
-    asset_records: HashMap<AssetCode, BTreeSet<(u64, u64)>>,
-    // record uids indexed by nullifier, for easy removal when confirmed as transfer inputs
-    nullifier_records: HashMap<Nullifier, u64>,
-    // sparse record Merkle tree mirrored from validators
-    record_merkle_tree: MerkleTree<RecordCommitment>,
+    // all records we own
+    owned_records: RecordDatabase,
     // sparse nullifier set Merkle tree mirrored from validators
     nullifiers: SetMerkleTree,
 }
@@ -1244,7 +1354,7 @@ impl<'a> UserWallet<'a> {
         let mut inputs = vec![];
         for (ro, uid) in input_records {
             let acc_member_witness =
-                AccMemberWitness::lookup_from_tree(&self.record_merkle_tree, uid)
+                AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
                     .expect_ok()
                     .unwrap()
                     .1;
@@ -1320,7 +1430,7 @@ impl<'a> UserWallet<'a> {
         // prepare inputs
         let mut inputs = vec![];
         for (ro, uid) in input_records.into_iter() {
-            let witness = AccMemberWitness::lookup_from_tree(&self.record_merkle_tree, uid)
+            let witness = AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
                 .expect_ok()
                 .unwrap()
                 .1;
@@ -1386,7 +1496,7 @@ impl<'a> UserWallet<'a> {
         let fee_input = FeeInput {
             ro: fee_ro,
             acc_member_witness: AccMemberWitness::lookup_from_tree(
-                &self.record_merkle_tree,
+                self.record_merkle_tree(),
                 fee_uid,
             )
             .expect_ok()
@@ -1417,33 +1527,20 @@ impl<'a> UserWallet<'a> {
         amount: u64,
         max_records: Option<isize>,
     ) -> Result<(Vec<(RecordOpening, u64)>, u64), Box<dyn std::error::Error>> {
-        let unspent_records = self.asset_records.get(asset).ok_or_else(|| {
-            Box::new(WalletError::InsufficientBalance {
-                asset: *asset,
-                required: amount,
-                actual: 0,
-            })
-        })?;
-
         let max_records = match max_records {
             Some(bound) if bound > 0 => bound as usize,
             Some(bound) => (self.max_inputs as isize + bound) as usize,
             None => self.max_inputs,
         };
-
         let now = self.validator.prev_commit_time;
 
         // If we have a record with the exact size required, use it to avoid fragmenting big records
         // into smaller change records.
-        let exact_matches = unspent_records.range((amount, 0)..(amount + 1, 0));
-        for (match_amount, uid) in exact_matches {
-            assert_eq!(*match_amount, amount);
-            let record = &self.owned_records[uid];
-            assert_eq!(record.ro.amount, amount);
-            if record.on_hold(now) {
-                continue;
-            }
-            return Ok((vec![(record.ro.clone(), *uid)], 0));
+        if let Some(record) = self
+            .owned_records
+            .spendable_record_with_amount(asset, amount, now)
+        {
+            return Ok((vec![(record.ro.clone(), record.uid)], 0));
         }
 
         // Take the biggest records we have until they exceed the required amount, as a heuristic to
@@ -1456,14 +1553,7 @@ impl<'a> UserWallet<'a> {
         // with something more sophisticated later.
         let mut result = vec![];
         let mut current_amount = 0u64;
-        let mut all_records = unspent_records.range((0, 0)..(u64::MAX, u64::MAX));
-        while let Some((match_amount, uid)) = all_records.next_back() {
-            let record = &self.owned_records[uid];
-            assert_eq!(record.ro.amount, *match_amount);
-            if record.ro.amount == 0 || record.on_hold(now) {
-                // Skip useless dummy records and records that are on hold
-                continue;
-            }
+        for record in self.owned_records.spendable_records(asset, now) {
             if result.len() >= max_records {
                 // Too much fragmentation: we can't make the required amount using few enough
                 // records. This should be less likely once we implement a better allocation
@@ -1503,9 +1593,9 @@ impl<'a> UserWallet<'a> {
                 // hold the record corresponding to this nullifier until the transaction is
                 // committed, rejected, or expired.
                 self.owned_records
-                    .get_mut(&self.nullifier_records[n])
+                    .record_with_nullifier_mut(n)
                     .unwrap()
-                    .hold_until = Some(now + RECORD_HOLD_TIME);
+                    .hold_until(now + RECORD_HOLD_TIME);
                 self.nullifiers.contains(*n).unwrap().1
             })
             .collect();
@@ -1525,38 +1615,8 @@ impl<'a> UserWallet<'a> {
             .map(|(ros, _change)| ros.into_iter().next().unwrap())
     }
 
-    fn add_record_opening(&mut self, ro: RecordOpening, uid: u64) {
-        self.asset_records
-            .entry(ro.asset_def.code)
-            .or_insert_with(BTreeSet::new)
-            .insert((ro.amount, uid));
-        self.nullifier_records.insert(self.nullify(&ro, uid), uid);
-        self.owned_records.insert(
-            uid,
-            OwnedRecord {
-                ro,
-                uid,
-                hold_until: None,
-            },
-        );
-    }
-
-    fn mark_spent_if_owned(&mut self, nullifier: Nullifier) {
-        if let Some(uid) = self.nullifier_records.remove(&nullifier) {
-            let record = self.owned_records.remove(&uid).unwrap();
-            self.asset_records
-                .get_mut(&record.ro.asset_def.code)
-                .unwrap()
-                .remove(&(record.ro.amount, uid));
-        }
-    }
-
-    fn nullify(&self, record: &RecordOpening, uid: u64) -> Nullifier {
-        self.key_pair.nullify(
-            record.asset_def.policy_ref().freezer_pub_key(),
-            uid,
-            &RecordCommitment::from(record),
-        )
+    fn record_merkle_tree(&self) -> &MerkleTree<RecordCommitment> {
+        &self.validator.record_merkle_frontier
     }
 }
 
@@ -1569,20 +1629,18 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
         max_outputs: usize,
         key_pair: UserKeyPair,
         initial_grant: Vec<(RecordOpening, u64)>,
-        mut record_merkle_tree: MerkleTree<RecordCommitment>,
+        record_merkle_tree: &MerkleTree<RecordCommitment>,
         nullifiers: SetMerkleTree,
-        validator: ValidatorState,
+        mut validator: ValidatorState,
     ) -> Self {
-        // Forget everything from record_merkle_tree, and then remember only the things we care about
-        let mut proofs = HashMap::new();
-        for i in 0..record_merkle_tree.num_leaves() {
-            let (comm, proof) = record_merkle_tree.forget(i).expect_ok().unwrap();
-            proofs.insert(comm, proof);
-        }
+        // Have the validator remember inclusion proofs for the record commitments we own.
         for (ro, uid) in initial_grant.iter() {
             let comm = RecordCommitment::from(ro);
-            let proof = &proofs[&comm];
-            record_merkle_tree.remember(*uid, comm, proof).unwrap();
+            let proof = record_merkle_tree.get_leaf(*uid).expect_ok().unwrap().1;
+            validator
+                .record_merkle_frontier
+                .remember(*uid, comm, &proof)
+                .unwrap();
         }
 
         let mut wallet = UserWallet {
@@ -1592,15 +1650,12 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
             proving_key: proving_key.xfr,
             max_inputs,
             max_outputs,
-            owned_records: HashMap::new(),
-            asset_records: HashMap::new(),
-            nullifier_records: HashMap::new(),
-            record_merkle_tree,
+            owned_records: RecordDatabase::new(),
             nullifiers,
         };
 
         for (ro, uid) in initial_grant {
-            wallet.add_record_opening(ro, uid)
+            wallet.owned_records.insert(ro, uid, &wallet.key_pair)
         }
 
         wallet
@@ -1611,78 +1666,64 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
     }
 
     fn balance(&self, asset: &AssetCode) -> u64 {
-        let now = self.validator.prev_commit_time;
-        self.asset_records
-            .get(asset)
-            .into_iter()
-            .flatten()
-            .map(|(amount, uid)| {
-                let record = &self.owned_records[uid];
-                assert_eq!(*amount, record.ro.amount);
-                if record.on_hold(now) {
-                    0
-                } else {
-                    *amount
-                }
-            })
+        self.owned_records
+            .spendable_records(asset, self.validator.prev_commit_time)
+            .map(|record| record.ro.amount)
             .sum()
     }
 
     fn handle_event(&mut self, event: LedgerEvent) -> Result<(), Box<dyn std::error::Error>> {
         match event {
             LedgerEvent::Commit(block, receiver_memos) => {
+                let mut receiver_memos = receiver_memos.into_iter().flatten();
+                let key_pair = &self.key_pair;
+                let owned_records = &mut self.owned_records;
+                let handle_record = |comm, uid| {
+                    let memo = receiver_memos.next().unwrap();
+                    match memo.decrypt(key_pair, &comm, &[]) {
+                        Ok(record_opening) => {
+                            match record_opening.freeze_flag {
+                                FreezeFlag::Unfrozen => {
+                                    // If this record is for us (i.e. its corresponding memo
+                                    // decrypts under our key) and it is unfrozen, then add it to
+                                    // our owned records.
+                                    owned_records.insert(record_opening, uid, key_pair);
+                                    // Tell the validator to remember it in the Merkle tree.
+                                    true
+                                }
+                                FreezeFlag::Frozen => {
+                                    // We are the owner of this record, but it is frozen. We
+                                    // will never be able to spend this record; we need to wait
+                                    // for the freezer to create a new, unfrozen version. So we
+                                    // can safely forget this commitment.
+                                    false
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // Record is for somebody else, forget it.
+                            false
+                        }
+                    }
+                };
+
                 // Don't trust the network connection that provided us this event; validate it
                 // against our local mirror of the ledger and bail out if it is invalid.
-                if let Err(val_err) = self.validator.validate_and_apply(
+                if let Err(val_err) = self.validator.validate_and_apply_by(
                     self.validator.prev_commit_time + 1,
                     block.block.clone(),
                     block.proofs,
+                    handle_record,
                 ) {
                     return Err(Box::new(WalletError::InvalidBlock { val_err }));
                 }
 
-                for (txn, receiver_memos) in block.block.0.iter().zip(receiver_memos) {
-                    let output_commitments = match txn {
-                        TransactionNote::Transfer(xfr) => xfr.output_commitments.clone(),
-                        TransactionNote::Mint(mint) => vec![mint.chg_comm, mint.mint_comm],
-                        TransactionNote::Freeze(freeze) => freeze.output_commitments.clone(),
-                    };
-                    assert_eq!(output_commitments.len(), receiver_memos.len());
-                    for (record_commitment, memo) in
-                        output_commitments.iter().zip(receiver_memos.iter())
-                    {
-                        let uid = self.record_merkle_tree.num_leaves();
-                        self.record_merkle_tree.push(*record_commitment);
-
-                        match memo.decrypt(&self.key_pair, record_commitment, &[]) {
-                            Ok(record_opening) => {
-                                // If this record is for us (i.e. its corresponding memo decrypts
-                                // under our key) and it is unfrozen, then add it to our owned
-                                // records.
-                                match record_opening.freeze_flag {
-                                    FreezeFlag::Unfrozen => {
-                                        self.add_record_opening(record_opening, uid);
-                                    }
-                                    FreezeFlag::Frozen => {
-                                        // We are the owner of this record, but it is frozen. We
-                                        // will never be able to spend this record; we need to wait
-                                        // for the freezer to create a new, unfrozen version. So we
-                                        // can safely forget this commitment.
-                                        self.record_merkle_tree.forget(uid);
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                // Record is for somebody else, prune it.
-                                self.record_merkle_tree.forget(uid);
-                            }
-                        }
-                    }
-
+                // Add newly published nullifiers to our local nullifiers set.
+                for txn in block.block.0.iter() {
                     for nullifier in txn.nullifiers().iter() {
                         self.nullifiers.insert(*nullifier);
                         // TODO prune nullifiers that we don't need for our non-inclusion proofs
-                        self.mark_spent_if_owned(*nullifier);
+                        self.owned_records.remove_by_nullifier(*nullifier);
                     }
                 }
             }
@@ -1691,8 +1732,10 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
                 // Remove the hold on input nullifiers we own.
                 for txn in block.block.0 {
                     for nullifier in txn.nullifiers().iter() {
-                        if let Some(uid) = self.nullifier_records.get(nullifier) {
-                            self.owned_records.get_mut(uid).unwrap().hold_until = None;
+                        if let Some(record) =
+                            self.owned_records.record_with_nullifier_mut(nullifier)
+                        {
+                            record.unhold();
                         }
                     }
                 }
@@ -1753,7 +1796,7 @@ impl<'a> IssuerWallet<'a> {
     > {
         let (fee_ro, uid) = self.wallet.find_record_for_fee(fee)?;
         let acc_member_witness =
-            AccMemberWitness::lookup_from_tree(&self.wallet.record_merkle_tree, uid)
+            AccMemberWitness::lookup_from_tree(self.wallet.record_merkle_tree(), uid)
                 .expect_ok()
                 .unwrap()
                 .1;
@@ -1798,7 +1841,7 @@ impl<'a> Wallet<'a> for IssuerWallet<'a> {
         max_outputs: usize,
         key_pair: UserKeyPair,
         initial_grant: Vec<(RecordOpening, u64)>,
-        record_merkle_tree: MerkleTree<RecordCommitment>,
+        record_merkle_tree: &MerkleTree<RecordCommitment>,
         nullifiers: SetMerkleTree,
         validator: ValidatorState,
     ) -> Self {
@@ -1942,7 +1985,7 @@ pub mod test_helpers {
                     num_outputs,
                     key,
                     grants,
-                    record_merkle_tree.clone(),
+                    &record_merkle_tree,
                     nullifiers.clone(),
                     validator.clone(),
                 )
