@@ -22,7 +22,7 @@ strum_macros = "0.20.1"
 toml = "0.4.2"
 tracing = "0.1"
 tracing-subscriber = "0.2"
-phaselock = { version = "0.0.0", registry = "translucence" }
+phaselock = { version = "0.0.1", registry = "translucence" }
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
 
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace

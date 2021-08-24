@@ -1,10 +1,11 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
-use phaselock::message::Message;
 use phaselock::{
     event::{Event, EventType},
     handle::PhaseLockHandle,
+    message::Message,
     networking::w_network::WNetwork,
+    traits::storage::memory_storage::MemoryStorage,
     PhaseLock, PhaseLockConfig, PubKey,
 };
 use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
@@ -125,21 +126,24 @@ async fn init_state_and_phaselock(
 
     let config = PhaseLockConfig {
         total_nodes: nodes as u32,
-        thershold: threshold as u32,
+        threshold: threshold as u32,
         max_transactions: 100,
         known_nodes,
         next_view_timeout: 10000,
         timeout_ratio: (11, 10),
+        round_start_delay: 1,
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
     let (_, phaselock) = PhaseLock::init(
         genesis,
-        sks,
+        sks.public_keys(),
+        sks.secret_key_share(node_id),
         node_id,
         config,
         state.validator.clone(),
         networking,
+        MemoryStorage::default(),
     )
     .await;
     debug!("phaselock launched");
