@@ -243,6 +243,24 @@ mod block_comm {
     }
 }
 
+mod record_merkle_hist_comm {
+    use super::*;
+    use blake2::crypto_mac::Mac;
+    use generic_array::GenericArray;
+    pub type RecordMerkleHistCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
+
+    pub fn record_merkle_hist_commit(
+        p: &VecDeque<merkle_tree::NodeValue>,
+    ) -> RecordMerkleHistCommitment {
+        let mut hasher = blake2::Blake2b::with_params(&[], &[], "Hist Comm".as_bytes());
+        hasher.update(&p.len().to_le_bytes());
+        for hash in p {
+            hasher.update(&CanonicalBytes::from(*hash).0);
+        }
+        hasher.finalize().into_bytes()
+    }
+}
+
 pub mod state_comm {
     use super::*;
     use blake2::crypto_mac::Mac;
@@ -258,6 +276,7 @@ pub mod state_comm {
         pub prev_state: state_comm::LedgerStateCommitment,
         pub verif_crs: verif_crs_comm::VerifCRSCommitment,
         pub record_merkle_root: merkle_tree::NodeValue,
+        pub past_record_merkle_roots: record_merkle_hist_comm::RecordMerkleHistCommitment,
         pub nullifiers: set_hash::Hash,
         pub next_uid: u64,
         pub prev_block: block_comm::BlockCommitment,
@@ -274,6 +293,8 @@ pub mod state_comm {
             hasher.update(&self.verif_crs);
             hasher.update(&"record_merkle_root".as_bytes());
             hasher.update(&CanonicalBytes::from(self.record_merkle_root).0);
+            hasher.update(&"past_record_merkle_roots".as_bytes());
+            hasher.update(&self.past_record_merkle_roots);
             hasher.update(&"nullifiers".as_bytes());
             hasher.update(&self.nullifiers);
             hasher.update(&"next_uid".as_bytes());
@@ -292,9 +313,9 @@ pub struct ValidatorState {
     pub prev_state: state_comm::LedgerStateCommitment,
     pub verif_crs: VerifierKey,
     // The current record Merkle root hash
-    record_merkle_root: merkle_tree::NodeValue,
+    pub record_merkle_root: merkle_tree::NodeValue,
     // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
-    past_record_merkle_roots: VecDeque<merkle_tree::NodeValue>,
+    pub past_record_merkle_roots: VecDeque<merkle_tree::NodeValue>,
     pub record_merkle_frontier: merkle_tree::MerkleTree<RecordCommitment>,
     pub nullifiers_root: set_hash::Hash,
     pub next_uid: u64,
@@ -334,21 +355,32 @@ impl ValidatorState {
             prev_commit_time: self.prev_commit_time,
             prev_state: self.prev_state,
             verif_crs: verif_crs_comm::verif_crs_commit(&self.verif_crs),
-            // We only need to include the most recent root hash in the commitment. The previous
-            // hashes are just extra metadata for optimization purposes, and if the validator is
-            // correct, the entirety of previous states should be included in the commitment for the
-            // current state anyway.
-            record_merkle_root: self.record_merkle_root(),
+            record_merkle_root: self.record_merkle_root,
+            // We need to include all the cached past record Merkle roots in the state commitment,
+            // even though they are not part of the current ledger state, because they affect
+            // validation: two validators with different caches will be able to validate different
+            // blocks.
+            //
+            // Note that this requires correct validators to agree on the number of cached past root
+            // hashes, since all the cached hashes are included in the state commitment and are thus
+            // part of the observable state of the ledger. This prevents heavyweight validators from
+            // caching extra past roots and thereby making it easier to verify transactions, but
+            // because root hashes are small, it should be possible to find a value of
+            // RECORD_ROOT_HISTORY_SIZE which strikes a balance between small space requirements (so
+            // that lightweight validators can keep up with the cache) and covering enough of
+            // history to make it easy for clients. If this is not possible, lightweight validators
+            // could also store a sparse history, and when they encounter a root hash that they do
+            // not have cached, they could ask a full validator for a proof that that hash was once
+            // the root of the record Merkle tree.
+            past_record_merkle_roots: record_merkle_hist_comm::record_merkle_hist_commit(
+                &self.past_record_merkle_roots,
+            ),
             nullifiers: self.nullifiers_root,
             next_uid: self.next_uid,
             prev_block: block_comm::block_commit(&self.prev_block),
         };
         // dbg!(&inputs);
         inputs.commit()
-    }
-
-    fn record_merkle_root(&self) -> merkle_tree::NodeValue {
-        self.record_merkle_root
     }
 
     pub fn validate_block(
@@ -2080,7 +2112,7 @@ pub mod test_helpers {
         println!(
             "Validator has new state {:x?}, Merkle root {:?}: {}s",
             comm,
-            validator.record_merkle_root(),
+            validator.record_merkle_root,
             now.elapsed().as_secs_f32()
         );
         *now = Instant::now();
@@ -2473,6 +2505,41 @@ mod tests {
     }
 
     #[test]
+    fn test_record_history_commit_hash() {
+        // Check that ValidatorStates with different record histories have different commits.
+        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
+        println!("generating universal parameters");
+
+        let univ = jf_txn::proof::universal_setup(
+            compute_universal_param_size(NoteType::Transfer, 2, 2, MERKLE_HEIGHT).unwrap(),
+            &mut prng,
+        )
+        .unwrap();
+        let (_, mint, _) = jf_txn::proof::mint::preprocess(&univ, MERKLE_HEIGHT).unwrap();
+        let (_, xfr, _) = jf_txn::proof::transfer::preprocess(&univ, 1, 1, MERKLE_HEIGHT).unwrap();
+        let (_, freeze, _) = jf_txn::proof::freeze::preprocess(&univ, 2, MERKLE_HEIGHT).unwrap();
+        println!("CRS set up");
+
+        let verif_crs = VerifierKey {
+            mint: TransactionVerifyingKey::Mint(mint),
+            xfr: TransactionVerifyingKey::Transfer(xfr),
+            freeze: TransactionVerifyingKey::Freeze(freeze),
+        };
+        let mut v1 = ValidatorState::new(verif_crs, MerkleTree::new(MERKLE_HEIGHT).unwrap());
+        let mut v2 = v1.clone();
+
+        // Test validators with different history lengths.
+        v1.past_record_merkle_roots
+            .push_front(merkle_tree::NodeValue::from(0));
+        assert_ne!(v1.commit(), v2.commit());
+
+        // Test validators with the same length, but different histories.
+        v2.past_record_merkle_roots
+            .push_front(merkle_tree::NodeValue::from(1));
+        assert_ne!(v1.commit(), v2.commit());
+    }
+
+    #[test]
     #[allow(unused_variables)]
     fn test_2user() {
         let now = Instant::now();
@@ -2580,7 +2647,7 @@ mod tests {
         let now = Instant::now();
 
         MerkleTree::check_proof(
-            validator.record_merkle_root(),
+            validator.record_merkle_root,
             0,
             alice_rec_elem,
             &alice_rec_path,
