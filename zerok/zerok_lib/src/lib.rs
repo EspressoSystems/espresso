@@ -291,7 +291,10 @@ pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: state_comm::LedgerStateCommitment,
     pub verif_crs: VerifierKey,
-    pub record_merkle_roots: VecDeque<merkle_tree::NodeValue>,
+    // The current record Merkle root hash
+    record_merkle_root: merkle_tree::NodeValue,
+    // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
+    past_record_merkle_roots: VecDeque<merkle_tree::NodeValue>,
     pub record_merkle_frontier: merkle_tree::MerkleTree<RecordCommitment>,
     pub nullifiers_root: set_hash::Hash,
     pub next_uid: u64,
@@ -310,9 +313,6 @@ impl ValidatorState {
         verif_crs: VerifierKey,
         record_merkle_frontier: MerkleTree<RecordCommitment>,
     ) -> Self {
-        let mut record_merkle_roots = VecDeque::with_capacity(Self::RECORD_ROOT_HISTORY_SIZE);
-        record_merkle_roots.push_front(record_merkle_frontier.get_root_value());
-
         let nullifiers: SetMerkleTree = Default::default();
         let next_uid = record_merkle_frontier.num_leaves();
 
@@ -320,7 +320,8 @@ impl ValidatorState {
             prev_commit_time: 0u64,
             prev_state: *state_comm::INITIAL_PREV_COMM,
             verif_crs,
-            record_merkle_roots,
+            record_merkle_root: record_merkle_frontier.get_root_value(),
+            past_record_merkle_roots: VecDeque::with_capacity(Self::RECORD_ROOT_HISTORY_SIZE),
             record_merkle_frontier,
             nullifiers_root: nullifiers.hash(),
             next_uid,
@@ -347,7 +348,7 @@ impl ValidatorState {
     }
 
     fn record_merkle_root(&self) -> merkle_tree::NodeValue {
-        *self.record_merkle_roots.front().unwrap()
+        self.record_merkle_root
     }
 
     pub fn validate_block(
@@ -393,7 +394,9 @@ impl ValidatorState {
                     .map(|note| {
                         // Only validate transactions if we can confirm that the record Merkle root
                         // they were generated with is a valid previous or current ledger state.
-                        if self.record_merkle_roots.contains(&note.merkle_root()) {
+                        if self.record_merkle_root == note.merkle_root()
+                            || self.past_record_merkle_roots.contains(&note.merkle_root())
+                        {
                             Ok(note.merkle_root())
                         } else {
                             Err(BadMerkleRoot {})
@@ -447,11 +450,12 @@ impl ValidatorState {
             assert_eq!(self.next_uid, self.record_merkle_frontier.num_leaves());
         }
 
-        if self.record_merkle_roots.len() >= Self::RECORD_ROOT_HISTORY_SIZE {
-            self.record_merkle_roots.pop_back();
+        if self.past_record_merkle_roots.len() >= Self::RECORD_ROOT_HISTORY_SIZE {
+            self.past_record_merkle_roots.pop_back();
         }
-        self.record_merkle_roots
-            .push_front(self.record_merkle_frontier.get_root_value());
+        self.past_record_merkle_roots
+            .push_front(self.record_merkle_root);
+        self.record_merkle_root = self.record_merkle_frontier.get_root_value();
         self.prev_state = comm;
         Ok(ret)
     }
