@@ -170,25 +170,40 @@ impl BlockContents<64> for ElaboratedBlock {
     }
 }
 
+#[derive(Debug, Snafu)]
+#[snafu(visibility = "pub")]
+pub enum KeySetError<Size> {
+    DuplicateKeys { size: Size },
+    NoKeys,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeySet<Size: Ord, K> {
     keys: BTreeMap<Size, K>,
 }
 
-impl<Size: Ord + Copy, K> KeySet<Size, K> {
-    pub fn new(keys: impl Iterator<Item = (Size, K)>) -> Self {
+impl<Size: 'static + Ord + Copy + Debug, K> KeySet<Size, K> {
+    /// Create a new KeySet with the keys in an iterator. `keys` must contain at least one key, and
+    /// it must not contain two keys with the same size.
+    pub fn new(keys: impl Iterator<Item = (Size, K)>) -> Result<Self, Box<dyn std::error::Error>> {
         let mut map = BTreeMap::new();
         for (size, key) in keys {
-            assert!(
-                !map.contains_key(&size),
-                "cannot create a KeySet with two keys of the same size"
-            );
+            if map.contains_key(&size) {
+                return Err(Box::new(KeySetError::DuplicateKeys { size }));
+            }
             map.insert(size, key);
         }
-        assert!(map.len() > 0);
-        Self { keys: map }
+        if map.is_empty() {
+            return Err(Box::new(KeySetError::NoKeys::<Size>));
+        }
+        Ok(Self { keys: map })
     }
 
+    /// Get the largest size supported by this KeySet.
+    ///
+    /// Panics if there are no keys in the KeySet. Since new() requires at least one key, this can
+    /// only happen if the KeySet is corrupt (for example, it was deserialized from a corrupted
+    /// file).
     pub fn max_size(&self) -> Size {
         *self.keys.iter().next_back().unwrap().0
     }
@@ -197,14 +212,14 @@ impl<Size: Ord + Copy, K> KeySet<Size, K> {
         self.keys.get(&size)
     }
 
-    // Return the smallest key whose size is at least `size`. If no such key is available, the error
-    // contains the largest size that could have been supported.
+    /// Return the smallest key whose size is at least `size`. If no such key is available, the
+    /// error contains the largest size that could have been supported.
     pub fn best_fit_key(&self, size: Size) -> Result<(Size, &K), Size> {
         self.keys
             .range((Included(size), Unbounded))
             .next()
             .map(|(size, key)| (*size, key))
-            .ok_or(self.max_size())
+            .ok_or_else(|| self.max_size())
     }
 }
 
@@ -617,10 +632,10 @@ impl MultiXfrTestState {
                     ((3, 3), TransactionVerifyingKey::Transfer(xfr_verif_key_33)),
                 ]
                 .into_iter(),
-            ),
+            )?,
             freeze: KeySet::new(
                 vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))].into_iter(),
-            ),
+            )?,
         };
 
         Self::update_timer(&mut timer, |t| println!("Verify Keys: {}s", t));
@@ -632,8 +647,8 @@ impl MultiXfrTestState {
                 mint: mint_prove_key,
                 xfr: KeySet::new(
                     vec![((2, 2), xfr_prove_key_22), ((3, 3), xfr_prove_key_33)].into_iter(),
-                ),
-                freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter()),
+                )?,
+                freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter())?,
             },
             verif_key: verif_key.clone(),
             native_token,
@@ -2248,11 +2263,12 @@ pub mod test_helpers {
             prev_commit_time: 0,
             prev_state: *state_comm::INITIAL_PREV_COMM,
             verif_crs: VerifierKey {
-                xfr: KeySet::new(xfr_verif_keys.into_iter()),
+                xfr: KeySet::new(xfr_verif_keys.into_iter()).unwrap(),
                 mint: TransactionVerifyingKey::Mint(mint_verif_key),
                 freeze: KeySet::new(
                     vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))].into_iter(),
-                ),
+                )
+                .unwrap(),
             },
             record_merkle_root: record_merkle_tree.get_root_value(),
             record_merkle_frontier: record_merkle_tree.clone(),
@@ -2272,9 +2288,9 @@ pub mod test_helpers {
         // Create a wallet for each user based on the validator and the per-user information
         // computed above.
         let prover_key = ProverKey {
-            xfr: KeySet::new(xfr_prove_keys.into_iter()),
+            xfr: KeySet::new(xfr_prove_keys.into_iter()).unwrap(),
             mint: mint_prove_key,
-            freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter()),
+            freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter()).unwrap(),
         };
         let wallets = users
             .into_iter()
@@ -2845,7 +2861,8 @@ mod tests {
                                 _ => panic!("invalid xfr size"),
                             }),
                         )
-                    })),
+                    }))
+                    .unwrap(),
                     freeze: KeySet::new(freezes.iter().map(|size| {
                         (
                             *size,
@@ -2855,7 +2872,8 @@ mod tests {
                                 _ => panic!("invalid freeze size"),
                             }),
                         )
-                    })),
+                    }))
+                    .unwrap(),
                 },
                 record_merkle_root: record_merkle_tree.get_root_value(),
                 record_merkle_frontier: record_merkle_tree,
@@ -2916,18 +2934,20 @@ mod tests {
 
         let prove_key = ProverKey {
             mint: mint_prove_key,
-            xfr: KeySet::new(vec![((1, 1), xfr_prove_key)].into_iter()),
-            freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter()),
+            xfr: KeySet::new(vec![((1, 1), xfr_prove_key)].into_iter()).unwrap(),
+            freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter()).unwrap(),
         };
 
         let verif_key = VerifierKey {
             mint: TransactionVerifyingKey::Mint(mint_verif_key),
             xfr: KeySet::new(
                 vec![((1, 1), TransactionVerifyingKey::Transfer(xfr_verif_key))].into_iter(),
-            ),
+            )
+            .unwrap(),
             freeze: KeySet::new(
                 vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))].into_iter(),
-            ),
+            )
+            .unwrap(),
         };
 
         println!("CRS set up: {}s", now.elapsed().as_secs_f32());
