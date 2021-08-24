@@ -1,5 +1,6 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
+#![deny(warnings)]
 //! This program demonstrates use of Hot Stuff in a trivial application.
 //!
 //! TODO - Add transaction validity checking.
@@ -56,7 +57,7 @@ pub async fn try_phaselock(
     WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
 ) {
     let genesis = ElaboratedBlock::default();
-    let pub_key_set = keys.public_keys();
+    let _pub_key_set = keys.public_keys();
     let known_nodes = (0..total as u64)
         .map(|i| PubKey::from_secret_key_set_escape_hatch(keys, i))
         .collect();
@@ -72,7 +73,7 @@ pub async fn try_phaselock(
     let (networking, port) = try_network(pub_key.clone()).await;
     let phaselock = PhaseLock::new(
         genesis,
-        &keys,
+        keys,
         node_number as u64,
         config,
         initial_state,
@@ -85,7 +86,7 @@ const VALIDATOR_COUNT: usize = 5;
 const TEST_SEED: [u8; 32] = [0x7au8; 32];
 const TRANSACTION_COUNT: u64 = 50;
 
-type TransactionSpecification = u64;
+// type TransactionSpecification = u64;
 type MultiXfrValidator = (
     PhaseLock<ElaboratedBlock, 64>,
     PubKey,
