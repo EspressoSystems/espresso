@@ -279,7 +279,7 @@ async fn main() {
                     ix,
                     TRANSACTION_COUNT as usize,
                     owner_memos,
-                    vec![k1_ix, k2_ix],
+                    vec![k1_ix, k1_ix, k2_ix],
                 )
                 .unwrap();
             state
