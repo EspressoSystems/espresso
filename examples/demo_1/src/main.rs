@@ -12,6 +12,7 @@ use tracing::{debug, error, info};
 
 use phaselock::message::Message;
 use phaselock::networking::w_network::WNetwork;
+use phaselock::traits::storage::memory_storage::MemoryStorage;
 use phaselock::{PhaseLock, PhaseLockConfig, PubKey};
 use rand::Rng;
 use serde::{de::DeserializeOwned, Serialize};
@@ -63,21 +64,25 @@ pub async fn try_phaselock(
     let pub_key = PubKey::from_secret_key_set_escape_hatch(keys, node_number as u64);
     let config = PhaseLockConfig {
         total_nodes: total as u32,
-        thershold: threshold as u32,
+        threshold: threshold as u32,
         max_transactions: 100,
         known_nodes,
         next_view_timeout: 40_000,
         timeout_ratio: (2, 1),
+        round_start_delay: 1,
     };
     let (networking, port) = try_network(pub_key.clone()).await;
     let phaselock = PhaseLock::new(
         genesis,
-        &keys,
+        pub_key_set,
+        keys.secret_key_share(node_number),
         node_number as u64,
         config,
         initial_state,
         networking.clone(),
-    );
+        MemoryStorage::default(),
+    )
+    .await;
     (phaselock, pub_key, port, networking)
 }
 

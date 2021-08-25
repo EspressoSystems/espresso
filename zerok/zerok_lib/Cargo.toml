@@ -13,7 +13,7 @@ jf-plonk = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev
 jf-primitives = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "3242c153cd30838e7d1c560d742250de41e36a4d"}
 jf-txn = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "3242c153cd30838e7d1c560d742250de41e36a4d"}
 jf-utils = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "3242c153cd30838e7d1c560d742250de41e36a4d"}
-phaselock = { version = "0.0.0", registry = "translucence"}
+phaselock = { version = "0.0.1", registry = "translucence"}
 ark-std = { version = "0.2.0", default-features = false }
 ark-ff = { version = "0.2.0", default-features = false }
 ark-serialize = "0.2.0"
