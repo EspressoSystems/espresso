@@ -2245,6 +2245,7 @@ dependencies = [
  "phaselock",
  "rand_xoshiro",
  "serde",
+ "serde_json",
  "structopt",
  "tagged-base64",
  "threshold_crypto",
