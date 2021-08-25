@@ -88,4 +88,38 @@ test:
       - .cargo/
       - target/
 
+test:fuzzing:
+  stage: test
+  tags:
+    - docker
+  script:
+    - cd zerok/zerok_lib; cargo fuzz run --release -s none multixfr_wallet -- -max_total_time=20m
+  cache:
+    key: fuzzing-cache
+    paths:
+      - .cargo/
+      - target/
+  only:
+    - triggers
+    - schedules
+    - web
+  allow_failure: true
+
+# Currently takes over an hour to run, we wanna fix that first.
+# test:extended:
+#   stage: test
+#   tags:
+#     - docker
+#   script:
+#     - cargo test --release --workspace -- --ignored
+#   cache:
+#     key: extended-test-cache
+#     paths:
+#       - .cargo/
+#       - target/
+#   only:
+#     - triggers
+#     - schedules
+#     - web
+#   allow_failure: true
 
