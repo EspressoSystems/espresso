@@ -7,17 +7,18 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+itertools = "0.10.1"
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
-jf-plonk = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "3242c153cd30838e7d1c560d742250de41e36a4d"}
-jf-primitives = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "3242c153cd30838e7d1c560d742250de41e36a4d"}
-jf-txn = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "3242c153cd30838e7d1c560d742250de41e36a4d"}
-jf-utils = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "3242c153cd30838e7d1c560d742250de41e36a4d"}
+jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
+jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
+jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
+jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
 phaselock = { version = "0.0.1", registry = "translucence"}
 ark-std = { version = "0.2.0", default-features = false }
 ark-ff = { version = "0.2.0", default-features = false }
 ark-serialize = "0.2.0"
-rand_chacha = "0.2.2"
+rand_chacha = "0.3.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1.0"
 serde_cbor = "*"
@@ -28,9 +29,8 @@ rayon = "*"
 generic-array = { version = "0.14.4", features = ["serde"] }
 lazy_static = "1.4.0"
 bincode = "1.3.3"
-itertools = "0.10.1"
 
 [dev-dependencies]
-quickcheck = "0.9"
-quickcheck_macros = "0.9"
+quickcheck = "1.0"
+quickcheck_macros = "1.0"
 proptest = "0.8.7"

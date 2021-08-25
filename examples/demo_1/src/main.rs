@@ -1,5 +1,6 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
+#![deny(warnings)]
 //! This program demonstrates use of Hot Stuff in a trivial application.
 //!
 //! TODO - Add transaction validity checking.
@@ -90,7 +91,7 @@ const VALIDATOR_COUNT: usize = 5;
 const TEST_SEED: [u8; 32] = [0x7au8; 32];
 const TRANSACTION_COUNT: u64 = 50;
 
-type TransactionSpecification = u64;
+// type TransactionSpecification = u64;
 type MultiXfrValidator = (
     PhaseLock<ElaboratedBlock, 64>,
     PubKey,
@@ -273,7 +274,18 @@ async fn main() {
 
         consense(i as usize, &phaselocks).await;
 
-        let (ix, (owner_memos, recv_keys), txn) = transaction;
+        let (ix, keys_and_memos, txn) = transaction;
+        let (owner_memos, kixs) = {
+            let mut owner_memos = vec![];
+            let mut kixs = vec![];
+
+            for (kix, memo) in keys_and_memos {
+                kixs.push(kix);
+                owner_memos.push(memo);
+            }
+            (owner_memos, kixs)
+        };
+
         let mut blk = ElaboratedBlock::default();
         test_state
             .try_add_transaction(
@@ -283,7 +295,7 @@ async fn main() {
                 ix,
                 TRANSACTION_COUNT as usize,
                 owner_memos,
-                recv_keys,
+                kixs,
             )
             .unwrap();
         test_state

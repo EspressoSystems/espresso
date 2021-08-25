@@ -15,9 +15,10 @@ use jf_txn::{
     keys::{UserKeyPair, UserPubKey},
     mint::MintNote,
     proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
+    sign_receiver_memos,
     structs::{
         AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, BlindFactor, FeeInput, FreezeFlag,
-        NoteType, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening,
+        NoteType, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
     txn_batch_verify,
@@ -124,9 +125,9 @@ impl BlockContents<64> for ElaboratedBlock {
         use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "ElaboratedBlock".as_bytes());
-        hasher.update(&"Block contents".as_bytes());
+        hasher.update("Block contents".as_bytes());
         hasher.update(&block_comm::block_commit(&self.block));
-        hasher.update(&"Block proofs".as_bytes());
+        hasher.update("Block proofs".as_bytes());
         hasher.update(&bincode::serialize(&self.proofs).unwrap());
         phaselock::BlockHash::<64>::from_array(
             hasher
@@ -158,9 +159,9 @@ impl BlockContents<64> for ElaboratedBlock {
         use std::convert::TryInto;
         let mut hasher =
             blake2::Blake2b::with_params(&[], &[], "ElaboratedTransaction Hash".as_bytes());
-        hasher.update(&"Txn contents".as_bytes());
+        hasher.update("Txn contents".as_bytes());
         hasher.update(&txn_comm::txn_commit(&txn.txn));
-        hasher.update(&"Txn proofs".as_bytes());
+        hasher.update("Txn proofs".as_bytes());
         hasher.update(&bincode::serialize(&txn.proofs).unwrap());
         phaselock::BlockHash::<64>::from_array(
             hasher
@@ -305,7 +306,7 @@ mod block_comm {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "Block Comm".as_bytes());
         hasher.update(&p.0.len().to_le_bytes());
         for t in p.0.iter() {
-            hasher.update(&txn_comm::txn_commit(&t));
+            hasher.update(&txn_comm::txn_commit(t));
         }
         hasher.finalize().into_bytes()
     }
@@ -353,21 +354,21 @@ pub mod state_comm {
     impl LedgerCommInputs {
         pub fn commit(&self) -> LedgerStateCommitment {
             let mut hasher = blake2::Blake2b::with_params(&[], &[], "Ledger Comm".as_bytes());
-            hasher.update(&"prev_commit_time".as_bytes());
+            hasher.update("prev_commit_time".as_bytes());
             hasher.update(&self.prev_commit_time.to_le_bytes());
-            hasher.update(&"prev_state".as_bytes());
+            hasher.update("prev_state".as_bytes());
             hasher.update(&self.prev_state);
-            hasher.update(&"verif_crs".as_bytes());
+            hasher.update("verif_crs".as_bytes());
             hasher.update(&self.verif_crs);
-            hasher.update(&"record_merkle_root".as_bytes());
+            hasher.update("record_merkle_root".as_bytes());
             hasher.update(&CanonicalBytes::from(self.record_merkle_root).0);
-            hasher.update(&"past_record_merkle_roots".as_bytes());
+            hasher.update("past_record_merkle_roots".as_bytes());
             hasher.update(&self.past_record_merkle_roots);
-            hasher.update(&"nullifiers".as_bytes());
+            hasher.update("nullifiers".as_bytes());
             hasher.update(&self.nullifiers);
-            hasher.update(&"next_uid".as_bytes());
+            hasher.update("next_uid".as_bytes());
             hasher.update(&self.next_uid.to_le_bytes());
-            hasher.update(&"prev_block".as_bytes());
+            hasher.update("prev_block".as_bytes());
             hasher.update(&self.prev_block);
 
             hasher.finalize().into_bytes()
@@ -539,8 +540,6 @@ impl ValidatorState {
         self.prev_commit_time = now;
         self.prev_block = txns.clone();
 
-        // TODO: getting this working requires getting something into the txn that allows nullifiers to be extracted.
-
         let nullifiers = txns
             .0
             .iter()
@@ -641,9 +640,9 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
     let param_bytes = bincode::serialize(&universal_param)
         .unwrap_or_else(|err| panic!("Error while serializing the universal parameter: {}", err));
     // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
-    let mut file = File::create(format!("../../zerok/zerok_lib/src/universal_param"))
+    let mut file = File::create("../../zerok/zerok_lib/src/universal_param".to_string())
         .unwrap_or_else(|err| panic!("Error while creating a universal parameter file: {}", err));
-    file.write(&param_bytes).unwrap_or_else(|err| {
+    file.write_all(&param_bytes).unwrap_or_else(|err| {
         panic!(
             "Error while writing to the universal parameter file: {}",
             err
@@ -655,7 +654,7 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
 /// it to file, and returns it.
 pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalParam {
     // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
-    let path_str = format!("../../zerok/zerok_lib/src/universal_param");
+    let path_str = "../../zerok/zerok_lib/src/universal_param".to_string();
     let path = Path::new(&path_str);
     let mut file = match File::open(&path) {
         Ok(f) => f,
@@ -816,110 +815,152 @@ impl MultiXfrTestState {
 
         let mut keys_in_block = HashSet::<usize>::new();
 
-        for (def_ix, key, amt) in std::iter::once(initial_records.0)
+        let mut to_add = std::iter::once(initial_records.0)
             .chain((initial_records.1).into_iter())
             .flat_map(|x| vec![x, x].into_iter())
             .map(|spec| (spec.asset_def_ix, spec.owner_key_ix, spec.asset_amount))
-        {
-            let amt = if amt < 2 { 2 } else { amt };
-            let def_ix = def_ix as usize % ret.asset_defs.len();
-            // We can't mint native tokens
-            let def_ix = if def_ix < 1 { 1 } else { def_ix };
-            let def = ret.asset_defs[def_ix].clone();
-            let kix = key as usize % ret.keys.len();
+            .collect::<Vec<_>>();
 
-            if keys_in_block.contains(&kix) {
-                keys_in_block.clear();
-                ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
+        while !to_add.is_empty() {
+            let mut this_block = vec![];
+            for (def_ix, key, amt) in core::mem::take(&mut to_add).into_iter() {
+                let amt = if amt < 2 { 2 } else { amt };
+                let def_ix = def_ix as usize % ret.asset_defs.len();
+                // We can't mint native tokens
+                let def_ix = if def_ix < 1 { 1 } else { def_ix };
+                let kix = key as usize % ret.keys.len();
+
+                if keys_in_block.contains(&kix) {
+                    to_add.push((def_ix as u8, key, amt));
+                    continue;
+                } else {
+                    keys_in_block.insert(kix);
+                    this_block.push((def_ix as u8, key, amt));
+                }
+            }
+
+            let this_block = this_block
+                .into_iter()
+                .map(|x| ChaChaRng::from_rng(&mut ret.prng).map(|y| (x, y)))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let txns = this_block
+                .into_par_iter()
+                .map(|((def_ix, key, amt), mut prng)| {
+                    let amt = if amt < 2 { 2 } else { amt };
+                    let def_ix = def_ix as usize % ret.asset_defs.len();
+                    // We can't mint native tokens
+                    let def_ix = if def_ix < 1 { 1 } else { def_ix };
+                    let def = ret.asset_defs[def_ix].clone();
+                    let kix = key as usize % ret.keys.len();
+
+                    let key = &ret.keys[kix];
+
+                    let rec = RecordOpening::new(
+                        &mut prng,
+                        amt,
+                        def,
+                        key.pub_key(),
+                        FreezeFlag::Unfrozen,
+                    );
+
+                    /*
+                                *
+                                * pub fn generate<R>(
+                        rng: &mut R,
+                        mint_ro: RecordOpening,
+                        ac_seed: AssetCodeSeed,
+                        ac_description: &[u8],
+                        fee_input: FeeInput<'_>,
+                        fee: u64,
+                        proving_key: &MintProvingKey<'_>
+                    ) -> Result<(Self, [ReceiverMemo; 2], Signature, RecordOpening), TxnApiError>
+                                */
+
+                    let fee_ix = ret.fee_records[kix];
+                    let fee_rec = {
+                        let comm = ret
+                            .record_merkle_tree
+                            .get_leaf(fee_ix as u64)
+                            .expect_ok()
+                            .unwrap()
+                            .0;
+                        let memo = ret.memos[fee_ix as usize].clone();
+                        let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
+                        let nullifier = key.nullify(
+                            open_rec.asset_def.policy_ref().freezer_pub_key(),
+                            fee_ix as u64,
+                            &comm,
+                        );
+                        assert!(!ret.nullifiers.contains(nullifier).unwrap().0);
+                        open_rec
+                    };
+
+                    assert_eq!(
+                        ret.record_merkle_tree.get_root_value(),
+                        ret.validator.record_merkle_frontier.get_root_value()
+                    );
+                    let fee_input = FeeInput {
+                        ro: fee_rec,
+                        owner_keypair: key,
+                        acc_member_witness: AccMemberWitness {
+                            merkle_path: ret
+                                .record_merkle_tree
+                                .get_leaf(fee_ix)
+                                .expect_ok()
+                                .unwrap()
+                                .1,
+                            root: ret.validator.record_merkle_frontier.get_root_value(),
+                            uid: fee_ix,
+                        },
+                    };
+
+                    let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut prng, fee_input, 1).unwrap();
+
+                    let memos = vec![
+                        ReceiverMemo::from_ro(&mut prng, &fee_out_rec, &[]).unwrap(),
+                        ReceiverMemo::from_ro(&mut prng, &rec, &[]).unwrap(),
+                    ];
+
+                    // TODO: use and check the ReceiverMemo signature
+                    let (note, _memo_kp) = MintNote::generate(
+                        &mut prng,
+                        rec,
+                        ret.asset_seeds[def_ix - 1].0,
+                        &ret.asset_seeds[def_ix - 1].1,
+                        fee_info,
+                        &ret.prove_key.mint,
+                    )
                     .unwrap();
 
-                setup_block = ElaboratedBlock::next_block(&ret.validator);
+                    (kix, note, memos)
+                })
+                .collect::<Vec<_>>();
+
+            for (kix, note, memos) in txns {
+                let nul = ret.nullifiers.contains(note.input_nullifier).unwrap().1;
+
+                let ix = setup_block.block.0.len();
+                ret.try_add_transaction(
+                    &mut setup_block,
+                    ElaboratedTransaction {
+                        txn: TransactionNote::Mint(Box::new(note)),
+                        proofs: vec![nul],
+                    },
+                    0,
+                    ix,
+                    0,
+                    memos,
+                    vec![kix, kix],
+                )
+                .unwrap();
             }
-            keys_in_block.insert(kix);
 
-            let key = &ret.keys[kix];
+            keys_in_block.clear();
+            ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
+                .unwrap();
 
-            let rec =
-                RecordOpening::new(&mut ret.prng, amt, def, key.pub_key(), FreezeFlag::Unfrozen);
-
-            /*
-                         *
-                         * pub fn generate<R>(
-                rng: &mut R,
-                mint_ro: RecordOpening,
-                ac_seed: AssetCodeSeed,
-                ac_description: &[u8],
-                fee_input: FeeInput<'_>,
-                fee: u64,
-                proving_key: &MintProvingKey<'_>
-            ) -> Result<(Self, [ReceiverMemo; 2], Signature, RecordOpening), TxnApiError>
-                         */
-
-            let fee_ix = ret.fee_records[kix];
-            let fee_rec = {
-                let comm = ret
-                    .record_merkle_tree
-                    .get_leaf(fee_ix as u64)
-                    .expect_ok()
-                    .unwrap()
-                    .0;
-                let memo = ret.memos[fee_ix as usize].clone();
-                let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
-                let nullifier = key.nullify(
-                    open_rec.asset_def.policy_ref().freezer_pub_key(),
-                    fee_ix as u64,
-                    &comm,
-                );
-                assert!(!ret.nullifiers.contains(nullifier).unwrap().0);
-                open_rec
-            };
-
-            assert_eq!(
-                ret.record_merkle_tree.get_root_value(),
-                ret.validator.record_merkle_frontier.get_root_value()
-            );
-            let fee_input = FeeInput {
-                ro: fee_rec,
-                owner_keypair: key,
-                acc_member_witness: AccMemberWitness {
-                    merkle_path: ret
-                        .record_merkle_tree
-                        .get_leaf(fee_ix)
-                        .expect_ok()
-                        .unwrap()
-                        .1,
-                    root: ret.validator.record_merkle_frontier.get_root_value(),
-                    uid: fee_ix,
-                },
-            };
-
-            let (note, memos, _memos_sig, _change_ro) = MintNote::generate(
-                &mut ret.prng,
-                rec,
-                ret.asset_seeds[def_ix - 1].0,
-                &ret.asset_seeds[def_ix - 1].1,
-                fee_input,
-                1,
-                &ret.prove_key.mint,
-            )
-            .unwrap();
-
-            let nul = ret.nullifiers.contains(note.input_nullifier).unwrap().1;
-
-            let ix = setup_block.block.0.len();
-            ret.try_add_transaction(
-                &mut setup_block,
-                ElaboratedTransaction {
-                    txn: TransactionNote::Mint(Box::new(note)),
-                    proofs: vec![nul],
-                },
-                0,
-                ix,
-                0,
-                memos.to_vec(),
-                vec![kix, kix],
-            )
-            .unwrap();
+            setup_block = ElaboratedBlock::next_block(&ret.validator);
         }
 
         ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
@@ -949,11 +990,7 @@ impl MultiXfrTestState {
         block: Vec<(bool, u16, u16, u8, u8, i32)>,
         num_txs: usize,
     ) -> Result<
-        Vec<(
-            usize,
-            (Vec<ReceiverMemo>, Vec<usize>),
-            ElaboratedTransaction,
-        )>,
+        Vec<(usize, Vec<(usize, ReceiverMemo)>, ElaboratedTransaction)>,
         Box<dyn std::error::Error>,
     > {
         let splits = block
@@ -993,7 +1030,7 @@ impl MultiXfrTestState {
                             .unwrap()
                             .0;
 
-                        let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
+                        let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
 
                         let nullifier = key.nullify(
                             open_rec.asset_def.policy_ref().freezer_pub_key(),
@@ -1012,7 +1049,7 @@ impl MultiXfrTestState {
                                     .unwrap()
                                     .0;
                                 let memo = self.memos[fee_ix as usize].clone();
-                                let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
+                                let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
                                 let nullifier = key.nullify(
                                     open_rec.asset_def.policy_ref().freezer_pub_key(),
                                     fee_ix as u64,
@@ -1021,11 +1058,8 @@ impl MultiXfrTestState {
                                 assert!(!self.nullifiers.contains(nullifier).unwrap().0);
                                 open_rec
                             }));
-                            break;
                         }
                     }
-
-                    // let owner_memos_key = schnorr::KeyPair::generate(&mut prng);
 
                     if !multi_input {
                         if let Some((rec1, in_key1)) = &rec1 {
@@ -1066,15 +1100,7 @@ impl MultiXfrTestState {
                             .unwrap()
                             .0;
 
-                        let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
-
-                        if let Some((rec1, _)) = rec1.as_ref() {
-                            // TODO: re-add support for this when jellyfish supports multi-assets
-                            // transfers and/or exchanges
-                            if rec1.asset_def != open_rec.asset_def {
-                                continue;
-                            }
-                        }
+                        let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
 
                         let nullifier = key.nullify(
                             open_rec.asset_def.policy_ref().freezer_pub_key(),
@@ -1094,7 +1120,7 @@ impl MultiXfrTestState {
                                         .unwrap()
                                         .0;
                                     let memo = self.memos[fee_ix as usize].clone();
-                                    let open_rec = memo.decrypt(&key, &comm, &[]).unwrap();
+                                    let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
                                     let nullifier = key.nullify(
                                         open_rec.asset_def.policy_ref().freezer_pub_key(),
                                         fee_ix as u64,
@@ -1137,9 +1163,10 @@ impl MultiXfrTestState {
                     }
 
                     let (fee_ix, fee_rec) = fee_rec?;
-                    let ((rec1, in_key_ix1), (rec2, in_key_ix2)) = (rec1?, rec2?);
-                    let in_key1 = &self.keys[in_key_ix1];
-                    let in_key2 = &self.keys[in_key_ix2];
+                    let ((rec1, in_key1), (rec2, in_key2)) = (rec1?, rec2?);
+                    let in_key1_ix = in_key1;
+                    let in_key1 = &self.keys[in_key1];
+                    let in_key2 = &self.keys[in_key2];
 
                     assert!(fee_ix != in1 as u64);
                     assert!(fee_ix != in2 as u64);
@@ -1154,8 +1181,6 @@ impl MultiXfrTestState {
                     let out_def1 = rec1.asset_def.clone();
                     let out_def2 = rec2.asset_def.clone();
 
-                    assert_ne!(rec1.amount, 0);
-                    assert_ne!(rec2.amount, 0);
                     let (out_amt1, out_amt2) = {
                         if out_def1 == out_def2 {
                             let total = rec1.amount + rec2.amount;
@@ -1175,8 +1200,6 @@ impl MultiXfrTestState {
                             (rec1.amount, rec2.amount)
                         }
                     };
-                    assert_ne!(out_amt1, 0);
-                    assert_ne!(out_amt2, 0);
 
                     // dbg!(&out_amt1);
                     // dbg!(&out_amt2);
@@ -1266,12 +1289,19 @@ impl MultiXfrTestState {
                     );
                     let now = Instant::now();
 
-                    let (txn, owner_memos, _owner_memos_sig) = TransferNote::generate_non_native(
+                    let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut prng, fee_input, 1).unwrap();
+
+                    let owner_memos = vec![&fee_out_rec, &out_rec1, &out_rec2]
+                        .into_iter()
+                        .map(|r| ReceiverMemo::from_ro(&mut prng, r, &[]))
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap();
+
+                    let (txn, _owner_memo_kp) = TransferNote::generate_non_native(
                         &mut prng,
                         vec![input1, input2],
                         &[out_rec1, out_rec2],
-                        fee_input,
-                        1,
+                        fee_info,
                         self.validator.prev_commit_time + 1,
                         self.prove_key.xfr.key_for_size((3, 3)).unwrap(),
                     )
@@ -1303,9 +1333,15 @@ impl MultiXfrTestState {
                         now.elapsed().as_secs_f32()
                     );
 
+                    assert_eq!(owner_memos.len(), 3);
+                    let keys_and_memos = vec![in_key1_ix, k1_ix, k2_ix]
+                        .into_iter()
+                        .zip(owner_memos.into_iter())
+                        .collect();
+
                     Some((
                         ix,
-                        (owner_memos, vec![in_key_ix1, k1_ix, k2_ix]),
+                        keys_and_memos,
                         ElaboratedTransaction {
                             txn: TransactionNote::Transfer(Box::new(txn)),
                             proofs: nullifier_pfs,
@@ -1334,11 +1370,7 @@ impl MultiXfrTestState {
         ix: usize,
         num_txs: usize,
         now: Instant,
-    ) -> Option<(
-        usize,
-        (Vec<ReceiverMemo>, Vec<usize>),
-        ElaboratedTransaction,
-    )> {
+    ) -> Option<(usize, Vec<(usize, ReceiverMemo)>, ElaboratedTransaction)> {
         println!(
             "Txn {}.{}/{}: generating single-input transaction {}s",
             round + 1,
@@ -1412,12 +1444,19 @@ impl MultiXfrTestState {
         );
         let now = Instant::now();
 
-        let (txn, owner_memos, _owner_memos_sig) = TransferNote::generate_non_native(
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(prng, fee_input, 1).unwrap();
+
+        let owner_memos = vec![&fee_out_rec, &out_rec1]
+            .into_iter()
+            .map(|r| ReceiverMemo::from_ro(prng, r, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        let (txn, _owner_memo_kp) = TransferNote::generate_non_native(
             prng,
             vec![input],
             &[out_rec1],
-            fee_input,
-            1,
+            fee_info,
             self.validator.prev_commit_time + 1,
             self.prove_key.xfr.key_for_size((2, 2)).unwrap(),
         )
@@ -1446,9 +1485,15 @@ impl MultiXfrTestState {
             now.elapsed().as_secs_f32()
         );
 
+        assert_eq!(owner_memos.len(), 2);
+        let keys_and_memos = vec![in_key_ix, out_key_ix]
+            .into_iter()
+            .zip(owner_memos.into_iter())
+            .collect();
+
         Some((
             ix,
-            (owner_memos, vec![in_key_ix, out_key_ix]),
+            keys_and_memos,
             ElaboratedTransaction {
                 txn: TransactionNote::Transfer(Box::new(txn)),
                 proofs: nullifier_pfs,
@@ -1686,7 +1731,7 @@ impl<'a> UserWallet<'a> {
             receivers.iter().fold(0, |sum, (_, amount)| sum + *amount) + fee;
 
         // find input records which account for at least the total amount, and possibly some change.
-        let (input_records, change) =
+        let (input_records, _change) =
             self.find_records(&AssetCode::native(), total_output_amount, None)?;
         // prepare inputs
         let mut inputs = vec![];
@@ -1704,14 +1749,8 @@ impl<'a> UserWallet<'a> {
             });
         }
 
-        // prepare output, include a fee change
-        let mut outputs = vec![RecordOpening::new(
-            &mut self.rng,
-            change,
-            AssetDefinition::native(),
-            self.key_pair.pub_key(),
-            FreezeFlag::Unfrozen,
-        )];
+        // prepare outputs, excluding fee change (which will be automatically generated)
+        let mut outputs = vec![];
         for (pub_key, amount) in receivers {
             outputs.push(RecordOpening::new(
                 &mut self.rng,
@@ -1722,7 +1761,7 @@ impl<'a> UserWallet<'a> {
             ));
         }
 
-        // find a proving key which can handle this transactin size
+        // find a proving key which can handle this transaction size
         let me = self.address();
         let proving_key = UserWallet::proving_key(
             &mut self.rng,
@@ -1735,13 +1774,27 @@ impl<'a> UserWallet<'a> {
         )?;
 
         // generate transfer note and receiver memos
-        let (note, recv_memos, sig) = TransferNote::generate_native(
+        let (note, kp, fee_change_ro) = TransferNote::generate_native(
             &mut self.rng,
             inputs,
             &outputs,
+            1,
             UNEXPIRED_VALID_UNTIL,
             proving_key,
         )?;
+
+        let outputs: Vec<_> = vec![fee_change_ro]
+            .into_iter()
+            .chain(outputs.into_iter())
+            .collect();
+
+        let recv_memos: Vec<_> = outputs
+            .iter()
+            .map(|ro| ReceiverMemo::from_ro(&mut self.rng, ro, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let sig = sign_receiver_memos(&kp, &recv_memos).unwrap();
+
         let txn = self.submit_transaction(TransactionNote::Transfer(Box::new(note)));
 
         Ok((txn, recv_memos, sig))
@@ -1828,15 +1881,22 @@ impl<'a> UserWallet<'a> {
         )?;
 
         // generate transfer note and receiver memos
-        let (note, recv_memos, sig) = TransferNote::generate_non_native(
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut self.rng, fee_input, fee).unwrap();
+        let (note, sig_key) = TransferNote::generate_non_native(
             &mut self.rng,
             inputs,
             &outputs,
-            fee_input,
-            fee,
+            fee_info,
             UNEXPIRED_VALID_UNTIL,
             proving_key,
         )?;
+        let recv_memos = vec![&fee_out_rec]
+            .into_iter()
+            .chain(outputs.iter())
+            .map(|r| ReceiverMemo::from_ro(&mut self.rng, r, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
         let txn = self.submit_transaction(TransactionNote::Transfer(Box::new(note)));
 
         Ok((txn, recv_memos, sig))
@@ -1936,13 +1996,20 @@ impl<'a> UserWallet<'a> {
         change_record: bool,
     ) -> Result<&'k TransferProvingKey<'a>, Box<dyn std::error::Error>> {
         let total_output_amount = outputs.iter().map(|ro| ro.amount).sum();
-        // non-native transfers have an extra fee input and an extra fee change output.
-        let fee_records = (*asset != AssetDefinition::native()) as usize;
+        // non-native transfers have an extra fee input, which is not included in `inputs`.
+        let fee_inputs = if *asset == AssetDefinition::native() {
+            0
+        } else {
+            1
+        };
+        // both native and non-native transfers have an extra fee change output which is
+        // automatically generated and not included in `outputs`.
+        let fee_outputs = 1;
 
         let ((key_inputs, key_outputs), proving_key) = proving_keys
-            .best_fit_key((inputs.len() + fee_records, outputs.len() + fee_records))
+            .best_fit_key((inputs.len() + fee_inputs, outputs.len() + fee_outputs))
             .map_err(|(max_inputs, max_outputs)| {
-                if inputs.len() + fee_records > max_inputs {
+                if inputs.len() + fee_inputs > max_inputs {
                     WalletError::Fragmentation {
                         asset: asset.code,
                         amount: total_output_amount,
@@ -1983,14 +2050,14 @@ impl<'a> UserWallet<'a> {
                     }
                 }
             })?;
-        assert!(inputs.len() + fee_records <= key_inputs);
-        assert!(outputs.len() + fee_records <= key_outputs);
+        assert!(inputs.len() + fee_inputs <= key_inputs);
+        assert!(outputs.len() + fee_outputs <= key_outputs);
 
-        if inputs.len() + fee_records < key_inputs {
+        if inputs.len() + fee_inputs < key_inputs {
             // TODO pad with dummy inputs, (leaving room for the fee input if applicable)
             unimplemented!("dummy inputs");
         }
-        if outputs.len() + fee_records < key_outputs {
+        if outputs.len() + fee_outputs < key_outputs {
             // pad with dummy (0-amount) outputs (leaving room for the fee change output if
             // applicable)
             while {
@@ -2298,20 +2365,32 @@ impl<'a> IssuerWallet<'a> {
             freeze_flag: FreezeFlag::Unfrozen,
             blind: BlindFactor::rand(&mut self.wallet.rng),
         };
+
         let fee_input = FeeInput {
             ro: fee_ro,
             acc_member_witness,
             owner_keypair: &self.wallet.key_pair,
         };
-        let (mint_note, recv_memos, signature, _) = jf_txn::mint::MintNote::generate(
+
+        let (fee_info, fee_out_rec) =
+            TxnFeeInfo::new(&mut self.wallet.rng, fee_input, fee).unwrap();
+
+        let rng = &mut self.wallet.rng;
+        let recv_memos = vec![&fee_out_rec, &mint_record]
+            .into_iter()
+            .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        let (mint_note, sig_key) = jf_txn::mint::MintNote::generate(
             &mut self.wallet.rng,
             mint_record,
             *seed,
             asset_description.as_slice(),
-            fee_input,
-            fee,
+            fee_info,
             &self.proving_key,
         )?;
+        let signature = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
         let txn = self
             .wallet
             .submit_transaction(TransactionNote::Mint(Box::new(mint_note)));
@@ -2888,6 +2967,7 @@ mod tests {
      *      - apply that transaction
      */
 
+    #[allow(clippy::type_complexity)] //todo replace (bool, u16, u16, u8, u8, i32) with a struct TransactionSpec
     fn test_multixfr(
         /*
          * multi_input (if false, generates smaller transaction and rec2 is ignored),
@@ -2954,16 +3034,19 @@ mod tests {
             });
 
             let mut blk = ElaboratedBlock::default();
-            for (ix, (owner_memos, recv_keys), txn) in txns {
-                let _ = state.try_add_transaction(
-                    &mut blk,
-                    txn,
-                    i,
-                    ix,
-                    num_txs,
-                    owner_memos,
-                    recv_keys,
-                );
+            for (ix, keys_and_memos, txn) in txns {
+                let (owner_memos, kixs) = {
+                    let mut owner_memos = vec![];
+                    let mut kixs = vec![];
+
+                    for (kix, memo) in keys_and_memos {
+                        kixs.push(kix);
+                        owner_memos.push(memo);
+                    }
+                    (owner_memos, kixs)
+                };
+
+                let _ = state.try_add_transaction(&mut blk, txn, i, ix, num_txs, owner_memos, kixs);
             }
 
             state
@@ -2984,6 +3067,7 @@ mod tests {
      */
 
     #[test]
+    #[allow(clippy::eq_op)]
     fn it_works() {
         assert_eq!(2 + 2, 4);
     }
@@ -3120,30 +3204,30 @@ mod tests {
         .unwrap();
 
         let (xfr_prove_key, xfr_verif_key, _) =
-            jf_txn::proof::transfer::preprocess(&univ_setup, 1, 1, MERKLE_HEIGHT).unwrap();
+            jf_txn::proof::transfer::preprocess(&univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
         let (mint_prove_key, mint_verif_key, _) =
             jf_txn::proof::mint::preprocess(&univ_setup, MERKLE_HEIGHT).unwrap();
         let (freeze_prove_key, freeze_verif_key, _) =
             jf_txn::proof::freeze::preprocess(&univ_setup, 2, MERKLE_HEIGHT).unwrap();
 
-        for k in vec![
-            CanonicalBytes::from(xfr_verif_key.clone()),
-            CanonicalBytes::from(mint_verif_key.clone()),
-            CanonicalBytes::from(freeze_verif_key.clone()),
+        for (l, k) in vec![
+            ("xfr", CanonicalBytes::from(xfr_verif_key.clone())),
+            ("mint", CanonicalBytes::from(mint_verif_key.clone())),
+            ("freeze", CanonicalBytes::from(freeze_verif_key.clone())),
         ] {
-            println!("{}", k.0.len());
+            println!("{}: {} bytes", l, k.0.len());
         }
 
         let prove_key = ProverKey {
             mint: mint_prove_key,
-            xfr: KeySet::new(vec![((1, 1), xfr_prove_key)].into_iter()).unwrap(),
+            xfr: KeySet::new(vec![((1, 2), xfr_prove_key)].into_iter()).unwrap(),
             freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter()).unwrap(),
         };
 
         let verif_key = VerifierKey {
             mint: TransactionVerifyingKey::Mint(mint_verif_key),
             xfr: KeySet::new(
-                vec![((1, 1), TransactionVerifyingKey::Transfer(xfr_verif_key))].into_iter(),
+                vec![((1, 2), TransactionVerifyingKey::Transfer(xfr_verif_key))].into_iter(),
             )
             .unwrap(),
             freeze: KeySet::new(
@@ -3195,12 +3279,12 @@ mod tests {
         let first_root = t.get_root_value();
 
         let alice_rec_final = TransferNoteInput {
-            ro: alice_rec1.clone(),
+            ro: alice_rec1,
             owner_keypair: &alice_key,
             cred: None,
             acc_member_witness: AccMemberWitness {
                 merkle_path: alice_rec_path.clone(),
-                root: first_root.clone(),
+                root: first_root,
                 uid: 0,
             },
         };
@@ -3244,12 +3328,14 @@ mod tests {
                 bob_key.pub_key(),
                 FreezeFlag::Unfrozen,
             );
+
             let txn = TransferNote::generate_native(
                 &mut prng,
                 /* inputs:         */ vec![alice_rec_final],
                 /* outputs:        */ &[bob_rec.clone()],
+                /* fee:            */ 1,
                 /* valid_until:    */ 2,
-                /* proving_key:    */ prove_key.xfr.key_for_size((1, 1)).unwrap(),
+                /* proving_key:    */ prove_key.xfr.key_for_size((1, 2)).unwrap(),
             )
             .unwrap();
             (txn, bob_rec)
@@ -3279,6 +3365,8 @@ mod tests {
         );
         let now = Instant::now();
 
+        let new_recs = txn1.output_commitments.to_vec();
+
         let new_uids = validator
             .validate_and_apply(
                 1,
@@ -3293,17 +3381,19 @@ mod tests {
         );
         let now = Instant::now();
 
-        assert_eq!(&new_uids, &vec![1]);
-        wallet_merkle_tree.push(RecordCommitment::from(&bob_rec));
+        assert_eq!(&new_uids[1..], &[2]);
+        for r in new_recs {
+            wallet_merkle_tree.push(r);
+        }
 
         let bob_rec = TransferNoteInput {
             ro: bob_rec,
             owner_keypair: &bob_key,
             cred: None,
             acc_member_witness: AccMemberWitness {
-                merkle_path: wallet_merkle_tree.get_leaf(1).expect_ok().unwrap().1,
+                merkle_path: wallet_merkle_tree.get_leaf(2).expect_ok().unwrap().1,
                 root: validator.record_merkle_frontier.get_root_value(),
-                uid: 1,
+                uid: 2,
             },
         };
 
@@ -4039,6 +4129,17 @@ mod tests {
 
     #[test]
     fn quickcheck_multixfr_regression5() {
+        test_multixfr(
+            vec![vec![(true, 0, 0, 1, 1, 0)], vec![(true, 0, 0, 0, 0, 0)]],
+            1,
+            0,
+            (0, 0, 0),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn quickcheck_multixfr_regression6() {
         // This test caused 0-amount records to be created by breaking single records into two using
         // single-input transactions. 0-amount records in turn lead to underflows when the test
         // tries to compute output amounts that are separated by a non-zero amt_diff and sum to 0.
