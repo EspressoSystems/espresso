@@ -2381,7 +2381,7 @@ impl<'a> Wallet<'a> for IssuerWallet<'a> {
 pub mod test_helpers {
     use super::*;
 
-    pub fn mock_ceremony<'a, W>(
+    pub fn create_test_network<'a, W>(
         univ_param: &'a jf_txn::proof::UniversalParam,
         xfr_sizes: &[(usize, usize)],
         initial_grants: Vec<u64>,
@@ -2683,7 +2683,7 @@ pub mod test_helpers {
             ).collect();
 
         let (mut validator, mut wallets) =
-            mock_ceremony::<IssuerWallet>(&univ_param, xfr_sizes, grants, &mut now);
+            create_test_network::<IssuerWallet>(&univ_param, xfr_sizes, grants, &mut now);
 
         println!(
             "ceremony complete, minting initial records: {}s",
@@ -3085,8 +3085,10 @@ mod tests {
 
         let verif_crs = VerifierKey {
             mint: TransactionVerifyingKey::Mint(mint),
-            xfr: KeySet::new(vec![((1, 1), TransactionVerifyingKey::Transfer(xfr))].into_iter()).unwrap(),
-            freeze: KeySet::new(vec![(2, TransactionVerifyingKey::Freeze(freeze))].into_iter()).unwrap(),
+            xfr: KeySet::new(vec![((1, 1), TransactionVerifyingKey::Transfer(xfr))].into_iter())
+                .unwrap(),
+            freeze: KeySet::new(vec![(2, TransactionVerifyingKey::Freeze(freeze))].into_iter())
+                .unwrap(),
         };
         let mut v1 = ValidatorState::new(verif_crs, MerkleTree::new(MERKLE_HEIGHT).unwrap());
         let mut v2 = v1.clone();
@@ -3378,7 +3380,7 @@ mod tests {
         // native coins from Alice.
         let alice_grant = 5;
         let bob_grant = if native { 0 } else { 1 };
-        let (mut validator, mut wallets) = mock_ceremony::<IssuerWallet>(
+        let (mut validator, mut wallets) = create_test_network::<IssuerWallet>(
             &univ_setup,
             &[(num_inputs, num_outputs)],
             vec![alice_grant, bob_grant],
@@ -3521,7 +3523,7 @@ mod tests {
         // act as the receiver, and wallets[2] will be a third party which generates
         // RECORD_HOLD_TIME transfers while a transfer from wallets[0] is pending, causing the
         // transfer to time out.
-        let (mut validator, mut wallets) = mock_ceremony::<IssuerWallet>(
+        let (mut validator, mut wallets) = create_test_network::<IssuerWallet>(
             &univ_setup,
             &[(num_inputs, num_outputs)],
             // If native, wallets[0] gets 1 coin to transfer and 1 for a transaction fee. Otherwise,
@@ -3721,7 +3723,7 @@ mod tests {
         // which generates RECORD_ROOT_HISTORY_SIZE-1 transfers while a transfer from wallets[0] is
         // pending, after which we will check if the pending transaction can be updated and
         // resubmitted.
-        let (mut validator, mut wallets) = mock_ceremony::<IssuerWallet>(
+        let (mut validator, mut wallets) = create_test_network::<IssuerWallet>(
             &univ_setup,
             &[(num_inputs, num_outputs)],
             vec![
