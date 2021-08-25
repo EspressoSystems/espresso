@@ -35,6 +35,9 @@ use serde::{Deserialize, Serialize};
 pub use set_merkle_tree::*;
 use snafu::Snafu;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::fs::File;
+use std::io::{prelude::*, Read};
+use std::path::Path;
 use std::time::Instant;
 
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
@@ -520,6 +523,79 @@ pub struct MultiXfrTestState {
     pub inner_timer: Instant,
 }
 
+/// Generates universal parameter and store it to file.
+pub fn set_universal_param(prng: &mut ChaChaRng) {
+    let universal_param = jf_txn::proof::universal_setup(
+        *[
+            compute_universal_param_size(NoteType::Transfer, 3, 3, MERKLE_HEIGHT).unwrap_or_else(
+                |err| {
+                    panic!(
+                        "Error while computing the universal parameter size for Transfer: {}",
+                        err
+                    )
+                },
+            ),
+            compute_universal_param_size(NoteType::Mint, 0, 0, MERKLE_HEIGHT).unwrap_or_else(
+                |err| {
+                    panic!(
+                        "Error while computing the universal parameter size for Mint: {}",
+                        err
+                    )
+                },
+            ),
+            compute_universal_param_size(NoteType::Freeze, 2, 2, MERKLE_HEIGHT).unwrap_or_else(
+                |err| {
+                    panic!(
+                        "Error while computing the universal parameter size for Freeze: {}",
+                        err
+                    )
+                },
+            ),
+        ]
+        .iter()
+        .max()
+        .unwrap(),
+        prng,
+    )
+    .unwrap_or_else(|err| panic!("Error while setting up the universal parameter: {}", err));
+    let param_bytes = bincode::serialize(&universal_param)
+        .unwrap_or_else(|err| panic!("Error while serializing the universal parameter: {}", err));
+    // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
+    let mut file = File::create(format!("../../zerok/zerok_lib/src/universal_param"))
+        .unwrap_or_else(|err| panic!("Error while creating a universal parameter file: {}", err));
+    file.write(&param_bytes).unwrap_or_else(|err| {
+        panic!(
+            "Error while writing to the universal parameter file: {}",
+            err
+        )
+    });
+}
+
+/// Reads universal parameter from file if it exists. If not, generates the universal parameter, stores
+/// it to file, and returns it.
+pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalParam {
+    // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
+    let path_str = format!("../../zerok/zerok_lib/src/universal_param");
+    let path = Path::new(&path_str);
+    let mut file = match File::open(&path) {
+        Ok(f) => f,
+        Err(_) => {
+            set_universal_param(prng);
+            File::open(&path).unwrap_or_else(|_| {
+                panic!(
+                    "Cannot find the universal parameter file after generation: {}",
+                    path.display()
+                )
+            })
+        }
+    };
+    let mut param_bytes = Vec::new();
+    file.read_to_end(&mut param_bytes)
+        .unwrap_or_else(|err| panic!("Error while reading the universal parameter file: {}", err));
+    bincode::deserialize(&param_bytes[..])
+        .unwrap_or_else(|err| panic!("Error while deserializing the universal parameter: {}", err))
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct MultiXfrRecordSpec {
     pub asset_def_ix: u8,
@@ -550,17 +626,7 @@ impl MultiXfrTestState {
         Self::update_timer(&mut timer, |_| println!("Generating params"));
         let mut prng = ChaChaRng::from_seed(seed);
 
-        let univ_setup = Box::leak(Box::new(jf_txn::proof::universal_setup(
-            *[
-                compute_universal_param_size(NoteType::Transfer, 3, 3, MERKLE_HEIGHT)?,
-                compute_universal_param_size(NoteType::Mint, 0, 0, MERKLE_HEIGHT)?,
-                compute_universal_param_size(NoteType::Freeze, 2, 2, MERKLE_HEIGHT)?,
-            ]
-            .iter()
-            .max()
-            .unwrap(),
-            &mut prng,
-        )?));
+        let univ_setup = Box::leak(Box::new(get_universal_param(&mut prng)));
         let (xfr_prove_key, xfr_verif_key, _) =
             jf_txn::proof::transfer::preprocess(univ_setup, 3, 3, MERKLE_HEIGHT)?;
         let (mint_prove_key, mint_verif_key, _) =

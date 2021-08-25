@@ -587,6 +587,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-tungstenite"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8645e929ec7964448a901db9da30cd2ae8c7fecf4d6176af427837531dbbb63b"
+dependencies = [
+ "async-std",
+ "futures-io",
+ "futures-util",
+ "log",
+ "pin-project-lite 0.2.7",
+ "tungstenite",
+]
+
+[[package]]
 name = "asynctide"
 version = "0.1.0"
 dependencies = [
@@ -2496,13 +2510,12 @@ dependencies = [
 
 [[package]]
 name = "phaselock"
-version = "0.0.0"
+version = "0.0.1"
 source = "registry+https://dl.cloudsmith.io/basic/translucence/tl/cargo/index.git"
-checksum = "6ee05ef0b01ffdace2b73b62635f00a9e1d923d9505431a078964d8906c47d28"
+checksum = "16be1cb8d75e682663d8a3892d9c24875e1bda7add0ec1b4fd3e9f3250ed0327"
 dependencies = [
  "async-std",
- "async-tls",
- "async-tungstenite",
+ "async-tungstenite 0.14.0",
  "bincode",
  "blake3",
  "byteorder",
@@ -2514,7 +2527,7 @@ dependencies = [
  "serde",
  "snafu",
  "threshold_crypto",
- "tokio 0.2.25",
+ "tokio 1.9.0",
  "tracing",
  "tracing-error",
  "tracing-futures",
@@ -3720,7 +3733,7 @@ checksum = "3592c5cb5cb1b7a2ff3a0e5353170c1bb5b104b2f66dd06f73304169b52cc725"
 dependencies = [
  "async-dup",
  "async-std",
- "async-tungstenite",
+ "async-tungstenite 0.13.1",
  "base64 0.13.0",
  "futures-util",
  "pin-project",
@@ -3735,7 +3748,7 @@ name = "tideui"
 version = "0.1.0"
 dependencies = [
  "async-std",
- "async-tungstenite",
+ "async-tungstenite 0.13.1",
  "serde",
  "tide",
  "tide-tracing",
