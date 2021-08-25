@@ -459,8 +459,6 @@ impl ValidatorState {
         self.prev_commit_time = now;
         self.prev_block = txns.clone();
 
-        // TODO: getting this working requires getting something into the txn that allows nullifiers to be extracted.
-
         let nullifiers = txns
             .0
             .iter()
@@ -1484,7 +1482,7 @@ impl<'a> UserWallet<'a> {
             unimplemented!("dummy inputs");
         }
 
-        // prepare output, include a fee change
+        // prepare outputs, excluding fee change (which will be automatically generated)
         let mut outputs = vec![];
         for (pub_key, amount) in receivers {
             outputs.push(RecordOpening::new(
