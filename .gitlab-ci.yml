@@ -39,7 +39,6 @@ lint:clippy:
     paths:
       - .cargo/
       - target/
-  allow_failure: true
 
 lint:audit:
   stage: lint
@@ -52,7 +51,6 @@ lint:audit:
     paths:
       - .cargo/
       - target/
-  allow_failure: true
 
 check:
   stage: check
@@ -124,3 +122,4 @@ test:fuzzing:
 #     - schedules
 #     - web
 #   allow_failure: true
+
