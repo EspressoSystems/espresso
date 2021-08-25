@@ -35,7 +35,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 pub use set_merkle_tree::*;
 use snafu::Snafu;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{prelude::*, Read};
 use std::path::Path;
@@ -247,6 +247,24 @@ mod block_comm {
     }
 }
 
+mod record_merkle_hist_comm {
+    use super::*;
+    use blake2::crypto_mac::Mac;
+    use generic_array::GenericArray;
+    pub type RecordMerkleHistCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
+
+    pub fn record_merkle_hist_commit(
+        p: &VecDeque<merkle_tree::NodeValue>,
+    ) -> RecordMerkleHistCommitment {
+        let mut hasher = blake2::Blake2b::with_params(&[], &[], "Hist Comm".as_bytes());
+        hasher.update(&p.len().to_le_bytes());
+        for hash in p {
+            hasher.update(&CanonicalBytes::from(*hash).0);
+        }
+        hasher.finalize().into_bytes()
+    }
+}
+
 pub mod state_comm {
     use super::*;
     use blake2::crypto_mac::Mac;
@@ -262,6 +280,7 @@ pub mod state_comm {
         pub prev_state: state_comm::LedgerStateCommitment,
         pub verif_crs: verif_crs_comm::VerifCRSCommitment,
         pub record_merkle_root: merkle_tree::NodeValue,
+        pub past_record_merkle_roots: record_merkle_hist_comm::RecordMerkleHistCommitment,
         pub nullifiers: set_hash::Hash,
         pub next_uid: u64,
         pub prev_block: block_comm::BlockCommitment,
@@ -278,6 +297,8 @@ pub mod state_comm {
             hasher.update(&self.verif_crs);
             hasher.update("record_merkle_root".as_bytes());
             hasher.update(&CanonicalBytes::from(self.record_merkle_root).0);
+            hasher.update("past_record_merkle_roots".as_bytes());
+            hasher.update(&self.past_record_merkle_roots);
             hasher.update("nullifiers".as_bytes());
             hasher.update(&self.nullifiers);
             hasher.update("next_uid".as_bytes());
@@ -295,7 +316,10 @@ pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: state_comm::LedgerStateCommitment,
     pub verif_crs: VerifierKey,
+    // The current record Merkle root hash
     pub record_merkle_root: merkle_tree::NodeValue,
+    // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
+    pub past_record_merkle_roots: VecDeque<merkle_tree::NodeValue>,
     pub record_merkle_frontier: merkle_tree::MerkleTree<RecordCommitment>,
     pub nullifiers_root: set_hash::Hash,
     pub next_uid: u64,
@@ -303,12 +327,58 @@ pub struct ValidatorState {
 }
 
 impl ValidatorState {
+    // How many previous record Merkle tree root hashes the validator should remember.
+    //
+    // Transactions can be validated without resubmitting or regenerating the ZKPs as long as they
+    // were generated using a validator state that is at most RECORD_ROOT_HISTORY_SIZE states before
+    // the current one.
+    const RECORD_ROOT_HISTORY_SIZE: usize = 10;
+
+    pub fn new(
+        verif_crs: VerifierKey,
+        record_merkle_frontier: MerkleTree<RecordCommitment>,
+    ) -> Self {
+        let nullifiers: SetMerkleTree = Default::default();
+        let next_uid = record_merkle_frontier.num_leaves();
+
+        Self {
+            prev_commit_time: 0u64,
+            prev_state: *state_comm::INITIAL_PREV_COMM,
+            verif_crs,
+            record_merkle_root: record_merkle_frontier.get_root_value(),
+            past_record_merkle_roots: VecDeque::with_capacity(Self::RECORD_ROOT_HISTORY_SIZE),
+            record_merkle_frontier,
+            nullifiers_root: nullifiers.hash(),
+            next_uid,
+            prev_block: Default::default(),
+        }
+    }
+
     pub fn commit(&self) -> state_comm::LedgerStateCommitment {
         let inputs = state_comm::LedgerCommInputs {
             prev_commit_time: self.prev_commit_time,
             prev_state: self.prev_state,
             verif_crs: verif_crs_comm::verif_crs_commit(&self.verif_crs),
             record_merkle_root: self.record_merkle_root,
+            // We need to include all the cached past record Merkle roots in the state commitment,
+            // even though they are not part of the current ledger state, because they affect
+            // validation: two validators with different caches will be able to validate different
+            // blocks.
+            //
+            // Note that this requires correct validators to agree on the number of cached past root
+            // hashes, since all the cached hashes are included in the state commitment and are thus
+            // part of the observable state of the ledger. This prevents heavyweight validators from
+            // caching extra past roots and thereby making it easier to verify transactions, but
+            // because root hashes are small, it should be possible to find a value of
+            // RECORD_ROOT_HISTORY_SIZE which strikes a balance between small space requirements (so
+            // that lightweight validators can keep up with the cache) and covering enough of
+            // history to make it easy for clients. If this is not possible, lightweight validators
+            // could also store a sparse history, and when they encounter a root hash that they do
+            // not have cached, they could ask a full validator for a proof that that hash was once
+            // the root of the record Merkle tree.
+            past_record_merkle_roots: record_merkle_hist_comm::record_merkle_hist_commit(
+                &self.past_record_merkle_roots,
+            ),
             nullifiers: self.nullifiers_root,
             next_uid: self.next_uid,
             prev_block: block_comm::block_commit(&self.prev_block),
@@ -357,8 +427,18 @@ impl ValidatorState {
                 &txns
                     .0
                     .iter()
-                    .map(|_| self.record_merkle_frontier.get_root_value())
-                    .collect::<Vec<_>>(),
+                    .map(|note| {
+                        // Only validate transactions if we can confirm that the record Merkle root
+                        // they were generated with is a valid previous or current ledger state.
+                        if self.record_merkle_root == note.merkle_root()
+                            || self.past_record_merkle_roots.contains(&note.merkle_root())
+                        {
+                            Ok(note.merkle_root())
+                        } else {
+                            Err(BadMerkleRoot {})
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
                 now,
                 &verif_keys,
             )
@@ -406,6 +486,11 @@ impl ValidatorState {
             assert_eq!(self.next_uid, self.record_merkle_frontier.num_leaves());
         }
 
+        if self.past_record_merkle_roots.len() >= Self::RECORD_ROOT_HISTORY_SIZE {
+            self.past_record_merkle_roots.pop_back();
+        }
+        self.past_record_merkle_roots
+            .push_front(self.record_merkle_root);
         self.record_merkle_root = self.record_merkle_frontier.get_root_value();
         self.prev_state = comm;
         Ok(ret)
@@ -602,11 +687,7 @@ impl MultiXfrTestState {
 
         Self::update_timer(&mut timer, |t| println!("Native token records: {}s", t));
 
-        let first_root = t.get_root_value();
-
-        let next_uid = owners.len() as u64;
         let nullifiers: SetMerkleTree = Default::default();
-        let nullifiers_root = nullifiers.hash();
 
         let verif_key = VerifierKey {
             mint: TransactionVerifyingKey::Mint(mint_verif_key),
@@ -634,16 +715,7 @@ impl MultiXfrTestState {
             memos,
             nullifiers, /*asset_defs,*/
             record_merkle_tree: t.clone(),
-            validator: ValidatorState {
-                prev_commit_time: 0u64,
-                prev_state: *state_comm::INITIAL_PREV_COMM,
-                verif_crs: verif_key,
-                record_merkle_root: first_root,
-                record_merkle_frontier: t,
-                nullifiers_root,
-                next_uid,
-                prev_block: Default::default(),
-            },
+            validator: ValidatorState::new(verif_key, t),
             outer_timer: timer,
             inner_timer: Instant::now(),
         };
@@ -1262,6 +1334,9 @@ pub enum WalletError {
     InvalidBlock {
         val_err: ValidationError,
     },
+    NullifierAlreadyPublished {
+        nullifier: Nullifier,
+    },
 }
 
 // Events consumed by the wallet produced by the backend (which potentially includes validators,
@@ -1296,6 +1371,24 @@ pub trait Wallet<'a> {
         receivers: &[(UserPubKey, u64)],
         fee: u64,
     ) -> Result<(ElaboratedTransaction, Vec<ReceiverMemo>, Signature), Box<dyn std::error::Error>>;
+
+    /// If a transaction is rejected because the state of the ledger has changed since it was built,
+    /// we may be able to resubmit it after just updating its nullifier proofs (which is cheap to
+    /// do) since the validator can verify the ZKP even if it is out-of-date by up to
+    /// RECORD_ROOT_HISTORY_SIZE states.
+    ///
+    /// Validators may also update the nullifier proofs automatically and re-verify the transactions
+    /// without incurring an extra network round trip. However, the wallet should have the
+    /// capability of doing this if needed because not all validators will store the entire
+    /// nullifier set needed to do the proofs.
+    ///
+    /// Eventually, the wallet should do this and resubmit the transaction automatically (e.g.
+    /// whenever it receives a relevant LedgerEvent::Reject), but in the current design the wallet
+    /// has no way to talk directly to the validators.
+    fn update_nullifier_proofs(
+        &self,
+        txn: &mut ElaboratedTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 struct OwnedRecord {
@@ -1344,7 +1437,7 @@ const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN
 // how long (in number of validator states) a record used as an input to an unconfirmed transaction
 // should be kept on hold before the transaction is considered timed out. This should be the number
 // of validator states after which the transaction's proof can no longer be verified.
-const RECORD_HOLD_TIME: u64 = 1;
+const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
 
 impl<'a> UserWallet<'a> {
     pub fn transfer_native(
@@ -1865,6 +1958,26 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
             self.transfer_non_native(asset, receivers, fee)
         }
     }
+
+    fn update_nullifier_proofs(
+        &self,
+        txn: &mut ElaboratedTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        txn.proofs = txn
+            .txn
+            .nullifiers()
+            .iter()
+            .map(|n| {
+                let (contains, proof) = self.nullifiers.contains(*n).unwrap();
+                if contains {
+                    Err(WalletError::NullifierAlreadyPublished { nullifier: *n })
+                } else {
+                    Ok(proof)
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(())
+    }
 }
 
 pub struct IssuerWallet<'a> {
@@ -2004,6 +2117,13 @@ impl<'a> Wallet<'a> for IssuerWallet<'a> {
     {
         self.wallet.transfer(asset, receivers, fee)
     }
+
+    fn update_nullifier_proofs(
+        &self,
+        txn: &mut ElaboratedTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.wallet.update_nullifier_proofs(txn)
+    }
 }
 
 #[cfg(any(test, fuzzing))]
@@ -2062,20 +2182,14 @@ pub mod test_helpers {
             jf_txn::proof::freeze::preprocess(univ_param, 2, MERKLE_HEIGHT).unwrap();
 
         let nullifiers: SetMerkleTree = Default::default();
-        let validator = ValidatorState {
-            prev_commit_time: 0,
-            prev_state: *state_comm::INITIAL_PREV_COMM,
-            verif_crs: VerifierKey {
+        let validator = ValidatorState::new(
+            VerifierKey {
                 xfr: TransactionVerifyingKey::Transfer(xfr_verif_key),
                 mint: TransactionVerifyingKey::Mint(mint_verif_key),
                 freeze: TransactionVerifyingKey::Freeze(freeze_verif_key),
             },
-            record_merkle_root: record_merkle_tree.get_root_value(),
-            record_merkle_frontier: record_merkle_tree.clone(),
-            nullifiers_root: nullifiers.hash(),
-            next_uid: record_merkle_tree.num_leaves(),
-            prev_block: Default::default(),
-        };
+            record_merkle_tree.clone(),
+        );
 
         let comm = validator.commit();
         println!(
@@ -2556,6 +2670,41 @@ mod tests {
     }
 
     #[test]
+    fn test_record_history_commit_hash() {
+        // Check that ValidatorStates with different record histories have different commits.
+        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
+        println!("generating universal parameters");
+
+        let univ = jf_txn::proof::universal_setup(
+            compute_universal_param_size(NoteType::Transfer, 2, 2, MERKLE_HEIGHT).unwrap(),
+            &mut prng,
+        )
+        .unwrap();
+        let (_, mint, _) = jf_txn::proof::mint::preprocess(&univ, MERKLE_HEIGHT).unwrap();
+        let (_, xfr, _) = jf_txn::proof::transfer::preprocess(&univ, 1, 1, MERKLE_HEIGHT).unwrap();
+        let (_, freeze, _) = jf_txn::proof::freeze::preprocess(&univ, 2, MERKLE_HEIGHT).unwrap();
+        println!("CRS set up");
+
+        let verif_crs = VerifierKey {
+            mint: TransactionVerifyingKey::Mint(mint),
+            xfr: TransactionVerifyingKey::Transfer(xfr),
+            freeze: TransactionVerifyingKey::Freeze(freeze),
+        };
+        let mut v1 = ValidatorState::new(verif_crs, MerkleTree::new(MERKLE_HEIGHT).unwrap());
+        let mut v2 = v1.clone();
+
+        // Test validators with different history lengths.
+        v1.past_record_merkle_roots
+            .push_front(merkle_tree::NodeValue::from(0));
+        assert_ne!(v1.commit(), v2.commit());
+
+        // Test validators with the same length, but different histories.
+        v2.past_record_merkle_roots
+            .push_front(merkle_tree::NodeValue::from(1));
+        assert_ne!(v1.commit(), v2.commit());
+    }
+
+    #[test]
     #[allow(unused_variables)]
     fn test_2user() {
         let now = Instant::now();
@@ -2577,12 +2726,12 @@ mod tests {
         let (freeze_prove_key, freeze_verif_key, _) =
             jf_txn::proof::freeze::preprocess(&univ_setup, 2, MERKLE_HEIGHT).unwrap();
 
-        for k in vec![
-            CanonicalBytes::from(xfr_verif_key.clone()),
-            CanonicalBytes::from(mint_verif_key.clone()),
-            CanonicalBytes::from(freeze_verif_key.clone()),
+        for (l, k) in vec![
+            ("xfr", CanonicalBytes::from(xfr_verif_key.clone())),
+            ("mint", CanonicalBytes::from(mint_verif_key.clone())),
+            ("freeze", CanonicalBytes::from(freeze_verif_key.clone())),
         ] {
-            println!("{}", k.0.len());
+            println!("{}: {} bytes", l, k.0.len());
         }
 
         let prove_key = ProverKey {
@@ -2651,16 +2800,7 @@ mod tests {
         };
 
         let mut wallet_merkle_tree = t.clone();
-        let mut validator = ValidatorState {
-            prev_commit_time: 0,
-            prev_state: *state_comm::INITIAL_PREV_COMM,
-            verif_crs: verif_key,
-            record_merkle_root: first_root,
-            record_merkle_frontier: t,
-            nullifiers_root: nullifiers.hash(),
-            next_uid: 1,
-            prev_block: Default::default(),
-        };
+        let mut validator = ValidatorState::new(verif_key, t);
 
         println!("Validator set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
@@ -3151,6 +3291,102 @@ mod tests {
     #[test]
     fn test_wallet_rejected_non_native_mint_timeout() {
         test_wallet_rejected(false, true, true)
+    }
+
+    #[test]
+    fn test_resubmit() {
+        let mut now = Instant::now();
+        println!("generating params");
+
+        let mut rng = ChaChaRng::from_seed([0x8au8; 32]);
+
+        let num_inputs = 1;
+        let num_outputs = 2;
+        let univ_setup = jf_txn::proof::universal_setup(
+            compute_universal_param_size(
+                NoteType::Transfer,
+                num_inputs,
+                num_outputs,
+                MERKLE_HEIGHT,
+            )
+            .unwrap(),
+            &mut rng,
+        )
+        .unwrap();
+
+        println!(
+            "Universal params generated: {}s",
+            now.elapsed().as_secs_f32()
+        );
+        now = Instant::now();
+
+        // The sender wallet (wallets[0]) gets an initial grant of 2 for a transaction fee and a
+        // payment. wallets[1] will act as the receiver, and wallets[2] will be a third party
+        // which generates RECORD_ROOT_HISTORY_SIZE-1 transfers while a transfer from wallets[0] is
+        // pending, after which we will check if the pending transaction can be updated and
+        // resubmitted.
+        let (mut validator, mut wallets) = mock_ceremony::<IssuerWallet>(
+            &univ_setup,
+            num_inputs,
+            num_outputs,
+            vec![
+                2,
+                0,
+                2 * (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64,
+            ],
+            &mut now,
+        );
+
+        println!("generating transaction: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+        let receiver = wallets[1].address();
+        let mut txn = wallets[0]
+            .transfer(&AssetDefinition::native(), &[(receiver.clone(), 1)], 1)
+            .unwrap();
+        println!("transfer generated: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+
+        // Generate a transaction, invalidating the pending transfer.
+        println!(
+            "generating {} transfers to invalidate the original transfer: {}s",
+            ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1,
+            now.elapsed().as_secs_f32(),
+        );
+        now = Instant::now();
+        for _ in 0..ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1 {
+            let other_txn = wallets[2]
+                .transfer(&AssetDefinition::native(), &[(receiver.clone(), 1)], 1)
+                .unwrap();
+            mock_validate(
+                &mut validator,
+                vec![other_txn],
+                wallets.as_mut_slice(),
+                &mut now,
+            )
+            .unwrap();
+        }
+
+        // Check that the pending transaction fails validation as-is.
+        println!(
+            "submitting invalid transaction: {}s",
+            now.elapsed().as_secs_f32()
+        );
+        now = Instant::now();
+        mock_validate(&mut validator, vec![txn.clone()], &mut wallets, &mut now).unwrap_err();
+
+        // Check that we can update the pending transaction and successfully resubmit it.
+        println!("updating transaction: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+        wallets[0].update_nullifier_proofs(&mut txn.0).unwrap();
+
+        println!("resubmitting transaction: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+        mock_validate(&mut validator, vec![txn], wallets.as_mut_slice(), &mut now).unwrap();
+        assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
+        assert_eq!(
+            wallets[1].balance(&AssetCode::native()),
+            1 + (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64
+        );
     }
 
     #[test]
