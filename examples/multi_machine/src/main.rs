@@ -145,7 +145,7 @@ async fn init_state_and_phaselock(
     .unwrap();
 
     // Create the initial phaselock
-    let known_nodes: Vec<_> = (0..nodes).map(|x| get_public_key(x)).collect();
+    let known_nodes: Vec<_> = (0..nodes).map(get_public_key).collect();
 
     let config = PhaseLockConfig {
         total_nodes: nodes as u32,
@@ -216,9 +216,11 @@ async fn main() {
                     .unwrap_or_else(|err| {
                         panic!("Error while creating a public key file: {}", err)
                     });
-            pk_file.write(pub_key_str.as_bytes()).unwrap_or_else(|err| {
-                panic!("Error while writing to the public key file: {}", err)
-            });
+            pk_file
+                .write_all(pub_key_str.as_bytes())
+                .unwrap_or_else(|err| {
+                    panic!("Error while writing to the public key file: {}", err)
+                });
         }
         println!("Public key files created");
     }
