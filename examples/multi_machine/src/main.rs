@@ -222,6 +222,7 @@ async fn main() {
         println!("Starting round {}", round + 1);
 
         // Generate a transaction if the node ID is 0
+        // Otherwise, pause to wait for node 0
         let mut txn = None;
         if own_id == 0 {
             println!("  - Proposing a transaction");
@@ -237,15 +238,18 @@ async fn main() {
                 .submit_transaction(txn.clone().unwrap().2)
                 .await
                 .unwrap();
+        } else {
+            match round {
+                0 => {
+                    async_std::task::sleep(std::time::Duration::from_millis(120_000)).await;
+                }
+                _ => {
+                    async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
+                }
+            }
         }
 
         // Start consensus
-        // Note: wait until the transaction is proposed before starting consensus. Otherwise,
-        // the node will never reaches decision.
-        // Issue: https://gitlab.com/translucence/systems/system/-/issues/15.
-        let mut line = String::new();
-        println!("Hit the enter key when ready to start the consensus...");
-        std::io::stdin().read_line(&mut line).unwrap();
         phaselock.start().await;
         println!("  - Starting consensus");
         let mut event: Event<ElaboratedBlock, ValidatorState> = phaselock
