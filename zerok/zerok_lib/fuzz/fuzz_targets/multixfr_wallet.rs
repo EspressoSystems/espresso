@@ -34,7 +34,9 @@ impl<'a> Arbitrary<'a> for MultiXfrParams {
                 (0..num_txns)
                     .map(|_| {
                         Ok((
-                            u.int_in_range(0..=ndefs - 1)?,
+                            // range is inclusive because def 0 is the native asset, and other asset
+                            // defs are 1-indexed
+                            u.int_in_range(0..=ndefs)?,
                             u.int_in_range(0..=nkeys - 1)?,
                             u.int_in_range(0..=nkeys - 1)?,
                             // Transaction amounts are smaller than record amounts because we don't
@@ -47,7 +49,7 @@ impl<'a> Arbitrary<'a> for MultiXfrParams {
             .collect::<Result<Vec<Vec<(u8, u8, u8, u64)>>>>()?;
 
         let init_rec = (
-            u.int_in_range(0..=ndefs - 1)?,
+            u.int_in_range(0..=ndefs)?,
             u.int_in_range(0..=nkeys - 1)?,
             u.int_in_range(1..=max_amt)?,
         );
@@ -56,7 +58,7 @@ impl<'a> Arbitrary<'a> for MultiXfrParams {
         let init_recs = (0..num_recs)
             .map(|_| {
                 Ok((
-                    u.int_in_range(0..=ndefs - 1)?,
+                    u.int_in_range(0..=ndefs)?,
                     u.int_in_range(0..=nkeys - 1)?,
                     u.int_in_range(1..=max_amt)?,
                 ))
