@@ -112,6 +112,7 @@ impl BlockContents<64> for ElaboratedBlock {
             state.prev_commit_time + 1,
             self.block.clone(),
             self.proofs.clone(),
+            false,
         )?;
         Ok(state)
     }
@@ -364,12 +365,12 @@ impl ValidatorState {
         Ok((txns, null_pfs))
     }
 
-    pub fn validate_and_apply_by(
+    pub fn validate_and_apply(
         &mut self,
         now: u64,
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
-        mut remember_comm: impl FnMut(RecordCommitment, u64) -> bool,
+        remember_commitments: bool,
     ) -> Result<Vec<u64> /* new uids */, ValidationError> {
         let (txns, _null_pfs) = self.validate_block(now, txns, null_pfs.clone())?;
         let comm = self.commit();
@@ -397,7 +398,7 @@ impl ValidatorState {
         {
             let uid = self.next_uid;
             self.record_merkle_frontier.push(o);
-            if !remember_comm(o, uid) {
+            if !remember_commitments {
                 self.record_merkle_frontier.forget(uid).expect_ok().unwrap();
             }
             ret.push(uid);
@@ -408,15 +409,6 @@ impl ValidatorState {
         self.record_merkle_root = self.record_merkle_frontier.get_root_value();
         self.prev_state = comm;
         Ok(ret)
-    }
-
-    pub fn validate_and_apply(
-        &mut self,
-        now: u64,
-        txns: Block,
-        null_pfs: Vec<Vec<SetMerkleProof>>,
-    ) -> Result<Vec<u64> /* new uids */, ValidationError> {
-        self.validate_and_apply_by(now, txns, null_pfs, |_, _| false)
     }
 }
 
@@ -1618,6 +1610,10 @@ impl<'a> UserWallet<'a> {
     fn record_merkle_tree(&self) -> &MerkleTree<RecordCommitment> {
         &self.validator.record_merkle_frontier
     }
+
+    fn record_merkle_tree_mut(&mut self) -> &mut MerkleTree<RecordCommitment> {
+        &mut self.validator.record_merkle_frontier
+    }
 }
 
 impl<'a> Wallet<'a> for UserWallet<'a> {
@@ -1675,51 +1671,60 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
     fn handle_event(&mut self, event: LedgerEvent) -> Result<(), Box<dyn std::error::Error>> {
         match event {
             LedgerEvent::Commit(block, receiver_memos) => {
-                let mut receiver_memos = receiver_memos.into_iter().flatten();
-                let key_pair = &self.key_pair;
-                let owned_records = &mut self.owned_records;
-                let handle_record = |comm, uid| {
-                    let memo = receiver_memos.next().unwrap();
-                    match memo.decrypt(key_pair, &comm, &[]) {
-                        Ok(record_opening) => {
-                            match record_opening.freeze_flag {
-                                FreezeFlag::Unfrozen => {
-                                    // If this record is for us (i.e. its corresponding memo
-                                    // decrypts under our key) and it is unfrozen, then add it to
-                                    // our owned records.
-                                    owned_records.insert(record_opening, uid, key_pair);
-                                    // Tell the validator to remember it in the Merkle tree.
-                                    true
-                                }
-                                FreezeFlag::Frozen => {
-                                    // We are the owner of this record, but it is frozen. We
-                                    // will never be able to spend this record; we need to wait
-                                    // for the freezer to create a new, unfrozen version. So we
-                                    // can safely forget this commitment.
-                                    false
-                                }
-                            }
-                        }
-                        Err(_) => {
-                            // Record is for somebody else, forget it.
-                            false
-                        }
-                    }
-                };
+                let mut uid = self.validator.next_uid;
 
                 // Don't trust the network connection that provided us this event; validate it
                 // against our local mirror of the ledger and bail out if it is invalid.
-                if let Err(val_err) = self.validator.validate_and_apply_by(
+                if let Err(val_err) = self.validator.validate_and_apply(
                     self.validator.prev_commit_time + 1,
                     block.block.clone(),
                     block.proofs,
-                    handle_record,
+                    true, // remember all commitments; we will forget the ones we don't need later
                 ) {
                     return Err(Box::new(WalletError::InvalidBlock { val_err }));
                 }
 
-                // Add newly published nullifiers to our local nullifiers set.
-                for txn in block.block.0.iter() {
+                for (txn, receiver_memos) in block.block.0.iter().zip(receiver_memos) {
+                    let output_commitments = match txn {
+                        TransactionNote::Transfer(xfr) => xfr.output_commitments.clone(),
+                        TransactionNote::Mint(mint) => vec![mint.chg_comm, mint.mint_comm],
+                        TransactionNote::Freeze(freeze) => freeze.output_commitments.clone(),
+                    };
+                    assert_eq!(output_commitments.len(), receiver_memos.len());
+                    for (record_commitment, memo) in
+                        output_commitments.iter().zip(receiver_memos.iter())
+                    {
+                        match memo.decrypt(&self.key_pair, record_commitment, &[]) {
+                            Ok(record_opening) => {
+                                // If this record is for us (i.e. its corresponding memo decrypts
+                                // under our key) and it is unfrozen, then add it to our owned
+                                // records.
+                                match record_opening.freeze_flag {
+                                    FreezeFlag::Unfrozen => {
+                                        self.owned_records.insert(
+                                            record_opening,
+                                            uid,
+                                            &self.key_pair,
+                                        );
+                                    }
+                                    FreezeFlag::Frozen => {
+                                        // We are the owner of this record, but it is frozen. We
+                                        // will never be able to spend this record; we need to wait
+                                        // for the freezer to create a new, unfrozen version. So we
+                                        // can safely forget this commitment.
+                                        self.record_merkle_tree_mut().forget(uid);
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                // Record is for somebody else, prune it.
+                                self.record_merkle_tree_mut().forget(uid);
+                            }
+                        }
+
+                        uid += 1;
+                    }
+
                     for nullifier in txn.nullifiers().iter() {
                         self.nullifiers.insert(*nullifier);
                         // TODO prune nullifiers that we don't need for our non-inclusion proofs
@@ -2018,7 +2023,8 @@ pub mod test_helpers {
             block: Block(txn.iter().map(|(txn, _, _)| txn.txn.clone()).collect()),
             proofs: txn.iter().map(|(txn, _, _)| txn.proofs.clone()).collect(),
         };
-        if let Err(err) = validator.validate_and_apply(1, block.block.clone(), block.proofs.clone())
+        if let Err(err) =
+            validator.validate_and_apply(1, block.block.clone(), block.proofs.clone(), false)
         {
             println!(
                 "Validation failed: {:?}: {}s",
@@ -2608,6 +2614,7 @@ mod tests {
                 1,
                 Block(vec![TransactionNote::Transfer(Box::new(txn1))]),
                 vec![nullifier_pfs],
+                false,
             )
             .unwrap();
 
