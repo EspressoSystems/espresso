@@ -263,7 +263,7 @@ async fn main() {
         let mut transactions = test_state
             .generate_transactions(
                 i as usize,
-                vec![(0, 0, 0, 0, -2)],
+                vec![(true, 0, 0, 0, 0, -2)],
                 TRANSACTION_COUNT as usize,
             )
             .unwrap();
