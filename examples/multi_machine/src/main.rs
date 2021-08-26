@@ -221,10 +221,9 @@ async fn main() {
     for round in 0..TRANSACTION_COUNT {
         println!("Starting round {}", round + 1);
 
-        // Generate a transaction if the node ID is 0
-        // Otherwise, pause to wait for node 0
+        // Generate a transaction if the node ID is the largest
         let mut txn = None;
-        if own_id == 0 {
+        if own_id == nodes - 1 {
             println!("  - Proposing a transaction");
             let mut transactions = state
                 .generate_transactions(
@@ -238,14 +237,11 @@ async fn main() {
                 .submit_transaction(txn.clone().unwrap().2)
                 .await
                 .unwrap();
-        } else {
-            match round {
-                0 => {
-                    async_std::task::sleep(std::time::Duration::from_millis(120_000)).await;
-                }
-                _ => {
-                    async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
-                }
+
+            // Pause to wait for other nodes. Otherwise, this node will never reaches decision.
+            // Issue: https://gitlab.com/translucence/systems/system/-/issues/15
+            if round == 0 {
+                async_std::task::sleep(std::time::Duration::from_millis(60_000)).await;
             }
         }
 
