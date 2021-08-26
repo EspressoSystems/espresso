@@ -659,7 +659,10 @@ pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalPara
     let mut file = match File::open(&path) {
         Ok(f) => f,
         Err(_) => {
-            set_universal_param(prng);
+            set_universal_param(
+                &mut ChaChaRng::from_rng(prng)
+                    .unwrap_or_else(|err| panic!("Error while creating a new PRNG: {}", err)),
+            );
             File::open(&path).unwrap_or_else(|_| {
                 panic!(
                     "Cannot find the universal parameter file after generation: {}",
