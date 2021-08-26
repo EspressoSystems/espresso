@@ -1,10 +1,11 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
-use phaselock::message::Message;
 use phaselock::{
     event::{Event, EventType},
     handle::PhaseLockHandle,
+    message::Message,
     networking::w_network::WNetwork,
+    traits::storage::memory_storage::MemoryStorage,
     PhaseLock, PhaseLockConfig, PubKey,
 };
 use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
@@ -125,21 +126,24 @@ async fn init_state_and_phaselock(
 
     let config = PhaseLockConfig {
         total_nodes: nodes as u32,
-        thershold: threshold as u32,
+        threshold: threshold as u32,
         max_transactions: 100,
         known_nodes,
         next_view_timeout: 10000,
         timeout_ratio: (11, 10),
+        round_start_delay: 1,
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
     let (_, phaselock) = PhaseLock::init(
         genesis,
-        sks,
+        sks.public_keys(),
+        sks.secret_key_share(node_id),
         node_id,
         config,
         state.validator.clone(),
         networking,
+        MemoryStorage::default(),
     )
     .await;
     debug!("phaselock launched");
@@ -240,7 +244,7 @@ async fn main() {
         // the node will never reaches decision.
         // Issue: https://gitlab.com/translucence/systems/system/-/issues/15.
         let mut line = String::new();
-        println!("Hit any key when ready to start the consensus...");
+        println!("Hit the enter key when ready to start the consensus...");
         std::io::stdin().read_line(&mut line).unwrap();
         phaselock.start().await;
         println!("  - Starting consensus");
@@ -264,9 +268,20 @@ async fn main() {
         }
 
         // Add the transaction if the node ID is 0
-        if let Some((ix, (owner_memos, k1_ix, k2_ix), t)) = txn {
+        if let Some((ix, keys_and_memos, t)) = txn {
             println!("  - Adding the transaction");
             let mut blk = ElaboratedBlock::default();
+            let (owner_memos, kixs) = {
+                let mut owner_memos = vec![];
+                let mut kixs = vec![];
+
+                for (kix, memo) in keys_and_memos {
+                    kixs.push(kix);
+                    owner_memos.push(memo);
+                }
+                (owner_memos, kixs)
+            };
+
             state
                 .try_add_transaction(
                     &mut blk,
@@ -275,7 +290,7 @@ async fn main() {
                     ix,
                     TRANSACTION_COUNT as usize,
                     owner_memos,
-                    vec![k1_ix, k2_ix],
+                    kixs,
                 )
                 .unwrap();
             state

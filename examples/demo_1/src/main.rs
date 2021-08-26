@@ -1,5 +1,6 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
+#![deny(warnings)]
 //! This program demonstrates use of Hot Stuff in a trivial application.
 //!
 //! TODO - Add transaction validity checking.
@@ -12,6 +13,7 @@ use tracing::{debug, error, info};
 
 use phaselock::message::Message;
 use phaselock::networking::w_network::WNetwork;
+use phaselock::traits::storage::memory_storage::MemoryStorage;
 use phaselock::{PhaseLock, PhaseLockConfig, PubKey};
 use rand::Rng;
 use serde::{de::DeserializeOwned, Serialize};
@@ -63,21 +65,25 @@ pub async fn try_phaselock(
     let pub_key = PubKey::from_secret_key_set_escape_hatch(keys, node_number as u64);
     let config = PhaseLockConfig {
         total_nodes: total as u32,
-        thershold: threshold as u32,
+        threshold: threshold as u32,
         max_transactions: 100,
         known_nodes,
         next_view_timeout: 40_000,
         timeout_ratio: (2, 1),
+        round_start_delay: 1,
     };
     let (networking, port) = try_network(pub_key.clone()).await;
     let phaselock = PhaseLock::new(
         genesis,
-        &keys,
+        pub_key_set,
+        keys.secret_key_share(node_number),
         node_number as u64,
         config,
         initial_state,
         networking.clone(),
-    );
+        MemoryStorage::default(),
+    )
+    .await;
     (phaselock, pub_key, port, networking)
 }
 
@@ -85,7 +91,7 @@ const VALIDATOR_COUNT: usize = 5;
 const TEST_SEED: [u8; 32] = [0x7au8; 32];
 const TRANSACTION_COUNT: u64 = 50;
 
-type TransactionSpecification = u64;
+// type TransactionSpecification = u64;
 type MultiXfrValidator = (
     PhaseLock<ElaboratedBlock, 64>,
     PubKey,
@@ -268,7 +274,18 @@ async fn main() {
 
         consense(i as usize, &phaselocks).await;
 
-        let (ix, (owner_memos, k1_ix, k2_ix), txn) = transaction;
+        let (ix, keys_and_memos, txn) = transaction;
+        let (owner_memos, kixs) = {
+            let mut owner_memos = vec![];
+            let mut kixs = vec![];
+
+            for (kix, memo) in keys_and_memos {
+                kixs.push(kix);
+                owner_memos.push(memo);
+            }
+            (owner_memos, kixs)
+        };
+
         let mut blk = ElaboratedBlock::default();
         test_state
             .try_add_transaction(
@@ -278,7 +295,7 @@ async fn main() {
                 ix,
                 TRANSACTION_COUNT as usize,
                 owner_memos,
-                vec![k1_ix, k2_ix, k2_ix],
+                kixs,
             )
             .unwrap();
         test_state

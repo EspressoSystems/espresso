@@ -4,6 +4,7 @@
 //
 // This code builds and validates transactions with two inputs and two outputs.
 
+#![deny(warnings)]
 //#![feature(proc_macro_hygiene, decl_macro)]
 
 use jf_txn::keys::UserKeyPair;
@@ -74,7 +75,7 @@ async fn main() {
     let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
 
     // Make two sets of keys
-    let keys: Vec<_> = (0..2).map(|_| UserKeyPair::generate(&mut prng)).collect();
+    let keys = (0..2).map(|_| UserKeyPair::generate(&mut prng));
     info!("Generated {} user key pairs", keys.len());
 
     // def0 and key0 are indices; amt0 is an arbitrary amount of asset units.
