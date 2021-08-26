@@ -228,7 +228,7 @@ async fn main() {
             let mut transactions = state
                 .generate_transactions(
                     round as usize,
-                    vec![(0, 0, 0, 0, -2)],
+                    vec![(true, 0, 0, 0, 0, -2)],
                     TRANSACTION_COUNT as usize,
                 )
                 .unwrap();
