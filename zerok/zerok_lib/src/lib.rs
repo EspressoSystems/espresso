@@ -656,13 +656,12 @@ pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalPara
     // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
     let path_str = "../../zerok/zerok_lib/src/universal_param".to_string();
     let path = Path::new(&path_str);
+    let mut new_prng = ChaChaRng::from_rng(prng)
+        .unwrap_or_else(|err| panic!("Error while creating a new PRNG: {}", err));
     let mut file = match File::open(&path) {
         Ok(f) => f,
         Err(_) => {
-            set_universal_param(
-                &mut ChaChaRng::from_rng(prng)
-                    .unwrap_or_else(|err| panic!("Error while creating a new PRNG: {}", err)),
-            );
+            set_universal_param(&mut new_prng);
             File::open(&path).unwrap_or_else(|_| {
                 panic!(
                     "Cannot find the universal parameter file after generation: {}",
