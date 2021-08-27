@@ -1703,7 +1703,7 @@ impl OwnedRecord {
 }
 
 pub struct RecordDatabase {
-    owned_records: HashMap<u64, OwnedRecord>,
+    records: HashMap<u64, OwnedRecord>,
     // record (size, uid) indexed by asset type, for easy allocation as transfer inputs. The records
     // for each asset are ordered by increasing size, which makes it easy to implement a worst-fit
     // allocator that minimizes fragmentation.
@@ -1715,7 +1715,7 @@ pub struct RecordDatabase {
 impl RecordDatabase {
     fn new() -> Self {
         Self {
-            owned_records: HashMap::new(),
+            records: HashMap::new(),
             asset_records: HashMap::new(),
             nullifier_records: HashMap::new(),
         }
@@ -1732,7 +1732,7 @@ impl RecordDatabase {
             .flatten()
             .rev()
             .filter_map(move |(_, uid)| {
-                let record = &self.owned_records[uid];
+                let record = &self.records[uid];
                 if record.ro.amount == 0 || record.on_hold(now) {
                     // Skip useless dummy records and records that are on hold
                     None
@@ -1752,7 +1752,7 @@ impl RecordDatabase {
         let exact_matches = unspent_records.range((amount, 0)..(amount + 1, 0));
         for (match_amount, uid) in exact_matches {
             assert_eq!(*match_amount, amount);
-            let record = &self.owned_records[uid];
+            let record = &self.records[uid];
             assert_eq!(record.ro.amount, amount);
             if record.on_hold(now) {
                 continue;
@@ -1765,7 +1765,7 @@ impl RecordDatabase {
 
     fn record_with_nullifier_mut(&mut self, nullifier: &Nullifier) -> Option<&mut OwnedRecord> {
         let uid = self.nullifier_records.get(nullifier)?;
-        self.owned_records.get_mut(uid)
+        self.records.get_mut(uid)
     }
 
     fn insert(&mut self, ro: RecordOpening, uid: u64, key_pair: &UserKeyPair) {
@@ -1779,7 +1779,7 @@ impl RecordDatabase {
             .or_insert_with(BTreeSet::new)
             .insert((ro.amount, uid));
         self.nullifier_records.insert(nullifier, uid);
-        self.owned_records.insert(
+        self.records.insert(
             uid,
             OwnedRecord {
                 ro,
@@ -1791,7 +1791,7 @@ impl RecordDatabase {
 
     fn remove_by_nullifier(&mut self, nullifier: Nullifier) {
         if let Some(uid) = self.nullifier_records.remove(&nullifier) {
-            let record = self.owned_records.remove(&uid).unwrap();
+            let record = self.records.remove(&uid).unwrap();
             self.asset_records
                 .get_mut(&record.ro.asset_def.code)
                 .unwrap()
