@@ -55,6 +55,14 @@ struct NodeOpt {
     /// Skip this option if only want to generate public key files.
     #[structopt(long = "id", short = "i")]
     id: Option<u64>,
+
+    /// Whether to automate the consensus process.
+    ///
+    /// With this option, the node which proposes transactions will pause for a minute to
+    /// wait for other nodes before starting the consensus. The default way is to skip this
+    /// option and wait for user prompts instead.
+    #[structopt(long = "auto", short = "a")]
+    auto: bool,
 }
 
 /// Gets public key of a node from its public key file.
@@ -294,21 +302,23 @@ async fn main() {
                     .await
                     .unwrap();
 
-                // // Pause to wait for other nodes. Otherwise, this node will never reaches decision.
-                // // Issue: https://gitlab.com/translucence/systems/system/-/issues/15
-                // if round == 0 {
-                //     async_std::task::sleep(std::time::Duration::from_millis(60_000)).await;
-                // }
+                // Pause to wait for other nodes. Otherwise, this node will never reaches decision.
+                // Issue: https://gitlab.com/translucence/systems/system/-/issues/15
+                if NodeOpt::from_args().auto && round == 0 {
+                    async_std::task::sleep(std::time::Duration::from_millis(60_000)).await;
+                }
             }
 
             // Start consensus
-            // Note: wait until the transaction is proposed before starting consensus. Otherwise,
-            // the node will never reaches decision.
-            // Issue: https://gitlab.com/translucence/systems/system/-/issues/15.
-            let mut line = String::new();
-            println!("Hit the return key when ready to start the consensus...");
-            std::io::stdin().read_line(&mut line).unwrap();
-            phaselock.start().await;
+            if !NodeOpt::from_args().auto {
+                // Wait until the transaction is proposed before starting consensus. Otherwise,
+                // the node will never reaches decision.
+                // Issue: https://gitlab.com/translucence/systems/system/-/issues/15.
+                let mut line = String::new();
+                println!("Hit the return key when ready to start the consensus...");
+                std::io::stdin().read_line(&mut line).unwrap();
+                phaselock.start().await;
+            }
             println!("  - Starting consensus");
             let mut event: Event<ElaboratedBlock, ValidatorState> = phaselock
                 .next_event()
