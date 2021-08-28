@@ -660,6 +660,10 @@ pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalPara
     // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
     let path_str = "../../zerok/zerok_lib/src/universal_param".to_string();
     let path = Path::new(&path_str);
+
+    // create a new seeded PRNG from the master PRNG when getting the UniversalParam. This ensures a
+    // deterministic RNG result after the call, either the UniversalParam is newly generated or loaded
+    // from a file.
     let mut new_prng = ChaChaRng::from_rng(prng)
         .unwrap_or_else(|err| panic!("Error while creating a new PRNG: {}", err));
     let mut file = match File::open(&path) {
