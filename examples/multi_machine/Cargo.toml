@@ -11,6 +11,7 @@ futures = "0.3.0"
 phaselock = { version = "0.0.1", registry = "translucence" }
 rand_xoshiro = "0.4.0"
 serde = { version = "1.0.123", features = ["derive", "rc"] }
+serde_json = "1.0.61"
 structopt = "0.3"
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
 threshold_crypto = "0.4.0"
