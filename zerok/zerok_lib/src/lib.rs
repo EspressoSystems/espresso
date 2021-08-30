@@ -315,25 +315,18 @@ mod key_set {
 use key_set::KeySet;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProverKey<
-    'a,
-    XfrOrder: key_set::KeyOrder = key_set::OrderByInputs,
-    FreezeOrder: key_set::KeyOrder = key_set::OrderByInputs,
-> {
+pub struct ProverKey<'a, Order: key_set::KeyOrder = key_set::OrderByInputs> {
     pub mint: MintProvingKey<'a>,
-    pub xfr: KeySet<TransferProvingKey<'a>, XfrOrder>,
-    pub freeze: KeySet<FreezeProvingKey<'a>, FreezeOrder>,
+    pub xfr: KeySet<TransferProvingKey<'a>, Order>,
+    pub freeze: KeySet<FreezeProvingKey<'a>, Order>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VerifierKey<
-    XfrOrder: key_set::KeyOrder = key_set::OrderByInputs,
-    FreezeOrder: key_set::KeyOrder = key_set::OrderByInputs,
-> {
+pub struct VerifierKey<Order: key_set::KeyOrder = key_set::OrderByInputs> {
     // TODO: is there a way to keep these types distinct?
     pub mint: TransactionVerifyingKey,
-    pub xfr: KeySet<TransactionVerifyingKey, XfrOrder>,
-    pub freeze: KeySet<TransactionVerifyingKey, FreezeOrder>,
+    pub xfr: KeySet<TransactionVerifyingKey, Order>,
+    pub freeze: KeySet<TransactionVerifyingKey, Order>,
 }
 
 // TODO
@@ -1742,7 +1735,7 @@ pub trait Wallet<'a> {
     #[allow(clippy::too_many_arguments)]
     fn new(
         seed: [u8; 32],
-        proving_key: ProverKey<'a, key_set::OrderByOutputs, key_set::OrderByOutputs>,
+        proving_key: ProverKey<'a, key_set::OrderByOutputs>,
         key_pair: UserKeyPair,
         initial_grant: Vec<(RecordOpening, u64)>,
         record_merkle_tree: &MerkleTree<RecordCommitment>,
@@ -2293,7 +2286,7 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
     #[allow(clippy::too_many_arguments)]
     fn new(
         seed: [u8; 32],
-        proving_key: ProverKey<'a, key_set::OrderByOutputs, key_set::OrderByOutputs>,
+        proving_key: ProverKey<'a, key_set::OrderByOutputs>,
         key_pair: UserKeyPair,
         initial_grant: Vec<(RecordOpening, u64)>,
         record_merkle_tree: &MerkleTree<RecordCommitment>,
@@ -2542,7 +2535,7 @@ impl<'a> IssuerWallet<'a> {
 impl<'a> Wallet<'a> for IssuerWallet<'a> {
     fn new(
         seed: [u8; 32],
-        prover_key: ProverKey<'a, key_set::OrderByOutputs, key_set::OrderByOutputs>,
+        prover_key: ProverKey<'a, key_set::OrderByOutputs>,
         key_pair: UserKeyPair,
         initial_grant: Vec<(RecordOpening, u64)>,
         record_merkle_tree: &MerkleTree<RecordCommitment>,
@@ -3347,7 +3340,7 @@ mod tests {
             println!("{}: {} bytes", l, k.0.len());
         }
 
-        let prove_key = ProverKey::<key_set::OrderByInputs, key_set::OrderByInputs> {
+        let prove_key = ProverKey::<key_set::OrderByInputs> {
             mint: mint_prove_key,
             xfr: KeySet::new(vec![xfr_prove_key].into_iter()).unwrap(),
             freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
