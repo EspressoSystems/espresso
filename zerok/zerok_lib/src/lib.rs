@@ -175,72 +175,158 @@ impl BlockContents<64> for ElaboratedBlock {
     }
 }
 
-#[derive(Debug, Snafu)]
-#[snafu(visibility = "pub")]
-pub enum KeySetError<Size> {
-    DuplicateKeys { size: Size },
-    NoKeys,
-}
+mod key_set {
+    use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KeySet<Size: Ord, K> {
-    keys: BTreeMap<Size, K>,
-}
+    #[derive(Debug, Snafu)]
+    #[snafu(visibility = "pub")]
+    pub enum Error {
+        DuplicateKeys {
+            num_inputs: usize,
+            num_outputs: usize,
+        },
+        NoKeys,
+    }
 
-impl<Size: 'static + Ord + Copy + Debug, K> KeySet<Size, K> {
-    /// Create a new KeySet with the keys in an iterator. `keys` must contain at least one key, and
-    /// it must not contain two keys with the same size.
-    pub fn new(keys: impl Iterator<Item = (Size, K)>) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut map = BTreeMap::new();
-        for (size, key) in keys {
-            if map.contains_key(&size) {
-                return Err(Box::new(KeySetError::DuplicateKeys { size }));
+    pub trait SizedKey {
+        fn num_inputs(&self) -> usize;
+        fn num_outputs(&self) -> usize;
+    }
+
+    impl<'a> SizedKey for TransferProvingKey<'a> {
+        fn num_inputs(&self) -> usize {
+            self.num_input()
+        }
+
+        fn num_outputs(&self) -> usize {
+            self.num_output()
+        }
+    }
+
+    impl<'a> SizedKey for FreezeProvingKey<'a> {
+        fn num_inputs(&self) -> usize {
+            self.num_input()
+        }
+
+        fn num_outputs(&self) -> usize {
+            self.num_output()
+        }
+    }
+
+    impl SizedKey for TransactionVerifyingKey {
+        fn num_inputs(&self) -> usize {
+            match self {
+                TransactionVerifyingKey::Transfer(xfr) => xfr.num_input(),
+                TransactionVerifyingKey::Freeze(freeze) => freeze.num_input(),
+                TransactionVerifyingKey::Mint(_) => 1,
             }
-            map.insert(size, key);
         }
-        if map.is_empty() {
-            return Err(Box::new(KeySetError::NoKeys::<Size>));
+
+        fn num_outputs(&self) -> usize {
+            match self {
+                TransactionVerifyingKey::Transfer(xfr) => xfr.num_output(),
+                TransactionVerifyingKey::Freeze(freeze) => freeze.num_output(),
+                TransactionVerifyingKey::Mint(_) => 2,
+            }
         }
-        Ok(Self { keys: map })
     }
 
-    /// Get the largest size supported by this KeySet.
-    ///
-    /// Panics if there are no keys in the KeySet. Since new() requires at least one key, this can
-    /// only happen if the KeySet is corrupt (for example, it was deserialized from a corrupted
-    /// file).
-    pub fn max_size(&self) -> Size {
-        *self.keys.iter().next_back().unwrap().0
+    pub trait KeyOrder {
+        type SortKey: Ord + Debug + Clone + Serialize + for<'a> Deserialize<'a>;
+        fn sort_key(num_inputs: usize, num_outputs: usize) -> Self::SortKey;
     }
 
-    pub fn key_for_size(&self, size: Size) -> Option<&K> {
-        self.keys.get(&size)
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct OrderByInputs;
+    impl KeyOrder for OrderByInputs {
+        type SortKey = (usize, usize);
+        fn sort_key(num_inputs: usize, num_outputs: usize) -> Self::SortKey {
+            (num_inputs, num_outputs)
+        }
     }
 
-    /// Return the smallest key whose size is at least `size`. If no such key is available, the
-    /// error contains the largest size that could have been supported.
-    pub fn best_fit_key(&self, size: Size) -> Result<(Size, &K), Size> {
-        self.keys
-            .range((Included(size), Unbounded))
-            .next()
-            .map(|(size, key)| (*size, key))
-            .ok_or_else(|| self.max_size())
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct OrderByOutputs;
+    impl KeyOrder for OrderByOutputs {
+        type SortKey = (usize, usize);
+        fn sort_key(num_inputs: usize, num_outputs: usize) -> Self::SortKey {
+            (num_outputs, num_inputs)
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct KeySet<K: SizedKey, Order: KeyOrder = OrderByInputs> {
+        keys: BTreeMap<Order::SortKey, K>,
+    }
+
+    impl<K: SizedKey, Order: KeyOrder> KeySet<K, Order> {
+        /// Create a new KeySet with the keys in an iterator. `keys` must contain at least one key,
+        /// and it must not contain two keys with the same size.
+        pub fn new(keys: impl Iterator<Item = K>) -> Result<Self, Error> {
+            let mut map = BTreeMap::new();
+            for key in keys {
+                let sort_key = Order::sort_key(key.num_inputs(), key.num_outputs());
+                if map.contains_key(&sort_key) {
+                    return Err(Error::DuplicateKeys {
+                        num_inputs: key.num_inputs(),
+                        num_outputs: key.num_outputs(),
+                    });
+                }
+                map.insert(sort_key, key);
+            }
+            if map.is_empty() {
+                return Err(Error::NoKeys);
+            }
+            Ok(Self { keys: map })
+        }
+
+        /// Get the largest size supported by this KeySet.
+        ///
+        /// Panics if there are no keys in the KeySet. Since new() requires at least one key, this
+        /// can only happen if the KeySet is corrupt (for example, it was deserialized from a
+        /// corrupted file).
+        pub fn max_size(&self) -> (usize, usize) {
+            let key = &self.keys.iter().next_back().unwrap().1;
+            (key.num_inputs(), key.num_outputs())
+        }
+
+        pub fn key_for_size(&self, num_inputs: usize, num_outputs: usize) -> Option<&K> {
+            self.keys.get(&Order::sort_key(num_inputs, num_outputs))
+        }
+
+        /// Return the smallest key whose size is at least (num_inputs, num_outputs). If no such key
+        /// is available, the error contains the largest size that could have been supported.
+        pub fn best_fit_key(
+            &self,
+            num_inputs: usize,
+            num_outputs: usize,
+        ) -> Result<(usize, usize, &K), (usize, usize)> {
+            self.keys
+                .range((
+                    Included(Order::sort_key(num_inputs, num_outputs)),
+                    Unbounded,
+                ))
+                .next()
+                .map(|(_, key)| (key.num_inputs(), key.num_outputs(), key))
+                .ok_or_else(|| self.max_size())
+        }
     }
 }
+use key_set::KeySet;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProverKey<'a> {
+pub struct ProverKey<'a, Order: key_set::KeyOrder = key_set::OrderByInputs> {
     pub mint: MintProvingKey<'a>,
-    pub xfr: KeySet<(usize, usize), TransferProvingKey<'a>>,
-    pub freeze: KeySet<usize, FreezeProvingKey<'a>>,
+    pub xfr: KeySet<TransferProvingKey<'a>, Order>,
+    pub freeze: KeySet<FreezeProvingKey<'a>, Order>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VerifierKey {
+pub struct VerifierKey<Order: key_set::KeyOrder = key_set::OrderByInputs> {
     // TODO: is there a way to keep these types distinct?
     pub mint: TransactionVerifyingKey,
-    pub xfr: KeySet<(usize, usize), TransactionVerifyingKey>,
-    pub freeze: KeySet<usize, TransactionVerifyingKey>,
+    pub xfr: KeySet<TransactionVerifyingKey, Order>,
+    pub freeze: KeySet<TransactionVerifyingKey, Order>,
 }
 
 // TODO
@@ -487,7 +573,7 @@ impl ValidatorState {
                     let num_outputs = note.output_commitments.len();
                     self.verif_crs
                         .xfr
-                        .key_for_size((num_inputs, num_outputs))
+                        .key_for_size(num_inputs, num_outputs)
                         .ok_or(UnsupportedTransferSize {
                             num_inputs,
                             num_outputs,
@@ -495,9 +581,10 @@ impl ValidatorState {
                 }
                 TransactionNote::Freeze(note) => {
                     let num_inputs = note.input_nullifiers.len();
+                    let num_outputs = note.output_commitments.len();
                     self.verif_crs
                         .freeze
-                        .key_for_size(num_inputs)
+                        .key_for_size(num_inputs, num_outputs)
                         .ok_or(UnsupportedFreezeSize { num_inputs })
                 }
             })
@@ -784,13 +871,13 @@ impl MultiXfrTestState {
             mint: TransactionVerifyingKey::Mint(mint_verif_key),
             xfr: KeySet::new(
                 vec![
-                    ((2, 2), TransactionVerifyingKey::Transfer(xfr_verif_key_22)),
-                    ((3, 3), TransactionVerifyingKey::Transfer(xfr_verif_key_33)),
+                    TransactionVerifyingKey::Transfer(xfr_verif_key_22),
+                    TransactionVerifyingKey::Transfer(xfr_verif_key_33),
                 ]
                 .into_iter(),
             )?,
             freeze: KeySet::new(
-                vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))].into_iter(),
+                vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
             )?,
         };
 
@@ -801,10 +888,8 @@ impl MultiXfrTestState {
             prng,
             prove_key: ProverKey {
                 mint: mint_prove_key,
-                xfr: KeySet::new(
-                    vec![((2, 2), xfr_prove_key_22), ((3, 3), xfr_prove_key_33)].into_iter(),
-                )?,
-                freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter())?,
+                xfr: KeySet::new(vec![xfr_prove_key_22, xfr_prove_key_33].into_iter())?,
+                freeze: KeySet::new(vec![freeze_prove_key].into_iter())?,
             },
             verif_key: verif_key.clone(),
             native_token,
@@ -1313,7 +1398,7 @@ impl MultiXfrTestState {
                         &[out_rec1, out_rec2],
                         fee_info,
                         self.validator.prev_commit_time + 1,
-                        self.prove_key.xfr.key_for_size((3, 3)).unwrap(),
+                        self.prove_key.xfr.key_for_size(3, 3).unwrap(),
                     )
                     .unwrap();
 
@@ -1468,7 +1553,7 @@ impl MultiXfrTestState {
             &[out_rec1],
             fee_info,
             self.validator.prev_commit_time + 1,
-            self.prove_key.xfr.key_for_size((2, 2)).unwrap(),
+            self.prove_key.xfr.key_for_size(2, 2).unwrap(),
         )
         .unwrap();
 
@@ -1650,7 +1735,7 @@ pub trait Wallet<'a> {
     #[allow(clippy::too_many_arguments)]
     fn new(
         seed: [u8; 32],
-        proving_key: ProverKey<'a>,
+        proving_key: ProverKey<'a, key_set::OrderByOutputs>,
         key_pair: UserKeyPair,
         initial_grant: Vec<(RecordOpening, u64)>,
         record_merkle_tree: &MerkleTree<RecordCommitment>,
@@ -1813,8 +1898,14 @@ pub struct UserWallet<'a> {
     rng: ChaChaRng,
     // spending, decrypting, signing keys
     key_pair: UserKeyPair,
-    // proving key for transfer transactions
-    proving_key: KeySet<(usize, usize), TransferProvingKey<'a>>,
+    // proving key set for transfer transactions. The proving keys are ordered by number of outputs
+    // first and number of inputs second, because the wallet is less flexible with respect to number
+    // of outputs. If we are building a trasnaction and find we have too many inputs we can always
+    // generate a merge transaction to defragment, but if the user requests a transaction with N
+    // independent outputs, there is nothing we can do to decrease that number. So when searching
+    // for an appropriate proving key, we will want to find a key with enough outputs first, and
+    // then worry about the number of inputs.
+    proving_key: KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
     // all records we own
     owned_records: RecordDatabase,
     // sparse nullifier set Merkle tree mirrored from validators
@@ -2075,12 +2166,12 @@ impl<'a> UserWallet<'a> {
     // necessary.
     //
     // `proving_keys` should always be `&self.proving_key`. This is a non-member function in order
-    // to prove to the compiler that the resutl only borrows from `&self.proving_key`, not all of
+    // to prove to the compiler that the result only borrows from `&self.proving_key`, not all of
     // `&self`.
     fn proving_key<'k>(
         rng: &mut ChaChaRng,
         me: UserPubKey,
-        proving_keys: &'k KeySet<(usize, usize), TransferProvingKey<'a>>,
+        proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
         asset: &AssetDefinition,
         inputs: &mut Vec<TransferNoteInput>,
         outputs: &mut Vec<RecordOpening>,
@@ -2097,58 +2188,43 @@ impl<'a> UserWallet<'a> {
         // automatically generated and not included in `outputs`.
         let fee_outputs = 1;
 
-        let ((key_inputs, key_outputs), proving_key) = proving_keys
-            .best_fit_key((inputs.len() + fee_inputs, outputs.len() + fee_outputs))
+        let num_inputs = inputs.len() + fee_inputs;
+        let num_outputs = outputs.len() + fee_outputs;
+        let (key_inputs, key_outputs, proving_key) = proving_keys
+            .best_fit_key(num_inputs, num_outputs)
             .map_err(|(max_inputs, max_outputs)| {
-                if inputs.len() + fee_inputs > max_inputs {
+                if max_outputs >= num_outputs {
+                    // If there is a key that can fit the correct number of outputs had we only
+                    // managed to find fewer inputs, call this a fragmentation error.
                     WalletError::Fragmentation {
                         asset: asset.code,
                         amount: total_output_amount,
                         suggested_amount: inputs
                             .iter()
-                            .take(max_inputs - 1) // leave room for fee input
+                            .take(max_inputs - fee_inputs)
                             .map(|input| input.ro.amount)
                             .sum(),
                         max_records: max_inputs,
                     }
                 } else {
-                    match proving_keys.best_fit_key((0, outputs.len() + 1)) {
-                        Ok(((better_num_inputs, _), _)) if better_num_inputs > 1 => {
-                            // If there is a key that can fit the correct number of outputs had we
-                            // only managed to find fewer inputs, call this a fragmentation error.
-                            WalletError::Fragmentation {
-                                asset: asset.code,
-                                amount: total_output_amount,
-                                suggested_amount: inputs
-                                    .iter()
-                                    .take(better_num_inputs - 1) // leave room for fee input
-                                    .map(|input| input.ro.amount)
-                                    .sum(),
-                                max_records: better_num_inputs,
-                            }
-                        }
-
-                        _ => {
-                            // Otherwise, we just have too many outputs for any of our available
-                            // keys. There is nothing we can do about that on the wallet side.
-                            WalletError::TooManyOutputs {
-                                asset: asset.code,
-                                max_records: max_outputs,
-                                num_receivers: outputs.len() - change_record as usize,
-                                num_change_records: 1 + change_record as usize,
-                            }
-                        }
+                    // Otherwise, we just have too many outputs for any of our available keys. There
+                    // is nothing we can do about that on the wallet side.
+                    WalletError::TooManyOutputs {
+                        asset: asset.code,
+                        max_records: max_outputs,
+                        num_receivers: outputs.len() - change_record as usize,
+                        num_change_records: 1 + change_record as usize,
                     }
                 }
             })?;
-        assert!(inputs.len() + fee_inputs <= key_inputs);
-        assert!(outputs.len() + fee_outputs <= key_outputs);
+        assert!(num_inputs <= key_inputs);
+        assert!(num_outputs <= key_outputs);
 
-        if inputs.len() + fee_inputs < key_inputs {
+        if num_inputs < key_inputs {
             // TODO pad with dummy inputs, (leaving room for the fee input if applicable)
             unimplemented!("dummy inputs");
         }
-        if outputs.len() + fee_outputs < key_outputs {
+        if num_outputs < key_outputs {
             // pad with dummy (0-amount) outputs (leaving room for the fee change output if
             // applicable)
             while {
@@ -2210,7 +2286,7 @@ impl<'a> Wallet<'a> for UserWallet<'a> {
     #[allow(clippy::too_many_arguments)]
     fn new(
         seed: [u8; 32],
-        proving_key: ProverKey<'a>,
+        proving_key: ProverKey<'a, key_set::OrderByOutputs>,
         key_pair: UserKeyPair,
         initial_grant: Vec<(RecordOpening, u64)>,
         record_merkle_tree: &MerkleTree<RecordCommitment>,
@@ -2459,7 +2535,7 @@ impl<'a> IssuerWallet<'a> {
 impl<'a> Wallet<'a> for IssuerWallet<'a> {
     fn new(
         seed: [u8; 32],
-        prover_key: ProverKey<'a>,
+        prover_key: ProverKey<'a, key_set::OrderByOutputs>,
         key_pair: UserKeyPair,
         initial_grant: Vec<(RecordOpening, u64)>,
         record_merkle_tree: &MerkleTree<RecordCommitment>,
@@ -2569,11 +2645,8 @@ pub mod test_helpers {
                 MERKLE_HEIGHT,
             )
             .unwrap();
-            xfr_prove_keys.push(((*num_inputs, *num_outputs), xfr_prove_key));
-            xfr_verif_keys.push((
-                (*num_inputs, *num_outputs),
-                TransactionVerifyingKey::Transfer(xfr_verif_key),
-            ));
+            xfr_prove_keys.push(xfr_prove_key);
+            xfr_verif_keys.push(TransactionVerifyingKey::Transfer(xfr_verif_key));
         }
         let (mint_prove_key, mint_verif_key, _) =
             jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT).unwrap();
@@ -2586,7 +2659,7 @@ pub mod test_helpers {
                 xfr: KeySet::new(xfr_verif_keys.into_iter()).unwrap(),
                 mint: TransactionVerifyingKey::Mint(mint_verif_key),
                 freeze: KeySet::new(
-                    vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))].into_iter(),
+                    vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
                 )
                 .unwrap(),
             },
@@ -2606,7 +2679,7 @@ pub mod test_helpers {
         let prover_key = ProverKey {
             xfr: KeySet::new(xfr_prove_keys.into_iter()).unwrap(),
             mint: mint_prove_key,
-            freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter()).unwrap(),
+            freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
         };
         let wallets = users
             .into_iter()
@@ -3167,25 +3240,19 @@ mod tests {
                 VerifierKey {
                     mint: TransactionVerifyingKey::Mint(mint.clone()),
                     xfr: KeySet::new(xfrs.iter().map(|size| {
-                        (
-                            *size,
-                            TransactionVerifyingKey::Transfer(match size {
-                                (1, 1) => xfr11.clone(),
-                                (2, 2) => xfr22.clone(),
-                                _ => panic!("invalid xfr size"),
-                            }),
-                        )
+                        TransactionVerifyingKey::Transfer(match size {
+                            (1, 1) => xfr11.clone(),
+                            (2, 2) => xfr22.clone(),
+                            _ => panic!("invalid xfr size"),
+                        })
                     }))
                     .unwrap(),
                     freeze: KeySet::new(freezes.iter().map(|size| {
-                        (
-                            *size,
-                            TransactionVerifyingKey::Freeze(match size {
-                                2 => freeze2.clone(),
-                                3 => freeze3.clone(),
-                                _ => panic!("invalid freeze size"),
-                            }),
-                        )
+                        TransactionVerifyingKey::Freeze(match size {
+                            2 => freeze2.clone(),
+                            3 => freeze3.clone(),
+                            _ => panic!("invalid freeze size"),
+                        })
                     }))
                     .unwrap(),
                 },
@@ -3226,10 +3293,8 @@ mod tests {
 
         let verif_crs = VerifierKey {
             mint: TransactionVerifyingKey::Mint(mint),
-            xfr: KeySet::new(vec![((1, 1), TransactionVerifyingKey::Transfer(xfr))].into_iter())
-                .unwrap(),
-            freeze: KeySet::new(vec![(2, TransactionVerifyingKey::Freeze(freeze))].into_iter())
-                .unwrap(),
+            xfr: KeySet::new(vec![TransactionVerifyingKey::Transfer(xfr)].into_iter()).unwrap(),
+            freeze: KeySet::new(vec![TransactionVerifyingKey::Freeze(freeze)].into_iter()).unwrap(),
         };
         let mut v1 = ValidatorState::new(verif_crs, MerkleTree::new(MERKLE_HEIGHT).unwrap());
         let mut v2 = v1.clone();
@@ -3275,20 +3340,18 @@ mod tests {
             println!("{}: {} bytes", l, k.0.len());
         }
 
-        let prove_key = ProverKey {
+        let prove_key = ProverKey::<key_set::OrderByInputs> {
             mint: mint_prove_key,
-            xfr: KeySet::new(vec![((1, 2), xfr_prove_key)].into_iter()).unwrap(),
-            freeze: KeySet::new(vec![(2, freeze_prove_key)].into_iter()).unwrap(),
+            xfr: KeySet::new(vec![xfr_prove_key].into_iter()).unwrap(),
+            freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
         };
 
         let verif_key = VerifierKey {
             mint: TransactionVerifyingKey::Mint(mint_verif_key),
-            xfr: KeySet::new(
-                vec![((1, 2), TransactionVerifyingKey::Transfer(xfr_verif_key))].into_iter(),
-            )
-            .unwrap(),
+            xfr: KeySet::new(vec![TransactionVerifyingKey::Transfer(xfr_verif_key)].into_iter())
+                .unwrap(),
             freeze: KeySet::new(
-                vec![(2, TransactionVerifyingKey::Freeze(freeze_verif_key))].into_iter(),
+                vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
             )
             .unwrap(),
         };
@@ -3392,7 +3455,7 @@ mod tests {
                 /* outputs:        */ &[bob_rec.clone()],
                 /* fee:            */ 1,
                 /* valid_until:    */ 2,
-                /* proving_key:    */ prove_key.xfr.key_for_size((1, 2)).unwrap(),
+                /* proving_key:    */ prove_key.xfr.key_for_size(1, 2).unwrap(),
             )
             .unwrap();
             (txn, bob_rec)
