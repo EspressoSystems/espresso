@@ -29,6 +29,9 @@ rayon = "*"
 generic-array = { version = "0.14.4", features = ["serde"] }
 lazy_static = "1.4.0"
 bincode = "1.3.3"
+async_executors = { version = "0.4.2", features = ["async_std"] }
+async-std = { version = "1.10.0", features = ["unstable", "attributes"] }
+futures = "0.3.16"
 
 [dev-dependencies]
 quickcheck = "1.0"
