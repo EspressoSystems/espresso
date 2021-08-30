@@ -4,22 +4,13 @@
 #[macro_use]
 extern crate proptest;
 
-#[cfg(any(test, fuzzing))]
-#[macro_use]
-extern crate lazy_static;
-
 mod set_merkle_tree;
 mod util;
 
+use async_scoped::AsyncScope;
 use core::fmt::Debug;
 use core::iter::once;
-use futures::{
-    channel::oneshot,
-    future::RemoteHandle,
-    prelude::*,
-    stream::Stream,
-    task::{Spawn, SpawnError, SpawnExt},
-};
+use futures::{channel::oneshot, prelude::*, stream::Stream};
 use jf_primitives::{jubjub_dsa::Signature, merkle_tree};
 use jf_txn::{
     errors::TxnApiError,
@@ -1679,9 +1670,6 @@ pub enum WalletError {
     CryptoError {
         err: TxnApiError,
     },
-    SpawnError {
-        err: SpawnError,
-    },
 }
 
 // Events consumed by the wallet produced by the backend (which potentially includes validators,
@@ -1694,7 +1682,7 @@ pub enum LedgerEvent {
     Reject(ElaboratedBlock, ValidationError),
 }
 
-pub struct WalletState {
+pub struct WalletState<'a> {
     rng: ChaChaRng,
     // sequence number of the last event processed
     now: u64,
@@ -1702,7 +1690,7 @@ pub struct WalletState {
     // blocks received from the event stream
     validator: ValidatorState,
     // proving key for transfer transactions
-    proving_key: ProverKey<'static>,
+    proving_key: ProverKey<'a>,
     // all records we own
     owned_records: RecordDatabase,
     // sparse nullifier set Merkle tree mirrored from validators
@@ -1711,9 +1699,9 @@ pub struct WalletState {
     defined_assets: HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
 }
 
-pub trait WalletBackend: 'static {
-    type EventStream: 'static + Stream<Item = LedgerEvent> + Unpin + Send;
-    fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState, WalletError>;
+pub trait WalletBackend<'a> {
+    type EventStream: 'a + Stream<Item = LedgerEvent> + Unpin + Send;
+    fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError>;
     fn store(&mut self, key_pair: &UserKeyPair, state: &WalletState) -> Result<(), WalletError>;
     fn subscribe(&self, starting_at: u64) -> Self::EventStream;
     fn submit(
@@ -1724,9 +1712,10 @@ pub trait WalletBackend: 'static {
     ) -> Result<(), WalletError>;
 }
 
-pub struct WalletSession<Backend: WalletBackend> {
+pub struct WalletSession<'a, Backend: WalletBackend<'a>> {
     backend: Backend,
     key_pair: UserKeyPair,
+    _marker: std::marker::PhantomData<&'a ()>,
 }
 
 struct OwnedRecord {
@@ -1858,12 +1847,16 @@ const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN
 // of validator states after which the transaction's proof can no longer be verified.
 const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
 
-impl WalletState {
-    pub fn address(&self, session: &WalletSession<impl WalletBackend>) -> UserPubKey {
+impl<'a> WalletState<'a> {
+    pub fn address(&self, session: &WalletSession<'a, impl WalletBackend<'a>>) -> UserPubKey {
         session.key_pair.pub_key()
     }
 
-    pub fn balance(&self, _session: &WalletSession<impl WalletBackend>, asset: &AssetCode) -> u64 {
+    pub fn balance(
+        &self,
+        _session: &WalletSession<'a, impl WalletBackend<'a>>,
+        asset: &AssetCode,
+    ) -> u64 {
         self.owned_records
             .spendable_records(asset, self.validator.prev_commit_time)
             .map(|record| record.ro.amount)
@@ -1872,7 +1865,7 @@ impl WalletState {
 
     pub fn handle_event(
         &mut self,
-        session: &mut WalletSession<impl WalletBackend>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         event: LedgerEvent,
     ) {
         self.now += 1;
@@ -1958,7 +1951,7 @@ impl WalletState {
 
     pub fn transfer(
         &mut self,
-        session: &mut WalletSession<impl WalletBackend>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         asset: &AssetDefinition,
         receivers: &[(UserPubKey, u64)],
         fee: u64,
@@ -1972,7 +1965,7 @@ impl WalletState {
 
     pub fn define_asset(
         &mut self,
-        _session: &mut WalletSession<impl WalletBackend>,
+        _session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         description: &[u8],
         policy: AssetPolicy,
     ) -> Result<AssetDefinition, WalletError> {
@@ -1987,7 +1980,7 @@ impl WalletState {
 
     pub fn mint(
         &mut self,
-        session: &mut WalletSession<impl WalletBackend>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         fee: u64,
         asset_code: &AssetCode,
         amount: u64,
@@ -2042,7 +2035,7 @@ impl WalletState {
 
     pub fn update_nullifier_proofs(
         &self,
-        _session: &WalletSession<impl WalletBackend>,
+        _session: &WalletSession<'a, impl WalletBackend<'a>>,
         txn: &mut ElaboratedTransaction,
     ) -> Result<(), WalletError> {
         txn.proofs = txn
@@ -2063,7 +2056,7 @@ impl WalletState {
 
     fn transfer_native(
         &mut self,
-        session: &mut WalletSession<impl WalletBackend>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         receivers: &[(UserPubKey, u64)],
         fee: u64,
     ) -> Result<(), WalletError> {
@@ -2147,7 +2140,7 @@ impl WalletState {
 
     fn transfer_non_native(
         &mut self,
-        session: &mut WalletSession<impl WalletBackend>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         asset: &AssetDefinition,
         receivers: &[(UserPubKey, u64)],
         fee: u64,
@@ -2328,12 +2321,12 @@ impl WalletState {
     fn xfr_proving_key<'k>(
         rng: &mut ChaChaRng,
         me: UserPubKey,
-        proving_keys: &'k KeySet<(usize, usize), TransferProvingKey<'static>>,
+        proving_keys: &'k KeySet<(usize, usize), TransferProvingKey<'a>>,
         asset: &AssetDefinition,
         inputs: &mut Vec<TransferNoteInput>,
         outputs: &mut Vec<RecordOpening>,
         change_record: bool,
-    ) -> Result<&'k TransferProvingKey<'static>, WalletError> {
+    ) -> Result<&'k TransferProvingKey<'a>, WalletError> {
         let total_output_amount = outputs.iter().map(|ro| ro.amount).sum();
         // non-native transfers have an extra fee input, which is not included in `inputs`.
         let fee_inputs = if *asset == AssetDefinition::native() {
@@ -2416,7 +2409,7 @@ impl WalletState {
 
     fn submit_transaction(
         &mut self,
-        backend: &mut impl WalletBackend,
+        backend: &mut impl WalletBackend<'a>,
         note: TransactionNote,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
@@ -2453,57 +2446,73 @@ impl WalletState {
 }
 
 type SyncHandles = HashMap<u64, Vec<oneshot::Sender<()>>>;
-pub struct Wallet<Backend: WalletBackend> {
+/// Note: it is a soundness requirement that the destructor of a `Wallet` run when the `Wallet` is
+/// dropped. Therefore, `std::mem::forget` must not be used to forget a `Wallet` without running its
+/// destructor.
+pub struct Wallet<'a, Backend: WalletBackend<'a>> {
     // Data shared between the main thread and the event handling thread:
     //  * the trusted, persistent wallet state
     //  * the trusted, ephemeral wallet session
     //  * promise completion handles for futures returned by sync(), indexed by the timestamp at
     //    which the corresponding future is supposed to complete. Handles are added in sync() (main
     //    thread) and removed and completed in the event thread
-    mutex: Arc<Mutex<(WalletState, WalletSession<Backend>, SyncHandles)>>,
+    mutex: Arc<Mutex<(WalletState<'a>, WalletSession<'a, Backend>, SyncHandles)>>,
     // Handle for the task running the event handling loop. When dropped, this handle will cancel
     // the task, so this field is never read, it exists solely to live as long as this struct and
     // then be dropped.
-    _event_task: RemoteHandle<()>,
+    _event_task: AsyncScope<'a, ()>,
 }
 
-impl<Backend: 'static + WalletBackend + Send> Wallet<Backend>
-where
-    Backend::EventStream: 'static,
-{
-    pub fn new<Exec: Spawn>(
-        exec: &Exec,
-        key_pair: UserKeyPair,
-        backend: Backend,
-    ) -> Result<Self, WalletError> {
+impl<'a, Backend: 'a + WalletBackend<'a> + Send> Wallet<'a, Backend> {
+    pub fn new(key_pair: UserKeyPair, backend: Backend) -> Result<Self, WalletError> {
         let state = backend.load(&key_pair)?;
         let mut events = backend.subscribe(state.now);
-        let session = WalletSession { key_pair, backend };
+        let session = WalletSession {
+            key_pair,
+            backend,
+            _marker: Default::default(),
+        };
         let sync_handles: SyncHandles = HashMap::new();
         let mutex = Arc::new(Mutex::new((state, session, sync_handles)));
 
         // Start the event loop.
         let event_task = {
             let mutex = mutex.clone();
-            exec.spawn_with_handle(async move {
-                while let Some(event) = events.next().await {
-                    let (state, session, sync_handles) = &mut *mutex.lock().unwrap();
-                    // handle an event
-                    state.handle_event(session, event);
-                    // signal any sync() futures which should complete after the last event
-                    if let Some(handles) = sync_handles.remove(&state.now) {
-                        for handle in handles {
-                            if handle.send(()).is_err() {
-                                // Errors mean the receiving end has dropped their promise before we
-                                // could signal it. This signal is a fire-and-forget operation; we
-                                // don't care if the receiver is listening or not, so just ignore
-                                // this error.
+            let mut scope = unsafe {
+                // Creating an AsyncScope is considered unsafe because `std::mem::forget` is allowed
+                // in safe code, and forgetting an AsyncScope can allow its inner futures to
+                // continue to be scheduled to run after the lifetime of the scope ends, since
+                // normally the destructor of the scope ensures that its futures are driven to
+                // completion before its lifetime ends.
+                //
+                // Since we are immediately going to store `scope` in the resulting `Wallet`, its
+                // lifetime will be the same as the `Wallet`, and its destructor will run as long as
+                // no one calls `forget` on the `Wallet` -- which no one should ever have any reason
+                // to.
+                AsyncScope::create()
+            };
+            scope.spawn_cancellable(
+                async move {
+                    while let Some(event) = events.next().await {
+                        let (state, session, sync_handles) = &mut *mutex.lock().unwrap();
+                        // handle an event
+                        state.handle_event(session, event);
+                        // signal any sync() futures which should complete after the last event
+                        if let Some(handles) = sync_handles.remove(&state.now) {
+                            for handle in handles {
+                                if handle.send(()).is_err() {
+                                    // Errors mean the receiving end has dropped their promise before we
+                                    // could signal it. This signal is a fire-and-forget operation; we
+                                    // don't care if the receiver is listening or not, so just ignore
+                                    // this error.
+                                }
                             }
                         }
                     }
-                }
-            })
-            .map_err(|err| WalletError::SpawnError { err })?
+                },
+                || (),
+            );
+            scope
         };
 
         Ok(Self {
@@ -2514,7 +2523,7 @@ where
 
     fn lock(
         &self,
-    ) -> std::sync::MutexGuard<'_, (WalletState, WalletSession<Backend>, SyncHandles)> {
+    ) -> std::sync::MutexGuard<'_, (WalletState<'a>, WalletSession<'a, Backend>, SyncHandles)> {
         // It's acceptable to `unwrap()` here, because the only way the mutex can be poisoned is if
         // another method in this class paniced while holding the lock. Therefore, if this function
         // panics, the solution is always to go fix that other panic.
@@ -2580,7 +2589,7 @@ where
         &self,
         txn: &mut ElaboratedTransaction,
     ) -> Result<(), WalletError> {
-        let (state, session, ..) = &*self.lock();
+        let (state, session, ..) = &mut *self.lock();
         state.update_nullifier_proofs(session, txn)
     }
 
@@ -2602,16 +2611,10 @@ where
 #[cfg(any(test, fuzzing))]
 pub mod test_helpers {
     use super::*;
-    use async_executors::AsyncStd;
     use futures::channel::mpsc as channel;
     use futures::future;
 
-    lazy_static! {
-        static ref UNIVERSAL_PARAM: jf_txn::proof::UniversalParam =
-            get_universal_param(&mut ChaChaRng::from_seed([42u8; 32]));
-    }
-
-    pub struct MockLedger {
+    pub struct MockLedger<'a> {
         now: u64,
         pub validator: ValidatorState,
         nullifiers: SetMerkleTree,
@@ -2621,10 +2624,10 @@ pub mod test_helpers {
         block_size: usize,
         hold_next_transaction: bool,
         held_transaction: Option<(ElaboratedTransaction, Vec<ReceiverMemo>, Signature)>,
-        prover_key: ProverKey<'static>,
+        prover_key: ProverKey<'a>,
     }
 
-    impl MockLedger {
+    impl<'a> MockLedger<'a> {
         fn generate_event(&mut self, e: LedgerEvent) {
             self.now += 1;
             for s in self.subscribers.iter_mut() {
@@ -2664,7 +2667,7 @@ pub mod test_helpers {
             }
         }
 
-        pub async fn sync(&mut self, wallets: &[Wallet<impl WalletBackend + Send>]) {
+        pub async fn sync(&mut self, wallets: &[Wallet<'a, impl 'a + WalletBackend<'a> + Send>]) {
             println!("waiting for sync point {}", self.now);
             future::join_all(wallets.iter().map(|wallet| wallet.sync(self.now))).await;
         }
@@ -2713,16 +2716,16 @@ pub mod test_helpers {
     }
 
     #[derive(Clone)]
-    pub struct MockWalletBackend {
-        ledger: Arc<Mutex<MockLedger>>,
+    pub struct MockWalletBackend<'a> {
+        ledger: Arc<Mutex<MockLedger<'a>>>,
         initial_grants: Vec<(RecordOpening, u64)>,
         seed: [u8; 32],
     }
 
-    impl WalletBackend for MockWalletBackend {
+    impl<'a> WalletBackend<'a> for MockWalletBackend<'a> {
         type EventStream = channel::UnboundedReceiver<LedgerEvent>;
 
-        fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState, WalletError> {
+        fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
             let ledger = self.ledger.lock().unwrap();
             assert_eq!(
                 ledger.now, 0,
@@ -2775,11 +2778,15 @@ pub mod test_helpers {
         }
     }
 
-    pub fn create_test_network(
+    pub fn create_test_network<'a>(
+        univ_param: &'a jf_txn::proof::UniversalParam,
         xfr_sizes: &[(usize, usize)],
         initial_grants: Vec<u64>,
         now: &mut Instant,
-    ) -> (Arc<Mutex<MockLedger>>, Vec<Wallet<MockWalletBackend>>) {
+    ) -> (
+        Arc<Mutex<MockLedger<'a>>>,
+        Vec<Wallet<'a, MockWalletBackend<'a>>>,
+    ) {
         let mut rng = ChaChaRng::from_seed([42u8; 32]);
 
         // Populate the unpruned record merkle tree with an initial record commitment for each
@@ -2817,7 +2824,7 @@ pub mod test_helpers {
         let mut xfr_verif_keys = vec![];
         for (num_inputs, num_outputs) in xfr_sizes {
             let (xfr_prove_key, xfr_verif_key, _) = jf_txn::proof::transfer::preprocess(
-                &UNIVERSAL_PARAM,
+                univ_param,
                 *num_inputs,
                 *num_outputs,
                 MERKLE_HEIGHT,
@@ -2830,9 +2837,9 @@ pub mod test_helpers {
             ));
         }
         let (mint_prove_key, mint_verif_key, _) =
-            jf_txn::proof::mint::preprocess(&UNIVERSAL_PARAM, MERKLE_HEIGHT).unwrap();
+            jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT).unwrap();
         let (freeze_prove_key, freeze_verif_key, _) =
-            jf_txn::proof::freeze::preprocess(&UNIVERSAL_PARAM, 2, MERKLE_HEIGHT).unwrap();
+            jf_txn::proof::freeze::preprocess(univ_param, 2, MERKLE_HEIGHT).unwrap();
         let nullifiers: SetMerkleTree = Default::default();
         let validator = ValidatorState::new(
             VerifierKey {
@@ -2873,14 +2880,12 @@ pub mod test_helpers {
 
         // Create a wallet for each user based on the validator and the per-user information
         // computed above.
-        let exec = AsyncStd::new();
         let wallets = users
             .into_iter()
             .map(|(key, initial_grants)| {
                 let mut seed = [0u8; 32];
                 rng.fill_bytes(&mut seed);
                 Wallet::new(
-                    &exec,
                     key,
                     MockWalletBackend {
                         ledger: ledger.clone(),
@@ -2922,6 +2927,9 @@ pub mod test_helpers {
             txs.iter().flatten().count()
         );
         let mut now = Instant::now();
+
+        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
+        let univ_param = get_universal_param(&mut prng);
 
         let xfr_sizes = &[
             (1, 2), // basic native transfer
@@ -2992,7 +3000,7 @@ pub mod test_helpers {
                     })
             ).collect();
 
-        let (ledger, mut wallets) = create_test_network(xfr_sizes, grants, &mut now);
+        let (ledger, mut wallets) = create_test_network(&univ_param, xfr_sizes, grants, &mut now);
         println!(
             "ceremony complete, minting initial records: {}s",
             now.elapsed().as_secs_f32()
@@ -3024,24 +3032,25 @@ pub mod test_helpers {
         println!("assets minted: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
-        // Check initial balances
-        let check_balances = |wallets: &Vec<Wallet<MockWalletBackend>>,
-                              balances: &Vec<Vec<u64>>| {
-            for i in 0..nkeys {
-                let wallet = &wallets[i as usize + 1];
-                let balance = &balances[i as usize];
+        // Check initial balances. This cannot be a closure because rust infers the wrong lifetime
+        // for the references (it tries to use 'a, which is longer than we want to borrow `wallets`
+        // for).
+        fn check_balances<'a>(
+            wallets: &[Wallet<'a, MockWalletBackend<'a>>],
+            balances: &[Vec<u64>],
+            assets: &[AssetDefinition],
+        ) {
+            for (i, balance) in balances.iter().enumerate() {
+                let wallet = &wallets[i + 1];
 
                 // Check native asset balance.
                 assert_eq!(wallet.balance(&AssetCode::native()), balance[0]);
-                for j in 1..ndefs + 1 {
-                    assert_eq!(
-                        wallet.balance(&assets[j as usize - 1].code),
-                        balance[j as usize]
-                    );
+                for (j, asset) in assets.iter().enumerate() {
+                    assert_eq!(wallet.balance(&asset.code), balance[j + 1]);
                 }
             }
-        };
-        check_balances(&wallets, &balances);
+        }
+        check_balances(&wallets, &balances, &assets);
 
         // Run the test transactions.
         for (i, block) in txs.iter().enumerate() {
@@ -3167,7 +3176,7 @@ pub mod test_helpers {
 
                 ledger.lock().unwrap().release_held_transaction();
                 ledger.lock().unwrap().sync(&wallets).await;
-                check_balances(&wallets, &balances);
+                check_balances(&wallets, &balances, &assets);
 
                 println!(
                     "Finished txn {}.{}/{}: {}s",
@@ -3669,6 +3678,8 @@ mod tests {
     async fn test_two_wallets(native: bool) {
         let mut now = Instant::now();
         println!("generating params");
+        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
+        let univ_param = get_universal_param(&mut prng);
 
         // Each transaction in this test will be a transfer of 1 record, with an additional
         // fee change output. We need to fix the transfer arity because although the wallet
@@ -3682,6 +3693,7 @@ mod tests {
         let alice_grant = 5;
         let bob_grant = if native { 0 } else { 1 };
         let (ledger, mut wallets) = create_test_network(
+            &univ_param,
             &[(num_inputs, num_outputs)],
             vec![alice_grant, bob_grant],
             &mut now,
@@ -3723,11 +3735,17 @@ mod tests {
         println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
-        // Check that both wallets reflect the new balances (less any fees).
-        let check_balance = |wallet: &Wallet<MockWalletBackend>,
-                             expected_coin_balance,
-                             starting_native_balance,
-                             fees_paid| {
+        // Check that both wallets reflect the new balances (less any fees). This cannot be a
+        // closure because rust infers the wrong lifetime for the references (it tries to use 'a,
+        // which is longer than we want to borrow `wallets` for).
+        fn check_balance<'a>(
+            wallet: &Wallet<'a, MockWalletBackend<'a>>,
+            expected_coin_balance: u64,
+            starting_native_balance: u64,
+            fees_paid: u64,
+            coin: &AssetDefinition,
+            native: bool,
+        ) {
             if native {
                 assert_eq!(
                     wallet.balance(&coin.code),
@@ -3740,9 +3758,16 @@ mod tests {
                     starting_native_balance - fees_paid
                 );
             }
-        };
-        check_balance(&wallets[0], 2, alice_initial_native_balance, 1);
-        check_balance(&wallets[1], 3, bob_initial_native_balance, 0);
+        }
+        check_balance(
+            &wallets[0],
+            2,
+            alice_initial_native_balance,
+            1,
+            &coin,
+            native,
+        );
+        check_balance(&wallets[1], 3, bob_initial_native_balance, 0, &coin, native);
 
         // Check that Bob's wallet has sufficient information to access received funds by
         // transferring some back to Alice.
@@ -3757,8 +3782,15 @@ mod tests {
         println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
-        check_balance(&wallets[0], 3, alice_initial_native_balance, 1);
-        check_balance(&wallets[1], 2, bob_initial_native_balance, 1);
+        check_balance(
+            &wallets[0],
+            3,
+            alice_initial_native_balance,
+            1,
+            &coin,
+            native,
+        );
+        check_balance(&wallets[1], 2, bob_initial_native_balance, 1, &coin, native);
     }
 
     #[async_std::test]
@@ -3788,6 +3820,7 @@ mod tests {
         println!("generating params");
 
         let mut rng = ChaChaRng::from_seed([0x8au8; 32]);
+        let univ_param = get_universal_param(&mut rng);
 
         // Native transfers have extra fee/change inputs/outputs.
         let num_inputs = if native { 1 } else { 2 };
@@ -3799,6 +3832,7 @@ mod tests {
         // RECORD_HOLD_TIME transfers while a transfer from wallets[0] is pending, causing the
         // transfer to time out.
         let (ledger, mut wallets) = create_test_network(
+            &univ_param,
             &[(num_inputs, num_outputs)],
             // If native, wallets[0] gets 1 coin to transfer and 1 for a transaction fee. Otherwise,
             // it gets
@@ -3847,14 +3881,6 @@ mod tests {
             asset
         };
 
-        let make_txn = |src: &mut Wallet<MockWalletBackend>, dst: &UserPubKey| {
-            if mint {
-                src.mint(1, &asset.code, 1, dst.clone()).unwrap()
-            } else {
-                src.transfer(&asset, &[(dst.clone(), 1)], 1).unwrap()
-            }
-        };
-
         // Start a transfer that will ultimately get rejected.
         println!(
             "generating a transfer which will fail: {}s",
@@ -3863,7 +3889,15 @@ mod tests {
         now = Instant::now();
         ledger.lock().unwrap().hold_next_transaction();
         let receiver = wallets[1].address();
-        make_txn(&mut wallets[0], &receiver);
+        if mint {
+            wallets[0]
+                .mint(1, &asset.code, 1, receiver.clone())
+                .unwrap()
+        } else {
+            wallets[0]
+                .transfer(&asset, &[(receiver.clone(), 1)], 1)
+                .unwrap()
+        }
         println!("transfer generated: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
@@ -3932,7 +3966,11 @@ mod tests {
             "transferring un-held record: {}s",
             now.elapsed().as_secs_f32()
         );
-        make_txn(&mut wallets[0], &receiver);
+        if mint {
+            wallets[0].mint(1, &asset.code, 1, receiver).unwrap()
+        } else {
+            wallets[0].transfer(&asset, &[(receiver, 1)], 1).unwrap()
+        }
         ledger.lock().unwrap().sync(&wallets).await;
         assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
         assert_eq!(wallets[0].balance(&asset.code), 0);
@@ -3981,6 +4019,8 @@ mod tests {
     #[async_std::test]
     async fn test_resubmit() -> std::io::Result<()> {
         let mut now = Instant::now();
+        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
+        let univ_param = get_universal_param(&mut prng);
 
         // The sender wallet (wallets[0]) gets an initial grant of 2 for a transaction fee and a
         // payment. wallets[1] will act as the receiver, and wallets[2] will be a third party
@@ -3988,6 +4028,7 @@ mod tests {
         // pending, after which we will check if the pending transaction can be updated and
         // resubmitted.
         let (ledger, mut wallets) = create_test_network(
+            &univ_param,
             &[(1, 2)],
             vec![
                 2,
