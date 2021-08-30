@@ -30,7 +30,7 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
             * The last node, `node 6`, is going to propose all transactions, but not necessarily the leader in each round.
             * Note: Make sure to start `node 6` last, so that it will complete network connections faster than other nodes and starts to propose the first transaction. 
         * Add `--auto` to automatically start each round of the consensus.
-            * Note: This is useful for automated testing, but the recommended adn default way is to start the consensus by user input.
+            * Note: This is useful for automated testing, but the recommended and default way is to start the consensus by user input.
 * For each round:
     * Wait until all windows display `Hit the enter key when ready to start the consensus...`, then hit the enter key in every window.
         * Skip this step if running with `--auto`.
