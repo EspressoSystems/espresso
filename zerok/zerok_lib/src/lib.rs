@@ -1697,6 +1697,16 @@ pub struct WalletState<'a> {
     nullifiers: SetMerkleTree,
     // maps defined asset code to asset definition, seed and description of the asset
     defined_assets: HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
+    // set of unconfirmed transactions, indexed by fee nullifier. We maintain the invariant that
+    // every nullifier in this set corresponds to an on-hold record, which ensures that there is
+    // never more than one transaction in flight with the same nullifier. Thus it is safe to use the
+    // fee record nullifier (which is always present) as a unique identifier for transactions. This
+    // is kind of a hack. It's standing in for what would be a better solution: a "user_data" field
+    // on transaction notes, preserved across round trips to the validators, which we could use as a
+    // unique ID.
+    pending_txns: HashMap<Nullifier, (Vec<ReceiverMemo>, Signature, u64)>,
+    // the fee nullifiers of transactions expiring at each validator timestamp.
+    expiring_txns: HashMap<u64, HashSet<Nullifier>>,
 }
 
 pub trait WalletBackend<'a> {
@@ -1704,6 +1714,8 @@ pub trait WalletBackend<'a> {
     fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError>;
     fn store(&mut self, key_pair: &UserKeyPair, state: &WalletState) -> Result<(), WalletError>;
     fn subscribe(&self, starting_at: u64) -> Self::EventStream;
+
+    // Submit a transaction to a validator.
     fn submit(
         &mut self,
         txn: ElaboratedTransaction,
@@ -1884,9 +1896,25 @@ impl<'a> WalletState<'a> {
                     println!("received invalid block: {:?}, {:?}", block, val_err);
                     return;
                 }
+                // Some transactions may have just expired when we stepped the validator state.
+                // Remove them from our pending transaction data structures.
+                //
+                // This maintains the invariant that everything in `pending_transactions` must
+                // correspond to an on-hold record, because everything which corresponds to a record
+                // whose hold just expired will be removed from the set now.
+                self.clear_expired_transactions();
 
-                for (txn, receiver_memos) in block.block.0.iter().zip(receiver_memos) {
-                    let output_commitments = match txn {
+                for ((txn, proofs), receiver_memos) in block
+                    .block
+                    .0
+                    .into_iter()
+                    .zip(block.proofs)
+                    .zip(receiver_memos)
+                {
+                    let txn = ElaboratedTransaction { txn, proofs };
+                    self.clear_pending_transaction(&txn, None);
+
+                    let output_commitments = match &txn.txn {
                         TransactionNote::Transfer(xfr) => xfr.output_commitments.clone(),
                         TransactionNote::Mint(mint) => vec![mint.chg_comm, mint.mint_comm],
                         TransactionNote::Freeze(freeze) => freeze.output_commitments.clone(),
@@ -1926,22 +1954,36 @@ impl<'a> WalletState<'a> {
                         uid += 1;
                     }
 
-                    for nullifier in txn.nullifiers().iter() {
-                        self.nullifiers.insert(*nullifier);
+                    for nullifier in txn.txn.nullifiers().into_iter() {
+                        self.nullifiers.insert(nullifier);
                         // TODO prune nullifiers that we don't need for our non-inclusion proofs
-                        self.owned_records.remove_by_nullifier(*nullifier);
+                        self.owned_records.remove_by_nullifier(nullifier);
                     }
                 }
             }
 
-            LedgerEvent::Reject(block, _) => {
-                for txn in block.block.0 {
-                    // Remove the hold on input nullifiers we own.
-                    for nullifier in txn.nullifiers().iter() {
-                        if let Some(record) =
-                            self.owned_records.record_with_nullifier_mut(nullifier)
-                        {
-                            record.unhold();
+            LedgerEvent::Reject(block, err) => {
+                for (txn, proofs) in block.block.0.into_iter().zip(block.proofs) {
+                    let mut txn = ElaboratedTransaction { txn, proofs };
+                    if let Some((memos, sig)) =
+                        self.clear_pending_transaction(&txn, Some(err.clone()))
+                    {
+                        // Try to resubmit if the error is recoverable.
+                        if let ValidationError::BadNullifierProof {} = err {
+                            if self.update_nullifier_proofs(session, &mut txn).is_ok() {
+                                println!("recoverable error in txn {:?}, resubmitting", txn);
+                                if self
+                                    .submit_elaborated_transaction(
+                                        &mut session.backend,
+                                        txn,
+                                        memos,
+                                        sig,
+                                    )
+                                    .is_err()
+                                {
+                                    println!("failed to resubmit transaction");
+                                }
+                            }
                         }
                     }
                 }
@@ -2033,7 +2075,7 @@ impl<'a> WalletState<'a> {
         )
     }
 
-    pub fn update_nullifier_proofs(
+    fn update_nullifier_proofs(
         &self,
         _session: &WalletSession<'a, impl WalletBackend<'a>>,
         txn: &mut ElaboratedTransaction,
@@ -2414,25 +2456,27 @@ impl<'a> WalletState<'a> {
         memos: Vec<ReceiverMemo>,
         sig: Signature,
     ) -> Result<(), WalletError> {
-        let now = self.validator.prev_commit_time;
         let nullifier_pfs = note
             .nullifiers()
             .iter()
-            .map(|n| {
-                // hold the record corresponding to this nullifier until the transaction is
-                // committed, rejected, or expired.
-                self.owned_records
-                    .record_with_nullifier_mut(n)
-                    .unwrap()
-                    .hold_until(now + RECORD_HOLD_TIME);
-                self.nullifiers.contains(*n).unwrap().1
-            })
+            .map(|n| self.nullifiers.contains(*n).unwrap().1)
             .collect();
         let txn = ElaboratedTransaction {
             txn: note,
             proofs: nullifier_pfs,
         };
 
+        self.submit_elaborated_transaction(backend, txn, memos, sig)
+    }
+
+    fn submit_elaborated_transaction(
+        &mut self,
+        backend: &mut impl WalletBackend<'a>,
+        txn: ElaboratedTransaction,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+    ) -> Result<(), WalletError> {
+        self.add_pending_transaction(&txn, memos.clone(), sig.clone());
         backend.submit(txn, memos, sig)
     }
 
@@ -2442,6 +2486,86 @@ impl<'a> WalletState<'a> {
 
     fn record_merkle_tree_mut(&mut self) -> &mut MerkleTree<RecordCommitment> {
         &mut self.validator.record_merkle_frontier
+    }
+
+    fn add_pending_transaction(
+        &mut self,
+        txn: &ElaboratedTransaction,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+    ) {
+        let now = self.validator.prev_commit_time;
+        for nullifier in txn.txn.nullifiers() {
+            // hold the record corresponding to this nullifier until the transaction is committed,
+            // rejected, or expired.
+            let record = self
+                .owned_records
+                .record_with_nullifier_mut(&nullifier)
+                .unwrap();
+            assert!(!record.on_hold(now));
+            record.hold_until(now + RECORD_HOLD_TIME);
+        }
+
+        // Add the fee nullifier to `pending_txns` and `expiring_txns`. We know it corresponds to an
+        // on-hold record since we just placed all the inputs to this transaction on hold. As soon
+        // as the hold expires, `handle_event` will remove the fee nullifier from these data
+        // structures by calling `clear_expired_transactions`.
+        let timeout = self.validator.prev_commit_time + RECORD_HOLD_TIME;
+        let nullifier = txn.txn.nullifiers()[0];
+        self.pending_txns.insert(nullifier, (memos, sig, timeout));
+        self.expiring_txns
+            .entry(timeout)
+            .or_default()
+            .insert(nullifier);
+    }
+
+    fn clear_pending_transaction(
+        &mut self,
+        txn: &ElaboratedTransaction,
+        err: Option<ValidationError>,
+    ) -> Option<(Vec<ReceiverMemo>, Signature)> {
+        let now = self.validator.prev_commit_time;
+        for nullifier in txn.txn.nullifiers() {
+            if let Some(record) = self.owned_records.record_with_nullifier_mut(&nullifier) {
+                assert!(record.on_hold(now));
+                if err.is_some() {
+                    // If the transaction was not accepted for any reason, its nullifiers have not
+                    // been spent, so remove the hold we placed on them.
+                    record.unhold();
+                }
+            }
+        }
+
+        // Remove the transaction from `pending_txns` and `expiring_txns`. This restores the
+        // invariant that every pending nullifier corresponds to an on-hold record, since we just
+        // cleared the hold for the inputs to this transaction.
+        let nullifier = txn.txn.nullifiers()[0];
+        self.pending_txns
+            .remove(&nullifier)
+            .map(|(memos, sig, timeout)| {
+                if let Some(expiring) = self.expiring_txns.get_mut(&timeout) {
+                    expiring.remove(&nullifier);
+                }
+                (memos, sig)
+            })
+    }
+
+    fn clear_expired_transactions(&mut self) {
+        for nullifier in self
+            .expiring_txns
+            .remove(&self.validator.prev_commit_time)
+            .into_iter()
+            .flatten()
+        {
+            assert!(
+                self.owned_records
+                    .record_with_nullifier_mut(&nullifier)
+                    .unwrap()
+                    .hold_until
+                    == Some(self.validator.prev_commit_time)
+            );
+            self.pending_txns.remove(&nullifier);
+        }
     }
 }
 
@@ -2615,7 +2739,7 @@ pub mod test_helpers {
     use futures::future;
 
     pub struct MockLedger<'a> {
-        now: u64,
+        pub now: u64,
         pub validator: ValidatorState,
         nullifiers: SetMerkleTree,
         subscribers: Vec<channel::UnboundedSender<LedgerEvent>>,
@@ -2667,11 +2791,6 @@ pub mod test_helpers {
             }
         }
 
-        pub async fn sync(&mut self, wallets: &[Wallet<'a, impl 'a + WalletBackend<'a> + Send>]) {
-            println!("waiting for sync point {}", self.now);
-            future::join_all(wallets.iter().map(|wallet| wallet.sync(self.now))).await;
-        }
-
         pub fn submit(
             &mut self,
             txn: ElaboratedTransaction,
@@ -2715,6 +2834,19 @@ pub mod test_helpers {
         }
     }
 
+    pub async fn sync<'a>(
+        ledger: &Arc<Mutex<MockLedger<'a>>>,
+        wallets: &[Wallet<'a, impl 'a + WalletBackend<'a> + Send>],
+    ) {
+        let now = ledger.lock().unwrap().now;
+        sync_with(wallets, now).await;
+    }
+
+    pub async fn sync_with<'a>(wallets: &[Wallet<'a, impl 'a + WalletBackend<'a> + Send>], t: u64) {
+        println!("waiting for sync point {}", t);
+        future::join_all(wallets.iter().map(|wallet| wallet.sync(t))).await;
+    }
+
     #[derive(Clone)]
     pub struct MockWalletBackend<'a> {
         ledger: Arc<Mutex<MockLedger<'a>>>,
@@ -2745,6 +2877,8 @@ pub mod test_helpers {
                 nullifiers: ledger.nullifiers.clone(),
                 defined_assets: HashMap::new(),
                 now: 0,
+                pending_txns: Default::default(),
+                expiring_txns: Default::default(),
             })
         }
 
@@ -3026,7 +3160,7 @@ pub mod test_helpers {
             wallets[0]
                 .mint(1, &assets[asset - 1].code, amount, address)
                 .unwrap();
-            ledger.lock().unwrap().sync(&wallets).await;
+            sync(&ledger, &wallets).await;
         }
 
         println!("assets minted: {}s", now.elapsed().as_secs_f32());
@@ -3113,7 +3247,7 @@ pub mod test_helpers {
                     wallets[0]
                         .mint(1, &asset.code, 2 * amount, sender_address)
                         .unwrap();
-                    ledger.lock().unwrap().sync(&wallets).await;
+                    sync(&ledger, &wallets).await;
                     balances[sender_ix][asset_ix] += 2 * amount;
 
                     println!("asset minted: {}s", now.elapsed().as_secs_f32());
@@ -3175,7 +3309,7 @@ pub mod test_helpers {
                 assert!(sender.balance(&asset.code) <= balances[sender_ix][asset_ix]);
 
                 ledger.lock().unwrap().release_held_transaction();
-                ledger.lock().unwrap().sync(&wallets).await;
+                sync(&ledger, &wallets).await;
                 check_balances(&wallets, &balances, &assets);
 
                 println!(
@@ -3716,7 +3850,7 @@ mod tests {
             wallets[0]
                 .mint(1, &coin.code, 5, alice_address.clone())
                 .unwrap();
-            ledger.lock().unwrap().sync(&wallets).await;
+            sync(&ledger, &wallets).await;
             println!("Asset minted: {}s", now.elapsed().as_secs_f32());
             now = Instant::now();
 
@@ -3731,7 +3865,7 @@ mod tests {
 
         // Construct a transaction to transfer some coins from Alice to Bob.
         wallets[0].transfer(&coin, &[(bob_address, 3)], 1).unwrap();
-        ledger.lock().unwrap().sync(&wallets).await;
+        sync(&ledger, &wallets).await;
         println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
@@ -3778,7 +3912,7 @@ mod tests {
         wallets[1]
             .transfer(&coin, &[(alice_address, 1)], 1)
             .unwrap();
-        ledger.lock().unwrap().sync(&wallets).await;
+        sync(&ledger, &wallets).await;
         println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
@@ -3864,7 +3998,7 @@ mod tests {
                 // itself is not minting the asset later on.
                 let dst = wallets[0].address();
                 wallets[0].mint(1, &asset.code, 1, dst).unwrap();
-                ledger.lock().unwrap().sync(&wallets).await;
+                sync(&ledger, &wallets).await;
             }
 
             if timeout {
@@ -3875,7 +4009,7 @@ mod tests {
                 wallets[0]
                     .mint(1, &asset.code, RECORD_HOLD_TIME, dst)
                     .unwrap();
-                ledger.lock().unwrap().sync(&wallets).await;
+                sync(&ledger, &wallets).await;
             }
 
             asset
@@ -3907,7 +4041,7 @@ mod tests {
 
         // Now do something that causes the sender's transaction to not go through
         if timeout {
-            // Generated RECORD_HOLD_TIME transactions to cause `txn` to time out.
+            // Generate RECORD_HOLD_TIME transactions to cause `txn` to time out.
             println!(
                 "generating {} transfers to time out the original transfer: {}s",
                 RECORD_HOLD_TIME,
@@ -3922,27 +4056,30 @@ mod tests {
                 wallets[2]
                     .transfer(&asset, &[(receiver.clone(), 1)], 1)
                     .unwrap();
-                ledger.lock().unwrap().sync(&wallets).await;
+                sync(&ledger, &wallets).await;
             }
         } else {
-            let mut ledger = ledger.lock().unwrap();
+            {
+                let mut ledger = ledger.lock().unwrap();
 
-            // Change the validator state, so that the wallet's transaction (built against the old
-            // validator state) will fail to validate.
-            let old_nullifiers_root = ledger.validator.nullifiers_root;
-            ledger.validator.nullifiers_root =
-                set_hash::elem_hash(Nullifier::random_for_test(&mut rng));
+                // Change the validator state, so that the wallet's transaction (built against the
+                // old validator state) will fail to validate.
+                let old_record_merkle_root = ledger.validator.record_merkle_root;
+                ledger.validator.record_merkle_root = merkle_tree::NodeValue::from(0);
 
-            println!(
-                "validating invalid transaction: {}s",
-                now.elapsed().as_secs_f32()
-            );
-            now = Instant::now();
-            ledger.release_held_transaction();
-            ledger.sync(&wallets).await;
+                println!(
+                    "validating invalid transaction: {}s",
+                    now.elapsed().as_secs_f32()
+                );
+                now = Instant::now();
+                ledger.release_held_transaction();
 
-            // The sender gets back in sync with the validator after their transaction is rejected.
-            ledger.validator.nullifiers_root = old_nullifiers_root;
+                // The sender gets back in sync with the validator after their transaction is
+                // rejected.
+                ledger.validator.record_merkle_root = old_record_merkle_root;
+            }
+
+            sync(&ledger, &wallets).await;
         }
 
         // Check that the sender got their balance back.
@@ -3971,7 +4108,7 @@ mod tests {
         } else {
             wallets[0].transfer(&asset, &[(receiver, 1)], 1).unwrap()
         }
-        ledger.lock().unwrap().sync(&wallets).await;
+        sync(&ledger, &wallets).await;
         assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
         assert_eq!(wallets[0].balance(&asset.code), 0);
         assert_eq!(
@@ -4059,27 +4196,20 @@ mod tests {
             wallets[2]
                 .transfer(&AssetDefinition::native(), &[(receiver.clone(), 1)], 1)
                 .unwrap();
-            ledger.lock().unwrap().sync(&wallets).await;
+            sync(&ledger, &wallets).await;
         }
 
-        // Check that the pending transaction fails validation as-is.
+        // Check that the pending transaction eventually succeeds, after being automatically
+        // resubmitted by the wallet.
         println!(
             "submitting invalid transaction: {}s",
             now.elapsed().as_secs_f32()
         );
-        now = Instant::now();
-        let (mut txn, memos, sig) = ledger.lock().unwrap().release_held_transaction().unwrap();
-        ledger.lock().unwrap().sync(&wallets).await;
-        assert_eq!(wallets[0].balance(&AssetCode::native()), 2);
-
-        // Check that we can update the pending transaction and successfully resubmit it.
-        println!("updating transaction: {}s", now.elapsed().as_secs_f32());
-        now = Instant::now();
-        wallets[0].update_nullifier_proofs(&mut txn).unwrap();
-
-        println!("resubmitting transaction: {}s", now.elapsed().as_secs_f32());
-        ledger.lock().unwrap().submit(txn, memos, sig);
-        ledger.lock().unwrap().sync(&wallets).await;
+        let ledger_time = ledger.lock().unwrap().now;
+        ledger.lock().unwrap().release_held_transaction().unwrap();
+        // Wait for 2 events: the first Reject event and then a later Commit event after the wallet
+        // resubmits.
+        sync_with(&wallets, ledger_time + 2).await;
         assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
         assert_eq!(
             wallets[1].balance(&AssetCode::native()),
