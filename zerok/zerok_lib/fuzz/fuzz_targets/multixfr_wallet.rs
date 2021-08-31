@@ -2,6 +2,7 @@
 // run with `cargo fuzz run --release -s none multixfr_wallet`
 
 #![no_main]
+use async_std::task::block_on;
 use libfuzzer_sys::arbitrary::{Arbitrary, Result, Unstructured};
 use libfuzzer_sys::fuzz_target;
 use zerok_lib::test_helpers::*;
@@ -83,5 +84,6 @@ fuzz_target!(|params: MultiXfrParams| {
         init_rec,
         init_recs,
     } = params;
-    test_multixfr_wallet(txs, nkeys, ndefs, init_rec, init_recs)
+
+    block_on(test_multixfr_wallet(txs, nkeys, ndefs, init_rec, init_recs))
 });
