@@ -14,7 +14,7 @@ use futures::{channel::oneshot, prelude::*, stream::Stream};
 use jf_primitives::{jubjub_dsa::Signature, merkle_tree};
 use jf_txn::{
     errors::TxnApiError,
-    keys::{UserKeyPair, UserPubKey},
+    keys::{UserAddress, UserKeyPair, UserPubKey},
     mint::MintNote,
     proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
     sign_receiver_memos,
@@ -1755,6 +1755,9 @@ pub enum WalletError {
     CryptoError {
         err: TxnApiError,
     },
+    InvalidAddress {
+        address: UserAddress,
+    },
 }
 
 // Events consumed by the wallet produced by the backend (which potentially includes validators,
@@ -1805,6 +1808,7 @@ pub trait WalletBackend<'a> {
     fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError>;
     fn store(&mut self, key_pair: &UserKeyPair, state: &WalletState) -> Result<(), WalletError>;
     fn subscribe(&self, starting_at: u64) -> Self::EventStream;
+    fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError>;
 
     // Submit a transaction to a validator.
     fn submit(
@@ -1951,7 +1955,7 @@ const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN
 const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
 
 impl<'a> WalletState<'a> {
-    pub fn address(&self, session: &WalletSession<'a, impl WalletBackend<'a>>) -> UserPubKey {
+    pub fn pub_key(&self, session: &WalletSession<'a, impl WalletBackend<'a>>) -> UserPubKey {
         session.key_pair.pub_key()
     }
 
@@ -2086,13 +2090,17 @@ impl<'a> WalletState<'a> {
         &mut self,
         session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         asset: &AssetDefinition,
-        receivers: &[(UserPubKey, u64)],
+        receivers: &[(UserAddress, u64)],
         fee: u64,
     ) -> Result<(), WalletError> {
+        let receivers = receivers
+            .iter()
+            .map(|(addr, amt)| Ok((session.backend.get_public_key(addr)?, *amt)))
+            .collect::<Result<Vec<_>, _>>()?;
         if *asset == AssetDefinition::native() {
-            self.transfer_native(session, receivers, fee)
+            self.transfer_native(session, &receivers, fee)
         } else {
-            self.transfer_non_native(session, asset, receivers, fee)
+            self.transfer_non_native(session, asset, &receivers, fee)
         }
     }
 
@@ -2117,7 +2125,7 @@ impl<'a> WalletState<'a> {
         fee: u64,
         asset_code: &AssetCode,
         amount: u64,
-        owner: UserPubKey,
+        owner: UserAddress,
     ) -> Result<(), WalletError> {
         let (fee_ro, uid) = self.find_record_for_fee(fee)?;
         let acc_member_witness = AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
@@ -2131,7 +2139,7 @@ impl<'a> WalletState<'a> {
         let mint_record = RecordOpening {
             amount,
             asset_def: asset_def.clone(),
-            pub_key: owner,
+            pub_key: session.backend.get_public_key(&owner)?,
             freeze_flag: FreezeFlag::Unfrozen,
             blind: BlindFactor::rand(&mut self.rng),
         };
@@ -2229,7 +2237,7 @@ impl<'a> WalletState<'a> {
         }
 
         // find a proving key which can handle this transaction size
-        let me = self.address(session);
+        let me = self.pub_key(session);
         let proving_key = Self::xfr_proving_key(
             &mut self.rng,
             me,
@@ -2304,7 +2312,7 @@ impl<'a> WalletState<'a> {
         }
 
         // prepare outputs, excluding fee change (which will be automatically generated)
-        let me = self.address(session);
+        let me = self.pub_key(session);
         let mut outputs = vec![];
         for (pub_key, amount) in receivers {
             outputs.push(RecordOpening::new(
@@ -2730,9 +2738,13 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send> Wallet<'a, Backend> {
         self.mutex.lock().unwrap()
     }
 
-    pub fn address(&self) -> UserPubKey {
+    pub fn pub_key(&self) -> UserPubKey {
         let (state, session, ..) = &*self.lock();
-        state.address(session)
+        state.pub_key(session)
+    }
+
+    pub fn address(&self) -> UserAddress {
+        self.pub_key().address()
     }
 
     pub fn balance(&self, asset: &AssetCode) -> u64 {
@@ -2743,7 +2755,7 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send> Wallet<'a, Backend> {
     pub fn transfer(
         &mut self,
         asset: &AssetDefinition,
-        receivers: &[(UserPubKey, u64)],
+        receivers: &[(UserAddress, u64)],
         fee: u64,
     ) -> Result<(), WalletError> {
         let (state, session, ..) = &mut *self.lock();
@@ -2766,31 +2778,10 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send> Wallet<'a, Backend> {
         fee: u64,
         asset_code: &AssetCode,
         amount: u64,
-        owner: UserPubKey,
+        owner: UserAddress,
     ) -> Result<(), WalletError> {
         let (state, session, ..) = &mut *self.lock();
         state.mint(session, fee, asset_code, amount, owner)
-    }
-
-    /// If a transaction is rejected because the state of the ledger has changed since it was built,
-    /// we may be able to resubmit it after just updating its nullifier proofs (which is cheap to
-    /// do) since the validator can verify the ZKP even if it is out-of-date by up to
-    /// RECORD_ROOT_HISTORY_SIZE states.
-    ///
-    /// Validators may also update the nullifier proofs automatically and re-verify the transactions
-    /// without incurring an extra network round trip. However, the wallet should have the
-    /// capability of doing this if needed because not all validators will store the entire
-    /// nullifier set needed to do the proofs.
-    ///
-    /// Eventually, the wallet should do this and resubmit the transaction automatically (e.g.
-    /// whenever it receives a relevant LedgerEvent::Reject), but in the current design the wallet
-    /// has no way to talk directly to the validators.
-    pub fn update_nullifier_proofs(
-        &self,
-        txn: &mut ElaboratedTransaction,
-    ) -> Result<(), WalletError> {
-        let (state, session, ..) = &mut *self.lock();
-        state.update_nullifier_proofs(session, txn)
     }
 
     pub async fn sync(&self, t: u64) -> Result<(), oneshot::Canceled> {
@@ -2825,6 +2816,7 @@ pub mod test_helpers {
         hold_next_transaction: bool,
         held_transaction: Option<(ElaboratedTransaction, Vec<ReceiverMemo>, Signature)>,
         prover_key: ProverKey<'a, key_set::OrderByOutputs>,
+        address_map: HashMap<UserAddress, UserPubKey>,
     }
 
     impl<'a> MockLedger<'a> {
@@ -2977,6 +2969,16 @@ pub mod test_helpers {
             receiver
         }
 
+        fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
+            let ledger = self.ledger.lock().unwrap();
+            match ledger.address_map.get(address) {
+                Some(key) => Ok(key.clone()),
+                None => Err(WalletError::InvalidAddress {
+                    address: address.clone(),
+                }),
+            }
+        }
+
         fn submit(
             &mut self,
             txn: ElaboratedTransaction,
@@ -3083,6 +3085,10 @@ pub mod test_helpers {
                 mint: mint_prove_key,
                 freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
             },
+            address_map: users
+                .iter()
+                .map(|(key, _)| (key.address(), key.pub_key()))
+                .collect(),
         }));
 
         // Create a wallet for each user based on the validator and the per-user information
