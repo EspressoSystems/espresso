@@ -14,7 +14,11 @@ use futures::{channel::oneshot, prelude::*, stream::Stream};
 use jf_primitives::{jubjub_dsa::Signature, merkle_tree};
 use jf_txn::{
     errors::TxnApiError,
-    keys::{UserAddress, UserKeyPair, UserPubKey},
+    freeze::{FreezeNote, FreezeNoteInput},
+    keys::{
+        AuditorKeyPair, AuditorPubKey, FreezerKeyPair, FreezerPubKey, UserAddress, UserKeyPair,
+        UserPubKey,
+    },
     mint::MintNote,
     proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
     sign_receiver_memos,
@@ -1758,6 +1762,14 @@ pub enum WalletError {
     InvalidAddress {
         address: UserAddress,
     },
+    InvalidAuditorKey {
+        my_key: AuditorPubKey,
+        asset_key: AuditorPubKey,
+    },
+    InvalidFreezerKey {
+        my_key: FreezerPubKey,
+        asset_key: FreezerPubKey,
+    },
 }
 
 // Events consumed by the wallet produced by the backend (which potentially includes validators,
@@ -1785,8 +1797,16 @@ pub struct WalletState<'a> {
     // proving key, we will want to find a key with enough outputs first, and then worry about the
     // number of inputs.
     proving_key: ProverKey<'a, key_set::OrderByOutputs>,
-    // all records we own
-    owned_records: RecordDatabase,
+    // all records we care about, including records we own, records we have audited, and records we
+    // can freeze or unfreeze
+    records: RecordDatabase,
+    // key pair for decrypting auditor memos
+    auditor_key_pair: AuditorKeyPair,
+    // asset definitions for which we are an auditor, indexed by code
+    auditable_assets: HashMap<AssetCode, AssetDefinition>,
+    // key pair for computing nullifiers of records owned by someone else but which we can freeze or
+    // unfreeze
+    freezer_key_pair: FreezerKeyPair,
     // sparse nullifier set Merkle tree mirrored from validators
     nullifiers: SetMerkleTree,
     // maps defined asset code to asset definition, seed and description of the asset
@@ -1798,9 +1818,16 @@ pub struct WalletState<'a> {
     // is kind of a hack. It's standing in for what would be a better solution: a "user_data" field
     // on transaction notes, preserved across round trips to the validators, which we could use as a
     // unique ID.
-    pending_txns: HashMap<Nullifier, (Vec<ReceiverMemo>, Signature, u64)>,
+    pending_txns: HashMap<Nullifier, PendingTransaction>,
     // the fee nullifiers of transactions expiring at each validator timestamp.
     expiring_txns: HashMap<u64, HashSet<Nullifier>>,
+}
+
+struct PendingTransaction {
+    receiver_memos: Vec<ReceiverMemo>,
+    signature: Signature,
+    freeze_outputs: Vec<RecordOpening>,
+    timeout: u64,
 }
 
 pub trait WalletBackend<'a> {
@@ -1825,7 +1852,7 @@ pub struct WalletSession<'a, Backend: WalletBackend<'a>> {
     _marker: std::marker::PhantomData<&'a ()>,
 }
 
-struct OwnedRecord {
+struct RecordInfo {
     ro: RecordOpening,
     uid: u64,
     // if Some(t), this record is on hold until the validator timestamp surpasses `t`, because this
@@ -1833,7 +1860,7 @@ struct OwnedRecord {
     hold_until: Option<u64>,
 }
 
-impl OwnedRecord {
+impl RecordInfo {
     fn on_hold(&self, now: u64) -> bool {
         matches!(self.hold_until, Some(t) if t > now)
     }
@@ -1848,11 +1875,12 @@ impl OwnedRecord {
 }
 
 pub struct RecordDatabase {
-    records: HashMap<u64, OwnedRecord>,
-    // record (size, uid) indexed by asset type, for easy allocation as transfer inputs. The records
-    // for each asset are ordered by increasing size, which makes it easy to implement a worst-fit
-    // allocator that minimizes fragmentation.
-    asset_records: HashMap<AssetCode, BTreeSet<(u64, u64)>>,
+    // all records in the database, by uid
+    record_info: HashMap<u64, RecordInfo>,
+    // record (size, uid) indexed by asset type, owner, and freeze status, for easy allocation as
+    // transfer or freeze inputs. The records for each asset are ordered by increasing size, which
+    // makes it easy to implement a worst-fit allocator that minimizes fragmentation.
+    asset_records: HashMap<(AssetCode, UserPubKey, FreezeFlag), BTreeSet<(u64, u64)>>,
     // record uids indexed by nullifier, for easy removal when confirmed as transfer inputs
     nullifier_records: HashMap<Nullifier, u64>,
 }
@@ -1861,15 +1889,17 @@ impl RecordDatabase {
     fn spendable_records<'a>(
         &'a self,
         asset: &AssetCode,
+        owner: &UserPubKey,
+        frozen: FreezeFlag,
         now: u64,
-    ) -> impl Iterator<Item = &'a OwnedRecord> {
+    ) -> impl Iterator<Item = &'a RecordInfo> {
         self.asset_records
-            .get(asset)
+            .get(&(*asset, owner.clone(), frozen))
             .into_iter()
             .flatten()
             .rev()
             .filter_map(move |(_, uid)| {
-                let record = &self.records[uid];
+                let record = &self.record_info[uid];
                 if record.ro.amount == 0 || record.on_hold(now) {
                     // Skip useless dummy records and records that are on hold
                     None
@@ -1882,14 +1912,16 @@ impl RecordDatabase {
     fn spendable_record_with_amount(
         &self,
         asset: &AssetCode,
+        owner: &UserPubKey,
+        frozen: FreezeFlag,
         amount: u64,
         now: u64,
-    ) -> Option<&OwnedRecord> {
-        let unspent_records = self.asset_records.get(asset)?;
+    ) -> Option<&RecordInfo> {
+        let unspent_records = self.asset_records.get(&(*asset, owner.clone(), frozen))?;
         let exact_matches = unspent_records.range((amount, 0)..(amount + 1, 0));
         for (match_amount, uid) in exact_matches {
             assert_eq!(*match_amount, amount);
-            let record = &self.records[uid];
+            let record = &self.record_info[uid];
             assert_eq!(record.ro.amount, amount);
             if record.on_hold(now) {
                 continue;
@@ -1900,9 +1932,9 @@ impl RecordDatabase {
         None
     }
 
-    fn record_with_nullifier_mut(&mut self, nullifier: &Nullifier) -> Option<&mut OwnedRecord> {
+    fn record_with_nullifier_mut(&mut self, nullifier: &Nullifier) -> Option<&mut RecordInfo> {
         let uid = self.nullifier_records.get(nullifier)?;
-        self.records.get_mut(uid)
+        self.record_info.get_mut(uid)
     }
 
     fn insert(&mut self, ro: RecordOpening, uid: u64, key_pair: &UserKeyPair) {
@@ -1911,14 +1943,23 @@ impl RecordDatabase {
             uid,
             &RecordCommitment::from(&ro),
         );
+        self.insert_with_nullifier(ro, uid, nullifier)
+    }
+
+    fn insert_freezable(&mut self, ro: RecordOpening, uid: u64, key_pair: &FreezerKeyPair) {
+        let nullifier = key_pair.nullify(&ro.pub_key, uid, &RecordCommitment::from(&ro));
+        self.insert_with_nullifier(ro, uid, nullifier)
+    }
+
+    fn insert_with_nullifier(&mut self, ro: RecordOpening, uid: u64, nullifier: Nullifier) {
         self.asset_records
-            .entry(ro.asset_def.code)
+            .entry((ro.asset_def.code, ro.pub_key.clone(), ro.freeze_flag))
             .or_insert_with(BTreeSet::new)
             .insert((ro.amount, uid));
         self.nullifier_records.insert(nullifier, uid);
-        self.records.insert(
+        self.record_info.insert(
             uid,
-            OwnedRecord {
+            RecordInfo {
                 ro,
                 uid,
                 hold_until: None,
@@ -1926,21 +1967,26 @@ impl RecordDatabase {
         );
     }
 
-    fn remove_by_nullifier(&mut self, nullifier: Nullifier) {
-        if let Some(uid) = self.nullifier_records.remove(&nullifier) {
-            let record = self.records.remove(&uid).unwrap();
+    fn remove_by_nullifier(&mut self, nullifier: Nullifier) -> Option<RecordInfo> {
+        self.nullifier_records.remove(&nullifier).map(|uid| {
+            let record = self.record_info.remove(&uid).unwrap();
             self.asset_records
-                .get_mut(&record.ro.asset_def.code)
+                .get_mut(&(
+                    record.ro.asset_def.code,
+                    record.ro.pub_key.clone(),
+                    record.ro.freeze_flag,
+                ))
                 .unwrap()
                 .remove(&(record.ro.amount, uid));
-        }
+            record
+        })
     }
 }
 
 impl Default for RecordDatabase {
     fn default() -> Self {
         Self {
-            records: HashMap::new(),
+            record_info: HashMap::new(),
             asset_records: HashMap::new(),
             nullifier_records: HashMap::new(),
         }
@@ -1961,11 +2007,17 @@ impl<'a> WalletState<'a> {
 
     pub fn balance(
         &self,
-        _session: &WalletSession<'a, impl WalletBackend<'a>>,
+        session: &WalletSession<'a, impl WalletBackend<'a>>,
         asset: &AssetCode,
+        frozen: FreezeFlag,
     ) -> u64 {
-        self.owned_records
-            .spendable_records(asset, self.validator.prev_commit_time)
+        self.records
+            .spendable_records(
+                asset,
+                &self.pub_key(session),
+                frozen,
+                self.validator.prev_commit_time,
+            )
             .map(|record| record.ro.amount)
             .sum()
     }
@@ -1978,19 +2030,27 @@ impl<'a> WalletState<'a> {
         self.now += 1;
         match event {
             LedgerEvent::Commit(block, receiver_memos) => {
-                let mut uid = self.validator.next_uid;
-
                 // Don't trust the network connection that provided us this event; validate it
                 // against our local mirror of the ledger and bail out if it is invalid.
-                if let Err(val_err) = self.validator.validate_and_apply(
+                let mut uids = match self.validator.validate_and_apply(
                     self.validator.prev_commit_time + 1,
                     block.block.clone(),
                     block.proofs.clone(),
                     true, // remember all commitments; we will forget the ones we don't need later
                 ) {
-                    println!("received invalid block: {:?}, {:?}", block, val_err);
-                    return;
-                }
+                    Ok(uids) => {
+                        // Get a list of new uids and whether we want to remember them in our record
+                        // Merkle tree. Initially, set `remember` to false for all uids, to maximize
+                        // sparseness. If any of the consumers of this block (for example, the
+                        // auditor component, or the owner of this wallet) care about a uid, they
+                        // will set its `remember` flag to true.
+                        uids.into_iter().map(|uid| (uid, false)).collect::<Vec<_>>()
+                    }
+                    Err(val_err) => {
+                        println!("received invalid block: {:?}, {:?}", block, val_err);
+                        return;
+                    }
+                };
                 // Some transactions may have just expired when we stepped the validator state.
                 // Remove them from our pending transaction data structures.
                 //
@@ -2006,63 +2066,48 @@ impl<'a> WalletState<'a> {
                     .zip(block.proofs)
                     .zip(receiver_memos)
                 {
+                    let remaining_uids = uids.split_off(txn.output_len());
+                    assert_eq!(uids.len(), txn.output_len());
                     let txn = ElaboratedTransaction { txn, proofs };
-                    self.clear_pending_transaction(&txn, None);
 
-                    let output_commitments = match &txn.txn {
-                        TransactionNote::Transfer(xfr) => xfr.output_commitments.clone(),
-                        TransactionNote::Mint(mint) => vec![mint.chg_comm, mint.mint_comm],
-                        TransactionNote::Freeze(freeze) => freeze.output_commitments.clone(),
-                    };
-                    assert_eq!(output_commitments.len(), receiver_memos.len());
-                    for (record_commitment, memo) in
-                        output_commitments.iter().zip(receiver_memos.iter())
-                    {
-                        match memo.decrypt(&session.key_pair, record_commitment, &[]) {
-                            Ok(record_opening) => {
-                                // If this record is for us (i.e. its corresponding memo decrypts
-                                // under our key) and it is unfrozen, then add it to our owned
-                                // records.
-                                match record_opening.freeze_flag {
-                                    FreezeFlag::Unfrozen => {
-                                        self.owned_records.insert(
-                                            record_opening,
-                                            uid,
-                                            &session.key_pair,
-                                        );
-                                    }
-                                    FreezeFlag::Frozen => {
-                                        // We are the owner of this record, but it is frozen. We
-                                        // will never be able to spend this record; we need to wait
-                                        // for the freezer to create a new, unfrozen version. So we
-                                        // can safely forget this commitment.
-                                        self.record_merkle_tree_mut().forget(uid);
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                // Record is for somebody else, prune it.
-                                self.record_merkle_tree_mut().forget(uid);
-                            }
-                        }
+                    // Different concerns within the wallet consume transactions in different ways.
+                    // Now we give each concern a chance to consume this transaction, performing any
+                    // processing they need to do and possibly setting the `remember` flag for
+                    // output records they care about.
+                    //
+                    // This is a transaction we submitted and have been
+                    // awaiting confirmation.
+                    self.clear_pending_transaction(&txn, Ok(&mut uids));
+                    // This is someone else's transaction but we can audit it.
+                    self.audit_transaction(session, &txn, &mut uids);
+                    // This is someone else's transaction but we are a receiver of some of its
+                    // outputs.
+                    self.receive_transaction_outputs(session, &txn, receiver_memos, &mut uids);
 
-                        uid += 1;
-                    }
-
+                    // Update spent nullifiers.
                     for nullifier in txn.txn.nullifiers().into_iter() {
                         self.nullifiers.insert(nullifier);
                         // TODO prune nullifiers that we don't need for our non-inclusion proofs
-                        self.owned_records.remove_by_nullifier(nullifier);
+
+                        if let Some(record) = self.records.remove_by_nullifier(nullifier) {
+                            self.record_merkle_tree_mut().forget(record.uid);
+                        }
                     }
+
+                    // Prune the record Merkle tree of records we don't care about.
+                    for (uid, remember) in uids {
+                        if !remember {
+                            self.record_merkle_tree_mut().forget(uid);
+                        }
+                    }
+                    uids = remaining_uids;
                 }
             }
 
             LedgerEvent::Reject(block, err) => {
                 for (txn, proofs) in block.block.0.into_iter().zip(block.proofs) {
                     let mut txn = ElaboratedTransaction { txn, proofs };
-                    if let Some((memos, sig)) =
-                        self.clear_pending_transaction(&txn, Some(err.clone()))
-                    {
+                    if let Some(pending) = self.clear_pending_transaction(&txn, Err(err.clone())) {
                         // Try to resubmit if the error is recoverable.
                         if let ValidationError::BadNullifierProof {} = err {
                             if self.update_nullifier_proofs(session, &mut txn).is_ok() {
@@ -2071,8 +2116,9 @@ impl<'a> WalletState<'a> {
                                     .submit_elaborated_transaction(
                                         &mut session.backend,
                                         txn,
-                                        memos,
-                                        sig,
+                                        pending.receiver_memos,
+                                        pending.signature,
+                                        pending.freeze_outputs,
                                     )
                                     .is_err()
                                 {
@@ -2084,6 +2130,235 @@ impl<'a> WalletState<'a> {
                 }
             }
         };
+    }
+
+    fn clear_pending_transaction(
+        &mut self,
+        txn: &ElaboratedTransaction,
+        uids: Result<&mut [(u64, bool)], ValidationError>,
+    ) -> Option<PendingTransaction> {
+        let now = self.validator.prev_commit_time;
+
+        // Remove the transaction from `pending_txns` and `expiring_txns`. This restores the
+        // invariant that every pending nullifier corresponds to an on-hold record, since we just
+        // cleared the hold for the inputs to this transaction.
+        let txn_id = txn.txn.nullifiers()[0];
+        let pending = self.pending_txns.remove(&txn_id);
+        if let Some(pending) = &pending {
+            if let Some(expiring) = self.expiring_txns.get_mut(&pending.timeout) {
+                expiring.remove(&txn_id);
+            }
+        }
+
+        for nullifier in txn.txn.nullifiers() {
+            if let Some(record) = self.records.record_with_nullifier_mut(&nullifier) {
+                if pending.is_some() {
+                    // If we started this transaction, all of its inputs should have been on hold,
+                    // to preserve the invariant that all input nullifiers of all pending
+                    // transactions are on hold.
+                    assert!(record.on_hold(now));
+
+                    if uids.is_err() {
+                        // If the transaction was not accepted for any reason, its nullifiers have
+                        // not been spent, so remove the hold we placed on them.
+                        record.unhold();
+                    }
+                } else {
+                    // This isn't even our transaction.
+                    assert!(!record.on_hold(now));
+                }
+            }
+        }
+
+        // If this was a successful freeze transaction, add all of its frozen/unfrozen outputs to
+        // our freezable database.
+        if let Ok(uids) = uids {
+            if let Some(pending) = &pending {
+                // the first uid corresponds to the fee change output, which is not one of the
+                // `freeze_outputs`, so we skip that one
+                for ((uid, remember), ro) in uids.iter_mut().skip(1).zip(&pending.freeze_outputs) {
+                    self.records
+                        .insert_freezable(ro.clone(), *uid, &self.freezer_key_pair);
+                    *remember = true;
+                }
+            }
+        }
+
+        pending
+    }
+
+    fn clear_expired_transactions(&mut self) {
+        for nullifier in self
+            .expiring_txns
+            .remove(&self.validator.prev_commit_time)
+            .into_iter()
+            .flatten()
+        {
+            assert!(
+                self.records
+                    .record_with_nullifier_mut(&nullifier)
+                    .unwrap()
+                    .hold_until
+                    == Some(self.validator.prev_commit_time)
+            );
+            self.pending_txns.remove(&nullifier);
+        }
+    }
+
+    fn audit_transaction(
+        &mut self,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        txn: &ElaboratedTransaction,
+        uids: &mut [(u64, bool)],
+    ) {
+        // Try to decrypt auditor memos.
+        let mut audit_data = None;
+        match &txn.txn {
+            TransactionNote::Transfer(xfr) => {
+                for asset in self.auditable_assets.values() {
+                    audit_data = self
+                        .auditor_key_pair
+                        .open_transfer_audit_memo(asset, xfr)
+                        .ok();
+                    if audit_data.is_some() {
+                        break;
+                    }
+                }
+            }
+            TransactionNote::Mint(mint) => {
+                audit_data = self
+                    .auditor_key_pair
+                    .open_mint_audit_memo(mint)
+                    .ok()
+                    .map(|audit_output| (vec![], vec![audit_output]));
+            }
+            TransactionNote::Freeze(_) => {}
+        }
+        if let Some((_, audit_outputs)) = audit_data {
+            //todo !jeb.bearer eventually, we will probably want to save all the audit memos for
+            // the whole transaction (inputs and outputs) regardless of whether any of the outputs
+            // are freezeable, just for general auditing purposes.
+
+            // the first uid corresponds to the fee change output, which has no audit memo, so skip
+            // that one
+            for ((uid, remember), output) in uids.iter_mut().skip(1).zip(audit_outputs) {
+                if let (Some(asset_def), Some(pub_key), Some(amount), Some(blind)) = (
+                    self.auditable_assets.get(&output.asset_code),
+                    output
+                        .user_address
+                        .and_then(|address| session.backend.get_public_key(&address).ok()),
+                    output.amount,
+                    output.blinding_factor,
+                ) {
+                    // If the audit memo contains all the information we need to potentially freeze
+                    // this record, save it in our database for later freezing.
+                    if *asset_def.policy_ref().freezer_pub_key() == self.freezer_key_pair.pub_key()
+                    {
+                        let record_opening = RecordOpening {
+                            amount,
+                            asset_def: asset_def.clone(),
+                            pub_key,
+                            freeze_flag: FreezeFlag::Unfrozen,
+                            blind,
+                        };
+                        self.records
+                            .insert_freezable(record_opening, *uid, &self.freezer_key_pair);
+                        *remember = true;
+                    }
+                }
+            }
+        }
+    }
+
+    fn receive_transaction_outputs(
+        &mut self,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        txn: &ElaboratedTransaction,
+        receiver_memos: Vec<ReceiverMemo>,
+        uids: &mut [(u64, bool)],
+    ) {
+        let output_commitments = match &txn.txn {
+            TransactionNote::Transfer(xfr) => xfr.output_commitments.clone(),
+            TransactionNote::Mint(mint) => vec![mint.chg_comm, mint.mint_comm],
+            TransactionNote::Freeze(freeze) => freeze.output_commitments.clone(),
+        };
+        assert_eq!(output_commitments.len(), receiver_memos.len());
+        assert_eq!(output_commitments.len(), uids.len());
+        for (((uid, remember), record_commitment), memo) in
+            uids.iter_mut().zip(output_commitments).zip(receiver_memos)
+        {
+            if let Ok(record_opening) = memo.decrypt(&session.key_pair, &record_commitment, &[]) {
+                // If this record is for us (i.e. its corresponding memo decrypts under our
+                // key), then add it to our owned records.
+                self.records.insert(record_opening, *uid, &session.key_pair);
+                *remember = true;
+            }
+        }
+    }
+
+    fn update_nullifier_proofs(
+        &self,
+        _session: &WalletSession<'a, impl WalletBackend<'a>>,
+        txn: &mut ElaboratedTransaction,
+    ) -> Result<(), WalletError> {
+        txn.proofs = txn
+            .txn
+            .nullifiers()
+            .iter()
+            .map(|n| {
+                let (contains, proof) = self.nullifiers.contains(*n).unwrap();
+                if contains {
+                    Err(WalletError::NullifierAlreadyPublished { nullifier: *n })
+                } else {
+                    Ok(proof)
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(())
+    }
+
+    pub fn define_asset(
+        &mut self,
+        _session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        description: &[u8],
+        policy: AssetPolicy,
+    ) -> Result<AssetDefinition, WalletError> {
+        let seed = AssetCodeSeed::generate(&mut self.rng);
+        let code = AssetCode::new(seed, description);
+        let asset_definition =
+            AssetDefinition::new(code, policy).map_err(|err| WalletError::CryptoError { err })?;
+        self.defined_assets
+            .insert(code, (asset_definition.clone(), seed, description.to_vec()));
+        // If the policy lists ourself as the auditor, automatically start auditing transactions
+        // involving this asset.
+        if *asset_definition.policy_ref().auditor_pub_key() == self.auditor_key_pair.pub_key() {
+            self.auditable_assets
+                .insert(asset_definition.code, asset_definition.clone());
+        }
+        Ok(asset_definition)
+    }
+
+    /// Use `audit_asset` to start auditing transactions with a given asset type, when the asset
+    /// type was defined by someone else and sent to us out of band.
+    ///
+    /// Auditing of assets created by this user with an appropriate asset policy begins
+    /// automatically. Calling this function is unnecessary.
+    pub fn audit_asset(
+        &mut self,
+        _session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        asset: &AssetDefinition,
+    ) -> Result<(), WalletError> {
+        let my_key = self.auditor_key_pair.pub_key();
+        let asset_key = asset.policy_ref().auditor_pub_key();
+        if my_key != *asset_key {
+            return Err(WalletError::InvalidAuditorKey {
+                my_key,
+                asset_key: asset_key.clone(),
+            });
+        }
+
+        self.auditable_assets.insert(asset.code, asset.clone());
+        Ok(())
     }
 
     pub fn transfer(
@@ -2104,21 +2379,6 @@ impl<'a> WalletState<'a> {
         }
     }
 
-    pub fn define_asset(
-        &mut self,
-        _session: &mut WalletSession<'a, impl WalletBackend<'a>>,
-        description: &[u8],
-        policy: AssetPolicy,
-    ) -> Result<AssetDefinition, WalletError> {
-        let seed = AssetCodeSeed::generate(&mut self.rng);
-        let code = AssetCode::new(seed, description);
-        let asset_definition =
-            AssetDefinition::new(code, policy).map_err(|err| WalletError::CryptoError { err })?;
-        self.defined_assets
-            .insert(code, (asset_definition.clone(), seed, description.to_vec()));
-        Ok(asset_definition)
-    }
-
     pub fn mint(
         &mut self,
         session: &mut WalletSession<'a, impl WalletBackend<'a>>,
@@ -2127,7 +2387,7 @@ impl<'a> WalletState<'a> {
         amount: u64,
         owner: UserAddress,
     ) -> Result<(), WalletError> {
-        let (fee_ro, uid) = self.find_record_for_fee(fee)?;
+        let (fee_ro, uid) = self.find_record_for_fee(session, fee)?;
         let acc_member_witness = AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
             .expect_ok()
             .unwrap()
@@ -2171,28 +2431,134 @@ impl<'a> WalletState<'a> {
             TransactionNote::Mint(Box::new(mint_note)),
             recv_memos,
             signature,
+            vec![],
         )
     }
 
-    fn update_nullifier_proofs(
-        &self,
-        _session: &WalletSession<'a, impl WalletBackend<'a>>,
-        txn: &mut ElaboratedTransaction,
+    /// Freeze at least `amount` of a particular asset owned by a given user.
+    ///
+    /// In order to freeze an asset, this wallet must be an auditor of that asset type, and it must
+    /// have observed enough transactions to determine that the target user owns at least `amount`
+    /// of that asset.
+    ///
+    /// Freeze transactions do not currently support change, so the amount frozen will be at least
+    /// `amount` but might be more, depending on the distribution of the freezable records we have
+    /// for the target user.
+    ///
+    /// Some of these restrictions can be rolled back in the future:
+    /// * An API can be provided for freezing without being an auditor, if a freezable record
+    ///   opening is provided to us out of band by an auditor.
+    /// * `freeze` uses the same allocation scheme for input records as transfers, which tries to
+    ///   minimize fragmentation. But freeze transactions do not increase fragmentation because they
+    ///   have no change output, so we could use a different allocation scheme that tries to
+    ///   minimize change, which would limit the amount we can over-freeze, and would guarantee that
+    ///   we freeze the exact amount if it is possible to make exact change with the freezable
+    ///   records we have.
+    pub fn freeze(
+        &mut self,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        fee: u64,
+        asset: &AssetDefinition,
+        amount: u64,
+        owner: UserAddress,
     ) -> Result<(), WalletError> {
-        txn.proofs = txn
-            .txn
-            .nullifiers()
-            .iter()
-            .map(|n| {
-                let (contains, proof) = self.nullifiers.contains(*n).unwrap();
-                if contains {
-                    Err(WalletError::NullifierAlreadyPublished { nullifier: *n })
-                } else {
-                    Ok(proof)
-                }
+        self.freeze_or_unfreeze(session, fee, asset, amount, owner, FreezeFlag::Frozen)
+    }
+
+    /// Unfreeze at least `amount` of a particular asset owned by a given user.
+    ///
+    /// This wallet must have previously been used to freeze (without an intervening `unfreeze`) at
+    /// least `amount` of the given asset for the given user.
+    ///
+    /// Similar restrictions on change apply as for `freeze`.
+    pub fn unfreeze(
+        &mut self,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        fee: u64,
+        asset: &AssetDefinition,
+        amount: u64,
+        owner: UserAddress,
+    ) -> Result<(), WalletError> {
+        self.freeze_or_unfreeze(session, fee, asset, amount, owner, FreezeFlag::Unfrozen)
+    }
+
+    fn freeze_or_unfreeze(
+        &mut self,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        fee: u64,
+        asset: &AssetDefinition,
+        amount: u64,
+        owner: UserAddress,
+        outputs_frozen: FreezeFlag,
+    ) -> Result<(), WalletError> {
+        let my_key = self.freezer_key_pair.pub_key();
+        let asset_key = asset.policy_ref().freezer_pub_key();
+        if my_key != *asset_key {
+            return Err(WalletError::InvalidFreezerKey {
+                my_key,
+                asset_key: asset_key.clone(),
+            });
+        }
+
+        let owner = session.backend.get_public_key(&owner)?;
+
+        // find input records of the asset type to freeze (this does not include the fee input)
+        let inputs_frozen = match outputs_frozen {
+            FreezeFlag::Frozen => FreezeFlag::Unfrozen,
+            FreezeFlag::Unfrozen => FreezeFlag::Frozen,
+        };
+        let (input_records, _) =
+            self.find_records(&asset.code, &owner, inputs_frozen, amount, None)?;
+
+        // prepare inputs
+        let mut inputs = vec![];
+        for (ro, uid) in input_records.into_iter() {
+            let witness = AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
+                .expect_ok()
+                .unwrap()
+                .1;
+            inputs.push(FreezeNoteInput {
+                ro,
+                acc_member_witness: witness,
+                keypair: &self.freezer_key_pair,
             })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(())
+        }
+
+        let (fee_ro, fee_uid) = self.find_record_for_fee(session, fee)?;
+        let fee_input = FeeInput {
+            ro: fee_ro,
+            acc_member_witness: AccMemberWitness::lookup_from_tree(
+                self.record_merkle_tree(),
+                fee_uid,
+            )
+            .expect_ok()
+            .unwrap()
+            .1,
+            owner_keypair: &session.key_pair,
+        };
+
+        // find a proving key which can handle this transaction size
+        let proving_key = Self::freeze_proving_key(&self.proving_key.freeze, asset, &mut inputs)?;
+
+        // generate transfer note and receiver memos
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut self.rng, fee_input, fee).unwrap();
+        let (note, sig_key, outputs) =
+            FreezeNote::generate(&mut self.rng, inputs, fee_info, proving_key)
+                .map_err(|err| WalletError::CryptoError { err })?;
+        let recv_memos = vec![&fee_out_rec]
+            .into_iter()
+            .chain(outputs.iter())
+            .map(|r| ReceiverMemo::from_ro(&mut self.rng, r, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
+        self.submit_transaction(
+            &mut session.backend,
+            TransactionNote::Freeze(Box::new(note)),
+            recv_memos,
+            sig,
+            outputs,
+        )
     }
 
     fn transfer_native(
@@ -2205,8 +2571,13 @@ impl<'a> WalletState<'a> {
             receivers.iter().fold(0, |sum, (_, amount)| sum + *amount) + fee;
 
         // find input records which account for at least the total amount, and possibly some change.
-        let (input_records, _change) =
-            self.find_records(&AssetCode::native(), total_output_amount, None)?;
+        let (input_records, _change) = self.find_records(
+            &AssetCode::native(),
+            &self.pub_key(session),
+            FreezeFlag::Unfrozen,
+            total_output_amount,
+            None,
+        )?;
 
         // prepare inputs
         let mut inputs = vec![];
@@ -2276,6 +2647,7 @@ impl<'a> WalletState<'a> {
             TransactionNote::Transfer(Box::new(note)),
             recv_memos,
             sig,
+            vec![],
         )
     }
 
@@ -2294,7 +2666,13 @@ impl<'a> WalletState<'a> {
         let total_output_amount: u64 = receivers.iter().fold(0, |sum, (_, amount)| sum + *amount);
 
         // find input records of the asset type to spend (this does not include the fee input)
-        let (input_records, change) = self.find_records(&asset.code, total_output_amount, None)?;
+        let (input_records, change) = self.find_records(
+            &asset.code,
+            &self.pub_key(session),
+            FreezeFlag::Unfrozen,
+            total_output_amount,
+            None,
+        )?;
 
         // prepare inputs
         let mut inputs = vec![];
@@ -2335,7 +2713,7 @@ impl<'a> WalletState<'a> {
             outputs.push(change_ro);
         }
 
-        let (fee_ro, fee_uid) = self.find_record_for_fee(fee)?;
+        let (fee_ro, fee_uid) = self.find_record_for_fee(session, fee)?;
         let fee_input = FeeInput {
             ro: fee_ro,
             acc_member_witness: AccMemberWitness::lookup_from_tree(
@@ -2348,7 +2726,7 @@ impl<'a> WalletState<'a> {
             owner_keypair: &session.key_pair,
         };
 
-        // find a proving key which can handle this transactin size
+        // find a proving key which can handle this transaction size
         let proving_key = Self::xfr_proving_key(
             &mut self.rng,
             me,
@@ -2382,13 +2760,84 @@ impl<'a> WalletState<'a> {
             TransactionNote::Transfer(Box::new(note)),
             recv_memos,
             sig,
+            vec![],
         )
+    }
+
+    fn submit_transaction(
+        &mut self,
+        backend: &mut impl WalletBackend<'a>,
+        note: TransactionNote,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+        freeze_outputs: Vec<RecordOpening>,
+    ) -> Result<(), WalletError> {
+        let nullifier_pfs = note
+            .nullifiers()
+            .iter()
+            .map(|n| self.nullifiers.contains(*n).unwrap().1)
+            .collect();
+        let txn = ElaboratedTransaction {
+            txn: note,
+            proofs: nullifier_pfs,
+        };
+
+        self.submit_elaborated_transaction(backend, txn, memos, sig, freeze_outputs)
+    }
+
+    fn submit_elaborated_transaction(
+        &mut self,
+        backend: &mut impl WalletBackend<'a>,
+        txn: ElaboratedTransaction,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+        freeze_outputs: Vec<RecordOpening>,
+    ) -> Result<(), WalletError> {
+        self.add_pending_transaction(&txn, memos.clone(), sig.clone(), freeze_outputs);
+        backend.submit(txn, memos, sig)
+    }
+
+    fn add_pending_transaction(
+        &mut self,
+        txn: &ElaboratedTransaction,
+        receiver_memos: Vec<ReceiverMemo>,
+        signature: Signature,
+        freeze_outputs: Vec<RecordOpening>,
+    ) {
+        let now = self.validator.prev_commit_time;
+        for nullifier in txn.txn.nullifiers() {
+            // hold the record corresponding to this nullifier until the transaction is committed,
+            // rejected, or expired.
+            let record = self.records.record_with_nullifier_mut(&nullifier).unwrap();
+            assert!(!record.on_hold(now));
+            record.hold_until(now + RECORD_HOLD_TIME);
+        }
+
+        // Add the fee nullifier to `pending_txns` and `expiring_txns`. We know it corresponds to an
+        // on-hold record since we just placed all the inputs to this transaction on hold. As soon
+        // as the hold expires, `handle_event` will remove the fee nullifier from these data
+        // structures by calling `clear_expired_transactions`.
+        let timeout = self.validator.prev_commit_time + RECORD_HOLD_TIME;
+        let nullifier = txn.txn.nullifiers()[0];
+        let pending = PendingTransaction {
+            receiver_memos,
+            signature,
+            timeout,
+            freeze_outputs,
+        };
+        self.pending_txns.insert(nullifier, pending);
+        self.expiring_txns
+            .entry(timeout)
+            .or_default()
+            .insert(nullifier);
     }
 
     #[allow(clippy::type_complexity)]
     fn find_records(
         &self,
         asset: &AssetCode,
+        owner: &UserPubKey,
+        frozen: FreezeFlag,
         amount: u64,
         max_records: Option<usize>,
     ) -> Result<(Vec<(RecordOpening, u64)>, u64), WalletError> {
@@ -2397,8 +2846,8 @@ impl<'a> WalletState<'a> {
         // If we have a record with the exact size required, use it to avoid fragmenting big records
         // into smaller change records.
         if let Some(record) = self
-            .owned_records
-            .spendable_record_with_amount(asset, amount, now)
+            .records
+            .spendable_record_with_amount(asset, owner, frozen, amount, now)
         {
             return Ok((vec![(record.ro.clone(), record.uid)], 0));
         }
@@ -2413,7 +2862,7 @@ impl<'a> WalletState<'a> {
         // with something more sophisticated later.
         let mut result = vec![];
         let mut current_amount = 0u64;
-        for record in self.owned_records.spendable_records(asset, now) {
+        for record in self.records.spendable_records(asset, owner, frozen, now) {
             if let Some(max_records) = max_records {
                 if result.len() >= max_records {
                     // Too much fragmentation: we can't make the required amount using few enough
@@ -2448,9 +2897,19 @@ impl<'a> WalletState<'a> {
 
     /// find a record and corresponding uid on the native asset type with enough
     /// funds to pay transaction fee
-    fn find_record_for_fee(&self, fee: u64) -> Result<(RecordOpening, u64), WalletError> {
-        self.find_records(&AssetCode::native(), fee, Some(1))
-            .map(|(ros, _change)| ros.into_iter().next().unwrap())
+    fn find_record_for_fee(
+        &self,
+        session: &WalletSession<'a, impl WalletBackend<'a>>,
+        fee: u64,
+    ) -> Result<(RecordOpening, u64), WalletError> {
+        self.find_records(
+            &AssetCode::native(),
+            &self.pub_key(session),
+            FreezeFlag::Unfrozen,
+            fee,
+            Some(1),
+        )
+        .map(|(ros, _change)| ros.into_iter().next().unwrap())
     }
 
     // Find a proving key large enough to prove the given transaction, padding with dummy records if
@@ -2533,35 +2992,38 @@ impl<'a> WalletState<'a> {
         Ok(proving_key)
     }
 
-    fn submit_transaction(
-        &mut self,
-        backend: &mut impl WalletBackend<'a>,
-        note: TransactionNote,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), WalletError> {
-        let nullifier_pfs = note
-            .nullifiers()
-            .iter()
-            .map(|n| self.nullifiers.contains(*n).unwrap().1)
-            .collect();
-        let txn = ElaboratedTransaction {
-            txn: note,
-            proofs: nullifier_pfs,
-        };
+    fn freeze_proving_key<'k>(
+        proving_keys: &'k KeySet<FreezeProvingKey<'a>, key_set::OrderByOutputs>,
+        asset: &AssetDefinition,
+        inputs: &mut Vec<FreezeNoteInput>,
+    ) -> Result<&'k FreezeProvingKey<'a>, WalletError> {
+        let total_output_amount = inputs.iter().map(|input| input.ro.amount).sum();
 
-        self.submit_elaborated_transaction(backend, txn, memos, sig)
-    }
+        let num_inputs = inputs.len() + 1; // make sure to include fee input
+        let num_outputs = num_inputs; // freeze transactions always have equal outputs and inputs
+        let (key_inputs, key_outputs, proving_key) = proving_keys
+            .best_fit_key(num_inputs, num_outputs)
+            .map_err(|(max_inputs, _)| {
+                WalletError::Fragmentation {
+                    asset: asset.code,
+                    amount: total_output_amount,
+                    suggested_amount: inputs
+                        .iter()
+                        .take(max_inputs - 1) // leave room for fee input
+                        .map(|input| input.ro.amount)
+                        .sum(),
+                    max_records: max_inputs,
+                }
+            })?;
+        assert!(num_inputs <= key_inputs);
+        assert!(num_outputs <= key_outputs);
 
-    fn submit_elaborated_transaction(
-        &mut self,
-        backend: &mut impl WalletBackend<'a>,
-        txn: ElaboratedTransaction,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), WalletError> {
-        self.add_pending_transaction(&txn, memos.clone(), sig.clone());
-        backend.submit(txn, memos, sig)
+        if num_inputs < key_inputs {
+            // TODO pad with dummy inputs, (leaving room for the fee input if applicable)
+            unimplemented!("dummy inputs");
+        }
+
+        Ok(proving_key)
     }
 
     fn record_merkle_tree(&self) -> &MerkleTree<RecordCommitment> {
@@ -2570,86 +3032,6 @@ impl<'a> WalletState<'a> {
 
     fn record_merkle_tree_mut(&mut self) -> &mut MerkleTree<RecordCommitment> {
         &mut self.validator.record_merkle_frontier
-    }
-
-    fn add_pending_transaction(
-        &mut self,
-        txn: &ElaboratedTransaction,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) {
-        let now = self.validator.prev_commit_time;
-        for nullifier in txn.txn.nullifiers() {
-            // hold the record corresponding to this nullifier until the transaction is committed,
-            // rejected, or expired.
-            let record = self
-                .owned_records
-                .record_with_nullifier_mut(&nullifier)
-                .unwrap();
-            assert!(!record.on_hold(now));
-            record.hold_until(now + RECORD_HOLD_TIME);
-        }
-
-        // Add the fee nullifier to `pending_txns` and `expiring_txns`. We know it corresponds to an
-        // on-hold record since we just placed all the inputs to this transaction on hold. As soon
-        // as the hold expires, `handle_event` will remove the fee nullifier from these data
-        // structures by calling `clear_expired_transactions`.
-        let timeout = self.validator.prev_commit_time + RECORD_HOLD_TIME;
-        let nullifier = txn.txn.nullifiers()[0];
-        self.pending_txns.insert(nullifier, (memos, sig, timeout));
-        self.expiring_txns
-            .entry(timeout)
-            .or_default()
-            .insert(nullifier);
-    }
-
-    fn clear_pending_transaction(
-        &mut self,
-        txn: &ElaboratedTransaction,
-        err: Option<ValidationError>,
-    ) -> Option<(Vec<ReceiverMemo>, Signature)> {
-        let now = self.validator.prev_commit_time;
-        for nullifier in txn.txn.nullifiers() {
-            if let Some(record) = self.owned_records.record_with_nullifier_mut(&nullifier) {
-                assert!(record.on_hold(now));
-                if err.is_some() {
-                    // If the transaction was not accepted for any reason, its nullifiers have not
-                    // been spent, so remove the hold we placed on them.
-                    record.unhold();
-                }
-            }
-        }
-
-        // Remove the transaction from `pending_txns` and `expiring_txns`. This restores the
-        // invariant that every pending nullifier corresponds to an on-hold record, since we just
-        // cleared the hold for the inputs to this transaction.
-        let nullifier = txn.txn.nullifiers()[0];
-        self.pending_txns
-            .remove(&nullifier)
-            .map(|(memos, sig, timeout)| {
-                if let Some(expiring) = self.expiring_txns.get_mut(&timeout) {
-                    expiring.remove(&nullifier);
-                }
-                (memos, sig)
-            })
-    }
-
-    fn clear_expired_transactions(&mut self) {
-        for nullifier in self
-            .expiring_txns
-            .remove(&self.validator.prev_commit_time)
-            .into_iter()
-            .flatten()
-        {
-            assert!(
-                self.owned_records
-                    .record_with_nullifier_mut(&nullifier)
-                    .unwrap()
-                    .hold_until
-                    == Some(self.validator.prev_commit_time)
-            );
-            self.pending_txns.remove(&nullifier);
-        }
     }
 }
 
@@ -2743,13 +3125,28 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send> Wallet<'a, Backend> {
         state.pub_key(session)
     }
 
+    pub fn auditor_pub_key(&self) -> AuditorPubKey {
+        let (state, ..) = &*self.lock();
+        state.auditor_key_pair.pub_key()
+    }
+
+    pub fn freezer_pub_key(&self) -> FreezerPubKey {
+        let (state, ..) = &*self.lock();
+        state.freezer_key_pair.pub_key()
+    }
+
     pub fn address(&self) -> UserAddress {
         self.pub_key().address()
     }
 
     pub fn balance(&self, asset: &AssetCode) -> u64 {
         let (state, session, ..) = &*self.lock();
-        state.balance(session, asset)
+        state.balance(session, asset, FreezeFlag::Unfrozen)
+    }
+
+    pub fn frozen_balance(&self, asset: &AssetCode) -> u64 {
+        let (state, session, ..) = &*self.lock();
+        state.balance(session, asset, FreezeFlag::Frozen)
     }
 
     pub fn transfer(
@@ -2782,6 +3179,28 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send> Wallet<'a, Backend> {
     ) -> Result<(), WalletError> {
         let (state, session, ..) = &mut *self.lock();
         state.mint(session, fee, asset_code, amount, owner)
+    }
+
+    pub fn freeze(
+        &mut self,
+        fee: u64,
+        asset: &AssetDefinition,
+        amount: u64,
+        owner: UserAddress,
+    ) -> Result<(), WalletError> {
+        let (state, session, ..) = &mut *self.lock();
+        state.freeze(session, fee, asset, amount, owner)
+    }
+
+    pub fn unfreeze(
+        &mut self,
+        fee: u64,
+        asset: &AssetDefinition,
+        amount: u64,
+        owner: UserAddress,
+    ) -> Result<(), WalletError> {
+        let (state, session, ..) = &mut *self.lock();
+        state.unfreeze(session, fee, asset, amount, owner)
     }
 
     pub async fn sync(&self, t: u64) -> Result<(), oneshot::Canceled> {
@@ -2931,11 +3350,11 @@ pub mod test_helpers {
                 ledger.now, 0,
                 "MockWalletBackend does not support restartability"
             );
+            let mut rng = ChaChaRng::from_seed(self.seed);
             Ok(WalletState {
                 validator: ledger.validator.clone(),
-                rng: ChaChaRng::from_seed(self.seed),
                 proving_key: ledger.prover_key.clone(),
-                owned_records: {
+                records: {
                     let mut db: RecordDatabase = Default::default();
                     for (ro, uid) in self.initial_grants.iter() {
                         db.insert(ro.clone(), *uid, key_pair);
@@ -2947,6 +3366,10 @@ pub mod test_helpers {
                 now: 0,
                 pending_txns: Default::default(),
                 expiring_txns: Default::default(),
+                auditable_assets: Default::default(),
+                auditor_key_pair: AuditorKeyPair::generate(&mut rng),
+                freezer_key_pair: FreezerKeyPair::generate(&mut rng),
+                rng,
             })
         }
 
@@ -4011,13 +4434,18 @@ mod tests {
     // Test transactions that fail to complete.
     //
     // If `native`, the transaction is a native asset transfer.
-    // If `!native && !mint`, the trnasaction is a non-native asset transfer.
+    // If `!native && !mint && !freeze`, the trnasaction is a non-native asset transfer.
     // If `!native && mint`, the transaction is a non-native asset mint.
+    // If `!native && freeze`, the transaction is a non-native asset freeze.
     //
     // If `timeout`, the failed transaction times out with no explicit rejection event. Otherwise,
     // the failed transaction fails to verify and a Reject event is emitted.
-    async fn test_wallet_rejected(native: bool, mint: bool, timeout: bool) {
+    //
+    // (native, mint), (native, freeze), and (mint, freeze) are pairs of mutually exclusive flags.
+    async fn test_wallet_rejected(native: bool, mint: bool, freeze: bool, timeout: bool) {
         assert!(!(native && mint));
+        assert!(!(native && freeze));
+        assert!(!(mint && freeze));
 
         let mut now = Instant::now();
         println!("generating params");
@@ -4058,14 +4486,25 @@ mod tests {
         let asset = if native {
             AssetDefinition::native()
         } else {
+            let policy = AssetPolicy::default()
+                .set_auditor_pub_key(wallets[0].auditor_pub_key())
+                .set_freezer_pub_key(wallets[0].freezer_pub_key())
+                .reveal_record_opening()
+                .unwrap();
             let asset = wallets[0]
-                .define_asset("test asset".as_bytes(), Default::default())
+                .define_asset("test asset".as_bytes(), policy)
                 .unwrap();
 
             if !mint {
-                // wallets[0] gets 1 coin to transfer to wallets[1]. We only need this if the test
-                // itself is not minting the asset later on.
-                let dst = wallets[0].address();
+                // If we're freezing, the transaction is essentially taking balance away from
+                // wallets[1], so wallets[1] gets 1 coin to start with. Otherwise, the transaction
+                // is transferring balance from wallets[0] to wallets[1], so  wallets[0] gets 1
+                // coin. We only need this if the test itself is not minting the asset later on.
+                let dst = if freeze {
+                    wallets[1].address()
+                } else {
+                    wallets[0].address()
+                };
                 wallets[0].mint(1, &asset.code, 1, dst).unwrap();
                 sync(&ledger, &wallets).await;
             }
@@ -4095,18 +4534,22 @@ mod tests {
         if mint {
             wallets[0]
                 .mint(1, &asset.code, 1, receiver.clone())
-                .unwrap()
+                .unwrap();
+        } else if freeze {
+            wallets[0].freeze(1, &asset, 1, receiver.clone()).unwrap();
         } else {
             wallets[0]
                 .transfer(&asset, &[(receiver.clone(), 1)], 1)
-                .unwrap()
+                .unwrap();
         }
         println!("transfer generated: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
         // Check that the sender's balance is on hold (for the fee and the payment).
         assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
-        assert_eq!(wallets[0].balance(&asset.code), 0);
+        if !freeze {
+            assert_eq!(wallets[0].balance(&asset.code), 0);
+        }
 
         // Now do something that causes the sender's transaction to not go through
         if timeout {
@@ -4120,7 +4563,9 @@ mod tests {
             for _ in 0..RECORD_HOLD_TIME {
                 // Check that the sender's balance is still on hold.
                 assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
-                assert_eq!(wallets[0].balance(&asset.code), 0);
+                if !freeze {
+                    assert_eq!(wallets[0].balance(&asset.code), 0);
+                }
 
                 wallets[2]
                     .transfer(&asset, &[(receiver.clone(), 1)], 1)
@@ -4156,14 +4601,14 @@ mod tests {
             assert_eq!(wallets[0].balance(&AssetCode::native()), 2);
         } else {
             assert_eq!(wallets[0].balance(&AssetCode::native()), 1);
-            if !mint {
-                // in the mint case we never had a non-native balance to start with
+            if !(mint || freeze) {
+                // in the mint and freeze cases, we never had a non-native balance to start with
                 assert_eq!(wallets[0].balance(&asset.code), 1);
             }
         }
         assert_eq!(
             wallets[1].balance(&asset.code),
-            if timeout { RECORD_HOLD_TIME } else { 0 }
+            (if timeout { RECORD_HOLD_TIME } else { 0 }) + (if freeze { 1 } else { 0 })
         );
 
         // Now check that they can use the un-held record if their state gets back in sync with the
@@ -4173,52 +4618,66 @@ mod tests {
             now.elapsed().as_secs_f32()
         );
         if mint {
-            wallets[0].mint(1, &asset.code, 1, receiver).unwrap()
+            wallets[0].mint(1, &asset.code, 1, receiver).unwrap();
+        } else if freeze {
+            wallets[0].freeze(1, &asset, 1, receiver).unwrap();
         } else {
-            wallets[0].transfer(&asset, &[(receiver, 1)], 1).unwrap()
+            wallets[0].transfer(&asset, &[(receiver, 1)], 1).unwrap();
         }
         sync(&ledger, &wallets).await;
         assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
         assert_eq!(wallets[0].balance(&asset.code), 0);
         assert_eq!(
             wallets[1].balance(&asset.code),
-            1 + if timeout { RECORD_HOLD_TIME } else { 0 }
+            (if timeout { RECORD_HOLD_TIME } else { 0 }) + (if freeze { 0 } else { 1 })
         );
     }
 
     #[async_std::test]
     async fn test_wallet_rejected_native_xfr_invalid() -> std::io::Result<()> {
-        test_wallet_rejected(true, false, false).await;
+        test_wallet_rejected(true, false, false, false).await;
         Ok(())
     }
 
     #[async_std::test]
     async fn test_wallet_rejected_native_xfr_timeout() -> std::io::Result<()> {
-        test_wallet_rejected(true, false, true).await;
+        test_wallet_rejected(true, false, false, true).await;
         Ok(())
     }
 
     #[async_std::test]
     async fn test_wallet_rejected_non_native_xfr_invalid() -> std::io::Result<()> {
-        test_wallet_rejected(false, false, false).await;
+        test_wallet_rejected(false, false, false, false).await;
         Ok(())
     }
 
     #[async_std::test]
     async fn test_wallet_rejected_non_native_xfr_timeout() -> std::io::Result<()> {
-        test_wallet_rejected(false, false, true).await;
+        test_wallet_rejected(false, false, false, true).await;
         Ok(())
     }
 
     #[async_std::test]
     async fn test_wallet_rejected_non_native_mint_invalid() -> std::io::Result<()> {
-        test_wallet_rejected(false, true, false).await;
+        test_wallet_rejected(false, true, false, false).await;
         Ok(())
     }
 
     #[async_std::test]
     async fn test_wallet_rejected_non_native_mint_timeout() -> std::io::Result<()> {
-        test_wallet_rejected(false, true, true).await;
+        test_wallet_rejected(false, true, false, true).await;
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_wallet_rejected_non_native_freeze_invalid() -> std::io::Result<()> {
+        test_wallet_rejected(false, false, true, false).await;
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_wallet_rejected_non_native_freeze_timeout() -> std::io::Result<()> {
+        test_wallet_rejected(false, false, true, true).await;
         Ok(())
     }
 
@@ -4284,6 +4743,102 @@ mod tests {
             wallets[1].balance(&AssetCode::native()),
             1 + (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64
         );
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_wallet_freeze() -> std::io::Result<()> {
+        let mut now = Instant::now();
+        println!("generating params");
+
+        let mut rng = ChaChaRng::from_seed([0x8au8; 32]);
+        let univ_param = get_universal_param(&mut rng);
+
+        // The sender wallet (wallets[0]) gets an initial grant of 1 for a transfer fee. wallets[1]
+        // will act as the receiver, and wallets[2] will be a third party which issues and freezes
+        // some of wallets[0]'s assets. It gets a grant of 3, for a mint fee, a freeze fee and an
+        // unfreeze fee.
+        let (ledger, mut wallets) =
+            create_test_network(&univ_param, &[(2, 3)], vec![1, 0, 3], &mut now);
+
+        let asset = {
+            let policy = AssetPolicy::default()
+                .set_auditor_pub_key(wallets[2].auditor_pub_key())
+                .set_freezer_pub_key(wallets[2].freezer_pub_key())
+                .reveal_record_opening()
+                .unwrap();
+            let asset = wallets[2]
+                .define_asset("test asset".as_bytes(), policy)
+                .unwrap();
+
+            // wallets[0] gets 1 coin to transfer to wallets[1].
+            let dst = wallets[0].address();
+            wallets[2].mint(1, &asset.code, 1, dst).unwrap();
+            sync(&ledger, &wallets).await;
+
+            asset
+        };
+        assert_eq!(wallets[0].balance(&asset.code), 1);
+        assert_eq!(wallets[0].frozen_balance(&asset.code), 0);
+
+        // Now freeze wallets[0]'s record.
+        println!(
+            "generating a freeze transaction: {}s",
+            now.elapsed().as_secs_f32()
+        );
+        now = Instant::now();
+        let dst = wallets[0].address();
+        ledger.lock().unwrap().hold_next_transaction();
+        wallets[2].freeze(1, &asset, 1, dst.clone()).unwrap();
+
+        // Check that, like transfer inputs, freeze inputs are placed on hold and unusable while a
+        // freeze that uses them is pending.
+        match wallets[2].freeze(1, &asset, 1, dst) {
+            Err(WalletError::InsufficientBalance { .. }) => {}
+            ret => panic!("expected InsufficientBalance, got {:?}", ret),
+        }
+
+        // Now go ahead with the original freeze.
+        ledger.lock().unwrap().release_held_transaction();
+        sync(&ledger, &wallets).await;
+        assert_eq!(wallets[0].balance(&asset.code), 0);
+        assert_eq!(wallets[0].frozen_balance(&asset.code), 1);
+
+        // Check that trying to transfer fails due to frozen balance.
+        println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+        let dst = wallets[1].address();
+        match wallets[0].transfer(&asset, &[(dst, 1)], 1) {
+            Err(WalletError::InsufficientBalance { .. }) => {
+                println!(
+                    "transfer correctly failed due to frozen balance: {}s",
+                    now.elapsed().as_secs_f32()
+                );
+                now = Instant::now();
+            }
+            ret => panic!("expected InsufficientBalance, got {:?}", ret),
+        }
+
+        // Now unfreeze the asset and try again.
+        println!(
+            "generating an unfreeze transaction: {}s",
+            now.elapsed().as_secs_f32()
+        );
+        now = Instant::now();
+        let dst = wallets[0].address();
+        wallets[2].unfreeze(1, &asset, 1, dst).unwrap();
+        sync(&ledger, &wallets).await;
+        assert_eq!(wallets[0].balance(&asset.code), 1);
+        assert_eq!(wallets[0].frozen_balance(&asset.code), 0);
+
+        println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
+        let dst = wallets[1].address();
+        wallets[0].transfer(&asset, &[(dst, 1)], 1).unwrap();
+        sync(&ledger, &wallets).await;
+        assert_eq!(wallets[0].balance(&asset.code), 0);
+        assert_eq!(wallets[0].frozen_balance(&asset.code), 0);
+        assert_eq!(wallets[1].balance(&asset.code), 1);
 
         Ok(())
     }
