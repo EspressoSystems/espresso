@@ -1820,7 +1820,7 @@ pub struct WalletState<'a> {
     // unique ID.
     pending_txns: HashMap<Nullifier, PendingTransaction>,
     // the fee nullifiers of transactions expiring at each validator timestamp.
-    expiring_txns: HashMap<u64, HashSet<Nullifier>>,
+    expiring_txns: BTreeMap<u64, HashSet<Nullifier>>,
 }
 
 struct PendingTransaction {
@@ -2197,18 +2197,26 @@ impl<'a> WalletState<'a> {
     }
 
     fn clear_expired_transactions(&mut self) {
-        for nullifier in self
-            .expiring_txns
-            .remove(&self.validator.prev_commit_time)
-            .into_iter()
-            .flatten()
+        let now = self.validator.prev_commit_time;
+
+        #[cfg(any(test, debug_assertions))]
         {
+            if let Some(earliest_timeout) = self.expiring_txns.keys().next() {
+                // Transactions expiring before now should already have been removed from the
+                // expiring_txns set, because we clear expired transactions every time we step the
+                // validator state.
+                assert!(*earliest_timeout >= now);
+            }
+        }
+
+        for nullifier in self.expiring_txns.remove(&now).into_iter().flatten() {
+            // Transactions expiring now should only contain records that are held until now.
             assert!(
                 self.records
                     .record_with_nullifier_mut(&nullifier)
                     .unwrap()
                     .hold_until
-                    == Some(self.validator.prev_commit_time)
+                    == Some(now)
             );
             self.pending_txns.remove(&nullifier);
         }
