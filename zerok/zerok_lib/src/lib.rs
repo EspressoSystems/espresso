@@ -2119,7 +2119,7 @@ impl<'a> WalletState<'a> {
                     if let Some(pending) = self.clear_pending_transaction(&txn, Err(err.clone())) {
                         // Try to resubmit if the error is recoverable.
                         if let ValidationError::BadNullifierProof {} = err {
-                            if self.update_nullifier_proofs(session, &mut txn).is_ok() {
+                            if self.update_nullifier_proofs(&mut txn).is_ok() {
                                 println!("recoverable error in txn {:?}, resubmitting", txn);
                                 if self
                                     .submit_elaborated_transaction(
@@ -2305,11 +2305,7 @@ impl<'a> WalletState<'a> {
         }
     }
 
-    fn update_nullifier_proofs(
-        &self,
-        _session: &WalletSession<'a, impl WalletBackend<'a>>,
-        txn: &mut ElaboratedTransaction,
-    ) -> Result<(), WalletError> {
+    fn update_nullifier_proofs(&self, txn: &mut ElaboratedTransaction) -> Result<(), WalletError> {
         txn.proofs = txn
             .txn
             .nullifiers()
@@ -2328,7 +2324,6 @@ impl<'a> WalletState<'a> {
 
     pub fn define_asset(
         &mut self,
-        _session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         description: &[u8],
         policy: AssetPolicy,
     ) -> Result<AssetDefinition, WalletError> {
@@ -2352,11 +2347,7 @@ impl<'a> WalletState<'a> {
     ///
     /// Auditing of assets created by this user with an appropriate asset policy begins
     /// automatically. Calling this function is unnecessary.
-    pub fn audit_asset(
-        &mut self,
-        _session: &mut WalletSession<'a, impl WalletBackend<'a>>,
-        asset: &AssetDefinition,
-    ) -> Result<(), WalletError> {
+    pub fn audit_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
         let my_key = self.auditor_key_pair.pub_key();
         let asset_key = asset.policy_ref().auditor_pub_key();
         if my_key != *asset_key {
@@ -2396,7 +2387,7 @@ impl<'a> WalletState<'a> {
         amount: u64,
         owner: UserAddress,
     ) -> Result<(), WalletError> {
-        let (fee_ro, uid) = self.find_record_for_fee(session, fee)?;
+        let (fee_ro, uid) = self.find_native_record_for_fee(session, fee)?;
         let acc_member_witness = AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
             .expect_ok()
             .unwrap()
@@ -2533,7 +2524,7 @@ impl<'a> WalletState<'a> {
             })
         }
 
-        let (fee_ro, fee_uid) = self.find_record_for_fee(session, fee)?;
+        let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
         let fee_input = FeeInput {
             ro: fee_ro,
             acc_member_witness: AccMemberWitness::lookup_from_tree(
@@ -2722,7 +2713,7 @@ impl<'a> WalletState<'a> {
             outputs.push(change_ro);
         }
 
-        let (fee_ro, fee_uid) = self.find_record_for_fee(session, fee)?;
+        let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
         let fee_input = FeeInput {
             ro: fee_ro,
             acc_member_witness: AccMemberWitness::lookup_from_tree(
@@ -2814,19 +2805,20 @@ impl<'a> WalletState<'a> {
         freeze_outputs: Vec<RecordOpening>,
     ) {
         let now = self.validator.prev_commit_time;
+        let timeout = now + RECORD_HOLD_TIME;
+
         for nullifier in txn.txn.nullifiers() {
             // hold the record corresponding to this nullifier until the transaction is committed,
             // rejected, or expired.
             let record = self.records.record_with_nullifier_mut(&nullifier).unwrap();
             assert!(!record.on_hold(now));
-            record.hold_until(now + RECORD_HOLD_TIME);
+            record.hold_until(timeout);
         }
 
         // Add the fee nullifier to `pending_txns` and `expiring_txns`. We know it corresponds to an
         // on-hold record since we just placed all the inputs to this transaction on hold. As soon
         // as the hold expires, `handle_event` will remove the fee nullifier from these data
         // structures by calling `clear_expired_transactions`.
-        let timeout = self.validator.prev_commit_time + RECORD_HOLD_TIME;
         let nullifier = txn.txn.nullifiers()[0];
         let pending = PendingTransaction {
             receiver_memos,
@@ -2906,7 +2898,7 @@ impl<'a> WalletState<'a> {
 
     /// find a record and corresponding uid on the native asset type with enough
     /// funds to pay transaction fee
-    fn find_record_for_fee(
+    fn find_native_record_for_fee(
         &self,
         session: &WalletSession<'a, impl WalletBackend<'a>>,
         fee: u64,
@@ -3174,8 +3166,8 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send> Wallet<'a, Backend> {
         description: &[u8],
         policy: AssetPolicy,
     ) -> Result<AssetDefinition, WalletError> {
-        let (state, session, ..) = &mut *self.lock();
-        state.define_asset(session, description, policy)
+        let (state, ..) = &mut *self.lock();
+        state.define_asset(description, policy)
     }
 
     /// create a mint note that assign asset to an owner
