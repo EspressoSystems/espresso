@@ -1886,7 +1886,8 @@ pub struct RecordDatabase {
 }
 
 impl RecordDatabase {
-    fn spendable_records<'a>(
+    /// Find records which can be the input to a transaction, matching the given parameters.
+    fn input_records<'a>(
         &'a self,
         asset: &AssetCode,
         owner: &UserPubKey,
@@ -1908,8 +1909,9 @@ impl RecordDatabase {
                 }
             })
     }
-
-    fn spendable_record_with_amount(
+    /// Find a record with exactly the requested amount, which can be the input to a transaction,
+    /// matching the given parameters.
+    fn input_record_with_amount(
         &self,
         asset: &AssetCode,
         owner: &UserPubKey,
@@ -2012,7 +2014,7 @@ impl<'a> WalletState<'a> {
         frozen: FreezeFlag,
     ) -> u64 {
         self.records
-            .spendable_records(
+            .input_records(
                 asset,
                 &self.pub_key(session),
                 frozen,
@@ -2847,7 +2849,7 @@ impl<'a> WalletState<'a> {
         // into smaller change records.
         if let Some(record) = self
             .records
-            .spendable_record_with_amount(asset, owner, frozen, amount, now)
+            .input_record_with_amount(asset, owner, frozen, amount, now)
         {
             return Ok((vec![(record.ro.clone(), record.uid)], 0));
         }
@@ -2862,7 +2864,7 @@ impl<'a> WalletState<'a> {
         // with something more sophisticated later.
         let mut result = vec![];
         let mut current_amount = 0u64;
-        for record in self.records.spendable_records(asset, owner, frozen, now) {
+        for record in self.records.input_records(asset, owner, frozen, now) {
             if let Some(max_records) = max_records {
                 if result.len() >= max_records {
                     // Too much fragmentation: we can't make the required amount using few enough
