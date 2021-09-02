@@ -2068,8 +2068,11 @@ impl<'a> WalletState<'a> {
                     .zip(block.proofs)
                     .zip(receiver_memos)
                 {
-                    let remaining_uids = uids.split_off(txn.output_len());
-                    assert_eq!(uids.len(), txn.output_len());
+                    // Split the uids corresponding to this transaction off the front of `uids`.
+                    let mut this_txn_uids = uids;
+                    uids = this_txn_uids.split_off(txn.output_len());
+
+                    assert_eq!(this_txn_uids.len(), txn.output_len());
                     let txn = ElaboratedTransaction { txn, proofs };
 
                     // Different concerns within the wallet consume transactions in different ways.
@@ -2079,12 +2082,17 @@ impl<'a> WalletState<'a> {
                     //
                     // This is a transaction we submitted and have been
                     // awaiting confirmation.
-                    self.clear_pending_transaction(&txn, Ok(&mut uids));
+                    self.clear_pending_transaction(&txn, Ok(&mut this_txn_uids));
                     // This is someone else's transaction but we can audit it.
-                    self.audit_transaction(session, &txn, &mut uids);
+                    self.audit_transaction(session, &txn, &mut this_txn_uids);
                     // This is someone else's transaction but we are a receiver of some of its
                     // outputs.
-                    self.receive_transaction_outputs(session, &txn, receiver_memos, &mut uids);
+                    self.receive_transaction_outputs(
+                        session,
+                        &txn,
+                        receiver_memos,
+                        &mut this_txn_uids,
+                    );
 
                     // Update spent nullifiers.
                     for nullifier in txn.txn.nullifiers().into_iter() {
@@ -2097,12 +2105,11 @@ impl<'a> WalletState<'a> {
                     }
 
                     // Prune the record Merkle tree of records we don't care about.
-                    for (uid, remember) in uids {
+                    for (uid, remember) in this_txn_uids {
                         if !remember {
                             self.record_merkle_tree_mut().forget(uid);
                         }
                     }
-                    uids = remaining_uids;
                 }
             }
 
