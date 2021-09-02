@@ -322,14 +322,14 @@ mod key_set {
 use key_set::KeySet;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProverKey<'a, Order: key_set::KeyOrder = key_set::OrderByInputs> {
+pub struct ProverKeySet<'a, Order: key_set::KeyOrder = key_set::OrderByInputs> {
     pub mint: MintProvingKey<'a>,
     pub xfr: KeySet<TransferProvingKey<'a>, Order>,
     pub freeze: KeySet<FreezeProvingKey<'a>, Order>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VerifierKey<Order: key_set::KeyOrder = key_set::OrderByInputs> {
+pub struct VerifierKeySet<Order: key_set::KeyOrder = key_set::OrderByInputs> {
     // TODO: is there a way to keep these types distinct?
     pub mint: TransactionVerifyingKey,
     pub xfr: KeySet<TransactionVerifyingKey, Order>,
@@ -400,7 +400,7 @@ mod verif_crs_comm {
     use generic_array::GenericArray;
     pub type VerifCRSCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
 
-    pub fn verif_crs_commit(p: &VerifierKey) -> VerifCRSCommitment {
+    pub fn verif_crs_commit(p: &VerifierKeySet) -> VerifCRSCommitment {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "VerifCRS Comm".as_bytes());
         hasher.update(&bincode::serialize(&p).unwrap());
         hasher.finalize().into_bytes()
@@ -505,7 +505,7 @@ pub mod state_comm {
 pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: state_comm::LedgerStateCommitment,
-    pub verif_crs: VerifierKey,
+    pub verif_crs: VerifierKeySet,
     // The current record Merkle root hash
     pub record_merkle_root: merkle_tree::NodeValue,
     // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
@@ -525,7 +525,7 @@ impl ValidatorState {
     const RECORD_ROOT_HISTORY_SIZE: usize = 10;
 
     pub fn new(
-        verif_crs: VerifierKey,
+        verif_crs: VerifierKeySet,
         record_merkle_frontier: MerkleTree<RecordCommitment>,
     ) -> Self {
         let nullifiers: SetMerkleTree = Default::default();
@@ -709,8 +709,8 @@ pub struct MultiXfrTestState {
     pub prng: ChaChaRng,
 
     pub univ_setup: &'static jf_txn::proof::UniversalParam,
-    pub prove_key: ProverKey<'static>,
-    pub verif_key: VerifierKey,
+    pub prove_keys: ProverKeySet<'static>,
+    pub verif_keys: VerifierKeySet,
 
     pub native_token: AssetDefinition,
 
@@ -905,7 +905,7 @@ impl MultiXfrTestState {
 
         let nullifiers: SetMerkleTree = Default::default();
 
-        let verif_key = VerifierKey {
+        let verif_keys = VerifierKeySet {
             mint: TransactionVerifyingKey::Mint(mint_verif_key),
             xfr: KeySet::new(
                 vec![
@@ -924,12 +924,12 @@ impl MultiXfrTestState {
         let mut ret = Self {
             univ_setup,
             prng,
-            prove_key: ProverKey {
+            prove_keys: ProverKeySet {
                 mint: mint_prove_key,
                 xfr: KeySet::new(vec![xfr_prove_key_22, xfr_prove_key_33].into_iter())?,
                 freeze: KeySet::new(vec![freeze_prove_key].into_iter())?,
             },
-            verif_key: verif_key.clone(),
+            verif_keys: verif_keys.clone(),
             native_token,
             keys,
             fee_records,
@@ -939,7 +939,7 @@ impl MultiXfrTestState {
             memos,
             nullifiers, /*asset_defs,*/
             record_merkle_tree: t.clone(),
-            validator: ValidatorState::new(verif_key, t),
+            validator: ValidatorState::new(verif_keys, t),
             outer_timer: timer,
             inner_timer: Instant::now(),
         };
@@ -1062,7 +1062,7 @@ impl MultiXfrTestState {
                         ret.asset_seeds[def_ix - 1].0,
                         &ret.asset_seeds[def_ix - 1].1,
                         fee_info,
-                        &ret.prove_key.mint,
+                        &ret.prove_keys.mint,
                     )
                     .unwrap();
 
@@ -1436,7 +1436,7 @@ impl MultiXfrTestState {
                         &[out_rec1, out_rec2],
                         fee_info,
                         self.validator.prev_commit_time + 1,
-                        self.prove_key.xfr.key_for_size(3, 3).unwrap(),
+                        self.prove_keys.xfr.key_for_size(3, 3).unwrap(),
                     )
                     .unwrap();
 
@@ -1591,7 +1591,7 @@ impl MultiXfrTestState {
             &[out_rec1],
             fee_info,
             self.validator.prev_commit_time + 1,
-            self.prove_key.xfr.key_for_size(2, 2).unwrap(),
+            self.prove_keys.xfr.key_for_size(2, 2).unwrap(),
         )
         .unwrap();
 
@@ -1791,12 +1791,12 @@ pub struct WalletState<'a> {
     validator: ValidatorState,
     // proving key set. The proving keys are ordered by number of outputs first and number of inputs
     // second, because the wallet is less flexible with respect to number of outputs. If we are
-    // building a trasnaction and find we have too many inputs we can always generate a merge
+    // building a transaction and find we have too many inputs we can always generate a merge
     // transaction to defragment, but if the user requests a transaction with N independent outputs,
     // there is nothing we can do to decrease that number. So when searching for an appropriate
     // proving key, we will want to find a key with enough outputs first, and then worry about the
     // number of inputs.
-    proving_key: ProverKey<'a, key_set::OrderByOutputs>,
+    proving_keys: ProverKeySet<'a, key_set::OrderByOutputs>,
     // all records we care about, including records we own, records we have audited, and records we
     // can freeze or unfreeze
     records: RecordDatabase,
@@ -2422,7 +2422,7 @@ impl<'a> WalletState<'a> {
             *seed,
             asset_description.as_slice(),
             fee_info,
-            &self.proving_key.mint,
+            &self.proving_keys.mint,
         )
         .map_err(|err| WalletError::CryptoError { err })?;
         let signature = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
@@ -2538,7 +2538,7 @@ impl<'a> WalletState<'a> {
         };
 
         // find a proving key which can handle this transaction size
-        let proving_key = Self::freeze_proving_key(&self.proving_key.freeze, asset, &mut inputs)?;
+        let proving_key = Self::freeze_proving_key(&self.proving_keys.freeze, asset, &mut inputs)?;
 
         // generate transfer note and receiver memos
         let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut self.rng, fee_input, fee).unwrap();
@@ -2612,7 +2612,7 @@ impl<'a> WalletState<'a> {
         let proving_key = Self::xfr_proving_key(
             &mut self.rng,
             me,
-            &self.proving_key.xfr,
+            &self.proving_keys.xfr,
             &AssetDefinition::native(),
             &mut inputs,
             &mut outputs,
@@ -2730,7 +2730,7 @@ impl<'a> WalletState<'a> {
         let proving_key = Self::xfr_proving_key(
             &mut self.rng,
             me,
-            &self.proving_key.xfr,
+            &self.proving_keys.xfr,
             asset,
             &mut inputs,
             &mut outputs,
@@ -3234,7 +3234,7 @@ pub mod test_helpers {
         block_size: usize,
         hold_next_transaction: bool,
         held_transaction: Option<(ElaboratedTransaction, Vec<ReceiverMemo>, Signature)>,
-        prover_key: ProverKey<'a, key_set::OrderByOutputs>,
+        proving_keys: ProverKeySet<'a, key_set::OrderByOutputs>,
         address_map: HashMap<UserAddress, UserPubKey>,
     }
 
@@ -3353,7 +3353,7 @@ pub mod test_helpers {
             let mut rng = ChaChaRng::from_seed(self.seed);
             Ok(WalletState {
                 validator: ledger.validator.clone(),
-                proving_key: ledger.prover_key.clone(),
+                proving_keys: ledger.proving_keys.clone(),
                 records: {
                     let mut db: RecordDatabase = Default::default();
                     for (ro, uid) in self.initial_grants.iter() {
@@ -3474,7 +3474,7 @@ pub mod test_helpers {
             jf_txn::proof::freeze::preprocess(univ_param, 2, MERKLE_HEIGHT).unwrap();
         let nullifiers: SetMerkleTree = Default::default();
         let validator = ValidatorState::new(
-            VerifierKey {
+            VerifierKeySet {
                 xfr: KeySet::new(xfr_verif_keys.into_iter()).unwrap(),
                 mint: TransactionVerifyingKey::Mint(mint_verif_key),
                 freeze: KeySet::new(
@@ -3503,7 +3503,7 @@ pub mod test_helpers {
             block_size: 1,
             hold_next_transaction: false,
             held_transaction: None,
-            prover_key: ProverKey {
+            proving_keys: ProverKeySet {
                 xfr: KeySet::new(xfr_prove_keys.into_iter()).unwrap(),
                 mint: mint_prove_key,
                 freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
@@ -3988,7 +3988,7 @@ mod tests {
         let validator = |xfrs: &[_], freezes: &[_]| {
             let record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
             ValidatorState::new(
-                VerifierKey {
+                VerifierKeySet {
                     mint: TransactionVerifyingKey::Mint(mint.clone()),
                     xfr: KeySet::new(xfrs.iter().map(|size| {
                         TransactionVerifyingKey::Transfer(match size {
@@ -4042,7 +4042,7 @@ mod tests {
         let (_, freeze, _) = jf_txn::proof::freeze::preprocess(&univ, 2, MERKLE_HEIGHT).unwrap();
         println!("CRS set up");
 
-        let verif_crs = VerifierKey {
+        let verif_crs = VerifierKeySet {
             mint: TransactionVerifyingKey::Mint(mint),
             xfr: KeySet::new(vec![TransactionVerifyingKey::Transfer(xfr)].into_iter()).unwrap(),
             freeze: KeySet::new(vec![TransactionVerifyingKey::Freeze(freeze)].into_iter()).unwrap(),
@@ -4091,13 +4091,13 @@ mod tests {
             println!("{}: {} bytes", l, k.0.len());
         }
 
-        let prove_key = ProverKey::<key_set::OrderByInputs> {
+        let prove_keys = ProverKeySet::<key_set::OrderByInputs> {
             mint: mint_prove_key,
             xfr: KeySet::new(vec![xfr_prove_key].into_iter()).unwrap(),
             freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
         };
 
-        let verif_key = VerifierKey {
+        let verif_keys = VerifierKeySet {
             mint: TransactionVerifyingKey::Mint(mint_verif_key),
             xfr: KeySet::new(vec![TransactionVerifyingKey::Transfer(xfr_verif_key)].into_iter())
                 .unwrap(),
@@ -4161,7 +4161,7 @@ mod tests {
         };
 
         let mut wallet_merkle_tree = t.clone();
-        let mut validator = ValidatorState::new(verif_key, t);
+        let mut validator = ValidatorState::new(verif_keys, t);
 
         println!("Validator set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
@@ -4206,7 +4206,7 @@ mod tests {
                 /* outputs:        */ &[bob_rec.clone()],
                 /* fee:            */ 1,
                 /* valid_until:    */ 2,
-                /* proving_key:    */ prove_key.xfr.key_for_size(1, 2).unwrap(),
+                /* proving_key:    */ prove_keys.xfr.key_for_size(1, 2).unwrap(),
             )
             .unwrap();
             (txn, bob_rec)
