@@ -483,6 +483,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-scoped"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1181d2a07303ac3e8df0b3bdaaf648b4ac968d352e61158f5c1897db70d22a09"
+dependencies = [
+ "async-std",
+ "futures",
+ "pin-project",
+ "slab",
+]
+
+[[package]]
 name = "async-session"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4499,9 +4511,12 @@ dependencies = [
  "ark-ff 0.2.0",
  "ark-serialize 0.2.0",
  "ark-std 0.2.0",
+ "async-scoped",
+ "async-std",
  "bincode",
  "bitvec",
  "blake2",
+ "futures",
  "generic-array",
  "itertools",
  "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
