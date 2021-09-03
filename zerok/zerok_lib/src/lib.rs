@@ -32,6 +32,7 @@ use jf_txn::{
     TransactionNote, TransactionVerifyingKey,
 };
 use jf_utils::serialize::CanonicalBytes;
+use lazy_static::lazy_static;
 use merkle_tree::{AccMemberWitness, MerkleTree};
 use phaselock::BlockContents;
 #[allow(unused_imports)]
@@ -810,6 +811,11 @@ pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalPara
         .unwrap_or_else(|err| panic!("Error while deserializing the universal parameter: {}", err))
 }
 
+lazy_static! {
+    static ref UNIVERSAL_PARAM: jf_txn::proof::UniversalParam =
+        get_universal_param(&mut ChaChaRng::from_seed([0x8au8; 32]));
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct MultiXfrRecordSpec {
     pub asset_def_ix: u8,
@@ -840,7 +846,7 @@ impl MultiXfrTestState {
         Self::update_timer(&mut timer, |_| println!("Generating params"));
         let mut prng = ChaChaRng::from_seed(seed);
 
-        let univ_setup = Box::leak(Box::new(get_universal_param(&mut prng)));
+        let univ_setup = &*UNIVERSAL_PARAM;
         let (xfr_prove_key_22, xfr_verif_key_22, _) =
             jf_txn::proof::transfer::preprocess(univ_setup, 2, 2, MERKLE_HEIGHT)?;
         let (xfr_prove_key_33, xfr_verif_key_33, _) =
@@ -3423,7 +3429,6 @@ pub mod test_helpers {
     }
 
     pub fn create_test_network<'a>(
-        univ_param: &'a jf_txn::proof::UniversalParam,
         xfr_sizes: &[(usize, usize)],
         initial_grants: Vec<u64>,
         now: &mut Instant,
@@ -3468,7 +3473,7 @@ pub mod test_helpers {
         let mut xfr_verif_keys = vec![];
         for (num_inputs, num_outputs) in xfr_sizes {
             let (xfr_prove_key, xfr_verif_key, _) = jf_txn::proof::transfer::preprocess(
-                univ_param,
+                &*UNIVERSAL_PARAM,
                 *num_inputs,
                 *num_outputs,
                 MERKLE_HEIGHT,
@@ -3478,9 +3483,9 @@ pub mod test_helpers {
             xfr_verif_keys.push(TransactionVerifyingKey::Transfer(xfr_verif_key));
         }
         let (mint_prove_key, mint_verif_key, _) =
-            jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT).unwrap();
+            jf_txn::proof::mint::preprocess(&*UNIVERSAL_PARAM, MERKLE_HEIGHT).unwrap();
         let (freeze_prove_key, freeze_verif_key, _) =
-            jf_txn::proof::freeze::preprocess(univ_param, 2, MERKLE_HEIGHT).unwrap();
+            jf_txn::proof::freeze::preprocess(&*UNIVERSAL_PARAM, 2, MERKLE_HEIGHT).unwrap();
         let nullifiers: SetMerkleTree = Default::default();
         let validator = ValidatorState::new(
             VerifierKeySet {
@@ -3573,9 +3578,6 @@ pub mod test_helpers {
         );
         let mut now = Instant::now();
 
-        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
-        let univ_param = get_universal_param(&mut prng);
-
         let xfr_sizes = &[
             (1, 2), // basic native transfer
             (2, 2), // basic non-native transfer, or native merge
@@ -3645,7 +3647,7 @@ pub mod test_helpers {
                     })
             ).collect();
 
-        let (ledger, mut wallets) = create_test_network(&univ_param, xfr_sizes, grants, &mut now);
+        let (ledger, mut wallets) = create_test_network(xfr_sizes, grants, &mut now);
         println!(
             "ceremony complete, minting initial records: {}s",
             now.elapsed().as_secs_f32()
@@ -3981,17 +3983,14 @@ mod tests {
     #[test]
     fn test_verifier_key_commit_hash() {
         // Check that ValidatorStates with different verify_crs have different commits.
-        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
         println!("generating universal parameters");
 
-        let univ = get_universal_param(&mut prng);
-        let (_, mint, _) = jf_txn::proof::mint::preprocess(&univ, MERKLE_HEIGHT).unwrap();
-        let (_, xfr11, _) =
-            jf_txn::proof::transfer::preprocess(&univ, 1, 1, MERKLE_HEIGHT).unwrap();
-        let (_, xfr22, _) =
-            jf_txn::proof::transfer::preprocess(&univ, 2, 2, MERKLE_HEIGHT).unwrap();
-        let (_, freeze2, _) = jf_txn::proof::freeze::preprocess(&univ, 2, MERKLE_HEIGHT).unwrap();
-        let (_, freeze3, _) = jf_txn::proof::freeze::preprocess(&univ, 3, MERKLE_HEIGHT).unwrap();
+        let univ = &*UNIVERSAL_PARAM;
+        let (_, mint, _) = jf_txn::proof::mint::preprocess(univ, MERKLE_HEIGHT).unwrap();
+        let (_, xfr11, _) = jf_txn::proof::transfer::preprocess(univ, 1, 1, MERKLE_HEIGHT).unwrap();
+        let (_, xfr22, _) = jf_txn::proof::transfer::preprocess(univ, 2, 2, MERKLE_HEIGHT).unwrap();
+        let (_, freeze2, _) = jf_txn::proof::freeze::preprocess(univ, 2, MERKLE_HEIGHT).unwrap();
+        let (_, freeze3, _) = jf_txn::proof::freeze::preprocess(univ, 3, MERKLE_HEIGHT).unwrap();
         println!("CRS set up");
 
         let validator = |xfrs: &[_], freezes: &[_]| {
@@ -4042,13 +4041,12 @@ mod tests {
     #[test]
     fn test_record_history_commit_hash() {
         // Check that ValidatorStates with different record histories have different commits.
-        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
         println!("generating universal parameters");
 
-        let univ = get_universal_param(&mut prng);
-        let (_, mint, _) = jf_txn::proof::mint::preprocess(&univ, MERKLE_HEIGHT).unwrap();
-        let (_, xfr, _) = jf_txn::proof::transfer::preprocess(&univ, 1, 1, MERKLE_HEIGHT).unwrap();
-        let (_, freeze, _) = jf_txn::proof::freeze::preprocess(&univ, 2, MERKLE_HEIGHT).unwrap();
+        let univ = &*UNIVERSAL_PARAM;
+        let (_, mint, _) = jf_txn::proof::mint::preprocess(univ, MERKLE_HEIGHT).unwrap();
+        let (_, xfr, _) = jf_txn::proof::transfer::preprocess(univ, 1, 1, MERKLE_HEIGHT).unwrap();
+        let (_, freeze, _) = jf_txn::proof::freeze::preprocess(univ, 2, MERKLE_HEIGHT).unwrap();
         println!("CRS set up");
 
         let verif_crs = VerifierKeySet {
@@ -4079,18 +4077,14 @@ mod tests {
 
         let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
 
-        let univ_setup = jf_txn::proof::universal_setup(
-            compute_universal_param_size(NoteType::Transfer, 1, 1, MERKLE_HEIGHT).unwrap(),
-            &mut prng,
-        )
-        .unwrap();
+        let univ_setup = &*UNIVERSAL_PARAM;
 
         let (xfr_prove_key, xfr_verif_key, _) =
-            jf_txn::proof::transfer::preprocess(&univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
+            jf_txn::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
         let (mint_prove_key, mint_verif_key, _) =
-            jf_txn::proof::mint::preprocess(&univ_setup, MERKLE_HEIGHT).unwrap();
+            jf_txn::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
         let (freeze_prove_key, freeze_verif_key, _) =
-            jf_txn::proof::freeze::preprocess(&univ_setup, 2, MERKLE_HEIGHT).unwrap();
+            jf_txn::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
 
         for (l, k) in vec![
             ("xfr", CanonicalBytes::from(xfr_verif_key.clone())),
@@ -4312,9 +4306,6 @@ mod tests {
     #[allow(unused_assignments)]
     async fn test_two_wallets(native: bool) {
         let mut now = Instant::now();
-        println!("generating params");
-        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
-        let univ_param = get_universal_param(&mut prng);
 
         // Each transaction in this test will be a transfer of 1 record, with an additional
         // fee change output. We need to fix the transfer arity because although the wallet
@@ -4328,7 +4319,6 @@ mod tests {
         let alice_grant = 5;
         let bob_grant = if native { 0 } else { 1 };
         let (ledger, mut wallets) = create_test_network(
-            &univ_param,
             &[(num_inputs, num_outputs)],
             vec![alice_grant, bob_grant],
             &mut now,
@@ -4457,10 +4447,6 @@ mod tests {
         assert!(!(mint && freeze));
 
         let mut now = Instant::now();
-        println!("generating params");
-
-        let mut rng = ChaChaRng::from_seed([0x8au8; 32]);
-        let univ_param = get_universal_param(&mut rng);
 
         // Native transfers have extra fee/change inputs/outputs.
         let num_inputs = if native { 1 } else { 2 };
@@ -4472,7 +4458,6 @@ mod tests {
         // RECORD_HOLD_TIME transfers while a transfer from wallets[0] is pending, causing the
         // transfer to time out.
         let (ledger, mut wallets) = create_test_network(
-            &univ_param,
             &[(num_inputs, num_outputs)],
             // If native, wallets[0] gets 1 coin to transfer and 1 for a transaction fee. Otherwise,
             // it gets
@@ -4693,8 +4678,6 @@ mod tests {
     #[async_std::test]
     async fn test_resubmit() -> std::io::Result<()> {
         let mut now = Instant::now();
-        let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
-        let univ_param = get_universal_param(&mut prng);
 
         // The sender wallet (wallets[0]) gets an initial grant of 2 for a transaction fee and a
         // payment. wallets[1] will act as the receiver, and wallets[2] will be a third party
@@ -4702,7 +4685,6 @@ mod tests {
         // pending, after which we will check if the pending transaction can be updated and
         // resubmitted.
         let (ledger, mut wallets) = create_test_network(
-            &univ_param,
             &[(1, 2)],
             vec![
                 2,
@@ -4759,17 +4741,12 @@ mod tests {
     #[async_std::test]
     async fn test_wallet_freeze() -> std::io::Result<()> {
         let mut now = Instant::now();
-        println!("generating params");
-
-        let mut rng = ChaChaRng::from_seed([0x8au8; 32]);
-        let univ_param = get_universal_param(&mut rng);
 
         // The sender wallet (wallets[0]) gets an initial grant of 1 for a transfer fee. wallets[1]
         // will act as the receiver, and wallets[2] will be a third party which issues and freezes
         // some of wallets[0]'s assets. It gets a grant of 3, for a mint fee, a freeze fee and an
         // unfreeze fee.
-        let (ledger, mut wallets) =
-            create_test_network(&univ_param, &[(2, 3)], vec![1, 0, 3], &mut now);
+        let (ledger, mut wallets) = create_test_network(&[(2, 3)], vec![1, 0, 3], &mut now);
 
         let asset = {
             let policy = AssetPolicy::default()
