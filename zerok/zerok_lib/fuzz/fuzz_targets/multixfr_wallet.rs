@@ -5,7 +5,7 @@
 use async_std::task::block_on;
 use libfuzzer_sys::arbitrary::{Arbitrary, Result, Unstructured};
 use libfuzzer_sys::fuzz_target;
-use zerok_lib::test_helpers::*;
+use zerok_lib::wallet::test_helpers::*;
 
 #[derive(Debug)]
 struct MultiXfrParams {
