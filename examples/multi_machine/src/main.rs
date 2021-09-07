@@ -1,12 +1,8 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
 use phaselock::{
-    event::{Event, EventType},
-    handle::PhaseLockHandle,
-    message::Message,
-    networking::w_network::WNetwork,
-    traits::storage::memory_storage::MemoryStorage,
-    PhaseLock, PhaseLockConfig, PubKey,
+    event::EventType, message::Message, networking::w_network::WNetwork,
+    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey,
 };
 use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
 use serde::{de::DeserializeOwned, Serialize};
@@ -19,7 +15,7 @@ use threshold_crypto as tc;
 use toml::Value;
 use tracing::debug;
 use zerok_lib::{
-    ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
+    node::*, ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState,
 };
 
 const STATE_SEED: [u8; 32] = [0x7au8; 32];
@@ -55,6 +51,10 @@ struct NodeOpt {
     /// Skip this option if only want to generate public key files.
     #[structopt(long = "id", short = "i")]
     id: Option<u64>,
+
+    /// Whether the current node should run a full node.
+    #[structopt(long = "full", short = "f")]
+    full: bool,
 }
 
 /// Gets public key of a node from its public key file.
@@ -116,7 +116,8 @@ async fn init_state_and_phaselock(
     threshold: u64,
     node_id: u64,
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
-) -> (MultiXfrTestState, PhaseLockHandle<ElaboratedBlock, 64>) {
+    full_node: bool,
+) -> (MultiXfrTestState, Box<dyn Validator>) {
     // Create the initial state
     let state = MultiXfrTestState::initialize(
         STATE_SEED,
@@ -171,7 +172,14 @@ async fn init_state_and_phaselock(
     .await;
     debug!("phaselock launched");
 
-    (state, phaselock)
+    let validator = if full_node {
+        Box::new(FullNode::new(phaselock, state.validator.clone(), state.nullifiers.clone()).await)
+            as Box<dyn Validator>
+    } else {
+        Box::new(phaselock) as Box<dyn Validator>
+    };
+
+    (state, validator)
 }
 
 #[async_std::main]
@@ -263,15 +271,17 @@ async fn main() {
         println!("All nodes connected to network");
 
         // Initialize the state and phaselock
-        let (mut state, mut phaselock) = init_state_and_phaselock(
+        let (mut state, phaselock) = init_state_and_phaselock(
             public_keys,
             secret_key_share,
             nodes,
             threshold,
             own_id,
             own_network,
+            NodeOpt::from_args().full,
         )
         .await;
+        let mut events = phaselock.subscribe().await;
 
         // Start consensus for each transaction
         for round in 0..TRANSACTION_COUNT {
@@ -302,25 +312,21 @@ async fn main() {
             let mut line = String::new();
             println!("Hit the return key when ready to start the consensus...");
             std::io::stdin().read_line(&mut line).unwrap();
-            phaselock.start().await;
+            phaselock.start_consensus().await;
             println!("  - Starting consensus");
-            let mut event: Event<ElaboratedBlock, ValidatorState> = phaselock
-                .next_event()
-                .await
-                .expect("PhaseLock unexpectedly closed");
-            while !matches!(event.event, EventType::Decide { .. }) {
-                event = phaselock
-                    .next_event()
-                    .await
-                    .expect("PhaseLock unexpectedly closed");
-            }
-            if let EventType::Decide { block: _, state } = event.event {
-                let commitment = TaggedBase64::new("LEDG", &state.commit())
-                    .unwrap()
-                    .to_string();
-                println!("  - Current commitment: {}", commitment);
-            } else {
-                unreachable!();
+            loop {
+                println!("Waiting for PhaseLock event");
+                let event = events.next().await.expect("PhaseLock unexpectedly closed");
+
+                if let EventType::Decide { block: _, state } = event.event {
+                    let commitment = TaggedBase64::new("LEDG", &state.commit())
+                        .unwrap()
+                        .to_string();
+                    println!("  - Current commitment: {}", commitment);
+                    break;
+                } else {
+                    println!("EVENT: {:?}", event);
+                }
             }
 
             // Add the transaction if the node ID is 0

@@ -4,6 +4,7 @@
 #[macro_use]
 extern crate proptest;
 
+pub mod node;
 mod set_merkle_tree;
 mod util;
 
