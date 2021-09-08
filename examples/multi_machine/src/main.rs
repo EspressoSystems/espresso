@@ -117,7 +117,10 @@ async fn init_state_and_phaselock(
     node_id: u64,
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
     full_node: bool,
-) -> (MultiXfrTestState, Box<dyn Validator>) {
+) -> (
+    MultiXfrTestState,
+    Box<dyn Validator<Event = PhaseLockEvent>>,
+) {
     // Create the initial state
     let state = MultiXfrTestState::initialize(
         STATE_SEED,
@@ -173,10 +176,13 @@ async fn init_state_and_phaselock(
     debug!("phaselock launched");
 
     let validator = if full_node {
-        Box::new(FullNode::new(phaselock, state.validator.clone(), state.nullifiers.clone()).await)
-            as Box<dyn Validator>
+        Box::new(FullNode::new(
+            phaselock,
+            state.validator.clone(),
+            state.nullifiers.clone(),
+        )) as Box<dyn Validator<Event = PhaseLockEvent>>
     } else {
-        Box::new(phaselock) as Box<dyn Validator>
+        Box::new(phaselock) as Box<dyn Validator<Event = PhaseLockEvent>>
     };
 
     (state, validator)
@@ -281,7 +287,7 @@ async fn main() {
             NodeOpt::from_args().full,
         )
         .await;
-        let mut events = phaselock.subscribe().await;
+        let mut events = phaselock.subscribe();
 
         // Start consensus for each transaction
         for round in 0..TRANSACTION_COUNT {

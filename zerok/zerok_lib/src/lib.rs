@@ -817,6 +817,8 @@ pub struct MultiXfrRecordSpec {
 }
 
 impl MultiXfrTestState {
+    const MAX_AMOUNT: u64 = 10_000;
+
     pub fn update_timer<F>(now: &mut Instant, print: F)
     where
         F: FnOnce(f32),
@@ -956,7 +958,7 @@ impl MultiXfrTestState {
         while !to_add.is_empty() {
             let mut this_block = vec![];
             for (def_ix, key, amt) in core::mem::take(&mut to_add).into_iter() {
-                let amt = if amt < 2 { 2 } else { amt };
+                let amt = if amt < 2 { 2 } else { amt % Self::MAX_AMOUNT };
                 let def_ix = def_ix as usize % ret.asset_defs.len();
                 // We can't mint native tokens
                 let def_ix = if def_ix < 1 { 1 } else { def_ix };
@@ -1233,6 +1235,12 @@ impl MultiXfrTestState {
                             .0;
 
                         let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
+
+                        if let Some((rec1, _)) = &rec1 {
+                            if open_rec.asset_def != rec1.asset_def {
+                                continue;
+                            }
+                        }
 
                         let nullifier = key.nullify(
                             open_rec.asset_def.policy_ref().freezer_pub_key(),
