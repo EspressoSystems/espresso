@@ -25,7 +25,6 @@ use std::time::Duration;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use threshold_crypto as tc;
-use tide;
 use tide_websockets::{
     async_tungstenite::tungstenite::protocol::frame::coding::CloseCode, Message::Close, WebSocket,
     WebSocketConnection,
