@@ -1,0 +1,123 @@
+# API and messages
+#
+# Work-in-progress based on
+# https://www.notion.so/translucence/Query-service-v1-API-sketch-203581e934334ff48f639d4fd523668d
+#
+# TOML specification: https://github.com/kezhuw/toml-spec
+
+[meta]
+FORMAT_VERSION = "0.1.0"
+
+[route.getinfo]
+PATH = [ "getinfo" ]
+DOC = """
+_This is preliminary:_
+- version: full node version
+- network_id
+- blocks: total number of blocks (1 more than the latest block number if we start with block #0)
+- transactions: total number of transactions
+- records: total number of records (including spent)
+- circulation: total number of XYZ tokens in circulation *(implementation note: XYZ-related items can wait until the native token is implemented).*
+- blockchain_size: total size of all blocks (not the size of a full node; just bare blocks)
+- current_block_size: size of latest block
+- current_block_tx: number of transactions in latest block
+- mempool_transactions: number of transactions in mempool (known to node)
+- mempool_outputs: number of outputs in mempool (known to node)
+- mempool_size: mempool size in bytes (known to node)
+"""
+
+[route.getblockhash]
+PATH = [ "getblockhash/latest", "getblockhash/:bkid", "getblockhash/index/:index" ]
+":bkid" = "TaggedBase64"
+":index" = "Integer"
+DOC = "Returns the designated block hash. If /latest is appended, returns the latest block hash."
+ERROR_bkid = """
+A valid block identifier is required. Block identifiers begin with BK~, for example, BK~Q3_ac7-.
+"""
+ERROR_index = """
+A valid block index is required. The index is a natural number between 0 and one less than the number of blocks.
+See also getblockcount. 
+"""
+
+[route.getblockid]
+PATH = [ "getblockid/latest", "getblockid/index/:index", "getblockid/hash/:hash" ]
+":hash" = "Hexadecimal"
+":index" = "Integer"
+DOC = """
+Returns the latest available block identifier.
+
+Note that the identifier includes a checksum. For calculations,
+getblockhash may be needed, but care must be exercised to avoid
+errors resulting from inappropriate data conversion, truncation, or
+other forms of data corruption.
+
+See [taggedbase64spec](Tagged Identifier Specification) for the
+algorithms to verify the checksum and extract the hash from an
+identifier. In brief, the checksum is the last character. The
+characters between the tilde (~) and the last character are URL-safe
+base64 encoded. Raw hash values are 32 digit hexadecimal. For
+hexadecimal values that do not contain a, b, c, d, e, or f, JavaScript
+implicit data conversion and limited numeric precision can lead to
+bugs.
+
+"""
+ERROR_index = """
+A valid block index is required. The index is a natural number between
+0 and one less than the number of blocks.
+
+See also getblockcount.
+"""
+ERROR_hash = """
+A valid block hash is required. A block hash is 32 hexadecimal digits.
+"""
+
+[route.getblockcount]
+PATH = [ "getblockcount" ]
+DOC = "Returns the total number of blocks in decimal."
+
+[route.getblock]
+PATH = [ "getblock/latest", "getblock/:bkid", "getblock/hash/:hash" ]
+":hash" = "Hexadecimal"
+":bkid" = "TaggedBase64"
+DOC = """
+Returns all block-specific information
+- block identifier
+- block hash
+- state_commitment
+- transaction_data: ordered list of transactions in block
+- etc...
+"""
+
+[route.getmempool]
+PATH = [ "getmempool" ]
+DOC = """
+Returns a set of transaction IDs in memory pool.
+"""
+
+# TODO !corbett Does it makes sense to implement gettransaction/latest?
+[route.gettransaction]
+PATH = [ "gettransaction/:txid" ]
+":txid" = "TaggedBase64"
+DOC = "Get transaction data associated with a transaction identifier, or an error if no such transaction exists."
+ERROR_txid = "A valid transaction identifier is required. Transaction identifiers begin with TX~, for example, TX~Ab-3D_x5."
+
+# TODO !corbett Is this possible in JF?
+[route.getunspentrecordsetinfo]
+PATH = [ "getunspentrecordsetinfo" ]
+DOC = """
+Returns statistics about unspent record set including the number of unspent records.
+"""
+
+# Does this work in JF?
+# TODO !corbett If it does, do we care that it leaks information about the number of outputs in every transaction?
+[route.getunspentrecord]
+PATH = ["getunspentrecord/:txid/:output_index/:mempool", "getunspentrecord/:txid/:output_index/"]
+":txid" = "TaggedBase64"
+":output_index" = "Integer"
+":mempool" = "Boolean"
+DOC = """
+record_data: details about an unspent record from the *n*th output of the given transaction
+"""
+ERROR_txid = "A valid transaction identifier is required. Transaction identifiers begin with TX~, for example, TX~Ab-3D_x5."
+ERROR_output_index = "No such output. The output index must be non-negative and less than the number of outputs."
+ERROR_mempool = "The optional mempool parameter must be Boolean. The value 'true' indicates mempool information is wanted."
