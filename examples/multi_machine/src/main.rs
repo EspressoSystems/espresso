@@ -306,7 +306,7 @@ async fn main() {
                     .unwrap();
                 txn = Some(transactions.remove(0));
                 phaselock
-                    .submit_transaction(txn.clone().unwrap().2)
+                    .submit_transaction(txn.clone().unwrap().3)
                     .await
                     .unwrap();
             }
@@ -336,7 +336,7 @@ async fn main() {
             }
 
             // Add the transaction if the node ID is 0
-            if let Some((ix, keys_and_memos, t)) = txn {
+            if let Some((ix, keys_and_memos, _, t)) = txn {
                 println!("  - Adding the transaction");
                 let mut blk = ElaboratedBlock::default();
                 let (owner_memos, kixs) = {

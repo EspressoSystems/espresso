@@ -24,7 +24,7 @@ use jf_txn::{
     TransactionNote,
 };
 use key_set::KeySet;
-use merkle_tree::{AccMemberWitness, MerkleTree};
+use merkle_tree::{AccMemberWitness, MerklePath, MerkleTree};
 use rand_chacha::ChaChaRng;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -79,8 +79,9 @@ pub enum WalletError {
 // simply has a public method for receiving mocked versions of these events.
 #[derive(Clone, Debug)]
 pub enum LedgerEvent {
-    Commit(ElaboratedBlock, Vec<Vec<ReceiverMemo>>),
+    Commit(ElaboratedBlock),
     Reject(ElaboratedBlock, ValidationError),
+    Memos(Vec<(ReceiverMemo, RecordCommitment, u64, MerklePath)>),
 }
 
 pub struct WalletState<'a> {
@@ -332,7 +333,7 @@ impl<'a> WalletState<'a> {
     ) {
         self.now += 1;
         match event {
-            LedgerEvent::Commit(block, receiver_memos) => {
+            LedgerEvent::Commit(block) => {
                 // Don't trust the network connection that provided us this event; validate it
                 // against our local mirror of the ledger and bail out if it is invalid.
                 let mut uids = match self.validator.validate_and_apply(
@@ -362,13 +363,7 @@ impl<'a> WalletState<'a> {
                 // whose hold just expired will be removed from the set now.
                 self.clear_expired_transactions();
 
-                for ((txn, proofs), receiver_memos) in block
-                    .block
-                    .0
-                    .into_iter()
-                    .zip(block.proofs)
-                    .zip(receiver_memos)
-                {
+                for (txn, proofs) in block.block.0.into_iter().zip(block.proofs) {
                     // Split the uids corresponding to this transaction off the front of `uids`.
                     let mut this_txn_uids = uids;
                     uids = this_txn_uids.split_off(txn.output_len());
@@ -386,14 +381,6 @@ impl<'a> WalletState<'a> {
                     self.clear_pending_transaction(&txn, Ok(&mut this_txn_uids));
                     // This is someone else's transaction but we can audit it.
                     self.audit_transaction(session, &txn, &mut this_txn_uids);
-                    // This is someone else's transaction but we are a receiver of some of its
-                    // outputs.
-                    self.receive_transaction_outputs(
-                        session,
-                        &txn,
-                        receiver_memos,
-                        &mut this_txn_uids,
-                    );
 
                     // Update spent nullifiers.
                     for nullifier in txn.txn.nullifiers().into_iter() {
@@ -409,6 +396,26 @@ impl<'a> WalletState<'a> {
                     for (uid, remember) in this_txn_uids {
                         if !remember {
                             self.record_merkle_tree_mut().forget(uid);
+                        }
+                    }
+                }
+            }
+
+            LedgerEvent::Memos(outputs) => {
+                for (memo, comm, uid, proof) in outputs {
+                    if let Ok(record_opening) = memo.decrypt(&session.key_pair, &comm, &[]) {
+                        // If this record is for us (i.e. its corresponding memo decrypts under our
+                        // key), then add it to our owned records.
+                        self.records.insert(record_opening, uid, &session.key_pair);
+                        if self
+                            .record_merkle_tree_mut()
+                            .remember(uid, comm, &proof)
+                            .is_err()
+                        {
+                            println!(
+                                "error: got bad merkle proof from backend for commitment {:?}",
+                                comm
+                            );
                         }
                     }
                 }
@@ -584,32 +591,6 @@ impl<'a> WalletState<'a> {
                         *remember = true;
                     }
                 }
-            }
-        }
-    }
-
-    fn receive_transaction_outputs(
-        &mut self,
-        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
-        txn: &ElaboratedTransaction,
-        receiver_memos: Vec<ReceiverMemo>,
-        uids: &mut [(u64, bool)],
-    ) {
-        let output_commitments = match &txn.txn {
-            TransactionNote::Transfer(xfr) => xfr.output_commitments.clone(),
-            TransactionNote::Mint(mint) => vec![mint.chg_comm, mint.mint_comm],
-            TransactionNote::Freeze(freeze) => freeze.output_commitments.clone(),
-        };
-        assert_eq!(output_commitments.len(), receiver_memos.len());
-        assert_eq!(output_commitments.len(), uids.len());
-        for (((uid, remember), record_commitment), memo) in
-            uids.iter_mut().zip(output_commitments).zip(receiver_memos)
-        {
-            if let Ok(record_opening) = memo.decrypt(&session.key_pair, &record_commitment, &[]) {
-                // If this record is for us (i.e. its corresponding memo decrypts under our
-                // key), then add it to our owned records.
-                self.records.insert(record_opening, *uid, &session.key_pair);
-                *remember = true;
             }
         }
     }
@@ -1534,6 +1515,7 @@ pub mod test_helpers {
     use crate::{Block, TransactionVerifyingKey, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM};
     use futures::channel::mpsc as channel;
     use futures::future;
+    use itertools::izip;
     use phaselock::BlockContents;
     use rand_chacha::rand_core::{RngCore, SeedableRng};
     use std::iter::once;
@@ -1571,9 +1553,34 @@ pub mod test_helpers {
                 self.now,
                 block.block.clone(),
                 block.proofs.clone(),
-                false,
+                true,
             ) {
-                Ok(_) => self.generate_event(LedgerEvent::Commit(block, memos)),
+                Ok(mut uids) => {
+                    self.generate_event(LedgerEvent::Commit(block.clone()));
+
+                    for (txn, memos) in block.block.0.into_iter().zip(memos) {
+                        let mut this_txn_uids = uids;
+                        uids = this_txn_uids.split_off(txn.output_len());
+                        assert_eq!(this_txn_uids.len(), txn.output_len());
+
+                        let merkle_paths = this_txn_uids
+                            .iter()
+                            .map(|uid| {
+                                self.validator
+                                    .record_merkle_frontier
+                                    .get_leaf(*uid)
+                                    .expect_ok()
+                                    .unwrap()
+                                    .1
+                            })
+                            .collect::<Vec<_>>();
+
+                        self.generate_event(LedgerEvent::Memos(
+                            izip!(memos, txn.output_commitments(), this_txn_uids, merkle_paths)
+                                .collect(),
+                        ));
+                    }
+                }
                 Err(err) => self.generate_event(LedgerEvent::Reject(block, err)),
             }
         }

@@ -270,11 +270,11 @@ async fn main() {
         let transaction = transactions.remove(0);
 
         // Propose the transaction
-        propose_transaction(i as usize, &phaselocks[0].0, transaction.2.clone()).await;
+        propose_transaction(i as usize, &phaselocks[0].0, transaction.3.clone()).await;
 
         consense(i as usize, &phaselocks).await;
 
-        let (ix, keys_and_memos, txn) = transaction;
+        let (ix, keys_and_memos, _, txn) = transaction;
         let (owner_memos, kixs) = {
             let mut owner_memos = vec![];
             let mut kixs = vec![];

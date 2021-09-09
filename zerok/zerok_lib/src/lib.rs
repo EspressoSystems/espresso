@@ -11,12 +11,14 @@ pub mod wallet;
 
 use core::fmt::Debug;
 use core::iter::once;
+use jf_primitives::jubjub_dsa::Signature;
 use jf_primitives::merkle_tree;
 use jf_txn::{
     errors::TxnApiError,
     keys::UserKeyPair,
     mint::MintNote,
     proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
+    sign_receiver_memos,
     structs::{
         AssetCode, AssetCodeSeed, AssetDefinition, FeeInput, FreezeFlag, NoteType, Nullifier,
         ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
@@ -1113,6 +1115,7 @@ impl MultiXfrTestState {
     /// Returns vector of
     ///     index of transaction within block
     ///     (receiver memos, receiver indices)
+    ///     receiver memos signature
     ///     transaction
     ///
     /// Note: `round` and `num_txs` are for `println!`s only.
@@ -1124,7 +1127,12 @@ impl MultiXfrTestState {
         block: Vec<(bool, u16, u16, u8, u8, i32)>,
         num_txs: usize,
     ) -> Result<
-        Vec<(usize, Vec<(usize, ReceiverMemo)>, ElaboratedTransaction)>,
+        Vec<(
+            usize,
+            Vec<(usize, ReceiverMemo)>,
+            Signature,
+            ElaboratedTransaction,
+        )>,
         Box<dyn std::error::Error>,
     > {
         let splits = block
@@ -1437,7 +1445,7 @@ impl MultiXfrTestState {
                         .collect::<Result<Vec<_>, _>>()
                         .unwrap();
 
-                    let (txn, _owner_memo_kp) = TransferNote::generate_non_native(
+                    let (txn, owner_memo_kp) = TransferNote::generate_non_native(
                         &mut prng,
                         vec![input1, input2],
                         &[out_rec1, out_rec2],
@@ -1446,6 +1454,7 @@ impl MultiXfrTestState {
                         self.prove_keys.xfr.key_for_size(3, 3).unwrap(),
                     )
                     .unwrap();
+                    let sig = sign_receiver_memos(&owner_memo_kp, &owner_memos).unwrap();
 
                     // owner_memos_key
                     // .verify(&helpers::get_owner_memos_digest(&owner_memos),
@@ -1482,6 +1491,7 @@ impl MultiXfrTestState {
                     Some((
                         ix,
                         keys_and_memos,
+                        sig,
                         ElaboratedTransaction {
                             txn: TransactionNote::Transfer(Box::new(txn)),
                             proofs: nullifier_pfs,
@@ -1492,7 +1502,7 @@ impl MultiXfrTestState {
             .filter_map(|x| x)
             .collect::<Vec<_>>();
 
-        txns.sort_by(|(i, _, _), (j, _, _)| i.cmp(j));
+        txns.sort_by(|(i, _, _, _), (j, _, _, _)| i.cmp(j));
         Ok(txns)
     }
 
@@ -1510,7 +1520,12 @@ impl MultiXfrTestState {
         ix: usize,
         num_txs: usize,
         now: Instant,
-    ) -> Option<(usize, Vec<(usize, ReceiverMemo)>, ElaboratedTransaction)> {
+    ) -> Option<(
+        usize,
+        Vec<(usize, ReceiverMemo)>,
+        Signature,
+        ElaboratedTransaction,
+    )> {
         println!(
             "Txn {}.{}/{}: generating single-input transaction {}s",
             round + 1,
@@ -1592,7 +1607,7 @@ impl MultiXfrTestState {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        let (txn, _owner_memo_kp) = TransferNote::generate_non_native(
+        let (txn, owner_memo_kp) = TransferNote::generate_non_native(
             prng,
             vec![input],
             &[out_rec1],
@@ -1601,6 +1616,7 @@ impl MultiXfrTestState {
             self.prove_keys.xfr.key_for_size(2, 2).unwrap(),
         )
         .unwrap();
+        let sig = sign_receiver_memos(&owner_memo_kp, &owner_memos).unwrap();
 
         println!(
             "Txn {}.{}/{} note generated: {}",
@@ -1634,6 +1650,7 @@ impl MultiXfrTestState {
         Some((
             ix,
             keys_and_memos,
+            sig,
             ElaboratedTransaction {
                 txn: TransactionNote::Transfer(Box::new(txn)),
                 proofs: nullifier_pfs,
@@ -1819,7 +1836,7 @@ mod tests {
             });
 
             let mut blk = ElaboratedBlock::default();
-            for (ix, keys_and_memos, txn) in txns {
+            for (ix, keys_and_memos, _, txn) in txns {
                 let (owner_memos, kixs) = {
                     let mut owner_memos = vec![];
                     let mut kixs = vec![];

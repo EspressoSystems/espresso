@@ -10,7 +10,9 @@ use futures::future::RemoteHandle;
 pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::task::SpawnExt;
-use jf_txn::structs::Nullifier;
+use itertools::izip;
+use jf_primitives::jubjub_dsa::Signature;
+use jf_txn::structs::{Nullifier, ReceiverMemo};
 use phaselock::{
     error::PhaseLockError,
     event::EventType,
@@ -89,7 +91,10 @@ impl Validator for LightWeightNode {
 #[async_trait]
 pub trait QueryService {
     /// Get the `i`th committed block and the state at the time just before the block was committed.
-    async fn get_block(&self, i: u64) -> (ValidatorState, ElaboratedBlock);
+    async fn get_block(
+        &self,
+        block_id: u64,
+    ) -> Result<(ValidatorState, ElaboratedBlock), QueryServiceError>;
 
     /// Query whether a nullifier is in a nullifier set with a given root hash, and retrieve a proof
     /// of inclusion or exclusion. The root hash must be the root of a past version of the
@@ -103,18 +108,52 @@ pub trait QueryService {
     /// Get an asynchronous stream which yields LedgerEvents when things happen on the ledger or
     /// the associated bulletin board.
     async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent>;
+
+    /// Broadcast that a set of receiver memos corresponds to a particular transaction. The memos
+    /// must be signed using the signing key for the specified transaction. The sender of a message
+    /// may only post one set of receiver memos per transaction, so calling this function twice with
+    /// the same (block_id, txn_id) will fail. (Note that non-senders of a transaction are prevented
+    /// from effectively denying service by posting invalid memos for transactions they didn't send
+    /// by the signature mechanism).
+    ///
+    /// If successful, the memos will be available for querying via `get_memos`. In addition, an
+    /// event will be broadcast asynchronously to all subscribers informing them of the new memos
+    /// and the corresponding record uids and commitments.
+    async fn post_memos(
+        &self,
+        block_id: u64,
+        txn_id: u64,
+        memos: Vec<ReceiverMemo>,
+        signature: Signature,
+    ) -> Result<(), QueryServiceError>;
+
+    /// Get the receiver memos for a transaction, if they have been posted to the bulletin board.
+    /// The result includes a signature over the contents of the memos using the signing key for the
+    /// requested transaction, as proof that these memos are in fact the ones that the sender
+    /// intended to associate with this transaction.
+    async fn get_memos(
+        &self,
+        block_id: u64,
+        txn_id: u64,
+    ) -> Result<(Vec<ReceiverMemo>, Signature), QueryServiceError>;
 }
 
 #[derive(Clone, Debug)]
 pub enum QueryServiceError {
     InvalidNullifierRoot {},
+    InvalidBlockId {},
+    InvalidTxnId {},
+    MemosAlreadyPosted {},
+    InvalidSignature {},
+    WrongNumberOfMemos { expected: usize },
+    NoMemosForTxn {},
 }
 
 struct FullState {
     validator: ValidatorState,
     nullifiers: HashMap<set_hash::Hash, SetMerkleTree>,
     // All past states and state transitions of the ledger.
-    history: Vec<(ValidatorState, ElaboratedBlock)>,
+    history: Vec<LedgerSnapshot>,
     // The last block which was proposed. This is currently used to correllate BadBlock and
     // InconsistentBlock errors from PhaseLock with the block that caused the error. In the future,
     // PhaseLock errors will contain the bad block (or some kind of reference to it, perhaps through
@@ -128,6 +167,19 @@ struct FullState {
     // Clients which have subscribed to events starting at some time in the future, to be added to
     // `subscribers` when the time comes.
     pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<LedgerEvent>>>,
+}
+
+#[derive(Clone, Debug)]
+struct LedgerSnapshot {
+    state: ValidatorState,
+    block: ElaboratedBlock,
+    // Receiver memos come in asynchronously after a block is committed, on a transaction-by-
+    // transaction basis. The list of memos corresponding to each transaction in a block will be
+    // None until valid memos for that block are received by the sender. Note that this may never
+    // happen if the sender chooses to send the memos directly to the receiver without posting them
+    // publicly.
+    memos: Vec<Option<(Vec<ReceiverMemo>, Signature)>>,
+    uids: Vec<Vec<u64>>,
 }
 
 impl FullState {
@@ -173,36 +225,49 @@ impl FullState {
 
                 // A block has been committed. Update our mirror of the ValidatorState by applying
                 // the new block, and generate a Commit event.
-                if self
-                    .validator
-                    .validate_and_apply(
-                        self.validator.prev_commit_time + 1,
-                        block.block.clone(),
-                        block.proofs.clone(),
-                        true,
-                    )
-                    .is_err()
-                    || self.validator.commit() != state.commit()
-                {
+                match self.validator.validate_and_apply(
+                    self.validator.prev_commit_time + 1,
+                    block.block.clone(),
+                    block.proofs.clone(),
+                    true,
+                ) {
                     // We update our ValidatorState for each block committed by the PhaseLock event
                     // source, so we shouldn't ever get out of sync.
-                    panic!("state is out of sync with validator");
-                } else {
-                    // Add the results of this block to our state.
-                    let mut new_nullifiers = self.nullifiers[&prev_state.nullifiers_root].clone();
-                    for txn in block.block.0.iter() {
-                        for n in txn.nullifiers() {
-                            new_nullifiers.insert(n);
-                        }
+                    Err(_) => panic!("state is out of sync with validator"),
+                    Ok(_) if self.validator.commit() != state.commit() => {
+                        panic!("state is out of sync with validator")
                     }
-                    assert_eq!(new_nullifiers.hash(), self.validator.nullifiers_root);
-                    self.nullifiers
-                        .insert(new_nullifiers.hash(), new_nullifiers);
-                    self.history.push((prev_state, (*block).clone()));
 
-                    // Notify subscribers of the new block.
-                    //todo !jeb.bearer get receiver memos somehow
-                    self.send_event(LedgerEvent::Commit((*block).clone(), vec![]));
+                    Ok(mut uids) => {
+                        // Add the results of this block to our state.
+                        let mut new_nullifiers =
+                            self.nullifiers[&prev_state.nullifiers_root].clone();
+                        let mut block_uids = vec![];
+                        for txn in block.block.0.iter() {
+                            for n in txn.nullifiers() {
+                                new_nullifiers.insert(n);
+                            }
+
+                            // Split the uids corresponding to this transaction off the front of the
+                            // list of uids for the whole block.
+                            let mut this_txn_uids = uids;
+                            uids = this_txn_uids.split_off(txn.output_len());
+                            assert_eq!(this_txn_uids.len(), txn.output_len());
+                            block_uids.push(this_txn_uids);
+                        }
+                        assert_eq!(new_nullifiers.hash(), self.validator.nullifiers_root);
+                        self.nullifiers
+                            .insert(new_nullifiers.hash(), new_nullifiers);
+                        self.history.push(LedgerSnapshot {
+                            state: prev_state,
+                            block: (*block).clone(),
+                            memos: vec![None; block.block.0.len()],
+                            uids: block_uids,
+                        });
+
+                        // Notify subscribers of the new block.
+                        self.send_event(LedgerEvent::Commit((*block).clone()));
+                    }
                 }
             }
 
@@ -249,6 +314,78 @@ impl FullState {
             self.pending_subscribers.entry(t).or_default().push(sender);
             Box::pin(receiver)
         }
+    }
+
+    fn verify_memos(
+        &mut self,
+        block_id: u64,
+        txn_id: u64,
+        new_memos: Vec<ReceiverMemo>,
+        sig: Signature,
+    ) -> Result<(), QueryServiceError> {
+        let block_id = block_id as usize;
+        let txn_id = txn_id as usize;
+
+        // Validate `block_id` and get the corresponding state snapshot.
+        if block_id >= self.history.len() {
+            return Err(QueryServiceError::InvalidBlockId {});
+        }
+        let LedgerSnapshot {
+            block, memos, uids, ..
+        } = &mut self.history[block_id];
+        let num_txns = block.block.0.len();
+        assert_eq!(memos.len(), num_txns);
+        assert_eq!(uids.len(), num_txns);
+        assert_eq!(block.proofs.len(), num_txns);
+
+        // Validate `txn_id` and get the relevant information for the transaction within `block`.
+        if txn_id >= num_txns {
+            return Err(QueryServiceError::InvalidTxnId {});
+        }
+        let txn = &block.block.0[txn_id];
+        let stored_memos = &mut memos[txn_id];
+        let uids = &uids[txn_id];
+
+        // Validate the new memos.
+        if stored_memos.is_some() {
+            return Err(QueryServiceError::MemosAlreadyPosted {});
+        }
+        if txn
+            .verify_receiver_memos_signature(&new_memos, &sig)
+            .is_err()
+        {
+            return Err(QueryServiceError::InvalidSignature {});
+        }
+        if new_memos.len() != txn.output_len() {
+            return Err(QueryServiceError::WrongNumberOfMemos {
+                expected: txn.output_len(),
+            });
+        }
+
+        // Store and broadcast the new memos.
+        *stored_memos = Some((new_memos.clone(), sig));
+        let merkle_tree = &self.validator.record_merkle_frontier;
+        let merkle_paths = uids
+            .iter()
+            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1);
+        let event = LedgerEvent::Memos(
+            izip!(
+                new_memos,
+                txn.output_commitments(),
+                uids.iter().cloned(),
+                merkle_paths
+            )
+            .collect(),
+        );
+        self.send_event(event);
+
+        Ok(())
+    }
+
+    fn get_snapshot(&self, block_id: u64) -> Result<&LedgerSnapshot, QueryServiceError> {
+        self.history
+            .get(block_id as usize)
+            .ok_or(QueryServiceError::InvalidBlockId {})
     }
 }
 
@@ -309,9 +446,13 @@ impl PhaseLockQueryService {
 
 #[async_trait]
 impl QueryService for PhaseLockQueryService {
-    async fn get_block(&self, i: u64) -> (ValidatorState, ElaboratedBlock) {
+    async fn get_block(
+        &self,
+        i: u64,
+    ) -> Result<(ValidatorState, ElaboratedBlock), QueryServiceError> {
         let state = self.state.read().await;
-        state.history[i as usize].clone()
+        let snapshot = state.get_snapshot(i)?;
+        Ok((snapshot.state.clone(), snapshot.block.clone()))
     }
 
     async fn nullifier_proof(
@@ -330,6 +471,32 @@ impl QueryService for PhaseLockQueryService {
     async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent> {
         let mut state = self.state.write().await;
         state.subscribe(i)
+    }
+
+    async fn post_memos(
+        &self,
+        block_id: u64,
+        txn_id: u64,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+    ) -> Result<(), QueryServiceError> {
+        let mut state = self.state.write().await;
+        state.verify_memos(block_id, txn_id, memos, sig)
+    }
+
+    async fn get_memos(
+        &self,
+        block_id: u64,
+        txn_id: u64,
+    ) -> Result<(Vec<ReceiverMemo>, Signature), QueryServiceError> {
+        let state = self.state.read().await;
+        let snapshot = state.get_snapshot(block_id)?;
+        snapshot
+            .memos
+            .get(txn_id as usize)
+            .cloned()
+            .ok_or(QueryServiceError::InvalidTxnId {})?
+            .ok_or(QueryServiceError::NoMemosForTxn {})
     }
 }
 
@@ -384,7 +551,10 @@ impl Validator for FullNode {
 
 #[async_trait]
 impl QueryService for FullNode {
-    async fn get_block(&self, i: u64) -> (ValidatorState, ElaboratedBlock) {
+    async fn get_block(
+        &self,
+        i: u64,
+    ) -> Result<(ValidatorState, ElaboratedBlock), QueryServiceError> {
         self.as_query_service().get_block(i).await
     }
 
@@ -399,6 +569,26 @@ impl QueryService for FullNode {
     async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent> {
         self.as_query_service().subscribe(i).await
     }
+
+    async fn post_memos(
+        &self,
+        block_id: u64,
+        txn_id: u64,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+    ) -> Result<(), QueryServiceError> {
+        self.as_query_service()
+            .post_memos(block_id, txn_id, memos, sig)
+            .await
+    }
+
+    async fn get_memos(
+        &self,
+        block_id: u64,
+        txn_id: u64,
+    ) -> Result<(Vec<ReceiverMemo>, Signature), QueryServiceError> {
+        self.as_query_service().get_memos(block_id, txn_id).await
+    }
 }
 
 #[cfg(test)]
@@ -406,6 +596,9 @@ mod tests {
     use super::*;
     use crate::{MultiXfrRecordSpec, MultiXfrTestState};
     use async_std::task::block_on;
+    use jf_primitives::jubjub_dsa::KeyPair;
+    use jf_primitives::merkle_tree::MerkleTree;
+    use jf_txn::sign_receiver_memos;
     use quickcheck::QuickCheck;
     use rand_chacha::rand_core::SeedableRng;
     use rand_chacha::ChaChaRng;
@@ -429,7 +622,12 @@ mod tests {
         init_recs: Vec<(u8, u8, u64)>, // (def,key) -> amount
     ) -> (
         (ValidatorState, SetMerkleTree),
-        Vec<(ValidatorState, ElaboratedBlock, ValidatorState)>,
+        Vec<(
+            ValidatorState,
+            ElaboratedBlock,
+            Vec<(Vec<ReceiverMemo>, Signature)>,
+            ValidatorState,
+        )>,
     ) {
         let mut state = MultiXfrTestState::initialize(
             [0x7au8; 32],
@@ -483,7 +681,8 @@ mod tests {
             });
 
             let mut blk = ElaboratedBlock::default();
-            for (ix, keys_and_memos, txn) in txns {
+            let mut signed_memos = vec![];
+            for (ix, keys_and_memos, sig, txn) in txns {
                 let (owner_memos, kixs) = {
                     let mut owner_memos = vec![];
                     let mut kixs = vec![];
@@ -495,14 +694,19 @@ mod tests {
                     (owner_memos, kixs)
                 };
 
-                let _ = state.try_add_transaction(&mut blk, txn, i, ix, num_txs, owner_memos, kixs);
+                if state
+                    .try_add_transaction(&mut blk, txn, i, ix, num_txs, owner_memos.clone(), kixs)
+                    .is_ok()
+                {
+                    signed_memos.push((owner_memos, sig));
+                }
             }
 
             let prev_state = state.validator.clone();
             state
                 .validate_and_apply(blk.clone(), i, num_txs, generation_time)
                 .unwrap();
-            history.push((prev_state, blk, state.validator.clone()));
+            history.push((prev_state, blk, signed_memos, state.validator.clone()));
         }
 
         (initial_state, history)
@@ -522,12 +726,15 @@ mod tests {
         }
 
         let mut rng = ChaChaRng::from_seed([0x42u8; 32]);
+        let dummy_key_pair = KeyPair::generate(&mut rng);
+
         block_on(async {
             let (initial_state, history) =
                 generate_valid_history(txs, nkeys, ndefs, init_rec, init_recs);
+            let initial_uid = initial_state.0.record_merkle_frontier.num_leaves();
             assert_eq!(initial_state.0.commit(), history[0].0.commit());
             let events = Box::pin(stream::iter(history.clone().into_iter().map(
-                |(_, block, state)| MockConsensusEvent {
+                |(_, block, _, state)| MockConsensusEvent {
                     event: EventType::Decide {
                         block: Arc::new(block),
                         state: Arc::new(state),
@@ -537,7 +744,7 @@ mod tests {
             let qs = PhaseLockQueryService::new(events, initial_state.0, initial_state.1);
 
             let mut events = qs.subscribe(0).await;
-            for (_, hist_block, hist_state) in history.iter() {
+            for (_, hist_block, _, hist_state) in history.iter() {
                 match events.next().await.unwrap() {
                     LedgerEvent::Commit(block, ..) => {
                         assert_eq!(block, *hist_block);
@@ -562,10 +769,87 @@ mod tests {
                 }
             }
 
-            for (i, (state, block, _)) in history.into_iter().enumerate() {
+            // We should now be able to submit receiver memos for the blocks that just got committed.
+            let mut expected_uid = initial_uid;
+            for (block_id, (_, block, memos, _)) in history.iter().enumerate() {
+                for (txn_id, (txn, (memos, sig))) in block.block.0.iter().zip(memos).enumerate() {
+                    // Posting memos with an invalid signature should fail.
+                    let dummy_signature = sign_receiver_memos(&dummy_key_pair, memos).unwrap();
+                    match qs
+                        .post_memos(
+                            block_id as u64,
+                            txn_id as u64,
+                            memos.clone(),
+                            dummy_signature,
+                        )
+                        .await
+                    {
+                        Err(QueryServiceError::InvalidSignature { .. }) => {}
+                        res => {
+                            panic!("Expected error InvalidSignature, got {:?}", res);
+                        }
+                    }
+
+                    qs.post_memos(block_id as u64, txn_id as u64, memos.clone(), sig.clone())
+                        .await
+                        .unwrap();
+                    match events.next().await.unwrap() {
+                        LedgerEvent::Memos(info) => {
+                            // After successfully posting memos, we should get a Memos event.
+                            for ((memo, comm, uid, merkle_path), (expected_memo, expected_comm)) in
+                                info.into_iter()
+                                    .zip(memos.iter().zip(txn.output_commitments()))
+                            {
+                                // The contents of the event should match the memos we just posted.
+                                assert_eq!(memo, *expected_memo);
+                                assert_eq!(comm, expected_comm);
+                                assert_eq!(uid, expected_uid);
+
+                                // The event should contain a valid inclusion proof for each
+                                // commitment. This proof is relative to the root hash of the
+                                // latest validator state in the event stream.
+                                let state = &history[history.len() - 1].3;
+                                MerkleTree::check_proof(
+                                    state.record_merkle_frontier.get_root_value(),
+                                    uid,
+                                    comm,
+                                    &merkle_path,
+                                )
+                                .unwrap();
+
+                                expected_uid += 1;
+                            }
+                        }
+
+                        event => {
+                            panic!("Expected Memos event, got {:?}", event);
+                        }
+                    }
+
+                    // Posting the same memos twice should fail.
+                    match qs
+                        .post_memos(block_id as u64, txn_id as u64, memos.clone(), sig.clone())
+                        .await
+                    {
+                        Err(QueryServiceError::MemosAlreadyPosted { .. }) => {}
+                        res => {
+                            panic!("Expected error MemosAlreadyPosted, got {:?}", res);
+                        }
+                    }
+
+                    // We should be able to query the newly posted memos.
+                    let (queried_memos, sig) =
+                        qs.get_memos(block_id as u64, txn_id as u64).await.unwrap();
+                    txn.verify_receiver_memos_signature(&queried_memos, &sig)
+                        .unwrap();
+                    assert_eq!(queried_memos, *memos);
+                }
+            }
+
+            for (block_id, (state, block, _, _)) in history.into_iter().enumerate() {
                 // We should be able to query the block and state at each time step in the history
                 // of the ledger.
-                let (qs_state, qs_block) = qs.get_block(i as u64).await;
+                let (qs_state, qs_block) = qs.get_block(block_id as u64).await.unwrap();
                 assert_eq!(qs_state.commit(), state.commit());
                 assert_eq!(qs_block, block);
 
