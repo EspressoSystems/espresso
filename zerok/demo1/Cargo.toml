@@ -8,9 +8,10 @@ repository = "https://gitlab.com/translucence/systems/system"
 license = "Copyright © 2021 Translucence Research, Inc. All rights reserved."
 
 [dependencies]
+itertools = "0.10.1"
 bitvec = "0.21.1"
 log = "0.4"
-rand_chacha = "0.2.2"
+rand_chacha = "0.3.1"
 rocket = "0.5.0-rc.1"
 serde = { version = "1.0.123", features = ["derive", "rc"] }
 serde_derive = "1.0"
@@ -21,15 +22,15 @@ strum_macros = "0.20.1"
 toml = "0.4.2"
 tracing = "0.1"
 tracing-subscriber = "0.2"
-phaselock = { version = "0.0.0", registry = "translucence" }
+phaselock = { version = "0.0.1", registry = "translucence" }
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
 
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
-jf-plonk = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
-jf-primitives = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
-jf-txn = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
-jf-utils = { git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", branch = "main"}
+jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
+jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
+jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
+jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
 
 zerok_lib = { path = "../zerok_lib/" }
 

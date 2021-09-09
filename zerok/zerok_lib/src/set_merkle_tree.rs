@@ -529,8 +529,7 @@ pub fn set_merkle_lw_multi_insert(
 mod tests {
     use super::*;
     use quickcheck::QuickCheck;
-    use quickcheck::RngCore;
-    use rand_chacha::rand_core::SeedableRng;
+    use rand_chacha::rand_core::{RngCore, SeedableRng};
     use rand_chacha::ChaChaRng;
     use std::time::Instant; //????/
 
