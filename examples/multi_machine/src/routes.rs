@@ -4,7 +4,6 @@ use std::str::FromStr;
 use strum::IntoEnumIterator;
 use strum_macros::{AsRefStr, EnumIter, EnumString};
 use tagged_base64::TaggedBase64;
-use tide;
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
