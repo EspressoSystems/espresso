@@ -5,7 +5,6 @@ use crate::routes::{dispatch_url, RouteBinding, UrlSegmentType, UrlSegmentValue}
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use futures_util::StreamExt;
-use phaselock::message::Message;
 use phaselock::{
     event::{Event, EventType},
     handle::PhaseLockHandle,
@@ -19,17 +18,14 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::json;
 use std::collections::hash_map::{Entry, HashMap};
 use std::fs::File;
-use std::io::Read;
+use std::io::{prelude::*, Read};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 use structopt::StructOpt;
-//use strum::IntoEnumIterator;
-//use strum_macros::{AsRefStr, EnumIter, EnumString};
 use tagged_base64::TaggedBase64;
 use threshold_crypto as tc;
 use tide;
-//use tide_websockets::async_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tide_websockets::{
     async_tungstenite::tungstenite::protocol::frame::coding::CloseCode, Message::Close, WebSocket,
     WebSocketConnection,
@@ -78,7 +74,7 @@ struct NodeOpt {
     ///
     /// Skip this option if only want to generate public key files.
     #[structopt(long = "id", short = "i")]
-    id: u64,
+    id: Option<u64>,
 
     /// Path to assets including web server files.
     #[structopt(
@@ -93,6 +89,19 @@ struct NodeOpt {
         default_value = ""      // See fn default_api_path().
     )]
     api_path: String,
+}
+
+/// Gets public key of a node from its public key file.
+fn get_public_key(node_id: u64) -> PubKey {
+    let path_str = format!("../../examples/multi_machine/src/pk_{}", node_id);
+    let path = Path::new(&path_str);
+    let mut pk_file = File::open(&path)
+        .unwrap_or_else(|_| panic!("Cannot find public key file: {}", path.display()));
+    let mut pk_str = String::new();
+    pk_file
+        .read_to_string(&mut pk_str)
+        .unwrap_or_else(|err| panic!("Error while reading public key file: {}", err));
+    serde_json::from_str(&pk_str).expect("Error while reading public key")
 }
 
 /// Returns the project directory assuming the executable is in a
@@ -175,7 +184,8 @@ fn get_node_config() -> Value {
     let mut config_str = String::new();
     config_file
         .read_to_string(&mut config_str)
-        .unwrap_or_else(|err| panic!("Error while reading node config: [{}]", err));
+        .unwrap_or_else(|err| panic!("Error while reading node config file: {}", err));
+    let node_config: Value = toml::from_str(&config_str).expect("Error while reading node config");
     toml::from_str(&config_str).expect("Error while reading node config file")
 }
 
@@ -619,12 +629,6 @@ async fn main() -> Result<(), std::io::Error> {
 
     // Get configuration
     let node_config = get_node_config();
-    let own_id = NodeOpt::from_args().id;
-    println!("Spawning network for node {}", own_id);
-
-    // Initialize web server
-    let join_handle = init_web_server(&NodeOpt::from_args().web_path, own_id)
-        .expect("Failed to initialize web server");
 
     // Get secret key set
     let seed: u64 = node_config["seed"]
@@ -664,6 +668,10 @@ async fn main() -> Result<(), std::io::Error> {
     if let Some(own_id) = NodeOpt::from_args().id {
         println!("Current node: {}", own_id);
         let secret_key_share = secret_keys.secret_key_share(own_id);
+
+        // Initialize web server
+        let join_handle = init_web_server(&NodeOpt::from_args().web_path, own_id)
+            .expect("Failed to initialize web server");
 
         // Get networking information
         let (own_network, _) =
@@ -789,9 +797,11 @@ async fn main() -> Result<(), std::io::Error> {
                     .validate_and_apply(blk, round as usize, TRANSACTION_COUNT as usize, 0.0)
                     .unwrap();
             }
-
+            println!("  - Round {} completed.", round + 1);
+        }
+        join_handle.await?;
+    }
     println!("All rounds completed.");
 
-    join_handle.await?;
     Ok(())
 }
