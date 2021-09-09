@@ -185,7 +185,6 @@ fn get_node_config() -> Value {
     config_file
         .read_to_string(&mut config_str)
         .unwrap_or_else(|err| panic!("Error while reading node config file: {}", err));
-    let node_config: Value = toml::from_str(&config_str).expect("Error while reading node config");
     toml::from_str(&config_str).expect("Error while reading node config file")
 }
 
