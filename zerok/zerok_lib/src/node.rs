@@ -350,7 +350,7 @@ impl FullState {
         }
     }
 
-    fn verify_memos(
+    fn post_memos(
         &mut self,
         block_id: u64,
         txn_id: u64,
@@ -574,7 +574,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
         sig: Signature,
     ) -> Result<(), QueryServiceError> {
         let mut state = self.state.write().await;
-        state.verify_memos(block_id, txn_id, memos, sig)
+        state.post_memos(block_id, txn_id, memos, sig)
     }
 
     async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
