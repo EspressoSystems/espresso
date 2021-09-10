@@ -2320,7 +2320,4 @@ mod tests {
     fn double_item_insert() {
         test_merkle_tree(vec![Ok(0), Ok(1)]);
     }
-
-    #[test]
-    fn quickcheck_regressions() {}
 }
