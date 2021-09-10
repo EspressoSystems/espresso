@@ -484,7 +484,7 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
             let route_pattern_str = route_pattern.as_str().unwrap();
             arg_doc.push_str(&format!("Route matches request: {}\n", &route_pattern_str));
             matching_route_count += 1;
-            matching_route = route_pattern_str.clone();
+            matching_route = route_pattern_str;
         } else {
             arg_doc.push_str("Route does not match request.\n");
         }
