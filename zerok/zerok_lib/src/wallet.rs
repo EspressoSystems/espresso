@@ -1594,7 +1594,6 @@ pub mod test_helpers {
     use std::time::Instant;
 
     pub struct MockLedger<'a> {
-        pub now: u64,
         pub validator: ValidatorState,
         nullifiers: SetMerkleTree,
         subscribers: Vec<channel::UnboundedSender<LedgerEvent>>,
@@ -1605,11 +1604,16 @@ pub mod test_helpers {
         held_transaction: Option<ElaboratedTransaction>,
         proving_keys: ProverKeySet<'a, key_set::OrderByOutputs>,
         address_map: HashMap<UserAddress, UserPubKey>,
+        events: Vec<LedgerEvent>,
     }
 
     impl<'a> MockLedger<'a> {
+        pub fn now(&self) -> u64 {
+            self.events.len() as u64
+        }
+
         fn generate_event(&mut self, e: LedgerEvent) {
-            self.now += 1;
+            self.events.push(e.clone());
             for s in self.subscribers.iter_mut() {
                 s.start_send(e.clone()).unwrap();
             }
@@ -1621,7 +1625,7 @@ pub mod test_helpers {
                 ElaboratedBlock::next_block(&self.validator),
             );
             match self.validator.validate_and_apply(
-                self.now,
+                self.now(),
                 block.block.clone(),
                 block.proofs.clone(),
                 true,
@@ -1720,8 +1724,17 @@ pub mod test_helpers {
         ledger: &Arc<SyncMutex<MockLedger<'a>>>,
         wallets: &[Wallet<'a, impl 'a + WalletBackend<'a> + Send + Sync>],
     ) {
-        let now = ledger.lock().unwrap().now;
-        sync_with(wallets, now).await;
+        let t = {
+            let ledger = ledger.lock().unwrap();
+            if let Some(LedgerEvent::Commit(..)) = ledger.events.last() {
+                // If the last event is a Commit, wait until the sender receives the Commit event
+                // and posts the receiver memos, generating a new Memos event.
+                ledger.now() + 1
+            } else {
+                ledger.now()
+            }
+        };
+        sync_with(wallets, t).await;
     }
 
     pub async fn sync_with<'a>(
@@ -1746,7 +1759,8 @@ pub mod test_helpers {
         async fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
             let ledger = self.ledger.lock().unwrap();
             assert_eq!(
-                ledger.now, 0,
+                ledger.now(),
+                0,
                 "MockWalletBackend does not support restartability"
             );
             let mut rng = ChaChaRng::from_seed(self.seed);
@@ -1783,7 +1797,8 @@ pub mod test_helpers {
         async fn subscribe(&self, starting_at: u64) -> Self::EventStream {
             let mut ledger = self.ledger.lock().unwrap();
             assert_eq!(
-                starting_at, ledger.now,
+                starting_at,
+                ledger.now(),
                 "subscribing from a historical state is not supported in the MockWalletBackend"
             );
             let (sender, receiver) = channel::unbounded();
@@ -1900,7 +1915,6 @@ pub mod test_helpers {
 
         let current_block = ElaboratedBlock::next_block(&validator);
         let ledger = Arc::new(SyncMutex::new(MockLedger {
-            now: 0,
             validator,
             nullifiers,
             subscribers: Vec::new(),
@@ -1918,6 +1932,7 @@ pub mod test_helpers {
                 .iter()
                 .map(|(key, _)| (key.address(), key.pub_key()))
                 .collect(),
+            events: Vec::new(),
         }));
 
         // Create a wallet for each user based on the validator and the per-user information
@@ -2708,11 +2723,12 @@ mod tests {
             "submitting invalid transaction: {}s",
             now.elapsed().as_secs_f32()
         );
-        let ledger_time = ledger.lock().unwrap().now;
+        let ledger_time = ledger.lock().unwrap().now();
         ledger.lock().unwrap().release_held_transaction().unwrap();
-        // Wait for 2 events: the first Reject event and then a later Commit event after the wallet
-        // resubmits.
-        sync_with(&wallets, ledger_time + 2).await;
+        // Wait for 3 events: the first Reject event, then a later Commit event after the wallet
+        // resubmits, and finally a Memos event after the wallet receives the Commit event and posts
+        // the receiver memos.
+        sync_with(&wallets, ledger_time + 3).await;
         assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
         assert_eq!(
             wallets[1].balance(&AssetCode::native()),
