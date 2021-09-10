@@ -14,6 +14,7 @@ pub enum UrlSegmentType {
     Literal,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum UrlSegmentValue {
     Boolean(bool),

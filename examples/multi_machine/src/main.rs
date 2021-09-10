@@ -370,7 +370,7 @@ fn can_parse_as(value: &str, ptype: &str) -> bool {
     match ptype {
         "Boolean" => value.parse::<bool>().is_ok(),
         "Hexadecimal" => u128::from_str_radix(value, 16).is_ok(),
-        "Integer" => u128::from_str_radix(value, 10).is_ok(),
+        "Integer" => value.parse::<u128>().is_ok(),
         "TaggedBase64" => TaggedBase64::parse(value).is_ok(),
         _ => panic!("Type specified in api.toml isn't supported: {}", ptype),
     }
@@ -407,7 +407,7 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
         .as_str()
         .ok_or_else(|| internal_error("Missing DOC"))?
         .to_string();
-    let mut matching_route_count = 0;
+    let mut matching_route_count = 0u64;
     let mut matching_route = "";
     let mut bindings = HashMap::new();
     for route_pattern in route_patterns.iter() {
@@ -422,7 +422,7 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
         for pat_segment in route_pattern
             .as_str()
             .expect("PATH must be an array of strings")
-            .split("/")
+            .split('/')
         {
             // Each route parameter has an associated type. The lookup
             // will only succeed if the current segment is a parameter
@@ -432,7 +432,7 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
                 let segment_type = segment_type_value
                     .as_str()
                     .expect("The path pattern must be a string.");
-                let req_segment = req_segments.next().unwrap_or_else(|| "");
+                let req_segment = req_segments.next().unwrap_or("");
                 arg_doc.push_str(&format!(
                     "  Argument: {} as type {} and value: {} ",
                     pat_segment, segment_type, req_segment
@@ -476,9 +476,9 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
             length_matches = true;
         }
         if argument_parse_failed {
-            arg_doc.push_str(&format!("Argument parsing failed.\n"));
+            arg_doc.push_str(&"Argument parsing failed.\n".to_string());
         } else {
-            arg_doc.push_str(&format!("No argument parsing errors!\n"));
+            arg_doc.push_str(&"No argument parsing errors!\n".to_string());
         }
         if !argument_parse_failed && length_matches && !found_literal_mismatch {
             let route_pattern_str = route_pattern.as_str().unwrap();
