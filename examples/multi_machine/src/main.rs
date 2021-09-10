@@ -178,8 +178,11 @@ async fn init_state_and_phaselock(
     let validator = if full_node {
         Box::new(FullNode::new(
             phaselock,
+            state.univ_setup,
             state.validator.clone(),
+            state.record_merkle_tree.clone(),
             state.nullifiers.clone(),
+            state.unspent_memos(),
         )) as Box<dyn Validator<Event = PhaseLockEvent>>
     } else {
         Box::new(phaselock) as Box<dyn Validator<Event = PhaseLockEvent>>

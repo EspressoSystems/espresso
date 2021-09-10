@@ -41,6 +41,7 @@ use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{prelude::*, Read};
+use std::iter::FromIterator;
 use std::ops::Bound::*;
 use std::path::Path;
 use std::time::Instant;
@@ -312,6 +313,16 @@ mod key_set {
                 .next()
                 .map(|(_, key)| (key.num_inputs(), key.num_outputs(), key))
                 .ok_or_else(|| self.max_size())
+        }
+
+        pub fn iter(&self) -> impl Iterator<Item = &K> {
+            self.keys.values()
+        }
+    }
+
+    impl<K: SizedKey, Order: KeyOrder> FromIterator<K> for KeySet<K, Order> {
+        fn from_iter<T: IntoIterator<Item = K>>(iter: T) -> Self {
+            Self::new(iter.into_iter()).unwrap()
         }
     }
 }
@@ -1749,6 +1760,35 @@ impl MultiXfrTestState {
 
         assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
         Ok(())
+    }
+
+    pub fn unspent_memos(&self) -> Vec<(ReceiverMemo, u64)> {
+        self.memos
+            .iter()
+            .enumerate()
+            .filter_map(|(uid, memo)| {
+                let owner = self.owners[uid];
+                let key = &self.keys[owner];
+                let comm = self
+                    .record_merkle_tree
+                    .get_leaf(uid as u64)
+                    .expect_ok()
+                    .unwrap()
+                    .0;
+                let ro = memo.decrypt(key, &comm, &[]).unwrap();
+                let nullifier = key.nullify(
+                    ro.asset_def.policy_ref().freezer_pub_key(),
+                    uid as u64,
+                    &comm,
+                );
+                let spent = self.nullifiers.contains(nullifier).unwrap().0;
+                if spent {
+                    None
+                } else {
+                    Some((memo.clone(), uid as u64))
+                }
+            })
+            .collect()
     }
 }
 
