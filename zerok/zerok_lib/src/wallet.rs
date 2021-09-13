@@ -619,21 +619,10 @@ impl<'a> WalletState<'a> {
             // the first uid corresponds to the fee change output, which has no audit memo, so skip
             // that one
             for ((uid, remember), output) in uids.iter_mut().skip(1).zip(audit_outputs) {
-                let pub_key =
-                    // convert from Option to Result for TryFuture combinators
-                    future::ready(output.user_address.ok_or(()))
-                        .and_then(|address| {
-                            let session = &session;
-                            async move {
-                                session
-                                    .backend
-                                    .get_public_key(&address)
-                                    .await
-                                    .map_err(|_| ())
-                            }
-                        })
-                        .await
-                        .ok();
+                let pub_key = match output.user_address {
+                    Some(address) => session.backend.get_public_key(&address).await.ok(),
+                    None => None,
+                };
                 if let (Some(asset_def), Some(pub_key), Some(amount), Some(blind)) = (
                     self.auditable_assets.get(&output.asset_code),
                     pub_key,
@@ -1501,13 +1490,13 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
         self.pub_key().address()
     }
 
-    pub fn balance(&self, asset: &AssetCode) -> u64 {
-        let (state, session, ..) = &*block_on(self.mutex.lock());
+    pub async fn balance(&self, asset: &AssetCode) -> u64 {
+        let (state, session, ..) = &*self.mutex.lock().await;
         state.balance(session, asset, FreezeFlag::Unfrozen)
     }
 
-    pub fn frozen_balance(&self, asset: &AssetCode) -> u64 {
-        let (state, session, ..) = &*block_on(self.mutex.lock());
+    pub async fn frozen_balance(&self, asset: &AssetCode) -> u64 {
+        let (state, session, ..) = &*self.mutex.lock().await;
         state.balance(session, asset, FreezeFlag::Frozen)
     }
 
@@ -1522,12 +1511,12 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
     }
 
     /// define a new asset and store secret info for minting
-    pub fn define_asset(
+    pub async fn define_asset(
         &mut self,
         description: &[u8],
         policy: AssetPolicy,
     ) -> Result<AssetDefinition, WalletError> {
-        let (state, ..) = &mut *block_on(self.mutex.lock());
+        let (state, ..) = &mut *self.mutex.lock().await;
         state.define_asset(description, policy)
     }
 
@@ -2067,13 +2056,15 @@ pub mod test_helpers {
         now = Instant::now();
 
         // Define all of the test assets and mint initial records.
-        let assets: Vec<AssetDefinition> = (0..ndefs)
-            .map(|i| {
+        let mut assets = vec![];
+        for i in 0..ndefs {
+            assets.push(
                 wallets[0]
                     .define_asset(format!("Asset {}", i).as_bytes(), Default::default())
-                    .unwrap()
-            })
-            .collect();
+                    .await
+                    .unwrap(),
+            );
+        }
         for (asset, owner, amount) in once(init_rec).chain(init_recs) {
             let asset = (asset % (ndefs + 1)) as usize;
             if asset == 0 {
@@ -2095,7 +2086,7 @@ pub mod test_helpers {
         // Check initial balances. This cannot be a closure because rust infers the wrong lifetime
         // for the references (it tries to use 'a, which is longer than we want to borrow `wallets`
         // for).
-        fn check_balances<'a>(
+        async fn check_balances<'a>(
             wallets: &[Wallet<'a, MockWalletBackend<'a>>],
             balances: &[Vec<u64>],
             assets: &[AssetDefinition],
@@ -2104,13 +2095,13 @@ pub mod test_helpers {
                 let wallet = &wallets[i + 1];
 
                 // Check native asset balance.
-                assert_eq!(wallet.balance(&AssetCode::native()), balance[0]);
+                assert_eq!(wallet.balance(&AssetCode::native()).await, balance[0]);
                 for (j, asset) in assets.iter().enumerate() {
-                    assert_eq!(wallet.balance(&asset.code), balance[j + 1]);
+                    assert_eq!(wallet.balance(&asset.code).await, balance[j + 1]);
                 }
             }
         }
-        check_balances(&wallets, &balances, &assets);
+        check_balances(&wallets, &balances, &assets).await;
 
         // Run the test transactions.
         for (i, block) in txs.iter().enumerate() {
@@ -2144,7 +2135,7 @@ pub mod test_helpers {
                 };
                 let receiver = wallets[receiver_ix + 1].address();
                 let sender_address = wallets[sender_ix + 1].address();
-                let sender_balance = wallets[sender_ix + 1].balance(&asset.code);
+                let sender_balance = wallets[sender_ix + 1].balance(&asset.code).await;
 
                 let mut amount = if *amount <= sender_balance {
                     *amount
@@ -2238,12 +2229,12 @@ pub mod test_helpers {
                 //
                 // Note that the sender may report less than the final balance if it is waiting on a
                 // change output to be confirmed.
-                assert!(sender.balance(&native.code) <= balances[sender_ix][0]);
-                assert!(sender.balance(&asset.code) <= balances[sender_ix][asset_ix]);
+                assert!(sender.balance(&native.code).await <= balances[sender_ix][0]);
+                assert!(sender.balance(&asset.code).await <= balances[sender_ix][asset_ix]);
 
                 ledger.lock().unwrap().release_held_transaction();
                 sync(&ledger, &wallets).await;
-                check_balances(&wallets, &balances, &assets);
+                check_balances(&wallets, &balances, &assets).await;
 
                 println!(
                     "Finished txn {}.{}/{}: {}s",
@@ -2308,14 +2299,15 @@ mod tests {
 
         // Verify initial wallet state.
         assert_ne!(alice_address, bob_address);
-        assert_eq!(wallets[0].balance(&AssetCode::native()), alice_grant);
-        assert_eq!(wallets[1].balance(&AssetCode::native()), bob_grant);
+        assert_eq!(wallets[0].balance(&AssetCode::native()).await, alice_grant);
+        assert_eq!(wallets[1].balance(&AssetCode::native()).await, bob_grant);
 
         let coin = if native {
             AssetDefinition::native()
         } else {
             let coin = wallets[0]
                 .define_asset("Alice's asset".as_bytes(), Default::default())
+                .await
                 .unwrap();
             // Alice gives herself an initial grant of 5 coins.
             wallets[0]
@@ -2326,14 +2318,14 @@ mod tests {
             println!("Asset minted: {}s", now.elapsed().as_secs_f32());
             now = Instant::now();
 
-            assert_eq!(wallets[0].balance(&coin.code), 5);
-            assert_eq!(wallets[1].balance(&coin.code), 0);
+            assert_eq!(wallets[0].balance(&coin.code).await, 5);
+            assert_eq!(wallets[1].balance(&coin.code).await, 0);
 
             coin
         };
 
-        let alice_initial_native_balance = wallets[0].balance(&AssetCode::native());
-        let bob_initial_native_balance = wallets[1].balance(&AssetCode::native());
+        let alice_initial_native_balance = wallets[0].balance(&AssetCode::native()).await;
+        let bob_initial_native_balance = wallets[1].balance(&AssetCode::native()).await;
 
         // Construct a transaction to transfer some coins from Alice to Bob.
         wallets[0]
@@ -2347,7 +2339,7 @@ mod tests {
         // Check that both wallets reflect the new balances (less any fees). This cannot be a
         // closure because rust infers the wrong lifetime for the references (it tries to use 'a,
         // which is longer than we want to borrow `wallets` for).
-        fn check_balance<'a>(
+        async fn check_balance<'a>(
             wallet: &Wallet<'a, MockWalletBackend<'a>>,
             expected_coin_balance: u64,
             starting_native_balance: u64,
@@ -2357,13 +2349,13 @@ mod tests {
         ) {
             if native {
                 assert_eq!(
-                    wallet.balance(&coin.code),
+                    wallet.balance(&coin.code).await,
                     expected_coin_balance - fees_paid
                 );
             } else {
-                assert_eq!(wallet.balance(&coin.code), expected_coin_balance);
+                assert_eq!(wallet.balance(&coin.code).await, expected_coin_balance);
                 assert_eq!(
-                    wallet.balance(&AssetCode::native()),
+                    wallet.balance(&AssetCode::native()).await,
                     starting_native_balance - fees_paid
                 );
             }
@@ -2375,8 +2367,9 @@ mod tests {
             1,
             &coin,
             native,
-        );
-        check_balance(&wallets[1], 3, bob_initial_native_balance, 0, &coin, native);
+        )
+        .await;
+        check_balance(&wallets[1], 3, bob_initial_native_balance, 0, &coin, native).await;
 
         // Check that Bob's wallet has sufficient information to access received funds by
         // transferring some back to Alice.
@@ -2399,8 +2392,9 @@ mod tests {
             1,
             &coin,
             native,
-        );
-        check_balance(&wallets[1], 2, bob_initial_native_balance, 1, &coin, native);
+        )
+        .await;
+        check_balance(&wallets[1], 2, bob_initial_native_balance, 1, &coin, native).await;
     }
 
     #[async_std::test]
@@ -2473,6 +2467,7 @@ mod tests {
                 .unwrap();
             let asset = wallets[0]
                 .define_asset("test asset".as_bytes(), policy)
+                .await
                 .unwrap();
 
             if !mint {
@@ -2532,9 +2527,9 @@ mod tests {
         now = Instant::now();
 
         // Check that the sender's balance is on hold (for the fee and the payment).
-        assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
+        assert_eq!(wallets[0].balance(&AssetCode::native()).await, 0);
         if !freeze {
-            assert_eq!(wallets[0].balance(&asset.code), 0);
+            assert_eq!(wallets[0].balance(&asset.code).await, 0);
         }
 
         // Now do something that causes the sender's transaction to not go through
@@ -2548,9 +2543,9 @@ mod tests {
             now = Instant::now();
             for _ in 0..RECORD_HOLD_TIME {
                 // Check that the sender's balance is still on hold.
-                assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
+                assert_eq!(wallets[0].balance(&AssetCode::native()).await, 0);
                 if !freeze {
-                    assert_eq!(wallets[0].balance(&asset.code), 0);
+                    assert_eq!(wallets[0].balance(&asset.code).await, 0);
                 }
 
                 wallets[2]
@@ -2585,16 +2580,16 @@ mod tests {
 
         // Check that the sender got their balance back.
         if native {
-            assert_eq!(wallets[0].balance(&AssetCode::native()), 2);
+            assert_eq!(wallets[0].balance(&AssetCode::native()).await, 2);
         } else {
-            assert_eq!(wallets[0].balance(&AssetCode::native()), 1);
+            assert_eq!(wallets[0].balance(&AssetCode::native()).await, 1);
             if !(mint || freeze) {
                 // in the mint and freeze cases, we never had a non-native balance to start with
-                assert_eq!(wallets[0].balance(&asset.code), 1);
+                assert_eq!(wallets[0].balance(&asset.code).await, 1);
             }
         }
         assert_eq!(
-            wallets[1].balance(&asset.code),
+            wallets[1].balance(&asset.code).await,
             (if timeout { RECORD_HOLD_TIME } else { 0 }) + (if freeze { 1 } else { 0 })
         );
 
@@ -2615,10 +2610,10 @@ mod tests {
                 .unwrap();
         }
         sync(&ledger, &wallets).await;
-        assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
-        assert_eq!(wallets[0].balance(&asset.code), 0);
+        assert_eq!(wallets[0].balance(&AssetCode::native()).await, 0);
+        assert_eq!(wallets[0].balance(&asset.code).await, 0);
         assert_eq!(
-            wallets[1].balance(&asset.code),
+            wallets[1].balance(&asset.code).await,
             (if timeout { RECORD_HOLD_TIME } else { 0 }) + (if freeze { 0 } else { 1 })
         );
     }
@@ -2729,9 +2724,9 @@ mod tests {
         // resubmits, and finally a Memos event after the wallet receives the Commit event and posts
         // the receiver memos.
         sync_with(&wallets, ledger_time + 3).await;
-        assert_eq!(wallets[0].balance(&AssetCode::native()), 0);
+        assert_eq!(wallets[0].balance(&AssetCode::native()).await, 0);
         assert_eq!(
-            wallets[1].balance(&AssetCode::native()),
+            wallets[1].balance(&AssetCode::native()).await,
             1 + (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64
         );
 
@@ -2756,6 +2751,7 @@ mod tests {
                 .unwrap();
             let asset = wallets[2]
                 .define_asset("test asset".as_bytes(), policy)
+                .await
                 .unwrap();
 
             // wallets[0] gets 1 coin to transfer to wallets[1].
@@ -2765,8 +2761,8 @@ mod tests {
 
             asset
         };
-        assert_eq!(wallets[0].balance(&asset.code), 1);
-        assert_eq!(wallets[0].frozen_balance(&asset.code), 0);
+        assert_eq!(wallets[0].balance(&asset.code).await, 1);
+        assert_eq!(wallets[0].frozen_balance(&asset.code).await, 0);
 
         // Now freeze wallets[0]'s record.
         println!(
@@ -2788,8 +2784,8 @@ mod tests {
         // Now go ahead with the original freeze.
         ledger.lock().unwrap().release_held_transaction();
         sync(&ledger, &wallets).await;
-        assert_eq!(wallets[0].balance(&asset.code), 0);
-        assert_eq!(wallets[0].frozen_balance(&asset.code), 1);
+        assert_eq!(wallets[0].balance(&asset.code).await, 0);
+        assert_eq!(wallets[0].frozen_balance(&asset.code).await, 1);
 
         // Check that trying to transfer fails due to frozen balance.
         println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
@@ -2815,16 +2811,16 @@ mod tests {
         let dst = wallets[0].address();
         wallets[2].unfreeze(1, &asset, 1, dst).await.unwrap();
         sync(&ledger, &wallets).await;
-        assert_eq!(wallets[0].balance(&asset.code), 1);
-        assert_eq!(wallets[0].frozen_balance(&asset.code), 0);
+        assert_eq!(wallets[0].balance(&asset.code).await, 1);
+        assert_eq!(wallets[0].frozen_balance(&asset.code).await, 0);
 
         println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
         let dst = wallets[1].address();
         wallets[0].transfer(&asset, &[(dst, 1)], 1).await.unwrap();
         sync(&ledger, &wallets).await;
-        assert_eq!(wallets[0].balance(&asset.code), 0);
-        assert_eq!(wallets[0].frozen_balance(&asset.code), 0);
-        assert_eq!(wallets[1].balance(&asset.code), 1);
+        assert_eq!(wallets[0].balance(&asset.code).await, 0);
+        assert_eq!(wallets[0].frozen_balance(&asset.code).await, 0);
+        assert_eq!(wallets[1].balance(&asset.code).await, 1);
 
         Ok(())
     }

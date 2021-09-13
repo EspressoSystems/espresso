@@ -1259,9 +1259,9 @@ mod tests {
             wallet.sync(1).await.unwrap();
             // MultiXfrTestState doubles all the initial records for some reason, so we expect to
             // have 4 coins, not 2.
-            assert_eq!(wallet.balance(&state.asset_defs[1].code), 4);
+            assert_eq!(wallet.balance(&state.asset_defs[1].code).await, 4);
             // We start with 2^32 native tokens, but spend 2 minting our two non-native records.
-            assert_eq!(wallet.balance(&AssetCode::native()), (1u64 << 32) - 2);
+            assert_eq!(wallet.balance(&AssetCode::native()).await, (1u64 << 32) - 2);
 
             // Transfer 3 of our 4 coins away to another user. We should end up with only 1 coin,
             // which can only happen if
@@ -1273,8 +1273,8 @@ mod tests {
                 .unwrap();
             // Wait for 2 more events: the Commit event and the following Memos event.
             wallet.sync(3).await.unwrap();
-            assert_eq!(wallet.balance(&state.asset_defs[1].code), 1);
-            assert_eq!(wallet.balance(&AssetCode::native()), (1u64 << 32) - 3);
+            assert_eq!(wallet.balance(&state.asset_defs[1].code).await, 1);
+            assert_eq!(wallet.balance(&AssetCode::native()).await, (1u64 << 32) - 3);
         });
     }
 }
