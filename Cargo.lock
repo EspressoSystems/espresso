@@ -1947,6 +1947,15 @@ dependencies = [
 
 [[package]]
 name = "itertools"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "284f18f85651fe11e8a991b2adb42cb078325c996ed026d994719efcfca1d54b"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69ddb889f9d0d08a67338271fa9b62996bc788c7796a5c18cf057420aaed5eaf"
@@ -1975,7 +1984,7 @@ dependencies = [
  "ark-std 0.3.0",
  "displaydoc",
  "downcast-rs",
- "itertools",
+ "itertools 0.10.1",
  "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
  "merlin",
  "rayon",
@@ -1998,7 +2007,7 @@ dependencies = [
  "ark-std 0.3.0",
  "displaydoc",
  "downcast-rs",
- "itertools",
+ "itertools 0.10.1",
  "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
  "merlin",
  "rayon",
@@ -2020,7 +2029,7 @@ dependencies = [
  "crypto_box",
  "displaydoc",
  "generic-array",
- "itertools",
+ "itertools 0.10.1",
  "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
  "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
  "rayon",
@@ -2043,7 +2052,7 @@ dependencies = [
  "crypto_box",
  "displaydoc",
  "generic-array",
- "itertools",
+ "itertools 0.10.1",
  "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
  "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
  "rayon",
@@ -2067,7 +2076,7 @@ dependencies = [
  "bincode",
  "csv",
  "displaydoc",
- "itertools",
+ "itertools 0.10.1",
  "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
  "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
  "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
@@ -2098,7 +2107,7 @@ dependencies = [
  "bincode",
  "csv",
  "displaydoc",
- "itertools",
+ "itertools 0.10.1",
  "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
  "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
  "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
@@ -2308,15 +2317,24 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "futures",
+ "futures-util",
  "phaselock",
  "rand_xoshiro",
  "serde",
+ "serde_derive",
  "serde_json",
+ "shellexpand",
  "structopt",
+ "strum",
+ "strum_macros",
  "tagged-base64",
  "threshold_crypto",
- "toml 0.4.10",
+ "tide",
+ "tide-websockets",
+ "toml 0.5.8",
  "tracing",
+ "tracing-distributed",
+ "tracing-futures",
  "tracing-subscriber",
  "zerok_lib",
 ]
@@ -3661,7 +3679,7 @@ name = "system"
 version = "0.1.0"
 dependencies = [
  "bitvec",
- "itertools",
+ "itertools 0.10.1",
  "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
  "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
  "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
@@ -4039,6 +4057,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ca517f43f0fb96e0c3072ed5c275fe5eece87e8cb52f4a77b69226d3b1c9df8"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "tracing-distributed"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e351159c859c0bfa19dc77955731b8fc52d2f417cd8dc1d4585844d22f013f24"
+dependencies = [
+ "itertools 0.9.0",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4518,7 +4548,7 @@ dependencies = [
  "blake2",
  "futures",
  "generic-array",
- "itertools",
+ "itertools 0.10.1",
  "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
  "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
  "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
