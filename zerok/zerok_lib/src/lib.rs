@@ -4,18 +4,21 @@
 #[macro_use]
 extern crate proptest;
 
+pub mod node;
 mod set_merkle_tree;
 mod util;
 pub mod wallet;
 
 use core::fmt::Debug;
 use core::iter::once;
+use jf_primitives::jubjub_dsa::Signature;
 use jf_primitives::merkle_tree;
 use jf_txn::{
     errors::TxnApiError,
     keys::UserKeyPair,
     mint::MintNote,
     proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
+    sign_receiver_memos,
     structs::{
         AssetCode, AssetCodeSeed, AssetDefinition, FeeInput, FreezeFlag, NoteType, Nullifier,
         ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
@@ -38,6 +41,7 @@ use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{prelude::*, Read};
+use std::iter::FromIterator;
 use std::ops::Bound::*;
 use std::path::Path;
 use std::time::Instant;
@@ -309,6 +313,16 @@ mod key_set {
                 .next()
                 .map(|(_, key)| (key.num_inputs(), key.num_outputs(), key))
                 .ok_or_else(|| self.max_size())
+        }
+
+        pub fn iter(&self) -> impl Iterator<Item = &K> {
+            self.keys.values()
+        }
+    }
+
+    impl<K: SizedKey, Order: KeyOrder> FromIterator<K> for KeySet<K, Order> {
+        fn from_iter<T: IntoIterator<Item = K>>(iter: T) -> Self {
+            Self::new(iter.into_iter()).unwrap()
         }
     }
 }
@@ -816,6 +830,8 @@ pub struct MultiXfrRecordSpec {
 }
 
 impl MultiXfrTestState {
+    const MAX_AMOUNT: u64 = 10_000;
+
     pub fn update_timer<F>(now: &mut Instant, print: F)
     where
         F: FnOnce(f32),
@@ -955,7 +971,7 @@ impl MultiXfrTestState {
         while !to_add.is_empty() {
             let mut this_block = vec![];
             for (def_ix, key, amt) in core::mem::take(&mut to_add).into_iter() {
-                let amt = if amt < 2 { 2 } else { amt };
+                let amt = if amt < 2 { 2 } else { amt % Self::MAX_AMOUNT };
                 let def_ix = def_ix as usize % ret.asset_defs.len();
                 // We can't mint native tokens
                 let def_ix = if def_ix < 1 { 1 } else { def_ix };
@@ -1110,6 +1126,7 @@ impl MultiXfrTestState {
     /// Returns vector of
     ///     index of transaction within block
     ///     (receiver memos, receiver indices)
+    ///     receiver memos signature
     ///     transaction
     ///
     /// Note: `round` and `num_txs` are for `println!`s only.
@@ -1121,7 +1138,12 @@ impl MultiXfrTestState {
         block: Vec<(bool, u16, u16, u8, u8, i32)>,
         num_txs: usize,
     ) -> Result<
-        Vec<(usize, Vec<(usize, ReceiverMemo)>, ElaboratedTransaction)>,
+        Vec<(
+            usize,
+            Vec<(usize, ReceiverMemo)>,
+            Signature,
+            ElaboratedTransaction,
+        )>,
         Box<dyn std::error::Error>,
     > {
         let splits = block
@@ -1232,6 +1254,12 @@ impl MultiXfrTestState {
                             .0;
 
                         let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
+
+                        if let Some((rec1, _)) = &rec1 {
+                            if open_rec.asset_def != rec1.asset_def {
+                                continue;
+                            }
+                        }
 
                         let nullifier = key.nullify(
                             open_rec.asset_def.policy_ref().freezer_pub_key(),
@@ -1428,7 +1456,7 @@ impl MultiXfrTestState {
                         .collect::<Result<Vec<_>, _>>()
                         .unwrap();
 
-                    let (txn, _owner_memo_kp) = TransferNote::generate_non_native(
+                    let (txn, owner_memo_kp) = TransferNote::generate_non_native(
                         &mut prng,
                         vec![input1, input2],
                         &[out_rec1, out_rec2],
@@ -1437,6 +1465,7 @@ impl MultiXfrTestState {
                         self.prove_keys.xfr.key_for_size(3, 3).unwrap(),
                     )
                     .unwrap();
+                    let sig = sign_receiver_memos(&owner_memo_kp, &owner_memos).unwrap();
 
                     // owner_memos_key
                     // .verify(&helpers::get_owner_memos_digest(&owner_memos),
@@ -1473,6 +1502,7 @@ impl MultiXfrTestState {
                     Some((
                         ix,
                         keys_and_memos,
+                        sig,
                         ElaboratedTransaction {
                             txn: TransactionNote::Transfer(Box::new(txn)),
                             proofs: nullifier_pfs,
@@ -1483,7 +1513,7 @@ impl MultiXfrTestState {
             .filter_map(|x| x)
             .collect::<Vec<_>>();
 
-        txns.sort_by(|(i, _, _), (j, _, _)| i.cmp(j));
+        txns.sort_by(|(i, _, _, _), (j, _, _, _)| i.cmp(j));
         Ok(txns)
     }
 
@@ -1501,7 +1531,12 @@ impl MultiXfrTestState {
         ix: usize,
         num_txs: usize,
         now: Instant,
-    ) -> Option<(usize, Vec<(usize, ReceiverMemo)>, ElaboratedTransaction)> {
+    ) -> Option<(
+        usize,
+        Vec<(usize, ReceiverMemo)>,
+        Signature,
+        ElaboratedTransaction,
+    )> {
         println!(
             "Txn {}.{}/{}: generating single-input transaction {}s",
             round + 1,
@@ -1583,7 +1618,7 @@ impl MultiXfrTestState {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        let (txn, _owner_memo_kp) = TransferNote::generate_non_native(
+        let (txn, owner_memo_kp) = TransferNote::generate_non_native(
             prng,
             vec![input],
             &[out_rec1],
@@ -1592,6 +1627,7 @@ impl MultiXfrTestState {
             self.prove_keys.xfr.key_for_size(2, 2).unwrap(),
         )
         .unwrap();
+        let sig = sign_receiver_memos(&owner_memo_kp, &owner_memos).unwrap();
 
         println!(
             "Txn {}.{}/{} note generated: {}",
@@ -1625,6 +1661,7 @@ impl MultiXfrTestState {
         Some((
             ix,
             keys_and_memos,
+            sig,
             ElaboratedTransaction {
                 txn: TransactionNote::Transfer(Box::new(txn)),
                 proofs: nullifier_pfs,
@@ -1724,6 +1761,35 @@ impl MultiXfrTestState {
         assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
         Ok(())
     }
+
+    pub fn unspent_memos(&self) -> Vec<(ReceiverMemo, u64)> {
+        self.memos
+            .iter()
+            .enumerate()
+            .filter_map(|(uid, memo)| {
+                let owner = self.owners[uid];
+                let key = &self.keys[owner];
+                let comm = self
+                    .record_merkle_tree
+                    .get_leaf(uid as u64)
+                    .expect_ok()
+                    .unwrap()
+                    .0;
+                let ro = memo.decrypt(key, &comm, &[]).unwrap();
+                let nullifier = key.nullify(
+                    ro.asset_def.policy_ref().freezer_pub_key(),
+                    uid as u64,
+                    &comm,
+                );
+                let spent = self.nullifiers.contains(nullifier).unwrap().0;
+                if spent {
+                    None
+                } else {
+                    Some((memo.clone(), uid as u64))
+                }
+            })
+            .collect()
+    }
 }
 
 // TODO(joe): proper Err returns
@@ -1810,7 +1876,7 @@ mod tests {
             });
 
             let mut blk = ElaboratedBlock::default();
-            for (ix, keys_and_memos, txn) in txns {
+            for (ix, keys_and_memos, _, txn) in txns {
                 let (owner_memos, kixs) = {
                     let mut owner_memos = vec![];
                     let mut kixs = vec![];

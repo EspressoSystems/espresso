@@ -6,12 +6,8 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use futures_util::StreamExt;
 use phaselock::{
-    event::{Event, EventType},
-    handle::PhaseLockHandle,
-    message::Message,
-    networking::w_network::WNetwork,
-    traits::storage::memory_storage::MemoryStorage,
-    PhaseLock, PhaseLockConfig, PubKey,
+    event::EventType, message::Message, networking::w_network::WNetwork,
+    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey,
 };
 use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
 use serde::{de::DeserializeOwned, Serialize};
@@ -33,7 +29,7 @@ use toml::Value;
 use tracing::debug;
 use tracing::{event, Level};
 use zerok_lib::{
-    ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
+    node::*, ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState,
 };
 
 mod config;
@@ -74,6 +70,10 @@ struct NodeOpt {
     /// Skip this option if only want to generate public key files.
     #[structopt(long = "id", short = "i")]
     id: Option<u64>,
+
+    /// Whether the current node should run a full node.
+    #[structopt(long = "full", short = "f")]
+    full: bool,
 
     /// Path to assets including web server files.
     #[structopt(
@@ -233,7 +233,11 @@ async fn init_state_and_phaselock(
     threshold: u64,
     node_id: u64,
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
-) -> (MultiXfrTestState, PhaseLockHandle<ElaboratedBlock, 64>) {
+    full_node: bool,
+) -> (
+    MultiXfrTestState,
+    Box<dyn Validator<Event = PhaseLockEvent>>,
+) {
     // Create the initial state
     let state = MultiXfrTestState::initialize(
         STATE_SEED,
@@ -288,7 +292,20 @@ async fn init_state_and_phaselock(
     .await;
     debug!("phaselock launched");
 
-    (state, phaselock)
+    let validator = if full_node {
+        Box::new(FullNode::new(
+            phaselock,
+            state.univ_setup,
+            state.validator.clone(),
+            state.record_merkle_tree.clone(),
+            state.nullifiers.clone(),
+            state.unspent_memos(),
+        )) as Box<dyn Validator<Event = PhaseLockEvent>>
+    } else {
+        Box::new(phaselock) as Box<dyn Validator<Event = PhaseLockEvent>>
+    };
+
+    (state, validator)
 }
 
 #[derive(Clone)]
@@ -705,15 +722,17 @@ async fn main() -> Result<(), std::io::Error> {
         println!("All nodes connected to network");
 
         // Initialize the state and phaselock
-        let (mut state, mut phaselock) = init_state_and_phaselock(
+        let (mut state, phaselock) = init_state_and_phaselock(
             public_keys,
             secret_key_share,
             nodes,
             threshold,
             own_id,
             own_network,
+            NodeOpt::from_args().full,
         )
         .await;
+        let mut events = phaselock.subscribe();
 
         // Start consensus for each transaction
         for round in 0..TRANSACTION_COUNT {
@@ -732,7 +751,7 @@ async fn main() -> Result<(), std::io::Error> {
                     .unwrap();
                 txn = Some(transactions.remove(0));
                 phaselock
-                    .submit_transaction(txn.clone().unwrap().2)
+                    .submit_transaction(txn.clone().unwrap().3)
                     .await
                     .unwrap();
             }
@@ -744,29 +763,25 @@ async fn main() -> Result<(), std::io::Error> {
             let mut line = String::new();
             println!("Hit the return key when ready to start the consensus...");
             std::io::stdin().read_line(&mut line).unwrap();
-            phaselock.start().await;
+            phaselock.start_consensus().await;
             println!("  - Starting consensus");
-            let mut event: Event<ElaboratedBlock, ValidatorState> = phaselock
-                .next_event()
-                .await
-                .expect("PhaseLock unexpectedly closed");
-            while !matches!(event.event, EventType::Decide { .. }) {
-                event = phaselock
-                    .next_event()
-                    .await
-                    .expect("PhaseLock unexpectedly closed");
-            }
-            if let EventType::Decide { block: _, state } = event.event {
-                let commitment = TaggedBase64::new("LEDG", &state.commit())
-                    .unwrap()
-                    .to_string();
-                println!("  - Current commitment: {}", commitment);
-            } else {
-                unreachable!();
+            loop {
+                println!("Waiting for PhaseLock event");
+                let event = events.next().await.expect("PhaseLock unexpectedly closed");
+
+                if let EventType::Decide { block: _, state } = event.event {
+                    let commitment = TaggedBase64::new("LEDG", &state.commit())
+                        .unwrap()
+                        .to_string();
+                    println!("  - Current commitment: {}", commitment);
+                    break;
+                } else {
+                    println!("EVENT: {:?}", event);
+                }
             }
 
             // Add the transaction if the node ID is 0
-            if let Some((ix, keys_and_memos, t)) = txn {
+            if let Some((ix, keys_and_memos, _, t)) = txn {
                 println!("  - Adding the transaction");
                 let mut blk = ElaboratedBlock::default();
                 let (owner_memos, kixs) = {
