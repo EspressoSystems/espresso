@@ -159,7 +159,7 @@ fn default_config_path() -> PathBuf {
     [&dir, Path::new(CONFIG_FILE)].iter().collect()
 }
 
-/// Returns the default path to the node configuration file.
+/// Returns the default path to the API file.
 fn default_api_path() -> PathBuf {
     const API_FILE: &str = "api/api.toml";
     let dir = project_path();
