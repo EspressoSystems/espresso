@@ -296,7 +296,8 @@ impl FullState {
                         // Archive the old state.
                         let index = self.history.len();
                         self.past_nullifiers.insert(self.nullifiers.hash(), index);
-                        self.block_hashes.insert(Vec::from(block.hash().as_ref()), index);
+                        self.block_hashes
+                            .insert(Vec::from(block.hash().as_ref()), index);
                         let block_uids = block
                             .block
                             .0
