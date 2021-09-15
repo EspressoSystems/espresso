@@ -2342,6 +2342,7 @@ name = "multi_machine"
 version = "0.1.0"
 dependencies = [
  "async-std",
+ "async-trait",
  "bincode",
  "futures",
  "futures-util",
