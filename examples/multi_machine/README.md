@@ -39,6 +39,8 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
 * Nodes that have completed all (i.e., 3) rounds will terminate their processes, which may lead to connection errors displayed in other windows. It is okay to ignore these errors as long as the commitments of each round are consistent in all windows.
 
 ### Initialize web server
+* Port
+    * By default, the port the web server listens on is `id + 50000`. E.g., for `node 3`, the port is `50003`. Use the `PORT` environment variable to override the setting.
 * Asset directory
     * By default, it is `examples/multi_machine/public`. Use `--assets` to provide the path to a different directory.
 * API file
