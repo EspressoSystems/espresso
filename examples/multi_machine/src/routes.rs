@@ -251,6 +251,8 @@ pub async fn get_block(
         .await
         .map_err(server_error)?
         .block;
+    // The block numbered `index` is the block which was applied to the `index` state. Therefore,
+    // the next state (the one that resulted from this block) is `index + 1`.
     let state = query_service
         .get_snapshot(index + 1)
         .await
