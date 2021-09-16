@@ -132,7 +132,7 @@ pub trait QueryService {
     }
 
     /// Get a snapshot of the designated ledger state.
-    /// 
+    ///
     /// State 0 is the initial state. Each subsequent snapshot is the state immediately after
     /// applying a block, so `get_snapshot(1)` returns the snapshot after the 0th block is applied,
     /// `get_snapshot(i + 1)` returns the snapshot after the `i`th block is applied, and so on until
@@ -140,10 +140,10 @@ pub trait QueryService {
     async fn get_snapshot(&self, index: usize) -> Result<LedgerSnapshot, QueryServiceError>;
 
     /// Get information about the `i`th block and the state transition it caused.
-    /// 
+    ///
     /// The `i`th block is the block which was applied to the `i`th state (see `get_snapshot()`)
     /// resulting in the `i + 1`th state.
-    /// 
+    ///
     /// The result includes the `i`th block as well as the `i`th state, from which the resulting
     /// state can be derived by applying the block to the input state. Of course, the resulting
     /// state can also be queried directly by calling `get_snapshot(i + 1)`.
