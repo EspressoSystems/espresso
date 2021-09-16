@@ -1,8 +1,8 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
-use jf_primitives::{jubjub_dsa::Signature, merkle_tree::NodeValue};
 use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
 use jf_txn::TransactionNote;
+use jf_txn::{NodeValue, Signature};
 use phaselock::BlockContents;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -13,6 +13,7 @@ use tagged_base64::TaggedBase64;
 use tide::prelude::*;
 use tide::StatusCode;
 use tracing::{event, Level};
+use zerok_lib::canonical;
 use zerok_lib::node::{LedgerTransition, QueryService};
 
 #[derive(Debug, EnumString)]
@@ -69,12 +70,12 @@ impl UrlSegmentValue {
 
     pub fn as_bkid(&self) -> Result<usize, tide::Error> {
         let bytes = self.as_b64("BK")?;
-        bincode::deserialize(&bytes).map_err(server_error)
+        canonical::deserialize(&bytes).map_err(server_error)
     }
 
     pub fn as_txid(&self) -> Result<(usize, usize), tide::Error> {
         let bytes = self.as_b64("TX")?;
-        bincode::deserialize(&bytes).map_err(server_error)
+        canonical::deserialize(&bytes).map_err(server_error)
     }
 
     pub fn as_index(&self) -> Result<usize, tide::Error> {
@@ -111,37 +112,37 @@ mod js {
     }
 
     pub fn bkid(block_id: usize) -> Result<Value, tide::Error> {
-        let bytes = bincode::serialize(&block_id).map_err(server_error)?;
+        let bytes = canonical::serialize(&block_id).map_err(server_error)?;
         b64("BK", &bytes)
     }
 
     pub fn txid(block_id: usize, tx_offset: usize) -> Result<Value, tide::Error> {
-        let bytes = bincode::serialize(&(block_id, tx_offset)).map_err(server_error)?;
+        let bytes = canonical::serialize(&(block_id, tx_offset)).map_err(server_error)?;
         b64("TX", &bytes)
     }
 
     pub fn nullifier(n: &Nullifier) -> Result<Value, tide::Error> {
-        let bytes = bincode::serialize(n).map_err(server_error)?;
+        let bytes = canonical::serialize(n).map_err(server_error)?;
         b64("NUL", &bytes)
     }
 
     pub fn record_comm(c: &RecordCommitment) -> Result<Value, tide::Error> {
-        let bytes = bincode::serialize(c).map_err(server_error)?;
+        let bytes = canonical::serialize(c).map_err(server_error)?;
         b64("REC", &bytes)
     }
 
     pub fn node_value(n: &NodeValue) -> Result<Value, tide::Error> {
-        let bytes = bincode::serialize(n).map_err(server_error)?;
+        let bytes = canonical::serialize(n).map_err(server_error)?;
         b64("HASH", &bytes)
     }
 
     pub fn memo(m: &ReceiverMemo) -> Result<Value, tide::Error> {
-        let bytes = bincode::serialize(m).map_err(server_error)?;
+        let bytes = canonical::serialize(m).map_err(server_error)?;
         b64("MEMO", &bytes)
     }
 
     pub fn signature(s: &Signature) -> Result<Value, tide::Error> {
-        let bytes = bincode::serialize(s).map_err(server_error)?;
+        let bytes = canonical::serialize(s).map_err(server_error)?;
         b64("SIG", &bytes)
     }
 }
