@@ -2342,8 +2342,14 @@ name = "multi_machine"
 version = "0.1.0"
 dependencies = [
  "async-std",
+ "async-trait",
+ "bincode",
  "futures",
  "futures-util",
+ "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
+ "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
+ "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
+ "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=2f978e10bf8f379000b4bcca393e25529e4b0b8f)",
  "phaselock",
  "rand_xoshiro",
  "serde",

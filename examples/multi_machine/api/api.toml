@@ -36,31 +36,14 @@ A valid block identifier is required. Block identifiers begin with BK~, for exam
 """
 ERROR_index = """
 A valid block index is required. The index is a natural number between 0 and one less than the number of blocks.
-See also getblockcount. 
+See also getblockcount.
 """
 
 [route.getblockid]
 PATH = [ "getblockid/latest", "getblockid/index/:index", "getblockid/hash/:hash" ]
-":hash" = "Hexadecimal"
+":hash" = "TaggedBase64"
 ":index" = "Integer"
-DOC = """
-Returns the latest available block identifier.
-
-Note that the identifier includes a checksum. For calculations,
-getblockhash may be needed, but care must be exercised to avoid
-errors resulting from inappropriate data conversion, truncation, or
-other forms of data corruption.
-
-See [taggedbase64spec](Tagged Identifier Specification) for the
-algorithms to verify the checksum and extract the hash from an
-identifier. In brief, the checksum is the last character. The
-characters between the tilde (~) and the last character are URL-safe
-base64 encoded. Raw hash values are 32 digit hexadecimal. For
-hexadecimal values that do not contain a, b, c, d, e, or f, JavaScript
-implicit data conversion and limited numeric precision can lead to
-bugs.
-
-"""
+DOC = "Returns the designated block identifier. If /latest is appended, returns the latest block identifier."
 ERROR_index = """
 A valid block index is required. The index is a natural number between
 0 and one less than the number of blocks.
@@ -68,7 +51,7 @@ A valid block index is required. The index is a natural number between
 See also getblockcount.
 """
 ERROR_hash = """
-A valid block hash is required. A block hash is 32 hexadecimal digits.
+A valid block hash is required. Block hashes begin with HASH~, for example, HASH~qd47Ob5IQxCPqnCS7YRsXmukzJhFw2k0aAdX_N8i9LYmJ1JYvyELuzfB94TLin12IwwkjqTJebLmlV6vJ2eFl6g.
 """
 
 [route.getblockcount]
@@ -76,9 +59,10 @@ PATH = [ "getblockcount" ]
 DOC = "Returns the total number of blocks in decimal."
 
 [route.getblock]
-PATH = [ "getblock/latest", "getblock/:bkid", "getblock/hash/:hash" ]
-":hash" = "Hexadecimal"
+PATH = [ "getblock/latest", "getblock/:bkid", "getblock/hash/:hash", "getblock/index/:index" ]
+":hash" = "TaggedBase64"
 ":bkid" = "TaggedBase64"
+":index" = "Integer"
 DOC = """
 Returns all block-specific information
 - block identifier
@@ -86,6 +70,16 @@ Returns all block-specific information
 - state_commitment
 - transaction_data: ordered list of transactions in block
 - etc...
+"""
+ERROR_bkid = """
+A valid block identifier is required. Block identifiers begin with BK~, for example, BK~Q3_ac7-.
+"""
+ERROR_hash = """
+A valid block hash is required. Block hashes begin with HASH~, for example, HASH~qd47Ob5IQxCPqnCS7YRsXmukzJhFw2k0aAdX_N8i9LYmJ1JYvyELuzfB94TLin12IwwkjqTJebLmlV6vJ2eFl6g.
+"""
+ERROR_index = """
+A valid block index is required. The index is a natural number between 0 and one less than the number of blocks.
+See also getblockcount. 
 """
 
 [route.getmempool]

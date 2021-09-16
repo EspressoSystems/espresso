@@ -21,10 +21,13 @@ use phaselock::{
     error::PhaseLockError,
     event::EventType,
     handle::{HandleError, PhaseLockHandle},
+    BlockContents,
 };
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use std::collections::{BTreeMap, HashMap};
+use std::error;
+use std::fmt;
 use std::pin::Pin;
 
 pub trait ConsensusEvent {
@@ -93,30 +96,60 @@ impl Validator for LightWeightNode {
 }
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct LedgerSummary {
+    pub num_blocks: usize,
+    pub num_records: usize,
+}
+
+#[derive(Clone, Debug)]
 pub struct LedgerSnapshot {
-    state: ValidatorState,
-    nullifiers: SetMerkleTree,
+    pub state: ValidatorState,
+    pub nullifiers: SetMerkleTree,
 }
 
 #[derive(Clone, Debug)]
 pub struct LedgerTransition {
-    from_state: LedgerSnapshot,
-    block: ElaboratedBlock,
+    pub from_state: LedgerSnapshot,
+    pub block: ElaboratedBlock,
     // Receiver memos come in asynchronously after a block is committed, on a transaction-by-
     // transaction basis. The list of memos corresponding to each transaction in a block will be
     // None until valid memos for that block are received by the sender. Note that this may never
     // happen if the sender chooses to send the memos directly to the receiver without posting them
     // publicly.
-    memos: Vec<Option<(Vec<ReceiverMemo>, Signature)>>,
-    uids: Vec<Vec<u64>>,
+    pub memos: Vec<Option<(Vec<ReceiverMemo>, Signature)>>,
+    pub uids: Vec<Vec<u64>>,
 }
 
 /// A QueryService accumulates the full state of the ledger, making it available for consumption by
 /// network APIs and such.
 #[async_trait]
 pub trait QueryService {
+    async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError>;
+
+    async fn num_blocks(&self) -> Result<usize, QueryServiceError> {
+        Ok(self.get_summary().await?.num_blocks)
+    }
+
+    /// Get a snapshot of the designated ledger state.
+    ///
+    /// State 0 is the initial state. Each subsequent snapshot is the state immediately after
+    /// applying a block, so `get_snapshot(1)` returns the snapshot after the 0th block is applied,
+    /// `get_snapshot(i + 1)` returns the snapshot after the `i`th block is applied, and so on until
+    /// `get_snapshot(num_blocks())` returns the current state.
     async fn get_snapshot(&self, index: usize) -> Result<LedgerSnapshot, QueryServiceError>;
+
+    /// Get information about the `i`th block and the state transition it caused.
+    ///
+    /// The `i`th block is the block which was applied to the `i`th state (see `get_snapshot()`)
+    /// resulting in the `i + 1`th state.
+    ///
+    /// The result includes the `i`th block as well as the `i`th state, from which the resulting
+    /// state can be derived by applying the block to the input state. Of course, the resulting
+    /// state can also be queried directly by calling `get_snapshot(i + 1)`.
     async fn get_block(&self, index: usize) -> Result<LedgerTransition, QueryServiceError>;
+
+    async fn get_block_id_by_hash(&self, hash: &[u8]) -> Result<usize, QueryServiceError>;
 
     /// Query whether a nullifier is in a nullifier set with a given root hash, and retrieve a proof
     /// of inclusion or exclusion. The root hash must be the root of a past version of the
@@ -176,6 +209,7 @@ pub trait QueryService {
 pub enum QueryServiceError {
     InvalidNullifierRoot {},
     InvalidBlockId {},
+    InvalidBlockHash {},
     InvalidTxnId {},
     MemosAlreadyPosted {},
     InvalidSignature {},
@@ -183,6 +217,14 @@ pub enum QueryServiceError {
     NoMemosForTxn {},
     InvalidAddress {},
 }
+
+impl fmt::Display for QueryServiceError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl error::Error for QueryServiceError {}
 
 struct FullState {
     validator: ValidatorState,
@@ -193,6 +235,8 @@ struct FullState {
     past_nullifiers: HashMap<set_hash::Hash, usize>,
     // All past states and state transitions of the ledger.
     history: Vec<LedgerTransition>,
+    // Block IDs indexed by block hash.
+    block_hashes: HashMap<Vec<u8>, usize>,
     // The last block which was proposed. This is currently used to correllate BadBlock and
     // InconsistentBlock errors from PhaseLock with the block that caused the error. In the future,
     // PhaseLock errors will contain the bad block (or some kind of reference to it, perhaps through
@@ -268,6 +312,8 @@ impl FullState {
                         // Archive the old state.
                         let index = self.history.len();
                         self.past_nullifiers.insert(self.nullifiers.hash(), index);
+                        self.block_hashes
+                            .insert(Vec::from(block.hash().as_ref()), index);
                         let block_uids = block
                             .block
                             .0
@@ -429,12 +475,13 @@ impl FullState {
 }
 
 /// A QueryService that aggregates the full ledger state by observing consensus.
+#[derive(Clone)]
 pub struct PhaseLockQueryService<'a> {
     univ_param: &'a jf_txn::proof::UniversalParam,
     state: Arc<RwLock<FullState>>,
     // When dropped, this handle will cancel and join the event handling task. It is not used
     // explicitly; it is merely stored with the rest of the struct for the auto-generated drop glue.
-    _event_task: RemoteHandle<()>,
+    _event_task: Arc<RemoteHandle<()>>,
 }
 
 impl<'a> PhaseLockQueryService<'a> {
@@ -455,6 +502,7 @@ impl<'a> PhaseLockQueryService<'a> {
         //  let state = other_node.full_state(validator.commit());
         // For now, just assume we are starting at the beginning:
         let history = Vec::new();
+        let block_hashes = HashMap::new();
         let events = Vec::new();
         // Use the unpruned record Merkle tree.
         assert_eq!(
@@ -469,6 +517,7 @@ impl<'a> PhaseLockQueryService<'a> {
             known_nodes: Default::default(),
             past_nullifiers: HashMap::new(),
             history,
+            block_hashes,
             proposed: ElaboratedBlock::default(),
             events,
             subscribers: Default::default(),
@@ -513,13 +562,21 @@ impl<'a> PhaseLockQueryService<'a> {
         Self {
             univ_param,
             state,
-            _event_task: task,
+            _event_task: Arc::new(task),
         }
     }
 }
 
 #[async_trait]
 impl<'a> QueryService for PhaseLockQueryService<'a> {
+    async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError> {
+        let state = self.state.read().await;
+        Ok(LedgerSummary {
+            num_blocks: state.history.len(),
+            num_records: state.validator.record_merkle_frontier.num_leaves() as usize,
+        })
+    }
+
     async fn get_snapshot(&self, index: usize) -> Result<LedgerSnapshot, QueryServiceError> {
         use std::cmp::Ordering::*;
         let state = self.state.read().await;
@@ -540,6 +597,15 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
             .get(index)
             .cloned()
             .ok_or(QueryServiceError::InvalidBlockId {})
+    }
+
+    async fn get_block_id_by_hash(&self, hash: &[u8]) -> Result<usize, QueryServiceError> {
+        let state = self.state.read().await;
+        state
+            .block_hashes
+            .get(hash)
+            .cloned()
+            .ok_or(QueryServiceError::InvalidBlockHash {})
     }
 
     async fn nullifier_proof(
@@ -588,6 +654,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
 }
 
 /// A full node is a QueryService running alongside a lightweight validator.
+#[derive(Clone)]
 pub struct FullNode<'a> {
     validator: LightWeightNode,
     query_service: PhaseLockQueryService<'a>,
@@ -652,12 +719,20 @@ impl<'a> Validator for FullNode<'a> {
 
 #[async_trait]
 impl<'a> QueryService for FullNode<'a> {
+    async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError> {
+        self.as_query_service().get_summary().await
+    }
+
     async fn get_snapshot(&self, index: usize) -> Result<LedgerSnapshot, QueryServiceError> {
         self.as_query_service().get_snapshot(index).await
     }
 
     async fn get_block(&self, index: usize) -> Result<LedgerTransition, QueryServiceError> {
         self.as_query_service().get_block(index).await
+    }
+
+    async fn get_block_id_by_hash(&self, hash: &[u8]) -> Result<usize, QueryServiceError> {
+        self.as_query_service().get_block_id_by_hash(hash).await
     }
 
     async fn nullifier_proof(

@@ -4,9 +4,10 @@ use crate::config::executable_name;
 use crate::routes::{dispatch_url, RouteBinding, UrlSegmentType, UrlSegmentValue};
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
+use async_trait::async_trait;
 use futures_util::StreamExt;
 use phaselock::{
-    event::EventType, message::Message, networking::w_network::WNetwork,
+    error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey,
 };
 use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
@@ -225,6 +226,37 @@ async fn get_networking<
     panic!("Failed to open a port");
 }
 
+enum Node {
+    Light(LightWeightNode),
+    Full(FullNode<'static>),
+}
+
+#[async_trait]
+impl Validator for Node {
+    type Event = PhaseLockEvent;
+
+    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
+        match self {
+            Node::Light(n) => <LightWeightNode as Validator>::submit_transaction(n, tx).await,
+            Node::Full(n) => n.submit_transaction(tx).await,
+        }
+    }
+
+    async fn start_consensus(&self) {
+        match self {
+            Node::Light(n) => n.start_consensus().await,
+            Node::Full(n) => n.start_consensus().await,
+        }
+    }
+
+    fn subscribe(&self) -> EventStream<Self::Event> {
+        match self {
+            Node::Light(n) => n.subscribe(),
+            Node::Full(n) => <FullNode as Validator>::subscribe(n),
+        }
+    }
+}
+
 /// Creates the initial state and phaselock for simulation.
 async fn init_state_and_phaselock(
     public_keys: tc::PublicKeySet,
@@ -234,10 +266,7 @@ async fn init_state_and_phaselock(
     node_id: u64,
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
     full_node: bool,
-) -> (
-    MultiXfrTestState,
-    Box<dyn Validator<Event = PhaseLockEvent>>,
-) {
+) -> (MultiXfrTestState, Node) {
     // Create the initial state
     let state = MultiXfrTestState::initialize(
         STATE_SEED,
@@ -293,16 +322,17 @@ async fn init_state_and_phaselock(
     debug!("phaselock launched");
 
     let validator = if full_node {
-        Box::new(FullNode::new(
+        let node = FullNode::new(
             phaselock,
             state.univ_setup,
             state.validator.clone(),
             state.record_merkle_tree.clone(),
             state.nullifiers.clone(),
             state.unspent_memos(),
-        )) as Box<dyn Validator<Event = PhaseLockEvent>>
+        );
+        Node::Full(node)
     } else {
-        Box::new(phaselock) as Box<dyn Validator<Event = PhaseLockEvent>>
+        Node::Light(phaselock)
     };
 
     (state, validator)
@@ -319,6 +349,7 @@ struct WebState {
     connections: Arc<RwLock<HashMap<String, Connection>>>,
     web_path: String,
     api: toml::Value,
+    query_service: FullNode<'static>,
 }
 
 impl WebState {
@@ -383,16 +414,6 @@ async fn landing_page(req: tide::Request<WebState>) -> Result<tide::Body, tide::
     Ok(tide::Body::from_file(index_html).await?)
 }
 
-fn can_parse_as(value: &str, ptype: &str) -> bool {
-    match ptype {
-        "Boolean" => value.parse::<bool>().is_ok(),
-        "Hexadecimal" => u128::from_str_radix(value, 16).is_ok(),
-        "Integer" => value.parse::<u128>().is_ok(),
-        "TaggedBase64" => TaggedBase64::parse(value).is_ok(),
-        _ => panic!("Type specified in api.toml isn't supported: {}", ptype),
-    }
-}
-
 /* TODO
 
 Collect error messages for parameters that fail to parse, but only
@@ -426,7 +447,7 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
         .to_string();
     let mut matching_route_count = 0u64;
     let mut matching_route = "";
-    let mut bindings = HashMap::new();
+    let mut bindings: HashMap<&str, HashMap<String, RouteBinding>> = HashMap::new();
     for route_pattern in route_patterns.iter() {
         let mut found_literal_mismatch = false;
         let mut argument_parse_failed = false;
@@ -454,13 +475,16 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
                     "  Argument: {} as type {} and value: {} ",
                     pat_segment, segment_type, req_segment
                 ));
-                if can_parse_as(req_segment, segment_type) {
+                if let Some(value) = UrlSegmentValue::parse(req_segment, segment_type) {
                     let rb = RouteBinding {
                         parameter: pat_segment.to_string(),
                         ptype: UrlSegmentType::from_str(segment_type).unwrap(),
-                        value: UrlSegmentValue::Unparsed(req_segment.to_string()),
+                        value,
                     };
-                    bindings.insert(route_pattern.as_str().unwrap(), rb);
+                    bindings
+                        .entry(route_pattern.as_str().unwrap())
+                        .or_default()
+                        .insert(pat_segment.to_string(), rb);
                     arg_doc.push_str("(Parse succeeded)\n");
                 } else {
                     arg_doc.push_str("(Parse failed)\n");
@@ -511,8 +535,13 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
         1 => arg_doc.push_str(&format!(
             "\nCould dispatch: {}\n{:?}\nDispatch results:\n{:?}",
             matching_route,
-            bindings.get(&matching_route),
-            dispatch_url(matching_route, bindings.get(&matching_route)).await?
+            bindings.get(&matching_route).unwrap_or(&Default::default()),
+            dispatch_url(
+                matching_route,
+                bindings.get(&matching_route).unwrap_or(&Default::default()),
+                &req.state().query_service
+            )
+            .await?
         )),
         _ => arg_doc.push_str("\nAmbiguity in api.toml"),
     }
@@ -520,7 +549,12 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
     // TODO !corbett set the mime type to text/html and convert the
     // string from markdown to html
     if matching_route_count == 1 {
-        Ok(dispatch_url(matching_route, bindings.get(&matching_route)).await?)
+        Ok(dispatch_url(
+            matching_route,
+            bindings.get(&matching_route).unwrap_or(&Default::default()),
+            &req.state().query_service,
+        )
+        .await?)
     } else {
         Ok(tide::Response::builder(200).body(arg_doc).build())
     }
@@ -580,6 +614,7 @@ async fn handle_web_socket(
 fn init_web_server(
     opt_web_path: &str,
     own_id: u64,
+    query_service: FullNode<'static>,
 ) -> Result<task::JoinHandle<Result<(), std::io::Error>>, tide::Error> {
     // Take the command line option for the web asset directory path
     // provided it is not empty. Otherwise, construct the default from
@@ -598,6 +633,7 @@ fn init_web_server(
         connections: Default::default(),
         web_path: web_path.clone(),
         api: api.clone(),
+        query_service,
     });
 
     // Define the routes handled by the web server.
@@ -684,10 +720,6 @@ async fn main() -> Result<(), std::io::Error> {
         println!("Current node: {}", own_id);
         let secret_key_share = secret_keys.secret_key_share(own_id);
 
-        // Initialize web server
-        let join_handle = init_web_server(&NodeOpt::from_args().web_path, own_id)
-            .expect("Failed to initialize web server");
-
         // Get networking information
         let (own_network, _) =
             get_networking(own_id, get_host(node_config.clone(), own_id).1).await;
@@ -722,7 +754,7 @@ async fn main() -> Result<(), std::io::Error> {
         println!("All nodes connected to network");
 
         // Initialize the state and phaselock
-        let (mut state, phaselock) = init_state_and_phaselock(
+        let (mut state, mut phaselock) = init_state_and_phaselock(
             public_keys,
             secret_key_share,
             nodes,
@@ -733,6 +765,16 @@ async fn main() -> Result<(), std::io::Error> {
         )
         .await;
         let mut events = phaselock.subscribe();
+
+        // If we are running a full node, also host a query API to inspect the accumulated state.
+        let web_server = if let Node::Full(node) = &phaselock {
+            Some(
+                init_web_server(&NodeOpt::from_args().web_path, own_id, node.clone())
+                    .expect("Failed to initialize web server"),
+            )
+        } else {
+            None
+        };
 
         // Start consensus for each transaction
         for round in 0..TRANSACTION_COUNT {
@@ -781,7 +823,7 @@ async fn main() -> Result<(), std::io::Error> {
             }
 
             // Add the transaction if the node ID is 0
-            if let Some((ix, keys_and_memos, _, t)) = txn {
+            if let Some((ix, keys_and_memos, sig, t)) = txn {
                 println!("  - Adding the transaction");
                 let mut blk = ElaboratedBlock::default();
                 let (owner_memos, kixs) = {
@@ -794,6 +836,13 @@ async fn main() -> Result<(), std::io::Error> {
                     }
                     (owner_memos, kixs)
                 };
+
+                // If we're running a full node, publish the receiver memos.
+                if let Node::Full(node) = &mut phaselock {
+                    node.post_memos(round, ix as u64, owner_memos.clone(), sig)
+                        .await
+                        .unwrap();
+                }
 
                 state
                     .try_add_transaction(
@@ -812,7 +861,9 @@ async fn main() -> Result<(), std::io::Error> {
             }
             println!("  - Round {} completed.", round + 1);
         }
-        join_handle.await?;
+        if let Some(join_handle) = web_server {
+            join_handle.await?;
+        }
     }
     println!("All rounds completed.");
 
