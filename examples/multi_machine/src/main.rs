@@ -10,12 +10,13 @@ use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey,
 };
-use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
+use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::json;
 use std::collections::hash_map::{Entry, HashMap};
+use std::convert::TryInto;
 use std::fs::File;
-use std::io::{prelude::*, Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
@@ -682,9 +683,14 @@ async fn main() -> Result<(), std::io::Error> {
     let node_config = get_node_config();
 
     // Get secret key set
-    let seed: u64 = node_config["seed"]
-        .as_integer()
-        .expect("Missing seed value") as u64;
+    let seed: [u8; 32] = node_config["seed"]
+        .as_array()
+        .expect("Missing seed value")
+        .iter()
+        .map(|i| i.as_integer().expect("Invalid seed value") as u8)
+        .collect::<Vec<u8>>()
+        .try_into()
+        .expect("Error while converting the seed into an array");
     let nodes = node_config["nodes"]
         .as_table()
         .expect("Missing nodes info")
@@ -692,8 +698,10 @@ async fn main() -> Result<(), std::io::Error> {
     let threshold = ((nodes * 2) / 3) + 1;
 
     // Generate key sets
-    let mut rng = Xoshiro256StarStar::seed_from_u64(seed);
-    let secret_keys = tc::SecretKeySet::random(threshold as usize - 1, &mut rng);
+    let secret_keys = tc::SecretKeySet::random(
+        threshold as usize - 1,
+        &mut <ChaChaRng as SeedableRng>::from_seed(seed),
+    );
     let public_keys = secret_keys.public_keys();
 
     // Generate public key for each node
