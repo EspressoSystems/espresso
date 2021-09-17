@@ -870,8 +870,9 @@ async fn main() -> Result<(), std::io::Error> {
         if let Some(join_handle) = web_server {
             join_handle.await?;
         }
+
+        println!("All rounds completed");
     }
-    println!("All rounds completed.");
 
     Ok(())
 }
