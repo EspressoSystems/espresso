@@ -700,7 +700,7 @@ async fn main() -> Result<(), std::io::Error> {
     // Generate key sets
     let secret_keys = tc::SecretKeySet::random(
         threshold as usize - 1,
-        &mut <ChaChaRng as SeedableRng>::from_seed(seed),
+        &mut ChaChaRng::from_seed(seed),
     );
     let public_keys = secret_keys.public_keys();
 
