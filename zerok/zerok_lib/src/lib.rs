@@ -43,7 +43,7 @@ use std::iter::FromIterator;
 use std::ops::Bound::*;
 use std::path::Path;
 use std::time::Instant;
-use util::canonical;
+pub use util::canonical;
 
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
