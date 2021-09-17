@@ -105,7 +105,7 @@ Returns statistics about unspent record set including the number of unspent reco
 # Does this work in JF?
 # TODO !corbett If it does, do we care that it leaks information about the number of outputs in every transaction?
 [route.getunspentrecord]
-PATH = ["getunspentrecord/:txid/:output_index/:mempool", "getunspentrecord/:txid/:output_index/"]
+PATH = ["getunspentrecord/:txid/:output_index/:mempool"]
 ":txid" = "TaggedBase64"
 ":output_index" = "Integer"
 ":mempool" = "Boolean"
@@ -114,4 +114,4 @@ record_data: details about an unspent record from the *n*th output of the given 
 """
 ERROR_txid = "A valid transaction identifier is required. Transaction identifiers begin with TX~, for example, TX~Ab-3D_x5."
 ERROR_output_index = "No such output. The output index must be non-negative and less than the number of outputs."
-ERROR_mempool = "The optional mempool parameter must be Boolean. The value 'true' indicates mempool information is wanted."
+ERROR_mempool = "The mempool parameter must be Boolean. The value 'true' indicates mempool information is wanted."

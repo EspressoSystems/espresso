@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Keyao Shen <keyao@translucence.net>", "corbett@pictographer.com"]
 edition = "2018"
 license = "Copyright © 2021 Translucence Research, Inc. All rights reserved."
+default-run = "multi_machine"
 
 [dependencies]
 async-std = { version = "1.9.0", features = ["unstable", "attributes"] }
@@ -23,6 +24,7 @@ shellexpand = "2.0"
 structopt = { version = "0.3", features = ["paw"] }
 strum = "0.20"
 strum_macros = "0.20.1"
+surf = "2.3.1"
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
 threshold_crypto = "0.4.0"
 tide = "0.16.0"

@@ -50,6 +50,17 @@ impl UrlSegmentValue {
         })
     }
 
+    pub fn as_boolean(&self) -> Result<bool, tide::Error> {
+        if let Boolean(b) = self {
+            Ok(*b)
+        } else {
+            Err(tide::Error::from_str(
+                StatusCode::BadRequest,
+                format!("expected boolean, got {:?}", self),
+            ))
+        }
+    }
+
     pub fn as_b64(&self, tag: &str) -> Result<Vec<u8>, tide::Error> {
         if let Identifier(b64) = self {
             if b64.tag() == tag {
@@ -111,6 +122,10 @@ mod js {
         )))
     }
 
+    pub fn hash(bytes: &[u8]) -> Result<Value, tide::Error> {
+        b64("HASH", bytes)
+    }
+
     pub fn bkid(block_id: usize) -> Result<Value, tide::Error> {
         let bytes = canonical::serialize(&block_id).map_err(server_error)?;
         b64("BK", &bytes)
@@ -119,6 +134,21 @@ mod js {
     pub fn txid(block_id: usize, tx_offset: usize) -> Result<Value, tide::Error> {
         let bytes = canonical::serialize(&(block_id, tx_offset)).map_err(server_error)?;
         b64("TX", &bytes)
+    }
+
+    pub fn tx_output(
+        comm: &RecordCommitment,
+        uid: u64,
+        memo: Option<&ReceiverMemo>,
+    ) -> Result<Value, tide::Error> {
+        Ok(json!({
+            "commitment": record_comm(comm)?,
+            "uid": uid,
+            "memo": match memo {
+                Some(memo) => Some(js::memo(memo)?),
+                None => None,
+            },
+        }))
     }
 
     pub fn nullifier(n: &Nullifier) -> Result<Value, tide::Error> {
@@ -132,8 +162,7 @@ mod js {
     }
 
     pub fn node_value(n: &NodeValue) -> Result<Value, tide::Error> {
-        let bytes = canonical::serialize(n).map_err(server_error)?;
-        b64("HASH", &bytes)
+        hash(&canonical::serialize(n).map_err(server_error)?)
     }
 
     pub fn memo(m: &ReceiverMemo) -> Result<Value, tide::Error> {
@@ -227,24 +256,49 @@ pub fn dummy_url_eval(
         .build())
 }
 
-pub async fn get_block(
-    bindings: &HashMap<String, RouteBinding>,
+async fn get_info(
     query_service: &(impl QueryService + Sync),
 ) -> Result<tide::Response, tide::Error> {
-    // Get a block index from whatever form of block identifier was used in the URL.
-    let index = if let Some(b) = bindings.get(":index") {
-        b.value.as_index()?
+    let info = query_service.get_summary().await.map_err(server_error)?;
+    Ok(tide::Response::from(json!({
+        "num_blocks": info.num_blocks,
+        "num_records": info.num_records,
+        //todo !jeb.bearer add more info
+    })))
+}
+
+async fn get_block_count(
+    query_service: &(impl QueryService + Sync),
+) -> Result<tide::Response, tide::Error> {
+    let info = query_service.get_summary().await.map_err(server_error)?;
+    Ok(tide::Response::from(json!(info.num_blocks)))
+}
+
+// Get a block index from whatever form of block identifier was used in the URL.
+async fn block_index(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &(impl QueryService + Sync),
+) -> Result<usize, tide::Error> {
+    if let Some(b) = bindings.get(":index") {
+        b.value.as_index()
     } else if let Some(b) = bindings.get(":bkid") {
-        b.value.as_bkid()?
+        b.value.as_bkid()
     } else if let Some(hash) = bindings.get(":hash") {
         query_service
             .get_block_id_by_hash(&hash.value.as_block_hash()?)
             .await
-            .map_err(server_error)?
+            .map_err(server_error)
     } else {
-        // getblock/latest
-        query_service.num_blocks().await.map_err(server_error)? - 1
-    };
+        // latest
+        Ok(query_service.num_blocks().await.map_err(server_error)? - 1)
+    }
+}
+
+async fn get_block(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &(impl QueryService + Sync),
+) -> Result<tide::Response, tide::Error> {
+    let index = block_index(bindings, query_service).await?;
 
     // Get the block and the validator state that resulted from applying this block.
     let block = query_service
@@ -263,8 +317,8 @@ pub async fn get_block(
     Ok(tide::Response::from(json!({
         "id": js::bkid(index)?,
         "index": index,
-        "hash": js::b64("HASH", block.hash().as_ref())?,
-        "state_commitment": js::b64("HASH", &state.commit())?,
+        "hash": js::hash(block.hash().as_ref())?,
+        "state_commitment": js::hash(&state.commit())?,
         "transaction_data": block.block.0.iter().enumerate().map(|(i, _)| {
             Ok(json!({
                 "id": js::txid(index, i)?,
@@ -273,7 +327,28 @@ pub async fn get_block(
     })))
 }
 
-pub async fn get_transaction(
+async fn get_block_id(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &(impl QueryService + Sync),
+) -> Result<tide::Response, tide::Error> {
+    let index = block_index(bindings, query_service).await?;
+    Ok(tide::Response::from(js::bkid(index)?))
+}
+
+async fn get_block_hash(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &(impl QueryService + Sync),
+) -> Result<tide::Response, tide::Error> {
+    let index = block_index(bindings, query_service).await?;
+    let block = query_service
+        .get_block(index)
+        .await
+        .map_err(server_error)?
+        .block;
+    Ok(tide::Response::from(js::hash(block.hash().as_ref())?))
+}
+
+async fn get_transaction(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &impl QueryService,
 ) -> Result<tide::Response, tide::Error> {
@@ -323,14 +398,7 @@ pub async fn get_transaction(
             js::nullifier(&n)
         }).collect::<Result<Vec<_>, tide::Error>>()?,
         "outputs": tx.output_commitments().into_iter().zip(uids).zip(memos).map(|((comm, uid), memo)| {
-            Ok(json!({
-                "commitment": js::record_comm(&comm)?,
-                "uid": uid,
-                "memo": match memo {
-                    Some(memo) => Some(js::memo(memo)?),
-                    None => None,
-                },
-            }))
+            js::tx_output(&comm, *uid, memo)
         }).collect::<Result<Vec<_>, tide::Error>>()?,
         "memos_signature": match sig {
             Some(sig) => Some(js::signature(sig)?),
@@ -340,22 +408,71 @@ pub async fn get_transaction(
     })))
 }
 
+async fn get_unspent_record(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &impl QueryService,
+) -> Result<tide::Response, tide::Error> {
+    if bindings[":mempool"].value.as_boolean()? {
+        return Err(tide::Error::from_str(
+            StatusCode::NotImplemented,
+            "mempool queries unimplemented",
+        ));
+    }
+
+    let (block_id, tx_id) = bindings[":txid"].value.as_txid()?;
+    let output_index = bindings[":output_index"].value.as_index()?;
+
+    // First get the block containing the transaction.
+    let LedgerTransition {
+        block, memos, uids, ..
+    } = query_service
+        .get_block(block_id)
+        .await
+        .map_err(server_error)?;
+
+    // Extract the transaction and associated data from the block.
+    if tx_id >= block.block.0.len() {
+        return Err(tide::Error::from_str(
+            StatusCode::BadRequest,
+            "invalid transaction id",
+        ));
+    }
+    let tx = &block.block.0[tx_id];
+
+    // Extract data about the requested output from the transaction.
+    if output_index >= tx.output_len() {
+        return Err(tide::Error::from_str(
+            StatusCode::BadRequest,
+            "invalid output index",
+        ));
+    }
+    let comm = tx.output_commitments()[output_index];
+    let uid = uids[tx_id][output_index];
+    let memo = memos[tx_id]
+        .as_ref()
+        .map(|(memos, _sig)| &memos[output_index]);
+    Ok(tide::Response::from(js::tx_output(&comm, uid, memo)?))
+}
+
 pub async fn dispatch_url(
     route_pattern: &str,
     bindings: &HashMap<String, RouteBinding>,
     query_service: &(impl QueryService + Sync),
 ) -> Result<tide::Response, tide::Error> {
-    let first_segment = route_pattern.split_once('/').unwrap().0;
+    let first_segment = route_pattern
+        .split_once('/')
+        .unwrap_or((route_pattern, ""))
+        .0;
     let key = ApiRouteKey::from_str(first_segment).expect("Unknown route");
     match key {
         ApiRouteKey::getblock => get_block(bindings, query_service).await,
-        ApiRouteKey::getblockcount => dummy_url_eval(route_pattern, bindings),
-        ApiRouteKey::getblockhash => dummy_url_eval(route_pattern, bindings),
-        ApiRouteKey::getblockid => dummy_url_eval(route_pattern, bindings),
-        ApiRouteKey::getinfo => dummy_url_eval(route_pattern, bindings),
+        ApiRouteKey::getblockcount => get_block_count(query_service).await,
+        ApiRouteKey::getblockhash => get_block_hash(bindings, query_service).await,
+        ApiRouteKey::getblockid => get_block_id(bindings, query_service).await,
+        ApiRouteKey::getinfo => get_info(query_service).await,
         ApiRouteKey::getmempool => dummy_url_eval(route_pattern, bindings),
         ApiRouteKey::gettransaction => get_transaction(bindings, query_service).await,
-        ApiRouteKey::getunspentrecord => dummy_url_eval(route_pattern, bindings),
+        ApiRouteKey::getunspentrecord => get_unspent_record(bindings, query_service).await,
         ApiRouteKey::getunspentrecordsetinfo => dummy_url_eval(route_pattern, bindings),
     }
 }
