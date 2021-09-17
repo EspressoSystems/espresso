@@ -16,7 +16,7 @@ use serde_json::json;
 use std::collections::hash_map::{Entry, HashMap};
 use std::convert::TryInto;
 use std::fs::File;
-use std::io::Read;
+use std::io::{prelude::*, Read};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
@@ -698,10 +698,8 @@ async fn main() -> Result<(), std::io::Error> {
     let threshold = ((nodes * 2) / 3) + 1;
 
     // Generate key sets
-    let secret_keys = tc::SecretKeySet::random(
-        threshold as usize - 1,
-        &mut ChaChaRng::from_seed(seed),
-    );
+    let secret_keys =
+        tc::SecretKeySet::random(threshold as usize - 1, &mut ChaChaRng::from_seed(seed));
     let public_keys = secret_keys.public_keys();
 
     // Generate public key for each node
