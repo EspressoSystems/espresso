@@ -1,10 +1,11 @@
 use crate::{
     key_set::SizedKey,
     set_merkle_tree::*,
-    wallet::{LedgerEvent, WalletBackend, WalletError, WalletState},
+    wallet::{WalletBackend, WalletError, WalletState},
     ElaboratedBlock, ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState,
     MERKLE_HEIGHT,
 };
+pub use crate::state_comm::LedgerStateCommitment;
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
 use async_trait::async_trait;
@@ -14,7 +15,10 @@ pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::task::SpawnExt;
 use itertools::izip;
-use jf_primitives::{jubjub_dsa::Signature, merkle_tree::MerkleTree};
+use jf_primitives::{
+    jubjub_dsa::Signature,
+    merkle_tree::{MerklePath, MerkleTree},
+};
 use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey};
 use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
 use phaselock::{
@@ -119,6 +123,27 @@ pub struct LedgerTransition {
     // publicly.
     pub memos: Vec<Option<(Vec<ReceiverMemo>, Signature)>>,
     pub uids: Vec<Vec<u64>>,
+}
+
+#[derive(Clone, Debug)]
+pub enum LedgerEvent {
+    /// A new block was added to the ledger.
+    ///
+    /// Includes the block contents, the unique identifier for the block, and the new state
+    /// commitment.
+    Commit(ElaboratedBlock, u64, LedgerStateCommitment),
+
+    /// A proposed block was rejected.
+    ///
+    /// Includes the block contents and the reason for rejection.
+    Reject(ElaboratedBlock, ValidationError),
+
+    /// Receiver memos were posted for one or more previously accepted transactions.
+    ///
+    /// For each UTXO corresponding to the posted memos, includes the memo, the record commitment,
+    /// the unique identifier for the record, and a proof that the record commitment exists in the
+    /// current UTXO set.
+    Memos(Vec<(ReceiverMemo, RecordCommitment, u64, MerklePath)>),
 }
 
 /// A QueryService accumulates the full state of the ledger, making it available for consumption by
@@ -346,7 +371,11 @@ impl FullState {
                         assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
 
                         // Notify subscribers of the new block.
-                        self.send_event(LedgerEvent::Commit((*block).clone(), index as u64));
+                        self.send_event(LedgerEvent::Commit(
+                            (*block).clone(),
+                            index as u64,
+                            self.validator.commit(),
+                        ));
                     }
                 }
             }

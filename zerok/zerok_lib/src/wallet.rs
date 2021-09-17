@@ -1,8 +1,7 @@
 use crate::key_set;
+use crate::node::LedgerEvent;
 use crate::set_merkle_tree::*;
-use crate::{
-    ElaboratedBlock, ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState,
-};
+use crate::{ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState};
 use async_scoped::AsyncScope;
 use async_std::sync::Mutex;
 use async_std::task::block_on;
@@ -31,7 +30,7 @@ use jf_txn::{
     TransactionNote,
 };
 use key_set::KeySet;
-use merkle_tree::{AccMemberWitness, MerklePath, MerkleTree};
+use merkle_tree::{AccMemberWitness, MerkleTree};
 use rand_chacha::ChaChaRng;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -85,17 +84,6 @@ pub enum WalletError {
         err: crate::node::QueryServiceError,
     },
     Failed {},
-}
-
-// Events consumed by the wallet produced by the backend (which potentially includes validators,
-// query servers, bulletin boards, etc.). Eventually we may want the wallet to subscribe itself to
-// these events transparently, but this part of the system is underspecified, so for now the wallet
-// simply has a public method for receiving mocked versions of these events.
-#[derive(Clone, Debug)]
-pub enum LedgerEvent {
-    Commit(ElaboratedBlock, u64),
-    Reject(ElaboratedBlock, ValidationError),
-    Memos(Vec<(ReceiverMemo, RecordCommitment, u64, MerklePath)>),
 }
 
 pub struct WalletState<'a> {
@@ -356,7 +344,7 @@ impl<'a> WalletState<'a> {
     ) {
         self.now += 1;
         match event {
-            LedgerEvent::Commit(block, block_id) => {
+            LedgerEvent::Commit(block, block_id, state_comm) => {
                 // Don't trust the network connection that provided us this event; validate it
                 // against our local mirror of the ledger and bail out if it is invalid.
                 let mut uids = match self.validator.validate_and_apply(
@@ -366,6 +354,16 @@ impl<'a> WalletState<'a> {
                     true, // remember all commitments; we will forget the ones we don't need later
                 ) {
                     Ok(uids) => {
+                        if state_comm != self.validator.commit() {
+                            // Received a block which validates, but our state commitment does not 
+                            // match that of the event source. Since the block validates, we will
+                            // accept it, but this must indicate that the event source is lying or
+                            // mistaken about the state commitment. This would be a good time to
+                            // switch to a different query server or something, but for now we'll
+                            // just log the problem.
+                            println!("received valid block with invalid state commitment");
+                        }
+
                         // Get a list of new uids and whether we want to remember them in our record
                         // Merkle tree. Initially, set `remember` to false for all uids, to maximize
                         // sparseness. If any of the consumers of this block (for example, the
@@ -1572,7 +1570,10 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
 #[cfg(any(test, fuzzing))]
 pub mod test_helpers {
     use super::*;
-    use crate::{Block, TransactionVerifyingKey, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM};
+    use crate::{
+        Block, ElaboratedBlock, TransactionVerifyingKey, VerifierKeySet, MERKLE_HEIGHT,
+        UNIVERSAL_PARAM,
+    };
     use futures::channel::mpsc as channel;
     use futures::future;
     use itertools::izip;

@@ -1,6 +1,8 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
-use jf_primitives::{jubjub_dsa::Signature, merkle_tree::NodeValue};
+use crate::WebState;
+use futures::prelude::*;
+use jf_primitives::{jubjub_dsa::Signature, merkle_tree::{MerklePath, NodeValue}};
 use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
 use jf_txn::TransactionNote;
 use phaselock::BlockContents;
@@ -11,9 +13,11 @@ use strum::IntoEnumIterator;
 use strum_macros::{AsRefStr, EnumIter, EnumString};
 use tagged_base64::TaggedBase64;
 use tide::prelude::*;
+use tide::sse;
 use tide::StatusCode;
 use tracing::{event, Level};
-use zerok_lib::node::{LedgerTransition, QueryService};
+use zerok_lib::node::{LedgerEvent, LedgerTransition, QueryService};
+use zerok_lib::ElaboratedBlock;
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -130,9 +134,59 @@ mod js {
         b64("BK", &bytes)
     }
 
+    // Serialize a committed block, with references to the ledger such as the block's unique ID and
+    // the IDs of its transactions.
+    pub fn block(
+        block: &ElaboratedBlock,
+        block_id: usize,
+        state_comm: &[u8],
+    ) -> Result<Value, tide::Error> {
+        Ok(json!({
+            "id": bkid(block_id)?,
+            "index": block_id,
+            "hash": hash(block.hash().as_ref())?,
+            "state_commitment": hash(state_comm)?,
+            "transaction_data": block.block.0.iter().enumerate().map(|(i, _)| {
+                Ok(json!({
+                    "id": txid(block_id, i)?,
+                }))
+            }).collect::<Result<Vec<_>, tide::Error>>()?,
+        }))
+    }
+
+    // Serialize an uncommitted block.
+    pub fn block_contents(block: &ElaboratedBlock) -> Result<Value, tide::Error> {
+        Ok(json!({
+            "hash": hash(block.hash().as_ref())?,
+            "transaction_data": block.block.0.iter().map(tx_contents).collect::<Result<Vec<_>, _>>()?,
+        }))
+    }
+
     pub fn txid(block_id: usize, tx_offset: usize) -> Result<Value, tide::Error> {
         let bytes = bincode::serialize(&(block_id, tx_offset)).map_err(server_error)?;
         b64("TX", &bytes)
+    }
+
+    pub fn tx_contents(tx: &TransactionNote) -> Result<Value, tide::Error> {
+        Ok(json!({
+            "type": match tx {
+                TransactionNote::Transfer(_) => "transfer",
+                TransactionNote::Mint(_) => "mint",
+                TransactionNote::Freeze(_) => "freeze",
+            },
+            "fee": match tx {
+                TransactionNote::Transfer(xfr) => xfr.aux_info.fee,
+                TransactionNote::Mint(mint) => mint.aux_info.fee,
+                TransactionNote::Freeze(freeze) => freeze.aux_info.fee,
+            },
+            "inputs": tx.nullifiers().into_iter().map(|n| {
+                nullifier(&n)
+            }).collect::<Result<Vec<_>, tide::Error>>()?,
+            "outputs": tx.output_commitments().into_iter().map(|comm| Ok(json!({
+                "commitment": record_comm(&comm)?
+            }))).collect::<Result<Vec<_>, tide::Error>>()?,
+            "merkle_root": node_value(&tx.merkle_root())?,
+        }))
     }
 
     pub fn tx_output(
@@ -172,6 +226,20 @@ mod js {
     pub fn signature(s: &Signature) -> Result<Value, tide::Error> {
         let bytes = bincode::serialize(s).map_err(server_error)?;
         b64("SIG", &bytes)
+    }
+
+    pub fn merkle_path(path: &MerklePath) -> Result<Value, tide::Error> {
+        Ok(Value::from(
+            path.nodes.iter().map(|node| Ok(json!({
+                "sibling1": node_value(&node.sibling1)?,
+                "sibling2": node_value(&node.sibling2)?,
+                "pos": match node.pos {
+                    Left => "left",
+                    Middle => "middle",
+                    Right => "right",
+                }
+            }))).collect::<Result<Vec<_>, tide::Error>>()?
+        ))
     }
 }
 
@@ -313,17 +381,11 @@ async fn get_block(
         .map_err(server_error)?
         .state;
 
-    Ok(tide::Response::from(json!({
-        "id": js::bkid(index)?,
-        "index": index,
-        "hash": js::hash(block.hash().as_ref())?,
-        "state_commitment": js::hash(&state.commit())?,
-        "transaction_data": block.block.0.iter().enumerate().map(|(i, _)| {
-            Ok(json!({
-                "id": js::txid(index, i)?,
-            }))
-        }).collect::<Result<Vec<_>, tide::Error>>()?,
-    })))
+    Ok(tide::Response::from(js::block(
+        &block,
+        index,
+        &state.commit(),
+    )?))
 }
 
 async fn get_block_id(
@@ -451,6 +513,69 @@ async fn get_unspent_record(
         .as_ref()
         .map(|(memos, _sig)| &memos[output_index]);
     Ok(tide::Response::from(js::tx_output(&comm, uid, memo)?))
+}
+
+async fn subscribe(
+    req: tide::Request<WebState>,
+    bindings: &HashMap<String, RouteBinding>,
+) -> Result<tide::Response, tide::Error> {
+    let index = bindings[":index"].value.as_index()? as u64;
+    Ok(sse::upgrade(req, move |req, sender| async move {
+        let mut events = req.state().query_service.subscribe(index).await;
+        while let Some(event) = events.next().await {
+            match event {
+                LedgerEvent::Commit(block, block_id, state_comm) => {
+                    sender
+                        .send(
+                            "commit",
+                            serde_json::ser::to_string(&js::block(
+                                &block,
+                                block_id as usize,
+                                &state_comm,
+                            )?)?,
+                            None,
+                        )
+                        .await?;
+                }
+
+                LedgerEvent::Reject(block, error) => {
+                    sender
+                        .send(
+                            "reject",
+                            serde_json::ser::to_string(&json!({
+                                "block": js::block_contents(&block)?,
+                                "error": error,
+                            }))?,
+                            None,
+                        )
+                        .await?
+                }
+
+                LedgerEvent::Memos(info) => {
+                    sender
+                        .send(
+                            "memos",
+                            serde_json::ser::to_string(
+                                &info
+                                    .into_iter()
+                                    .map(|(memo, comm, uid, merkle_path)| {
+                                        Ok(json!({
+                                            "memo": js::memo(&memo),
+                                            "commitment": js::record_comm(&comm),
+                                            "uid": uid,
+                                            "merkle_path": js::merkle_path(&merkle_path),
+                                        }))
+                                    })
+                                    .collect::<Result<Vec<_>, _>>()?,
+                            )?,
+                            None,
+                        )
+                        .await?
+                }
+            }
+        }
+        Ok(())
+    }))
 }
 
 pub async fn dispatch_url(
