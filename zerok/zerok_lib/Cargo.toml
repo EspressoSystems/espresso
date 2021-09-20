@@ -14,10 +14,11 @@ jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/j
 jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "2f978e10bf8f379000b4bcca393e25529e4b0b8f"}
 jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "2f978e10bf8f379000b4bcca393e25529e4b0b8f"}
 jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "2f978e10bf8f379000b4bcca393e25529e4b0b8f"}
-phaselock = { version = "0.0.1", registry = "translucence"}
-ark-std = { version = "0.2.0", default-features = false }
-ark-ff = { version = "0.2.0", default-features = false }
-ark-serialize = "0.2.0"
+phaselock = { version = "0.0.1", registry = "translucence" }
+atomic_store = { version = "0.0.1", registry = "translucence" }
+ark-std = { version = "0.3.0", default-features = false }
+ark-ff = { version = "0.3.0", default-features = false }
+ark-serialize = { version = "0.3.0", default-features = false }
 rand_chacha = "0.3.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1.0"

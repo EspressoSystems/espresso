@@ -2,7 +2,7 @@ use crate::{
     key_set::SizedKey,
     set_merkle_tree::*,
     wallet::{LedgerEvent, WalletBackend, WalletError, WalletState},
-    ElaboratedBlock, ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState,
+    Block, ElaboratedBlock, ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState,
     MERKLE_HEIGHT,
 };
 use async_executors::exec::AsyncStd;
@@ -101,7 +101,9 @@ pub struct LedgerSnapshot {
 #[derive(Clone, Debug)]
 pub struct LedgerTransition {
     from_state: LedgerSnapshot,
-    block: ElaboratedBlock,
+    // Because the LedgerSnapshot contains the nullifier set of the prior block, and the FullState
+    // has the latest nullifier set, storing the ElaboratedBlock instead of the Block is redundant.
+    block: Block,
     // Receiver memos come in asynchronously after a block is committed, on a transaction-by-
     // transaction basis. The list of memos corresponding to each transaction in a block will be
     // None until valid memos for that block are received by the sender. Note that this may never
@@ -286,7 +288,7 @@ impl FullState {
                                 state: prev_state,
                                 nullifiers: self.nullifiers.clone(),
                             },
-                            block: (*block).clone(),
+                            block: block.block.clone(),
                             memos: vec![None; block.block.0.len()],
                             uids: block_uids,
                         });
@@ -367,16 +369,15 @@ impl FullState {
         let LedgerTransition {
             block, memos, uids, ..
         } = &mut self.history[block_id];
-        let num_txns = block.block.0.len();
+        let num_txns = block.0.len();
         assert_eq!(memos.len(), num_txns);
         assert_eq!(uids.len(), num_txns);
-        assert_eq!(block.proofs.len(), num_txns);
 
         // Validate `txn_id` and get the relevant information for the transaction within `block`.
         if txn_id >= num_txns {
             return Err(QueryServiceError::InvalidTxnId {});
         }
-        let txn = &block.block.0[txn_id];
+        let txn = &block.0[txn_id];
         let stored_memos = &mut memos[txn_id];
         let uids = &uids[txn_id];
 
