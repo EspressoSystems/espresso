@@ -117,7 +117,7 @@ ERROR_output_index = "No such output. The output index must be non-negative and 
 ERROR_mempool = "The mempool parameter must be Boolean. The value 'true' indicates mempool information is wanted."
 
 [route.subscribe]
-PATH = ["/subscribe/:index"]
+PATH = ["subscribe/:index"]
 ":index" = "Integer"
 DOC = """
 A server-sent event (SSE) endpoint which opens a data stream between the server and client. Each

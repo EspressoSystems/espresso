@@ -2,7 +2,10 @@
 
 use crate::WebState;
 use futures::prelude::*;
-use jf_primitives::{jubjub_dsa::Signature, merkle_tree::{MerklePath, NodeValue}};
+use jf_primitives::{
+    jubjub_dsa::Signature,
+    merkle_tree::{MerklePath, NodePos, NodeValue},
+};
 use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
 use jf_txn::TransactionNote;
 use phaselock::BlockContents;
@@ -230,16 +233,25 @@ mod js {
 
     pub fn merkle_path(path: &MerklePath) -> Result<Value, tide::Error> {
         Ok(Value::from(
-            path.nodes.iter().map(|node| Ok(json!({
-                "sibling1": node_value(&node.sibling1)?,
-                "sibling2": node_value(&node.sibling2)?,
-                "pos": match node.pos {
-                    Left => "left",
-                    Middle => "middle",
-                    Right => "right",
-                }
-            }))).collect::<Result<Vec<_>, tide::Error>>()?
+            path.nodes
+                .iter()
+                .map(|node| {
+                    Ok(json!({
+                        "sibling1": node_value(&node.sibling1)?,
+                        "sibling2": node_value(&node.sibling2)?,
+                        "pos": match node.pos {
+                            NodePos::Left => "left",
+                            NodePos::Middle => "middle",
+                            NodePos::Right => "right",
+                        }
+                    }))
+                })
+                .collect::<Result<Vec<_>, tide::Error>>()?,
         ))
+    }
+
+    pub fn to_string(value: &Value) -> Result<String, tide::Error> {
+        serde_json::ser::to_string(value).map_err(server_error)
     }
 }
 
@@ -277,6 +289,7 @@ pub enum ApiRouteKey {
     gettransaction,
     getunspentrecord,
     getunspentrecordsetinfo,
+    subscribe,
 }
 
 /// Verifiy that every variant of enum ApiRouteKey is defined in api.toml
@@ -528,23 +541,46 @@ async fn subscribe(
                     sender
                         .send(
                             "commit",
-                            serde_json::ser::to_string(&js::block(
-                                &block,
-                                block_id as usize,
-                                &state_comm,
-                            )?)?,
+                            js::to_string(&js::block(&block, block_id as usize, &state_comm)?)?,
                             None,
                         )
                         .await?;
                 }
 
                 LedgerEvent::Reject(block, error) => {
+                    use zerok_lib::ValidationError::*;
+                    let error_msg = match error {
+                        NullifierAlreadyExists { nullifier } => format!(
+                            "the nullifier {} has already been spent",
+                            js::to_string(&js::nullifier(&nullifier)?)?
+                        ),
+                        BadNullifierProof {} => String::from("bad nullifier proof"),
+                        MissingNullifierProof {} => String::from("missing nullifier proof"),
+                        ConflictingNullifiers {} => String::from("conflicting nullifiers"),
+                        Failed {} => String::from("unknown validation failure"),
+                        BadMerkleLength {} => String::from("bad merkle path length"),
+                        BadMerkleLeaf {} => String::from("bad merkle path leaf"),
+                        BadMerkleRoot {} => String::from("bad merkle root"),
+                        BadMerklePath {} => String::from("bad merkle path"),
+                        CryptoError { err } => format!("{}", err),
+                        UnsupportedTransferSize {
+                            num_inputs,
+                            num_outputs,
+                        } => format!(
+                            "transfers with {} inputs and {} outputs are not supported",
+                            num_inputs, num_outputs
+                        ),
+                        UnsupportedFreezeSize { num_inputs } => {
+                            format!("freezes with {} inputs are not supported", num_inputs)
+                        }
+                    };
+
                     sender
                         .send(
                             "reject",
-                            serde_json::ser::to_string(&json!({
+                            js::to_string(&json!({
                                 "block": js::block_contents(&block)?,
-                                "error": error,
+                                "error": error_msg,
                             }))?,
                             None,
                         )
@@ -560,13 +596,13 @@ async fn subscribe(
                                     .into_iter()
                                     .map(|(memo, comm, uid, merkle_path)| {
                                         Ok(json!({
-                                            "memo": js::memo(&memo),
-                                            "commitment": js::record_comm(&comm),
+                                            "memo": js::memo(&memo)?,
+                                            "commitment": js::record_comm(&comm)?,
                                             "uid": uid,
-                                            "merkle_path": js::merkle_path(&merkle_path),
+                                            "merkle_path": js::merkle_path(&merkle_path)?,
                                         }))
                                     })
-                                    .collect::<Result<Vec<_>, _>>()?,
+                                    .collect::<Result<Vec<_>, tide::Error>>()?,
                             )?,
                             None,
                         )
@@ -579,9 +615,9 @@ async fn subscribe(
 }
 
 pub async fn dispatch_url(
+    req: tide::Request<WebState>,
     route_pattern: &str,
     bindings: &HashMap<String, RouteBinding>,
-    query_service: &(impl QueryService + Sync),
 ) -> Result<tide::Response, tide::Error> {
     let first_segment = route_pattern
         .split_once('/')
@@ -589,14 +625,15 @@ pub async fn dispatch_url(
         .0;
     let key = ApiRouteKey::from_str(first_segment).expect("Unknown route");
     match key {
-        ApiRouteKey::getblock => get_block(bindings, query_service).await,
-        ApiRouteKey::getblockcount => get_block_count(query_service).await,
-        ApiRouteKey::getblockhash => get_block_hash(bindings, query_service).await,
-        ApiRouteKey::getblockid => get_block_id(bindings, query_service).await,
-        ApiRouteKey::getinfo => get_info(query_service).await,
+        ApiRouteKey::getblock => get_block(bindings, &req.state().query_service).await,
+        ApiRouteKey::getblockcount => get_block_count(&req.state().query_service).await,
+        ApiRouteKey::getblockhash => get_block_hash(bindings, &req.state().query_service).await,
+        ApiRouteKey::getblockid => get_block_id(bindings, &req.state().query_service).await,
+        ApiRouteKey::getinfo => get_info(&req.state().query_service).await,
         ApiRouteKey::getmempool => dummy_url_eval(route_pattern, bindings),
-        ApiRouteKey::gettransaction => get_transaction(bindings, query_service).await,
-        ApiRouteKey::getunspentrecord => get_unspent_record(bindings, query_service).await,
+        ApiRouteKey::gettransaction => get_transaction(bindings, &req.state().query_service).await,
+        ApiRouteKey::getunspentrecord => get_unspent_record(bindings, &req.state().query_service).await,
         ApiRouteKey::getunspentrecordsetinfo => dummy_url_eval(route_pattern, bindings),
+        ApiRouteKey::subscribe => subscribe(req, bindings).await,
     }
 }
