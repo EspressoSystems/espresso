@@ -2471,7 +2471,7 @@ dependencies = [
  "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=dfb681df8d218f9dca5ddb68b5213f44ef6a8490)",
  "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=dfb681df8d218f9dca5ddb68b5213f44ef6a8490)",
  "phaselock",
- "rand_xoshiro",
+ "rand_chacha 0.2.2",
  "serde",
  "serde_derive",
  "serde_json",
