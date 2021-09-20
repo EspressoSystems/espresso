@@ -12,7 +12,6 @@ use futures::{
     prelude::*,
     stream::{iter, Stream},
 };
-use jf_primitives::{jubjub_dsa::Signature, merkle_tree};
 use jf_txn::{
     errors::TxnApiError,
     freeze::{FreezeNote, FreezeNoteInput},
@@ -27,10 +26,9 @@ use jf_txn::{
         Nullifier, ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
-    TransactionNote,
+    AccMemberWitness, MerkleTree, Signature, TransactionNote,
 };
 use key_set::KeySet;
-use merkle_tree::{AccMemberWitness, MerkleTree};
 use rand_chacha::ChaChaRng;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -355,7 +353,7 @@ impl<'a> WalletState<'a> {
                 ) {
                     Ok(uids) => {
                         if state_comm != self.validator.commit() {
-                            // Received a block which validates, but our state commitment does not 
+                            // Received a block which validates, but our state commitment does not
                             // match that of the event source. Since the block validates, we will
                             // accept it, but this must indicate that the event source is lying or
                             // mistaken about the state commitment. This would be a good time to
@@ -438,7 +436,7 @@ impl<'a> WalletState<'a> {
                         self.records.insert(record_opening, uid, &session.key_pair);
                         if self
                             .record_merkle_tree_mut()
-                            .remember(uid, comm, &proof)
+                            .remember(uid, comm.to_field_element(), &proof)
                             .is_err()
                         {
                             println!(
@@ -1381,11 +1379,11 @@ impl<'a> WalletState<'a> {
         Ok(proving_key)
     }
 
-    fn record_merkle_tree(&self) -> &MerkleTree<RecordCommitment> {
+    fn record_merkle_tree(&self) -> &MerkleTree {
         &self.validator.record_merkle_frontier
     }
 
-    fn record_merkle_tree_mut(&mut self) -> &mut MerkleTree<RecordCommitment> {
+    fn record_merkle_tree_mut(&mut self) -> &mut MerkleTree {
         &mut self.validator.record_merkle_frontier
     }
 }
@@ -1624,6 +1622,7 @@ pub mod test_helpers {
                     self.generate_event(LedgerEvent::Commit(
                         block.clone(),
                         self.committed_blocks.len() as u64,
+                        self.validator.commit(),
                     ));
                     let mut block_uids = vec![];
                     for txn in block.block.0.iter() {
@@ -1852,7 +1851,7 @@ pub mod test_helpers {
                 );
                 let comm = RecordCommitment::from(&ro);
                 let uid = record_merkle_tree.num_leaves();
-                record_merkle_tree.push(comm);
+                record_merkle_tree.push(comm.to_field_element());
                 users.push((key, vec![(ro, uid)]));
             } else {
                 users.push((key, vec![]));
@@ -2253,6 +2252,7 @@ pub mod test_helpers {
 mod tests {
     use super::*;
     use async_std::task::block_on;
+    use jf_txn::NodeValue;
     use proptest::collection::vec;
     use proptest::strategy::Strategy;
     use std::time::Instant;
@@ -2562,7 +2562,7 @@ mod tests {
                 // Change the validator state, so that the wallet's transaction (built against the
                 // old validator state) will fail to validate.
                 let old_record_merkle_root = ledger.validator.record_merkle_root;
-                ledger.validator.record_merkle_root = merkle_tree::NodeValue::from(0);
+                ledger.validator.record_merkle_root = NodeValue::from(0);
 
                 println!(
                     "validating invalid transaction: {}s",

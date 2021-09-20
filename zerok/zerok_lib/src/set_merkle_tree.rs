@@ -1,8 +1,11 @@
 #![deny(warnings)]
 #![allow(dead_code)]
 
-use crate::util::byte_array_to_bits;
+use crate::deserialize_canonical_bytes;
+use crate::util::{byte_array_to_bits, canonical};
+use ark_serialize::*;
 use bitvec::vec::BitVec;
+use canonical::CanonicalBytes;
 use core::mem;
 use jf_txn::structs::Nullifier;
 use serde::{Deserialize, Serialize};
@@ -12,7 +15,6 @@ pub mod set_hash {
     use super::*;
     use blake2::crypto_mac::Mac;
     use generic_array::GenericArray;
-    use jf_utils::serialize::CanonicalBytes;
     pub type Hash = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
     lazy_static::lazy_static! {
         pub static ref EMPTY_HASH: Hash = GenericArray::<_,_>::default();
@@ -20,13 +22,13 @@ pub mod set_hash {
 
     pub fn elem_hash(x: Nullifier) -> Hash {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Elem".as_bytes());
-        hasher.update(&CanonicalBytes::from(x).0);
+        hasher.update(&canonical::serialize(&x).unwrap());
         hasher.finalize().into_bytes()
     }
 
     pub fn leaf_hash(x: Nullifier) -> Hash {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Leaf".as_bytes());
-        hasher.update(&CanonicalBytes::from(x).0);
+        hasher.update(&canonical::serialize(&x).unwrap());
         hasher.finalize().into_bytes()
     }
 
@@ -98,6 +100,7 @@ impl Default for SetMerkleTree {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "CanonicalBytes", into = "CanonicalBytes")]
 pub enum SetMerkleTerminalNode {
     EmptySubtree,
     Leaf {
@@ -105,6 +108,48 @@ pub enum SetMerkleTerminalNode {
         height: usize,
         elem: Nullifier,
     },
+}
+
+deserialize_canonical_bytes!(SetMerkleTerminalNode);
+
+impl CanonicalSerialize for SetMerkleTerminalNode {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        match self {
+            SetMerkleTerminalNode::EmptySubtree => {
+                writer.write_all(&[0]).map_err(SerializationError::from)
+            }
+            SetMerkleTerminalNode::Leaf { height, elem } => {
+                writer.write_all(&[1]).map_err(SerializationError::from)?;
+                <usize as CanonicalSerialize>::serialize(height, &mut writer)?;
+                elem.serialize(&mut writer)
+            }
+        }
+    }
+
+    fn serialized_size(&self) -> usize {
+        1 + match self {
+            SetMerkleTerminalNode::EmptySubtree => 0,
+            SetMerkleTerminalNode::Leaf { height, elem } => {
+                height.serialized_size() + elem.serialized_size()
+            }
+        }
+    }
+}
+
+impl CanonicalDeserialize for SetMerkleTerminalNode {
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut flag = [0u8];
+        reader.read_exact(&mut flag)?;
+        match flag[0] {
+            0 => Ok(SetMerkleTerminalNode::EmptySubtree),
+            1 => {
+                let height = CanonicalDeserialize::deserialize(&mut reader)?;
+                let elem = CanonicalDeserialize::deserialize(&mut reader)?;
+                Ok(SetMerkleTerminalNode::Leaf { height, elem })
+            }
+            _ => Err(SerializationError::InvalidData),
+        }
+    }
 }
 
 impl SetMerkleTerminalNode {
@@ -141,6 +186,42 @@ impl SetMerkleTerminalNode {
 pub struct SetMerkleProof {
     terminal_node: SetMerkleTerminalNode,
     path: Vec<set_hash::Hash>,
+}
+
+impl CanonicalSerialize for SetMerkleProof {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        CanonicalSerialize::serialize(&self.terminal_node, &mut writer)?;
+        CanonicalSerialize::serialize(&self.path.len(), &mut writer)?;
+        for hash in &self.path {
+            writer.write_all(&*hash).map_err(SerializationError::from)?;
+        }
+        Ok(())
+    }
+
+    fn serialized_size(&self) -> usize {
+        return self.terminal_node.serialized_size()
+            + self.path.iter().map(|hash| hash.len()).sum::<usize>();
+    }
+}
+
+impl CanonicalDeserialize for SetMerkleProof {
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let terminal_node = CanonicalDeserialize::deserialize(&mut reader)?;
+        let path_len: usize = CanonicalDeserialize::deserialize(&mut reader)?;
+        let path = (0..path_len)
+            .map(|_| {
+                let mut buf = set_hash::Hash::default();
+                reader
+                    .read_exact(&mut buf)
+                    .map_err(SerializationError::from)?;
+                Ok(buf)
+            })
+            .collect::<Result<Vec<_>, SerializationError>>()?;
+        Ok(Self {
+            terminal_node,
+            path,
+        })
+    }
 }
 
 impl SetMerkleProof {

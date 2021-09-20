@@ -1,3 +1,4 @@
+pub use crate::state_comm::LedgerStateCommitment;
 use crate::{
     key_set::SizedKey,
     set_merkle_tree::*,
@@ -5,7 +6,6 @@ use crate::{
     ElaboratedBlock, ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState,
     MERKLE_HEIGHT,
 };
-pub use crate::state_comm::LedgerStateCommitment;
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
 use async_trait::async_trait;
@@ -15,12 +15,11 @@ pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::task::SpawnExt;
 use itertools::izip;
-use jf_primitives::{
-    jubjub_dsa::Signature,
-    merkle_tree::{MerklePath, MerkleTree},
+use jf_txn::{
+    keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey},
+    structs::{Nullifier, ReceiverMemo, RecordCommitment},
+    MerklePath, MerkleTree, Signature,
 };
-use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey};
-use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
 use phaselock::{
     error::PhaseLockError,
     event::EventType,
@@ -522,7 +521,7 @@ impl<'a> PhaseLockQueryService<'a> {
         // a fresh network.
         univ_param: &'a jf_txn::proof::UniversalParam,
         mut validator: ValidatorState,
-        record_merkle_tree: MerkleTree<RecordCommitment>,
+        record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
     ) -> Self {
@@ -575,6 +574,10 @@ impl<'a> PhaseLockQueryService<'a> {
                                     .unwrap()
                             })
                             .unzip();
+                        let comms = comms
+                            .into_iter()
+                            .map(RecordCommitment::from_field_element)
+                            .collect::<Vec<_>>();
                         state.send_event(LedgerEvent::Memos(
                             izip!(memos, comms, uids, merkle_paths).collect(),
                         ));
@@ -698,7 +701,7 @@ impl<'a> FullNode<'a> {
         // a fresh network.
         univ_param: &'a jf_txn::proof::UniversalParam,
         state: ValidatorState,
-        record_merkle_tree: MerkleTree<RecordCommitment>,
+        record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
     ) -> Self {
@@ -932,8 +935,7 @@ mod tests {
     use crate::{wallet::Wallet, MultiXfrRecordSpec, MultiXfrTestState, UNIVERSAL_PARAM};
     use async_std::task::block_on;
     use jf_primitives::jubjub_dsa::KeyPair;
-    use jf_primitives::merkle_tree::MerkleTree;
-    use jf_txn::{sign_receiver_memos, structs::AssetCode};
+    use jf_txn::{sign_receiver_memos, structs::AssetCode, MerkleTree};
     use phaselock::{
         tc::SecretKeySet,
         traits::storage::memory_storage::MemoryStorage,
@@ -967,7 +969,7 @@ mod tests {
     ) -> (
         (
             ValidatorState,
-            MerkleTree<RecordCommitment>,
+            MerkleTree,
             SetMerkleTree,
             Vec<(ReceiverMemo, u64)>,
         ),
@@ -1175,7 +1177,7 @@ mod tests {
                                 MerkleTree::check_proof(
                                     state.record_merkle_frontier.get_root_value(),
                                     uid,
-                                    comm,
+                                    comm.to_field_element(),
                                     &merkle_path,
                                 )
                                 .unwrap();
