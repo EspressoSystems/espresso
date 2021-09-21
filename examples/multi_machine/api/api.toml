@@ -115,3 +115,18 @@ record_data: details about an unspent record from the *n*th output of the given 
 ERROR_txid = "A valid transaction identifier is required. Transaction identifiers begin with TX~, for example, TX~Ab-3D_x5."
 ERROR_output_index = "No such output. The output index must be non-negative and less than the number of outputs."
 ERROR_mempool = "The mempool parameter must be Boolean. The value 'true' indicates mempool information is wanted."
+
+[route.subscribe]
+PATH = ["subscribe/:index"]
+":index" = "Integer"
+DOC = """
+A server-sent event (SSE) endpoint which opens a data stream between the server and client. Each
+time the state of the ledger changes or something of interest happens, the query service will
+generate an event and send it over the stream. For example, events are generated when new blocks are
+added to the ledger, when submitted blocks are rejected by validators, and when receiver memos are
+posted for a previously accepted block.
+
+The :index URL parameter can be used to subscribe starting a particular event index. Use :index 0 to
+subscribe to all events in the history of the network.
+"""
+ERROR_index = "The event index must be a non-negative integer."

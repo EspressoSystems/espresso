@@ -1,8 +1,11 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
+use crate::WebState;
+use futures::prelude::*;
+use jf_primitives::merkle_tree::NodePos;
 use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
 use jf_txn::TransactionNote;
-use jf_txn::{NodeValue, Signature};
+use jf_txn::{MerklePath, NodeValue, Signature};
 use phaselock::BlockContents;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -11,10 +14,12 @@ use strum::IntoEnumIterator;
 use strum_macros::{AsRefStr, EnumIter, EnumString};
 use tagged_base64::TaggedBase64;
 use tide::prelude::*;
+use tide::sse;
 use tide::StatusCode;
 use tracing::{event, Level};
 use zerok_lib::canonical;
-use zerok_lib::node::{LedgerTransition, QueryService};
+use zerok_lib::node::{LedgerEvent, LedgerTransition, QueryService};
+use zerok_lib::ElaboratedBlock;
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -131,9 +136,59 @@ mod js {
         b64("BK", &bytes)
     }
 
+    // Serialize a committed block, with references to the ledger such as the block's unique ID and
+    // the IDs of its transactions.
+    pub fn block(
+        block: &ElaboratedBlock,
+        block_id: usize,
+        state_comm: &[u8],
+    ) -> Result<Value, tide::Error> {
+        Ok(json!({
+            "id": bkid(block_id)?,
+            "index": block_id,
+            "hash": hash(block.hash().as_ref())?,
+            "state_commitment": hash(state_comm)?,
+            "transaction_data": block.block.0.iter().enumerate().map(|(i, _)| {
+                Ok(json!({
+                    "id": txid(block_id, i)?,
+                }))
+            }).collect::<Result<Vec<_>, tide::Error>>()?,
+        }))
+    }
+
+    // Serialize an uncommitted block.
+    pub fn block_contents(block: &ElaboratedBlock) -> Result<Value, tide::Error> {
+        Ok(json!({
+            "hash": hash(block.hash().as_ref())?,
+            "transaction_data": block.block.0.iter().map(tx_contents).collect::<Result<Vec<_>, _>>()?,
+        }))
+    }
+
     pub fn txid(block_id: usize, tx_offset: usize) -> Result<Value, tide::Error> {
         let bytes = canonical::serialize(&(block_id, tx_offset)).map_err(server_error)?;
         b64("TX", &bytes)
+    }
+
+    pub fn tx_contents(tx: &TransactionNote) -> Result<Value, tide::Error> {
+        Ok(json!({
+            "type": match tx {
+                TransactionNote::Transfer(_) => "transfer",
+                TransactionNote::Mint(_) => "mint",
+                TransactionNote::Freeze(_) => "freeze",
+            },
+            "fee": match tx {
+                TransactionNote::Transfer(xfr) => xfr.aux_info.fee,
+                TransactionNote::Mint(mint) => mint.aux_info.fee,
+                TransactionNote::Freeze(freeze) => freeze.aux_info.fee,
+            },
+            "inputs": tx.nullifiers().into_iter().map(|n| {
+                nullifier(&n)
+            }).collect::<Result<Vec<_>, tide::Error>>()?,
+            "outputs": tx.output_commitments().into_iter().map(|comm| Ok(json!({
+                "commitment": record_comm(&comm)?
+            }))).collect::<Result<Vec<_>, tide::Error>>()?,
+            "merkle_root": node_value(&tx.merkle_root())?,
+        }))
     }
 
     pub fn tx_output(
@@ -174,6 +229,29 @@ mod js {
         let bytes = canonical::serialize(s).map_err(server_error)?;
         b64("SIG", &bytes)
     }
+
+    pub fn merkle_path(path: &MerklePath) -> Result<Value, tide::Error> {
+        Ok(Value::from(
+            path.nodes
+                .iter()
+                .map(|node| {
+                    Ok(json!({
+                        "sibling1": node_value(&node.sibling1)?,
+                        "sibling2": node_value(&node.sibling2)?,
+                        "pos": match node.pos {
+                            NodePos::Left => "left",
+                            NodePos::Middle => "middle",
+                            NodePos::Right => "right",
+                        }
+                    }))
+                })
+                .collect::<Result<Vec<_>, tide::Error>>()?,
+        ))
+    }
+
+    pub fn to_string(value: &Value) -> Result<String, tide::Error> {
+        serde_json::ser::to_string(value).map_err(server_error)
+    }
 }
 
 fn server_error(err: impl std::error::Error + Debug + Send + Sync + 'static) -> tide::Error {
@@ -210,6 +288,7 @@ pub enum ApiRouteKey {
     gettransaction,
     getunspentrecord,
     getunspentrecordsetinfo,
+    subscribe,
 }
 
 /// Verifiy that every variant of enum ApiRouteKey is defined in api.toml
@@ -314,17 +393,11 @@ async fn get_block(
         .map_err(server_error)?
         .state;
 
-    Ok(tide::Response::from(json!({
-        "id": js::bkid(index)?,
-        "index": index,
-        "hash": js::hash(block.hash().as_ref())?,
-        "state_commitment": js::hash(&state.commit())?,
-        "transaction_data": block.block.0.iter().enumerate().map(|(i, _)| {
-            Ok(json!({
-                "id": js::txid(index, i)?,
-            }))
-        }).collect::<Result<Vec<_>, tide::Error>>()?,
-    })))
+    Ok(tide::Response::from(js::block(
+        &block,
+        index,
+        &state.commit(),
+    )?))
 }
 
 async fn get_block_id(
@@ -454,10 +527,96 @@ async fn get_unspent_record(
     Ok(tide::Response::from(js::tx_output(&comm, uid, memo)?))
 }
 
+async fn subscribe(
+    req: tide::Request<WebState>,
+    bindings: &HashMap<String, RouteBinding>,
+) -> Result<tide::Response, tide::Error> {
+    let index = bindings[":index"].value.as_index()? as u64;
+    Ok(sse::upgrade(req, move |req, sender| async move {
+        let mut events = req.state().query_service.subscribe(index).await;
+        while let Some(event) = events.next().await {
+            match event {
+                LedgerEvent::Commit(block, block_id, state_comm) => {
+                    sender
+                        .send(
+                            "commit",
+                            js::to_string(&js::block(&block, block_id as usize, &state_comm)?)?,
+                            None,
+                        )
+                        .await?;
+                }
+
+                LedgerEvent::Reject(block, error) => {
+                    use zerok_lib::ValidationError::*;
+                    let error_msg = match error {
+                        NullifierAlreadyExists { nullifier } => format!(
+                            "the nullifier {} has already been spent",
+                            js::to_string(&js::nullifier(&nullifier)?)?
+                        ),
+                        BadNullifierProof {} => String::from("bad nullifier proof"),
+                        MissingNullifierProof {} => String::from("missing nullifier proof"),
+                        ConflictingNullifiers {} => String::from("conflicting nullifiers"),
+                        Failed {} => String::from("unknown validation failure"),
+                        BadMerkleLength {} => String::from("bad merkle path length"),
+                        BadMerkleLeaf {} => String::from("bad merkle path leaf"),
+                        BadMerkleRoot {} => String::from("bad merkle root"),
+                        BadMerklePath {} => String::from("bad merkle path"),
+                        CryptoError { err } => format!("{}", err),
+                        UnsupportedTransferSize {
+                            num_inputs,
+                            num_outputs,
+                        } => format!(
+                            "transfers with {} inputs and {} outputs are not supported",
+                            num_inputs, num_outputs
+                        ),
+                        UnsupportedFreezeSize { num_inputs } => {
+                            format!("freezes with {} inputs are not supported", num_inputs)
+                        }
+                    };
+
+                    sender
+                        .send(
+                            "reject",
+                            js::to_string(&json!({
+                                "block": js::block_contents(&block)?,
+                                "error": error_msg,
+                            }))?,
+                            None,
+                        )
+                        .await?
+                }
+
+                LedgerEvent::Memos(info) => {
+                    sender
+                        .send(
+                            "memos",
+                            serde_json::ser::to_string(
+                                &info
+                                    .into_iter()
+                                    .map(|(memo, comm, uid, merkle_path)| {
+                                        Ok(json!({
+                                            "memo": js::memo(&memo)?,
+                                            "commitment": js::record_comm(&comm)?,
+                                            "uid": uid,
+                                            "merkle_path": js::merkle_path(&merkle_path)?,
+                                        }))
+                                    })
+                                    .collect::<Result<Vec<_>, tide::Error>>()?,
+                            )?,
+                            None,
+                        )
+                        .await?
+                }
+            }
+        }
+        Ok(())
+    }))
+}
+
 pub async fn dispatch_url(
+    req: tide::Request<WebState>,
     route_pattern: &str,
     bindings: &HashMap<String, RouteBinding>,
-    query_service: &(impl QueryService + Sync),
 ) -> Result<tide::Response, tide::Error> {
     let first_segment = route_pattern
         .split_once('/')
@@ -465,14 +624,17 @@ pub async fn dispatch_url(
         .0;
     let key = ApiRouteKey::from_str(first_segment).expect("Unknown route");
     match key {
-        ApiRouteKey::getblock => get_block(bindings, query_service).await,
-        ApiRouteKey::getblockcount => get_block_count(query_service).await,
-        ApiRouteKey::getblockhash => get_block_hash(bindings, query_service).await,
-        ApiRouteKey::getblockid => get_block_id(bindings, query_service).await,
-        ApiRouteKey::getinfo => get_info(query_service).await,
+        ApiRouteKey::getblock => get_block(bindings, &req.state().query_service).await,
+        ApiRouteKey::getblockcount => get_block_count(&req.state().query_service).await,
+        ApiRouteKey::getblockhash => get_block_hash(bindings, &req.state().query_service).await,
+        ApiRouteKey::getblockid => get_block_id(bindings, &req.state().query_service).await,
+        ApiRouteKey::getinfo => get_info(&req.state().query_service).await,
         ApiRouteKey::getmempool => dummy_url_eval(route_pattern, bindings),
-        ApiRouteKey::gettransaction => get_transaction(bindings, query_service).await,
-        ApiRouteKey::getunspentrecord => get_unspent_record(bindings, query_service).await,
+        ApiRouteKey::gettransaction => get_transaction(bindings, &req.state().query_service).await,
+        ApiRouteKey::getunspentrecord => {
+            get_unspent_record(bindings, &req.state().query_service).await
+        }
         ApiRouteKey::getunspentrecordsetinfo => dummy_url_eval(route_pattern, bindings),
+        ApiRouteKey::subscribe => subscribe(req, bindings).await,
     }
 }

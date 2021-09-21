@@ -346,7 +346,7 @@ struct Connection {
 }
 
 #[derive(Clone)]
-struct WebState {
+pub struct WebState {
     connections: Arc<RwLock<HashMap<String, Connection>>>,
     web_path: String,
     api: toml::Value,
@@ -447,8 +447,8 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
         .ok_or_else(|| internal_error("Missing DOC"))?
         .to_string();
     let mut matching_route_count = 0u64;
-    let mut matching_route = "";
-    let mut bindings: HashMap<&str, HashMap<String, RouteBinding>> = HashMap::new();
+    let mut matching_route = String::new();
+    let mut bindings: HashMap<String, HashMap<String, RouteBinding>> = HashMap::new();
     for route_pattern in route_patterns.iter() {
         let mut found_literal_mismatch = false;
         let mut argument_parse_failed = false;
@@ -483,7 +483,7 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
                         value,
                     };
                     bindings
-                        .entry(route_pattern.as_str().unwrap())
+                        .entry(String::from(route_pattern.as_str().unwrap()))
                         .or_default()
                         .insert(pat_segment.to_string(), rb);
                     arg_doc.push_str("(Parse succeeded)\n");
@@ -526,39 +526,27 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
             let route_pattern_str = route_pattern.as_str().unwrap();
             arg_doc.push_str(&format!("Route matches request: {}\n", &route_pattern_str));
             matching_route_count += 1;
-            matching_route = route_pattern_str;
+            matching_route = String::from(route_pattern_str);
         } else {
             arg_doc.push_str("Route does not match request.\n");
         }
     }
     match matching_route_count {
         0 => arg_doc.push_str("\nNeed documentation"),
-        1 => arg_doc.push_str(&format!(
-            "\nCould dispatch: {}\n{:?}\nDispatch results:\n{:?}",
-            matching_route,
-            bindings.get(&matching_route).unwrap_or(&Default::default()),
-            dispatch_url(
-                matching_route,
+        1 => {
+            return dispatch_url(
+                req,
+                matching_route.as_str(),
                 bindings.get(&matching_route).unwrap_or(&Default::default()),
-                &req.state().query_service
             )
-            .await?
-        )),
+            .await;
+        }
         _ => arg_doc.push_str("\nAmbiguity in api.toml"),
     }
 
     // TODO !corbett set the mime type to text/html and convert the
     // string from markdown to html
-    if matching_route_count == 1 {
-        Ok(dispatch_url(
-            matching_route,
-            bindings.get(&matching_route).unwrap_or(&Default::default()),
-            &req.state().query_service,
-        )
-        .await?)
-    } else {
-        Ok(tide::Response::builder(200).body(arg_doc).build())
-    }
+    Ok(tide::Response::builder(200).body(arg_doc).build())
 }
 
 async fn handle_web_socket(
