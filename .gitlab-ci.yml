@@ -22,11 +22,6 @@ lint:fmt:
     - docker
   script:
     - cargo fmt -- --check
-  cache:
-    key: fmt-cache
-    paths:
-      - .cargo/
-      - target/
 
 lint:clippy:
   stage: lint
@@ -52,29 +47,18 @@ lint:audit:
       - .cargo/
       - target/
 
-check:
-  stage: check
-  tags:
-    - docker
-  script:
-    - cargo check
-  cache:
-    key: check-cache
-    paths:
-      - .cargo/
-      - target/
-
-build:
-  stage: build
-  tags:
-    - docker
-  script:
-    - cargo build --workspace --release
-  cache:
-    key: build-cache
-    paths:
-      - .cargo/
-      - target/
+## Unneeded until we are exporting artifacts for other uses
+#build:
+#  stage: build
+#  tags:
+#    - docker
+#  script:
+#    - cargo build --workspace --release
+#  cache:
+#    key: build-cache
+#    paths:
+#      - .cargo/
+#      - target/
 
 test:
   stage: test
