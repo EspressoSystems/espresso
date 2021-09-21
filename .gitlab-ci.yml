@@ -1,3 +1,6 @@
+variables:
+  FF_USE_FASTZIP: 1
+
 image: registry.gitlab.com/asuran-rs/containers/rust-sccache-docker:1.54
 
 stages:
