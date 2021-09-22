@@ -23,15 +23,18 @@ use futures::prelude::*;
 use itertools::izip;
 use phaselock::BlockContents;
 use serde::Deserialize;
+use snafu::ResultExt;
 use std::fmt::Display;
 use std::time::Duration;
 use structopt::StructOpt;
 use strum::AsStaticRef;
 use surf_sse::{EventSource, Url};
 use tracing::{event, Level};
+use wallet::{network::NetworkBackend, Wallet};
 use zerok_lib::api::*;
-use zerok_lib::node::{LedgerEvent, LedgerSummary};
-use zerok_lib::ElaboratedBlock;
+use zerok_lib::node::{LedgerEvent, LedgerSummary, QueryServiceError};
+use zerok_lib::wallet;
+use zerok_lib::{ElaboratedBlock, UNIVERSAL_PARAM};
 
 #[derive(StructOpt)]
 struct Args {
@@ -52,7 +55,34 @@ fn url(route: impl Display) -> Url {
 async fn get<T: for<'de> Deserialize<'de>, S: Display>(route: S) -> T {
     let url = url(route);
     event!(Level::INFO, "GET {}", url);
-    serde_json::from_value(surf::get(url).recv_json().await.unwrap()).unwrap()
+    middleware::response_body(
+        &mut surf::get(url)
+            .middleware(middleware::parse_error_body)
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+
+async fn get_error(route: impl Display) -> Error {
+    let url = url(route);
+    event!(Level::INFO, "GET {}", url);
+    match surf::get(url)
+        .middleware(middleware::parse_error_body)
+        .send()
+        .await
+        .context(ClientError)
+    {
+        Err(err) => err,
+        Ok(mut res) => {
+            panic!(
+                "expected error, but got Ok response: {}",
+                res.body_string().await.unwrap()
+            )
+        }
+    }
 }
 
 async fn validate_committed_block(
@@ -173,4 +203,19 @@ async fn main() {
         let ledger_event: LedgerEvent = serde_json::from_str(event.data.as_str()).unwrap();
         assert_eq!(event.event, ledger_event.as_static());
     }
+
+    // Test some invalid endpoints; check that error response bodies contain error descriptions.
+    match get_error(format!("/getblock/index/{}", num_blocks)).await {
+        Error::QueryServiceError {
+            source: QueryServiceError::InvalidBlockId { .. },
+        } => {}
+        err => panic!("expected InvalidBlockId, got {}", err),
+    }
+
+    // Check that we can create a wallet using this server as a backend.
+    let url = url("/");
+    let _wallet = Wallet::new(
+        wallet::new_key_pair(),
+        NetworkBackend::new(&*UNIVERSAL_PARAM, url.clone(), url.clone(), url).unwrap(),
+    );
 }

@@ -23,6 +23,7 @@ use std::time::Duration;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use threshold_crypto as tc;
+use tide::StatusCode;
 use tide_websockets::{
     async_tungstenite::tungstenite::protocol::frame::coding::CloseCode, Message::Close, WebSocket,
     WebSocketConnection,
@@ -31,7 +32,7 @@ use toml::Value;
 use tracing::debug;
 use tracing::{event, Level};
 use zerok_lib::{
-    node::*, ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState,
+    api::*, node::*, ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState,
 };
 
 mod config;
@@ -380,7 +381,7 @@ pub struct WebState {
     connections: Arc<RwLock<HashMap<String, Connection>>>,
     web_path: String,
     api: toml::Value,
-    query_service: FullNode<'static>,
+    node: Arc<RwLock<FullNode<'static>>>,
 }
 
 impl WebState {
@@ -437,6 +438,37 @@ impl WebState {
             .await?;
         Ok(())
     }
+}
+
+async fn submit_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    let tx = req.body_json().await?;
+    let validator = req.state().node.read().await;
+    validator
+        .submit_transaction(tx)
+        .await
+        .map_err(server_error)?;
+    Ok(tide::Response::new(StatusCode::Ok))
+}
+
+async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    let PostMemos { memos, signature } = req.body_json().await?;
+    let mut bulletin = req.state().node.write().await;
+    let TransactionId(BlockId(block), tx) =
+        UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
+            .ok_or_else(|| {
+                server_error(Error::ParamError {
+                    param: String::from("txid"),
+                    msg: String::from(
+                        "Valid transaction ID required. Transaction IDs start with TX~.",
+                    ),
+                })
+            })?
+            .to()?;
+    bulletin
+        .post_memos(block as u64, tx as u64, memos, signature)
+        .await
+        .map_err(server_error)?;
+    Ok(tide::Response::new(StatusCode::Ok))
 }
 
 async fn landing_page(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
@@ -633,7 +665,7 @@ async fn handle_web_socket(
 fn init_web_server(
     opt_web_path: &str,
     own_id: u64,
-    query_service: FullNode<'static>,
+    node: FullNode<'static>,
 ) -> Result<task::JoinHandle<Result<(), std::io::Error>>, tide::Error> {
     // Take the command line option for the web asset directory path
     // provided it is not empty. Otherwise, construct the default from
@@ -652,8 +684,9 @@ fn init_web_server(
         connections: Default::default(),
         web_path: web_path.clone(),
         api: api.clone(),
-        query_service,
+        node: Arc::new(RwLock::new(node)),
     });
+    web_server.with(middleware::add_error_body);
 
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;
@@ -666,6 +699,12 @@ fn init_web_server(
         .at("/transfer/:id/:recipient/:amount")
         .with(WebSocket::new(handle_web_socket))
         .get(landing_page);
+
+    // Define the routes handled by the validator and bulletin board. Eventually these should have
+    // their own services. For demo purposes, since they are not really part of the query service,
+    // we just handle them here in a pretty ad hoc fashion.
+    web_server.at("/submit").post(submit_endpoint);
+    web_server.at("/memos/:txid").post(memos_endpoint);
 
     // Add routes from a configuration file.
     println!("Format version: {}", &api["meta"]["FORMAT_VERSION"]);

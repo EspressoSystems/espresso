@@ -130,3 +130,22 @@ The :index URL parameter can be used to subscribe starting a particular event in
 subscribe to all events in the history of the network.
 """
 ERROR_index = "The event index must be a non-negative integer."
+
+[route.getsnapshot]
+PATH = ["getsnapshot/:index/:sparse", "getsnapshot/latest/:sparse"]
+":index" = "Integer"
+":sparse" = "Boolean"
+DOC = """
+Get a snapshot of the edger at the specified time. If :index is given, it is the 0-based index of
+the desired snapshot, starting from the genesis of the ledger. If using `getsnapshot/latest`, the
+most recent snapshot is returned. If `:sparse`, the resulting snapshot is sparse, containing only
+root hashes for the UTXO and nullifiers sets. Otherwise, the snapshot contains the full sets.
+"""
+ERROR_index = "The index must be a non-negative integer."
+ERROR_sparse = "The sparse flag must be Boolean."
+
+[route.getuser]
+PATH = ["getuser/:address"]
+":address" = "TaggedBase64"
+DOC = "Returns the public key of a user with a specified address."
+ERROR_address = "A valid user address is required. User addresses begin with ADDR~, for example, ADDR~Ab12whatever."

@@ -2,7 +2,10 @@ pub use crate::state_comm::LedgerStateCommitment;
 use crate::{
     key_set::SizedKey,
     set_merkle_tree::*,
-    wallet::{WalletBackend, WalletError, WalletState},
+    wallet::{
+        CryptoError, QueryServiceError as QueryServiceWalletError, WalletBackend, WalletError,
+        WalletState,
+    },
     ElaboratedBlock, ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState,
     MERKLE_HEIGHT,
 };
@@ -29,9 +32,8 @@ use phaselock::{
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
+use snafu::{ResultExt, Snafu};
 use std::collections::{BTreeMap, HashMap};
-use std::error;
-use std::fmt;
 use std::pin::Pin;
 
 pub trait ConsensusEvent {
@@ -106,7 +108,7 @@ pub struct LedgerSummary {
     pub num_records: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LedgerSnapshot {
     pub state: ValidatorState,
     pub nullifiers: SetMerkleTree,
@@ -240,7 +242,8 @@ pub trait QueryService {
     async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError>;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Snafu, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum QueryServiceError {
     InvalidNullifierRoot {},
     InvalidBlockId {},
@@ -252,14 +255,6 @@ pub enum QueryServiceError {
     NoMemosForTxn {},
     InvalidAddress {},
 }
-
-impl fmt::Display for QueryServiceError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl error::Error for QueryServiceError {}
 
 struct FullState {
     validator: ValidatorState,
@@ -830,7 +825,7 @@ impl<'a> WalletBackend<'a> for FullNode<'a> {
         let proving_keys =
             ProverKeySet {
                 mint: jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
-                    .map_err(|err| WalletError::CryptoError { err })?
+                    .context(CryptoError)?
                     .0,
                 freeze: validator
                     .verif_crs
@@ -842,7 +837,7 @@ impl<'a> WalletBackend<'a> for FullNode<'a> {
                             k.num_inputs(),
                             MERKLE_HEIGHT,
                         )
-                        .map_err(|err| WalletError::CryptoError { err })?
+                        .context(CryptoError)?
                         .0)
                     })
                     .collect::<Result<_, _>>()?,
@@ -857,7 +852,7 @@ impl<'a> WalletBackend<'a> for FullNode<'a> {
                             k.num_outputs(),
                             MERKLE_HEIGHT,
                         )
-                        .map_err(|err| WalletError::CryptoError { err })?
+                        .context(CryptoError)?
                         .0)
                     })
                     .collect::<Result<_, _>>()?,
@@ -906,7 +901,7 @@ impl<'a> WalletBackend<'a> for FullNode<'a> {
                 QueryServiceError::InvalidAddress {} => WalletError::InvalidAddress {
                     address: address.clone(),
                 },
-                _ => WalletError::QueryServiceError { err },
+                _ => WalletError::QueryServiceError { source: err },
             })
     }
 
@@ -915,16 +910,15 @@ impl<'a> WalletBackend<'a> for FullNode<'a> {
             .submit_transaction(txn)
             .await
             .map_err(|err| match err {
-                PhaseLockError::NetworkFault { source } => {
-                    WalletError::NetworkError { err: source }
-                }
+                PhaseLockError::NetworkFault { source } => WalletError::NetworkError { source },
                 _ => {
                     // PhaseLock is not supposed to return errors besides NetworkFault
-                    println!(
-                        "unexpected error from Validator::submit_transaction: {:?}",
-                        err
-                    );
-                    WalletError::Failed {}
+                    WalletError::Failed {
+                        msg: format!(
+                            "unexpected error from Validator::submit_transaction: {:?}",
+                            err
+                        ),
+                    }
                 }
             })
     }
@@ -939,7 +933,7 @@ impl<'a> WalletBackend<'a> for FullNode<'a> {
         self.as_query_service_mut()
             .post_memos(block_id, txn_id, memos, sig)
             .await
-            .map_err(|err| WalletError::QueryServiceError { err })
+            .context(QueryServiceWalletError)
     }
 }
 

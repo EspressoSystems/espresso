@@ -2072,9 +2072,9 @@ dependencies = [
 
 [[package]]
 name = "instant"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bee0328b1209d157ef001c94dd85b4f8f64139adb0eac2659f4b08382b2f474d"
+checksum = "716d3d89f35ac6a34fd0eed635395f4c3b76fa889338a4632e5231a8684216bd"
 dependencies = [
  "cfg-if 1.0.0",
 ]
@@ -2538,6 +2538,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "shellexpand",
+ "snafu",
  "structopt",
  "strum",
  "strum_macros",
@@ -4007,9 +4008,9 @@ checksum = "45f6ee7c7b87caf59549e9fe45d6a69c75c8019e79e212a835c5da0e92f0ba08"
 
 [[package]]
 name = "syn"
-version = "1.0.76"
+version = "1.0.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6f107db402c2c2055242dbf4d2af0e69197202e9faacbef9571bbe47f5a1b84"
+checksum = "5239bc68e0fef57495900cfea4e8dc75596d9a319d7e16b1e0a440d24e6fe0a0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4920,6 +4921,7 @@ dependencies = [
  "blake2",
  "futures",
  "generic-array",
+ "http-types",
  "itertools 0.10.1",
  "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=3faf4400a7ae67de18400051f57afe8e4fb6d4de)",
  "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=3faf4400a7ae67de18400051f57afe8e4fb6d4de)",
@@ -4940,7 +4942,10 @@ dependencies = [
  "snafu",
  "strum",
  "strum_macros",
+ "surf",
+ "surf-sse",
  "tagged-base64",
+ "tide",
 ]
 
 [[package]]

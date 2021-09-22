@@ -1,3 +1,6 @@
+pub mod network;
+
+use crate::api;
 use crate::key_set;
 use crate::node::LedgerEvent;
 use crate::set_merkle_tree::*;
@@ -29,11 +32,15 @@ use jf_txn::{
     AccMemberWitness, MerkleTree, Signature, TransactionNote,
 };
 use key_set::KeySet;
+use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
+use snafu::{ResultExt, Snafu};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::convert::TryFrom;
 use std::sync::Arc;
 
-#[derive(Debug)]
+#[derive(Debug, Snafu)]
+#[snafu(visibility = "pub(crate)")]
 pub enum WalletError {
     InsufficientBalance {
         asset: AssetCode,
@@ -56,13 +63,13 @@ pub enum WalletError {
         asset: AssetCode,
     },
     InvalidBlock {
-        val_err: ValidationError,
+        source: ValidationError,
     },
     NullifierAlreadyPublished {
         nullifier: Nullifier,
     },
     CryptoError {
-        err: TxnApiError,
+        source: TxnApiError,
     },
     InvalidAddress {
         address: UserAddress,
@@ -76,12 +83,39 @@ pub enum WalletError {
         asset_key: FreezerPubKey,
     },
     NetworkError {
-        err: phaselock::networking::NetworkError,
+        source: phaselock::networking::NetworkError,
     },
     QueryServiceError {
-        err: crate::node::QueryServiceError,
+        source: crate::node::QueryServiceError,
     },
-    Failed {},
+    ClientConfigError {
+        source: <surf::Client as TryFrom<surf::Config>>::Error,
+    },
+    ConsensusError {
+        #[snafu(source(false))]
+        source: Result<phaselock::error::PhaseLockError, String>,
+    },
+    Failed {
+        msg: String,
+    },
+}
+
+impl api::FromError for WalletError {
+    fn catch_all(msg: String) -> Self {
+        Self::Failed { msg }
+    }
+
+    fn from_query_service_error(source: crate::node::QueryServiceError) -> Self {
+        Self::QueryServiceError { source }
+    }
+
+    fn from_validation_error(source: ValidationError) -> Self {
+        Self::InvalidBlock { source }
+    }
+
+    fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
+        Self::ConsensusError { source }
+    }
 }
 
 pub struct WalletState<'a> {
@@ -673,8 +707,7 @@ impl<'a> WalletState<'a> {
     ) -> Result<AssetDefinition, WalletError> {
         let seed = AssetCodeSeed::generate(&mut self.rng);
         let code = AssetCode::new(seed, description);
-        let asset_definition =
-            AssetDefinition::new(code, policy).map_err(|err| WalletError::CryptoError { err })?;
+        let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
         self.defined_assets
             .insert(code, (asset_definition.clone(), seed, description.to_vec()));
         // If the policy lists ourself as the auditor, automatically start auditing transactions
@@ -773,7 +806,7 @@ impl<'a> WalletState<'a> {
             fee_info,
             &self.proving_keys.mint,
         )
-        .map_err(|err| WalletError::CryptoError { err })?;
+        .context(CryptoError)?;
         let signature = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
         self.submit_transaction(
             &mut session.backend,
@@ -896,7 +929,7 @@ impl<'a> WalletState<'a> {
         let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut self.rng, fee_input, fee).unwrap();
         let (note, sig_key, outputs) =
             FreezeNote::generate(&mut self.rng, inputs, fee_info, proving_key)
-                .map_err(|err| WalletError::CryptoError { err })?;
+                .context(CryptoError)?;
         let recv_memos = vec![&fee_out_rec]
             .into_iter()
             .chain(outputs.iter())
@@ -981,7 +1014,7 @@ impl<'a> WalletState<'a> {
             UNEXPIRED_VALID_UNTIL,
             proving_key,
         )
-        .map_err(|err| WalletError::CryptoError { err })?;
+        .context(CryptoError)?;
 
         let outputs: Vec<_> = vec![fee_change_ro]
             .into_iter()
@@ -993,8 +1026,7 @@ impl<'a> WalletState<'a> {
             .map(|ro| ReceiverMemo::from_ro(&mut self.rng, ro, &[]))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let sig = sign_receiver_memos(&kp, &recv_memos)
-            .map_err(|err| WalletError::CryptoError { err })?;
+        let sig = sign_receiver_memos(&kp, &recv_memos).context(CryptoError)?;
         self.submit_transaction(
             &mut session.backend,
             TransactionNote::Transfer(Box::new(note)),
@@ -1101,7 +1133,7 @@ impl<'a> WalletState<'a> {
             UNEXPIRED_VALID_UNTIL,
             proving_key,
         )
-        .map_err(|err| WalletError::CryptoError { err })?;
+        .context(CryptoError)?;
         let recv_memos = vec![&fee_out_rec]
             .into_iter()
             .chain(outputs.iter())
@@ -1569,6 +1601,10 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
     }
 }
 
+pub fn new_key_pair() -> UserKeyPair {
+    UserKeyPair::generate(&mut ChaChaRng::from_entropy())
+}
+
 #[cfg(any(test, fuzzing))]
 pub mod test_helpers {
     use super::*;
@@ -1580,7 +1616,7 @@ pub mod test_helpers {
     use futures::future;
     use itertools::izip;
     use phaselock::BlockContents;
-    use rand_chacha::rand_core::{RngCore, SeedableRng};
+    use rand_chacha::rand_core::RngCore;
     use std::iter::once;
     use std::sync::Mutex as SyncMutex;
     use std::time::Instant;
@@ -1695,7 +1731,7 @@ pub mod test_helpers {
             let uids = block_uids[txn_id as usize].clone();
 
             txn.verify_receiver_memos_signature(&memos, &sig)
-                .map_err(|err| WalletError::CryptoError { err })?;
+                .context(CryptoError)?;
 
             let merkle_paths = uids
                 .iter()

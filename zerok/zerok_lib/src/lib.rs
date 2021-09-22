@@ -75,7 +75,18 @@ pub struct ElaboratedTransaction {
 
 deserialize_canonical_bytes!(ElaboratedTransaction);
 
-#[derive(Default, Debug, Clone, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq, Hash)]
+#[derive(
+    Default,
+    Debug,
+    Clone,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+)]
 pub struct Block(pub Vec<TransactionNote>);
 
 // A block with nullifier set non-membership proofs
@@ -362,14 +373,14 @@ mod key_set {
 }
 use key_set::KeySet;
 
-#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize)]
 pub struct ProverKeySet<'a, Order: key_set::KeyOrder = key_set::OrderByInputs> {
     pub mint: MintProvingKey<'a>,
     pub xfr: KeySet<TransferProvingKey<'a>, Order>,
     pub freeze: KeySet<FreezeProvingKey<'a>, Order>,
 }
 
-#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize)]
 pub struct VerifierKeySet<Order: key_set::KeyOrder = key_set::OrderByInputs> {
     // TODO: is there a way to keep these types distinct?
     pub mint: TransactionVerifyingKey,
@@ -421,6 +432,27 @@ mod ser_display {
     ) -> Result<S::Ok, S::Error> {
         let string = match v {
             Ok(v) => format!("{}", v),
+            Err(string) => string.clone(),
+        };
+        Serialize::serialize(&string, s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T>(d: D) -> Result<Result<T, String>, D::Error> {
+        Ok(Err(Deserialize::deserialize(d)?))
+    }
+}
+
+mod ser_debug {
+    use serde::de::{Deserialize, Deserializer};
+    use serde::ser::{Serialize, Serializer};
+    use std::fmt::Debug;
+
+    pub fn serialize<S: Serializer, T: Debug>(
+        v: &Result<T, String>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let string = match v {
+            Ok(v) => format!("{:?}", v),
             Err(string) => string.clone(),
         };
         Serialize::serialize(&string, s)
@@ -567,7 +599,7 @@ pub mod state_comm {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: state_comm::LedgerStateCommitment,
@@ -874,7 +906,7 @@ pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalPara
 }
 
 lazy_static! {
-    static ref UNIVERSAL_PARAM: jf_txn::proof::UniversalParam =
+    pub static ref UNIVERSAL_PARAM: jf_txn::proof::UniversalParam =
         get_universal_param(&mut ChaChaRng::from_seed([0x8au8; 32]));
 }
 
