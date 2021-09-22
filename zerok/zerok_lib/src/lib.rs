@@ -6,6 +6,7 @@ extern crate proptest;
 
 pub mod node;
 mod set_merkle_tree;
+mod store_adaptors;
 mod util;
 pub mod wallet;
 
