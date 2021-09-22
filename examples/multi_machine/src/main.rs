@@ -58,12 +58,22 @@ struct NodeOpt {
 
     /// Whether to generate and store public keys for all nodes.
     ///
-    /// Public keys will be stored under `examples/multi_machine/src`, file names starting
-    /// with `pk_`.
+    /// Public keys will be stored under the directory specified by `pk_path`.
     ///
     /// Skip this option if public key files already exist.
-    #[structopt(long = "generate_keys", short = "g")]
-    generate_keys: bool,
+    #[structopt(long = "gen_pk", short = "g")]
+    gen_pk: bool,
+
+    /// Path to public keys.
+    ///
+    /// Public keys will be stored under the specified directory, file names starting
+    /// with `pk_`.
+    #[structopt(
+        long = "pk_path", 
+        short = "p", 
+        default_value = ""      // See fn default_pk_path().
+    )]
+    pk_path: String,
 
     /// Id of the current node.
     ///
@@ -94,7 +104,7 @@ struct NodeOpt {
 
 /// Gets public key of a node from its public key file.
 fn get_public_key(node_id: u64) -> PubKey {
-    let path_str = format!("../../examples/multi_machine/src/pk_{}", node_id);
+    let path_str = format!("{}/pk_{}", get_pk_dir(), node_id);
     let path = Path::new(&path_str);
     let mut pk_file = File::open(&path)
         .unwrap_or_else(|_| panic!("Cannot find public key file: {}", path.display()));
@@ -161,6 +171,13 @@ fn default_config_path() -> PathBuf {
     [&dir, Path::new(CONFIG_FILE)].iter().collect()
 }
 
+/// Returns the default directory to store public key files.
+fn default_pk_path() -> PathBuf {
+    const PK_DIR: &str = "src";
+    let dir = project_path();
+    [&dir, Path::new(PK_DIR)].iter().collect()
+}
+
 /// Returns the default path to the node configuration file.
 fn default_api_path() -> PathBuf {
     const API_FILE: &str = "api/api.toml";
@@ -187,6 +204,19 @@ fn get_node_config() -> Value {
         .read_to_string(&mut config_str)
         .unwrap_or_else(|err| panic!("Error while reading node config file: {}", err));
     toml::from_str(&config_str).expect("Error while reading node config file")
+}
+
+/// Gets the directory to public key files.
+fn get_pk_dir() -> String {
+    let pk_path = NodeOpt::from_args().pk_path;
+    if pk_path.is_empty() {
+        default_pk_path()
+            .into_os_string()
+            .into_string()
+            .expect("Error while converting public key path to a string")
+    } else {
+        pk_path
+    }
 }
 
 /// Gets IP address and port number of a node from node configuration file.
@@ -691,16 +721,14 @@ async fn main() -> Result<(), std::io::Error> {
     let public_keys = secret_keys.public_keys();
 
     // Generate public key for each node
-    if NodeOpt::from_args().generate_keys {
+    let pk_dir = get_pk_dir();
+    if NodeOpt::from_args().gen_pk {
         for node_id in 0..nodes {
             let pub_key = PubKey::from_secret_key_set_escape_hatch(&secret_keys, node_id);
             let pub_key_str = serde_json::to_string(&pub_key)
                 .unwrap_or_else(|err| panic!("Error while serializing the public key: {}", err));
-            let mut pk_file =
-                File::create(format!("../../examples/multi_machine/src/pk_{}", node_id))
-                    .unwrap_or_else(|err| {
-                        panic!("Error while creating a public key file: {}", err)
-                    });
+            let mut pk_file = File::create(format!("{}/pk_{}", pk_dir, node_id))
+                .unwrap_or_else(|err| panic!("Error while creating a public key file: {}", err));
             pk_file
                 .write_all(pub_key_str.as_bytes())
                 .unwrap_or_else(|err| {
