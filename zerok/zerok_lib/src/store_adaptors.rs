@@ -1,6 +1,6 @@
-use jf_primitives::merkle_tree::{LookupResult, MerklePath, MerkleTree, NodeValue};
-use atomic_store::{AppendLog, AtomicStoreLoader};
 use atomic_store::load_store::ArkLoadStore;
+use atomic_store::{AppendLog, AtomicStoreLoader};
+use jf_primitives::merkle_tree::{LookupResult, MerklePath, MerkleTree, NodeValue};
 
 use ark_ff::fields::PrimeField;
 
@@ -17,7 +17,12 @@ impl<F> FullMerkleTree<F>
 where
     F: PrimeField,
 {
-    pub fn create(height: u8, loader: &mut AtomicStoreLoader, file_pattern: &str, file_fill_size: u64) -> Option<Self> {
+    pub fn create(
+        height: u8,
+        loader: &mut AtomicStoreLoader,
+        file_pattern: &str,
+        file_fill_size: u64,
+    ) -> Option<Self> {
         if let Some(inner_tree) = MerkleTree::new(height) {
             let leaf_log = AppendLog::create(loader, file_pattern, file_fill_size).ok()?;
             Some(FullMerkleTree {
@@ -28,7 +33,12 @@ where
             None
         }
     }
-    pub fn load(height: u8, loader: &mut AtomicStoreLoader, file_pattern: &str, file_fill_size: u64) -> Option<Self> {
+    pub fn load(
+        height: u8,
+        loader: &mut AtomicStoreLoader,
+        file_pattern: &str,
+        file_fill_size: u64,
+    ) -> Option<Self> {
         if let Some(mut inner_tree) = MerkleTree::new(height) {
             let leaf_log = AppendLog::load(loader, file_pattern, file_fill_size).ok()?;
             for res in leaf_log.iter() {
@@ -66,7 +76,7 @@ where
     pub fn get_leaf(&self, pos: u64) -> LookupResult<F, MerklePath<F>> {
         self.inner_tree.get_leaf(pos)
     }
- 
+
     /// Verify an element is a leaf of a Merkle tree given the root of the tree
     /// an a path
     /// * `root_value` - value of the root of the tree
