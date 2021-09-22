@@ -42,7 +42,7 @@ where
         if let Some(mut inner_tree) = MerkleTree::new(height) {
             let leaf_log = AppendLog::load(loader, file_pattern, file_fill_size).ok()?;
             for res in leaf_log.iter() {
-                if !res.is_ok() {
+                if res.is_err() {
                     return None;
                 }
                 inner_tree.push(res.unwrap());
