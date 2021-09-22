@@ -20,11 +20,17 @@
 
 use async_std::future::timeout;
 use futures::prelude::*;
-use serde_json::Value;
+use itertools::izip;
+use phaselock::BlockContents;
+use serde::Deserialize;
 use std::fmt::Display;
 use std::time::Duration;
 use structopt::StructOpt;
 use surf_sse::{EventSource, Url};
+use tracing::{event, Level};
+use zerok_lib::api::*;
+use zerok_lib::node::{LedgerEvent, LedgerSummary};
+use zerok_lib::ElaboratedBlock;
 
 #[derive(StructOpt)]
 struct Args {
@@ -42,108 +48,100 @@ fn url(route: impl Display) -> Url {
     Url::parse(format!("http://{}:{}{}", host, port, route).as_str()).unwrap()
 }
 
-async fn get(route: impl Display) -> Value {
-    surf::get(url(route)).recv_json().await.unwrap()
+async fn get<T: for<'de> Deserialize<'de>, S: Display>(route: S) -> T {
+    let url = url(route);
+    event!(Level::INFO, "GET {}", url);
+    serde_json::from_value(surf::get(url).recv_json().await.unwrap()).unwrap()
 }
 
-async fn validate_block(block: &Value, ix: u64, num_blocks: u64, num_records: u64) {
+async fn validate_committed_block(
+    block: &CommittedBlock,
+    ix: usize,
+    num_blocks: usize,
+    num_records: usize,
+) {
     // Check well-formedness of the data.
-    let id = block["id"].as_str().unwrap();
-    let hash = block["hash"].as_str().unwrap();
-    let state_comm = block["state_commitment"].as_str().unwrap();
-    assert!(id.starts_with("BK~"));
-    assert!(hash.starts_with("HASH~"));
-    assert!(state_comm.starts_with("HASH~"));
-    assert_eq!(ix, block["index"].as_u64().unwrap());
+    assert_eq!(ix, block.index);
+    assert!(block.index < num_blocks);
+    assert_eq!(block.index, block.id.0);
+    assert_eq!(block.hash, Hash::from(ElaboratedBlock::from(block).hash()));
 
     // Check that we get the same block if we query by other methods.
-    assert_eq!(*block, get(format!("/getblock/{}", id)).await);
-    assert_eq!(*block, get(format!("/getblock/hash/{}", hash)).await);
+    assert_eq!(*block, get(format!("/getblock/{}", block.id)).await);
+    assert_eq!(*block, get(format!("/getblock/hash/{}", block.hash)).await);
     if ix == num_blocks - 1 {
         assert_eq!(*block, get("/getblock/latest").await);
     }
 
     // Check the other block-related queries.
     assert_eq!(
-        id,
-        get(format!("/getblockid/index/{}", ix))
-            .await
-            .as_str()
-            .unwrap()
+        block.id,
+        get(format!("/getblockid/index/{}", block.index)).await
     );
     assert_eq!(
-        id,
-        get(format!("/getblockid/hash/{}", hash))
-            .await
-            .as_str()
-            .unwrap()
+        block.id,
+        get(format!("/getblockid/hash/{}", block.hash)).await
     );
+    assert_eq!(block.hash, get(format!("/getblockhash/{}", block.id)).await);
     assert_eq!(
-        hash,
-        get(format!("/getblockhash/{}", id)).await.as_str().unwrap()
+        block.hash,
+        get(format!("/getblockhash/index/{}", block.index)).await
     );
-    assert_eq!(
-        hash,
-        get(format!("/getblockhash/index/{}", ix))
-            .await
-            .as_str()
-            .unwrap()
-    );
+
     // Check the block's transactions.
-    for tx in block["transaction_data"].as_array().unwrap() {
-        let tx_id = tx["id"].as_str().unwrap();
-        let tx = get(format!("/gettransaction/{}", tx_id)).await;
+    for tx in &block.transactions {
+        // Check that the transaction listed in the block is the same transaction we would get if we
+        // queried directly.
+        assert_eq!(*tx, get(format!("/gettransaction/{}", tx.id)).await);
 
-        // Check well-formedness of the data.
-        let ty = tx["type"].as_str().unwrap();
-        let _fee = tx["fee"].as_u64().unwrap();
-        let sig = &tx["memos_signature"];
-        let merkle_root = tx["merkle_root"].as_str().unwrap();
-        assert_eq!(tx_id, tx["id"].as_str().unwrap());
-        match ty {
-            "transfer" | "mint" | "freeze" => {}
-            _ => panic!("invalid transaction type {}", ty),
+        // Check uids.
+        assert_eq!(tx.output_uids.len(), tx.data.output_len());
+        for uid in &tx.output_uids {
+            assert!((*uid as usize) < num_records);
         }
-        assert!(sig.is_null() || sig.as_str().unwrap().starts_with("SIG~"));
-        assert!(merkle_root.starts_with("HASH~"));
 
-        // Check inputs.
-        for input in tx["inputs"].as_array().unwrap() {
-            assert!(input.as_str().unwrap().starts_with("NUL~"));
-        }
+        // Check memos.
+        let memos = match (&tx.output_memos, &tx.memos_signature) {
+            (Some(memos), Some(sig)) => {
+                assert_eq!(memos.len(), tx.data.output_len());
+                tx.data.verify_receiver_memos_signature(memos, sig).unwrap();
+                memos.iter().cloned().map(Some).collect()
+            }
+            (None, None) => vec![None; tx.data.output_len()],
+            (Some(_), None) => panic!("memos are provided without a signature"),
+            (None, Some(_)) => panic!("signature is provied without memos"),
+        };
 
         // Check outputs.
-        for (i, output) in tx["outputs"].as_array().unwrap().iter().enumerate() {
-            // Check well-formedness of the data.
-            let comm = output["commitment"].as_str().unwrap();
-            let uid = output["uid"].as_u64().unwrap();
-            let memo = &output["memo"];
-            assert!(comm.starts_with("REC~"));
-            assert!(uid < num_records);
-            assert!(memo.is_null() || memo.as_str().unwrap().starts_with("MEMO~"));
+        for (i, (output, uid, memo)) in
+            izip!(tx.data.output_commitments(), &tx.output_uids, memos).enumerate()
+        {
             // Check that we get the same record if we query for the output directly.
-            assert_eq!(
-                *output,
-                get(format!("/getunspentrecord/{}/{}/{}", tx_id, i, false)).await
-            );
+            let utxo: UnspentRecord =
+                get(format!("/getunspentrecord/{}/{}/{}", tx.id, i, false)).await;
+            assert_eq!(output, utxo.commitment);
+            assert_eq!(*uid, utxo.uid);
+            assert_eq!(memo, utxo.memo);
         }
     }
 }
 
 #[async_std::main]
 async fn main() {
-    let summary = get("/getinfo").await;
-    let num_blocks = summary["num_blocks"].as_u64().unwrap();
-    let num_records = summary["num_records"].as_u64().unwrap();
+    tracing_subscriber::fmt().init();
+
+    let summary: LedgerSummary = get("/getinfo").await;
+    let num_blocks = summary.num_blocks;
+    let num_records = summary.num_records;
 
     // Check that querying for pieces of the summary directly gives results consistent with the
     // whole summary.
-    assert_eq!(num_blocks, get("/getblockcount").await.as_u64().unwrap());
+    assert_eq!(num_blocks, get::<usize, _>("/getblockcount").await);
 
     // Check that we can query the 0th block and the last block.
     for ix in [0, num_blocks - 1] {
         let block = get(format!("/getblock/index/{}", ix)).await;
-        validate_block(&block, ix, num_blocks, num_records).await;
+        validate_committed_block(&block, ix, num_blocks, num_records).await;
     }
 
     // Check the event stream. The event stream is technically never-ending; once we have received
@@ -168,79 +166,9 @@ async fn main() {
         .unwrap();
     assert_eq!(&events1[1..], &events2);
 
-    // Check validity of the individual events.
+    // Check validity of the individual events. The events are just serialized LedgerEvents, not an
+    // API-specific type, so as long as they deserialize properly they should be fine.
     for event in events1.into_iter() {
-        let data: Value = serde_json::de::from_str(event.data.as_str()).unwrap();
-        match event.event.as_str() {
-            "commit" => {
-                validate_block(
-                    &data,
-                    data["index"].as_u64().unwrap(),
-                    num_blocks,
-                    num_records,
-                )
-                .await
-            }
-            "reject" => {
-                let block = &data["block"];
-                let _error = data["error"].as_str().unwrap();
-
-                // Validate the block contents.
-                let hash = block["hash"].as_str().unwrap();
-                let txs = block["transaction_data"].as_array().unwrap();
-                assert!(hash.starts_with("HASH~"));
-                for tx in txs {
-                    // Check well-formedness of the transaction data.
-                    let ty = tx["type"].as_str().unwrap();
-                    let _fee = tx["fee"].as_u64().unwrap();
-                    let merkle_root = tx["merkle_root"].as_str().unwrap();
-                    match ty {
-                        "transfer" | "mint" | "freeze" => {}
-                        _ => panic!("invalid transaction type {}", ty),
-                    }
-                    assert!(merkle_root.starts_with("HASH~"));
-
-                    // Check inputs.
-                    for input in tx["inputs"].as_array().unwrap() {
-                        assert!(input.as_str().unwrap().starts_with("NUL~"));
-                    }
-
-                    // Check outputs.
-                    for output in tx["outputs"].as_array().unwrap() {
-                        let comm = output["commitment"].as_str().unwrap();
-                        assert!(comm.starts_with("REC~"));
-                    }
-                }
-            }
-            "memos" => {
-                for data in data.as_array().unwrap() {
-                    let memo = data["memo"].as_str().unwrap();
-                    let comm = data["commitment"].as_str().unwrap();
-                    let uid = data["uid"].as_u64().unwrap();
-                    let merkle_path = data["merkle_path"].as_array().unwrap();
-
-                    assert!(memo.starts_with("MEMO~"));
-                    assert!(comm.starts_with("REC~"));
-                    assert!(uid < num_records);
-                    assert!(!merkle_path.is_empty());
-                    for node in merkle_path {
-                        let sibling1 = node["sibling1"].as_str().unwrap();
-                        let sibling2 = node["sibling2"].as_str().unwrap();
-                        let pos = node["pos"].as_str().unwrap();
-
-                        assert!(sibling1.starts_with("HASH~"));
-                        assert!(sibling2.starts_with("HASH~"));
-                        match pos {
-                            "left" | "middle" | "right" => {}
-                            _ => panic!(
-                                "invalid node pos; expected 'left', 'middle', or 'right', but got {}",
-                                pos
-                            ),
-                        }
-                    }
-                }
-            }
-            ty => panic!("invalid event type {}", ty),
-        }
+        serde_json::from_str::<LedgerEvent>(event.data.as_str()).unwrap();
     }
 }

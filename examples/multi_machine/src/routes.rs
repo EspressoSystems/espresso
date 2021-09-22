@@ -2,10 +2,7 @@
 
 use crate::WebState;
 use futures::prelude::*;
-use jf_primitives::merkle_tree::NodePos;
-use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
-use jf_txn::TransactionNote;
-use jf_txn::{MerklePath, NodeValue, Signature};
+use itertools::izip;
 use phaselock::BlockContents;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -13,13 +10,13 @@ use std::str::FromStr;
 use strum::IntoEnumIterator;
 use strum_macros::{AsRefStr, EnumIter, EnumString};
 use tagged_base64::TaggedBase64;
+use tide::http::mime;
 use tide::prelude::*;
 use tide::sse;
 use tide::StatusCode;
 use tracing::{event, Level};
-use zerok_lib::canonical;
-use zerok_lib::node::{LedgerEvent, LedgerTransition, QueryService};
-use zerok_lib::ElaboratedBlock;
+use zerok_lib::api::*;
+use zerok_lib::node::{LedgerEvent, LedgerSummary, LedgerTransition, QueryService};
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -66,34 +63,6 @@ impl UrlSegmentValue {
         }
     }
 
-    pub fn as_b64(&self, tag: &str) -> Result<Vec<u8>, tide::Error> {
-        if let Identifier(b64) = self {
-            if b64.tag() == tag {
-                Ok(b64.value())
-            } else {
-                Err(tide::Error::from_str(
-                    StatusCode::BadRequest,
-                    format!("expected base 64 with tag {}, got tag {}", tag, b64.tag()),
-                ))
-            }
-        } else {
-            Err(tide::Error::from_str(
-                StatusCode::BadRequest,
-                format!("expected base 64 with tag {}, got {:?}", tag, self),
-            ))
-        }
-    }
-
-    pub fn as_bkid(&self) -> Result<usize, tide::Error> {
-        let bytes = self.as_b64("BK")?;
-        canonical::deserialize(&bytes).map_err(server_error)
-    }
-
-    pub fn as_txid(&self) -> Result<(usize, usize), tide::Error> {
-        let bytes = self.as_b64("TX")?;
-        canonical::deserialize(&bytes).map_err(server_error)
-    }
-
     pub fn as_index(&self) -> Result<usize, tide::Error> {
         if let Integer(ix) = self {
             Ok(*ix as usize)
@@ -105,152 +74,20 @@ impl UrlSegmentValue {
         }
     }
 
-    pub fn as_block_hash(&self) -> Result<Vec<u8>, tide::Error> {
-        self.as_b64("HASH")
-    }
-}
-
-// Helpers for converting binary data to JSON values. Most types can be converted to a JSON value by
-// serializing to a blob and then encoding the binary data as tagged base 64.
-mod js {
-    use super::*;
-    pub use serde_json::Value;
-
-    pub fn b64(tag: &str, value: &[u8]) -> Result<Value, tide::Error> {
-        Ok(Value::from(tagged_base64::to_string(
-            &TaggedBase64::new(tag, value).map_err(|_| {
-                tide::Error::from_str(
-                    StatusCode::InternalServerError,
-                    "failed to convert to tagged base 64",
-                )
-            })?,
-        )))
+    pub fn as_identifier(&self) -> Result<TaggedBase64, tide::Error> {
+        if let Identifier(i) = self {
+            Ok(i.clone())
+        } else {
+            Err(tide::Error::from_str(
+                StatusCode::BadRequest,
+                format!("expected tagged base 64, got {:?}", self),
+            ))
+        }
     }
 
-    pub fn hash(bytes: &[u8]) -> Result<Value, tide::Error> {
-        b64("HASH", bytes)
-    }
-
-    pub fn bkid(block_id: usize) -> Result<Value, tide::Error> {
-        let bytes = canonical::serialize(&block_id).map_err(server_error)?;
-        b64("BK", &bytes)
-    }
-
-    // Serialize a committed block, with references to the ledger such as the block's unique ID and
-    // the IDs of its transactions.
-    pub fn block(
-        block: &ElaboratedBlock,
-        block_id: usize,
-        state_comm: &[u8],
-    ) -> Result<Value, tide::Error> {
-        Ok(json!({
-            "id": bkid(block_id)?,
-            "index": block_id,
-            "hash": hash(block.hash().as_ref())?,
-            "state_commitment": hash(state_comm)?,
-            "transaction_data": block.block.0.iter().enumerate().map(|(i, _)| {
-                Ok(json!({
-                    "id": txid(block_id, i)?,
-                }))
-            }).collect::<Result<Vec<_>, tide::Error>>()?,
-        }))
-    }
-
-    // Serialize an uncommitted block.
-    pub fn block_contents(block: &ElaboratedBlock) -> Result<Value, tide::Error> {
-        Ok(json!({
-            "hash": hash(block.hash().as_ref())?,
-            "transaction_data": block.block.0.iter().map(tx_contents).collect::<Result<Vec<_>, _>>()?,
-        }))
-    }
-
-    pub fn txid(block_id: usize, tx_offset: usize) -> Result<Value, tide::Error> {
-        let bytes = canonical::serialize(&(block_id, tx_offset)).map_err(server_error)?;
-        b64("TX", &bytes)
-    }
-
-    pub fn tx_contents(tx: &TransactionNote) -> Result<Value, tide::Error> {
-        Ok(json!({
-            "type": match tx {
-                TransactionNote::Transfer(_) => "transfer",
-                TransactionNote::Mint(_) => "mint",
-                TransactionNote::Freeze(_) => "freeze",
-            },
-            "fee": match tx {
-                TransactionNote::Transfer(xfr) => xfr.aux_info.fee,
-                TransactionNote::Mint(mint) => mint.aux_info.fee,
-                TransactionNote::Freeze(freeze) => freeze.aux_info.fee,
-            },
-            "inputs": tx.nullifiers().into_iter().map(|n| {
-                nullifier(&n)
-            }).collect::<Result<Vec<_>, tide::Error>>()?,
-            "outputs": tx.output_commitments().into_iter().map(|comm| Ok(json!({
-                "commitment": record_comm(&comm)?
-            }))).collect::<Result<Vec<_>, tide::Error>>()?,
-            "merkle_root": node_value(&tx.merkle_root())?,
-        }))
-    }
-
-    pub fn tx_output(
-        comm: &RecordCommitment,
-        uid: u64,
-        memo: Option<&ReceiverMemo>,
-    ) -> Result<Value, tide::Error> {
-        Ok(json!({
-            "commitment": record_comm(comm)?,
-            "uid": uid,
-            "memo": match memo {
-                Some(memo) => Some(js::memo(memo)?),
-                None => None,
-            },
-        }))
-    }
-
-    pub fn nullifier(n: &Nullifier) -> Result<Value, tide::Error> {
-        let bytes = canonical::serialize(n).map_err(server_error)?;
-        b64("NUL", &bytes)
-    }
-
-    pub fn record_comm(c: &RecordCommitment) -> Result<Value, tide::Error> {
-        let bytes = canonical::serialize(c).map_err(server_error)?;
-        b64("REC", &bytes)
-    }
-
-    pub fn node_value(n: &NodeValue) -> Result<Value, tide::Error> {
-        hash(&canonical::serialize(n).map_err(server_error)?)
-    }
-
-    pub fn memo(m: &ReceiverMemo) -> Result<Value, tide::Error> {
-        let bytes = canonical::serialize(m).map_err(server_error)?;
-        b64("MEMO", &bytes)
-    }
-
-    pub fn signature(s: &Signature) -> Result<Value, tide::Error> {
-        let bytes = canonical::serialize(s).map_err(server_error)?;
-        b64("SIG", &bytes)
-    }
-
-    pub fn merkle_path(path: &MerklePath) -> Result<Value, tide::Error> {
-        Ok(Value::from(
-            path.nodes
-                .iter()
-                .map(|node| {
-                    Ok(json!({
-                        "sibling1": node_value(&node.sibling1)?,
-                        "sibling2": node_value(&node.sibling2)?,
-                        "pos": match node.pos {
-                            NodePos::Left => "left",
-                            NodePos::Middle => "middle",
-                            NodePos::Right => "right",
-                        }
-                    }))
-                })
-                .collect::<Result<Vec<_>, tide::Error>>()?,
-        ))
-    }
-
-    pub fn to_string(value: &Value) -> Result<String, tide::Error> {
-        serde_json::ser::to_string(value).map_err(server_error)
+    pub fn to<T: TaggedBlob>(&self) -> Result<T, tide::Error> {
+        T::from_tagged_blob(&self.as_identifier()?)
+            .map_err(|err| tide::Error::from_str(StatusCode::BadRequest, format!("{}", err)))
     }
 }
 
@@ -308,6 +145,26 @@ pub fn check_api(api: toml::Value) -> bool {
     !missing_definition
 }
 
+// Get a block index from whatever form of block identifier was used in the URL.
+async fn block_index(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &(impl QueryService + Sync),
+) -> Result<usize, tide::Error> {
+    if let Some(b) = bindings.get(":index") {
+        b.value.as_index()
+    } else if let Some(b) = bindings.get(":bkid") {
+        Ok(b.value.to::<BlockId>()?.0)
+    } else if let Some(hash) = bindings.get(":hash") {
+        query_service
+            .get_block_id_by_hash(&hash.value.to::<Hash>()?.0)
+            .await
+            .map_err(server_error)
+    } else {
+        // latest
+        Ok(query_service.num_blocks().await.map_err(server_error)? - 1)
+    }
+}
+
 pub fn dummy_url_eval(
     route_pattern: &str,
     bindings: &HashMap<String, RouteBinding>,
@@ -335,56 +192,34 @@ pub fn dummy_url_eval(
         .build())
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Endpoints
+//
+// Each endpoint function handles one API endpoint, returning an instance of
+// Serialize (or an error). The main entrypoint, dispatch_url, is in charge of
+// serializing the endpoint responses according to the requested content type
+// and building a Response object.
+//
+
 async fn get_info(
     query_service: &(impl QueryService + Sync),
-) -> Result<tide::Response, tide::Error> {
-    let info = query_service.get_summary().await.map_err(server_error)?;
-    Ok(tide::Response::from(json!({
-        "num_blocks": info.num_blocks,
-        "num_records": info.num_records,
-        //todo !jeb.bearer add more info
-    })))
+) -> Result<LedgerSummary, tide::Error> {
+    query_service.get_summary().await.map_err(server_error)
 }
 
-async fn get_block_count(
-    query_service: &(impl QueryService + Sync),
-) -> Result<tide::Response, tide::Error> {
+async fn get_block_count(query_service: &(impl QueryService + Sync)) -> Result<usize, tide::Error> {
     let info = query_service.get_summary().await.map_err(server_error)?;
-    Ok(tide::Response::from(json!(info.num_blocks)))
-}
-
-// Get a block index from whatever form of block identifier was used in the URL.
-async fn block_index(
-    bindings: &HashMap<String, RouteBinding>,
-    query_service: &(impl QueryService + Sync),
-) -> Result<usize, tide::Error> {
-    if let Some(b) = bindings.get(":index") {
-        b.value.as_index()
-    } else if let Some(b) = bindings.get(":bkid") {
-        b.value.as_bkid()
-    } else if let Some(hash) = bindings.get(":hash") {
-        query_service
-            .get_block_id_by_hash(&hash.value.as_block_hash()?)
-            .await
-            .map_err(server_error)
-    } else {
-        // latest
-        Ok(query_service.num_blocks().await.map_err(server_error)? - 1)
-    }
+    Ok(info.num_blocks)
 }
 
 async fn get_block(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &(impl QueryService + Sync),
-) -> Result<tide::Response, tide::Error> {
+) -> Result<CommittedBlock, tide::Error> {
     let index = block_index(bindings, query_service).await?;
 
     // Get the block and the validator state that resulted from applying this block.
-    let block = query_service
-        .get_block(index)
-        .await
-        .map_err(server_error)?
-        .block;
+    let transition = query_service.get_block(index).await.map_err(server_error)?;
     // The block numbered `index` is the block which was applied to the `index` state. Therefore,
     // the next state (the one that resulted from this block) is `index + 1`.
     let state = query_service
@@ -393,45 +228,71 @@ async fn get_block(
         .map_err(server_error)?
         .state;
 
-    Ok(tide::Response::from(js::block(
-        &block,
+    Ok(CommittedBlock {
+        id: BlockId(index),
         index,
-        &state.commit(),
-    )?))
+        hash: Hash::from(transition.block.hash()),
+        state_commitment: Hash::from(state.commit()),
+        transactions: izip!(
+            transition.block.block.0,
+            transition.block.proofs,
+            transition.memos,
+            transition.uids
+        )
+        .enumerate()
+        .map(|(i, (tx, proofs, signed_memos, uids))| {
+            let (memos, sig) = match signed_memos {
+                Some((memos, sig)) => (Some(memos), Some(sig)),
+                None => (None, None),
+            };
+            CommittedTransaction {
+                id: TransactionId(BlockId(index), i),
+                data: tx,
+                proofs,
+                output_uids: uids,
+                output_memos: memos,
+                memos_signature: sig,
+            }
+        })
+        .collect(),
+    })
 }
 
 async fn get_block_id(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &(impl QueryService + Sync),
-) -> Result<tide::Response, tide::Error> {
+) -> Result<BlockId, tide::Error> {
     let index = block_index(bindings, query_service).await?;
-    Ok(tide::Response::from(js::bkid(index)?))
+    Ok(BlockId(index))
 }
 
 async fn get_block_hash(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &(impl QueryService + Sync),
-) -> Result<tide::Response, tide::Error> {
+) -> Result<Hash, tide::Error> {
     let index = block_index(bindings, query_service).await?;
     let block = query_service
         .get_block(index)
         .await
         .map_err(server_error)?
         .block;
-    Ok(tide::Response::from(js::hash(block.hash().as_ref())?))
+    Ok(Hash::from(block.hash()))
 }
 
 async fn get_transaction(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &impl QueryService,
-) -> Result<tide::Response, tide::Error> {
-    let (block_id, tx_id) = bindings[":txid"].value.as_txid()?;
+) -> Result<CommittedTransaction, tide::Error> {
+    let TransactionId(block_id, tx_id) = bindings[":txid"].value.to()?;
 
     // First get the block containing the transaction.
     let LedgerTransition {
-        block, memos, uids, ..
+        mut block,
+        mut memos,
+        mut uids,
+        ..
     } = query_service
-        .get_block(block_id)
+        .get_block(block_id.0)
         .await
         .map_err(server_error)?;
 
@@ -442,49 +303,28 @@ async fn get_transaction(
             "invalid transaction id",
         ));
     }
-    let tx = &block.block.0[tx_id];
-    let uids = &uids[tx_id];
-    // The memos and signature may not be provided yet for this transaction, so memos[tx_id] may be
-    // None. We want to work with the memos and the signature separately, and in fact we want to
-    // work with each memo as a separate entity which may or may not be present, even though all are
-    // present or none are, since we will attach each memo to a separate transaction output. So we
-    // explode the single Option<(Vec<Memo>, Signature)> into a Vec<Option<Memo>> and an
-    // Option<Signature>.
-    let (memos, sig) = match &memos[tx_id] {
-        Some((memos, sig)) => (memos.iter().map(Some).collect::<Vec<_>>(), Some(sig)),
-        None => (vec![None; tx.output_len()], None),
+    let tx = block.block.0.swap_remove(tx_id);
+    let proofs = block.proofs.swap_remove(tx_id);
+    let uids = uids.swap_remove(tx_id);
+    let (memos, sig) = match memos.swap_remove(tx_id) {
+        Some((memos, sig)) => (Some(memos), Some(sig)),
+        None => (None, None),
     };
 
-    Ok(tide::Response::from(json!({
-        "id": js::txid(block_id, tx_id)?,
-        "type": match tx {
-            TransactionNote::Transfer(_) => "transfer",
-            TransactionNote::Mint(_) => "mint",
-            TransactionNote::Freeze(_) => "freeze",
-        },
-        "fee": match tx {
-            TransactionNote::Transfer(xfr) => xfr.aux_info.fee,
-            TransactionNote::Mint(mint) => mint.aux_info.fee,
-            TransactionNote::Freeze(freeze) => freeze.aux_info.fee,
-        },
-        "inputs": tx.nullifiers().into_iter().map(|n| {
-            js::nullifier(&n)
-        }).collect::<Result<Vec<_>, tide::Error>>()?,
-        "outputs": tx.output_commitments().into_iter().zip(uids).zip(memos).map(|((comm, uid), memo)| {
-            js::tx_output(&comm, *uid, memo)
-        }).collect::<Result<Vec<_>, tide::Error>>()?,
-        "memos_signature": match sig {
-            Some(sig) => Some(js::signature(sig)?),
-            None => None,
-        },
-        "merkle_root": js::node_value(&tx.merkle_root())?,
-    })))
+    Ok(CommittedTransaction {
+        id: TransactionId(block_id, tx_id),
+        data: tx,
+        proofs,
+        output_uids: uids,
+        output_memos: memos,
+        memos_signature: sig,
+    })
 }
 
 async fn get_unspent_record(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &impl QueryService,
-) -> Result<tide::Response, tide::Error> {
+) -> Result<UnspentRecord, tide::Error> {
     if bindings[":mempool"].value.as_boolean()? {
         return Err(tide::Error::from_str(
             StatusCode::NotImplemented,
@@ -492,14 +332,14 @@ async fn get_unspent_record(
         ));
     }
 
-    let (block_id, tx_id) = bindings[":txid"].value.as_txid()?;
+    let TransactionId(block_id, tx_id) = bindings[":txid"].value.to()?;
     let output_index = bindings[":output_index"].value.as_index()?;
 
     // First get the block containing the transaction.
     let LedgerTransition {
         block, memos, uids, ..
     } = query_service
-        .get_block(block_id)
+        .get_block(block_id.0)
         .await
         .map_err(server_error)?;
 
@@ -523,8 +363,12 @@ async fn get_unspent_record(
     let uid = uids[tx_id][output_index];
     let memo = memos[tx_id]
         .as_ref()
-        .map(|(memos, _sig)| &memos[output_index]);
-    Ok(tide::Response::from(js::tx_output(&comm, uid, memo)?))
+        .map(|(memos, _sig)| memos[output_index].clone());
+    Ok(UnspentRecord {
+        commitment: comm,
+        uid,
+        memo,
+    })
 }
 
 async fn subscribe(
@@ -535,82 +379,31 @@ async fn subscribe(
     Ok(sse::upgrade(req, move |req, sender| async move {
         let mut events = req.state().query_service.subscribe(index).await;
         while let Some(event) = events.next().await {
-            match event {
-                LedgerEvent::Commit(block, block_id, state_comm) => {
-                    sender
-                        .send(
-                            "commit",
-                            js::to_string(&js::block(&block, block_id as usize, &state_comm)?)?,
-                            None,
-                        )
-                        .await?;
-                }
-
-                LedgerEvent::Reject(block, error) => {
-                    use zerok_lib::ValidationError::*;
-                    let error_msg = match error {
-                        NullifierAlreadyExists { nullifier } => format!(
-                            "the nullifier {} has already been spent",
-                            js::to_string(&js::nullifier(&nullifier)?)?
-                        ),
-                        BadNullifierProof {} => String::from("bad nullifier proof"),
-                        MissingNullifierProof {} => String::from("missing nullifier proof"),
-                        ConflictingNullifiers {} => String::from("conflicting nullifiers"),
-                        Failed {} => String::from("unknown validation failure"),
-                        BadMerkleLength {} => String::from("bad merkle path length"),
-                        BadMerkleLeaf {} => String::from("bad merkle path leaf"),
-                        BadMerkleRoot {} => String::from("bad merkle root"),
-                        BadMerklePath {} => String::from("bad merkle path"),
-                        CryptoError { err } => format!("{}", err),
-                        UnsupportedTransferSize {
-                            num_inputs,
-                            num_outputs,
-                        } => format!(
-                            "transfers with {} inputs and {} outputs are not supported",
-                            num_inputs, num_outputs
-                        ),
-                        UnsupportedFreezeSize { num_inputs } => {
-                            format!("freezes with {} inputs are not supported", num_inputs)
-                        }
-                    };
-
-                    sender
-                        .send(
-                            "reject",
-                            js::to_string(&json!({
-                                "block": js::block_contents(&block)?,
-                                "error": error_msg,
-                            }))?,
-                            None,
-                        )
-                        .await?
-                }
-
-                LedgerEvent::Memos(info) => {
-                    sender
-                        .send(
-                            "memos",
-                            serde_json::ser::to_string(
-                                &info
-                                    .into_iter()
-                                    .map(|(memo, comm, uid, merkle_path)| {
-                                        Ok(json!({
-                                            "memo": js::memo(&memo)?,
-                                            "commitment": js::record_comm(&comm)?,
-                                            "uid": uid,
-                                            "merkle_path": js::merkle_path(&merkle_path)?,
-                                        }))
-                                    })
-                                    .collect::<Result<Vec<_>, tide::Error>>()?,
-                            )?,
-                            None,
-                        )
-                        .await?
-                }
-            }
+            let event_type = match event {
+                LedgerEvent::Commit { .. } => "commit",
+                LedgerEvent::Reject { .. } => "reject",
+                LedgerEvent::Memos { .. } => "memos",
+            };
+            sender
+                .send(
+                    event_type,
+                    serde_json::to_string(&event).map_err(server_error)?,
+                    None,
+                )
+                .await?;
         }
         Ok(())
     }))
+}
+
+fn respond<T: Serialize>(content_type: mime::Mime, res: T) -> Result<tide::Response, tide::Error> {
+    match content_type.subtype() {
+        "json" => Ok(tide::Response::from(json!(res))),
+        _ => Err(tide::Error::from_str(
+            StatusCode::UnsupportedMediaType,
+            format!("unsupported content type {}", content_type),
+        )),
+    }
 }
 
 pub async fn dispatch_url(
@@ -623,17 +416,36 @@ pub async fn dispatch_url(
         .unwrap_or((route_pattern, ""))
         .0;
     let key = ApiRouteKey::from_str(first_segment).expect("Unknown route");
+    //todo !jeb.bearer Get the content type to respond with from the request (URL parameter or
+    // header or something). All endpoint functions return a serializable structure, so we can
+    // respond with any content type that serde can target.
+    let res_type = mime::JSON;
     match key {
-        ApiRouteKey::getblock => get_block(bindings, &req.state().query_service).await,
-        ApiRouteKey::getblockcount => get_block_count(&req.state().query_service).await,
-        ApiRouteKey::getblockhash => get_block_hash(bindings, &req.state().query_service).await,
-        ApiRouteKey::getblockid => get_block_id(bindings, &req.state().query_service).await,
-        ApiRouteKey::getinfo => get_info(&req.state().query_service).await,
-        ApiRouteKey::getmempool => dummy_url_eval(route_pattern, bindings),
-        ApiRouteKey::gettransaction => get_transaction(bindings, &req.state().query_service).await,
-        ApiRouteKey::getunspentrecord => {
-            get_unspent_record(bindings, &req.state().query_service).await
+        ApiRouteKey::getblock => respond(
+            res_type,
+            get_block(bindings, &req.state().query_service).await?,
+        ),
+        ApiRouteKey::getblockcount => {
+            respond(res_type, get_block_count(&req.state().query_service).await?)
         }
+        ApiRouteKey::getblockhash => respond(
+            res_type,
+            get_block_hash(bindings, &req.state().query_service).await?,
+        ),
+        ApiRouteKey::getblockid => respond(
+            res_type,
+            get_block_id(bindings, &req.state().query_service).await?,
+        ),
+        ApiRouteKey::getinfo => respond(res_type, get_info(&req.state().query_service).await?),
+        ApiRouteKey::getmempool => dummy_url_eval(route_pattern, bindings),
+        ApiRouteKey::gettransaction => respond(
+            res_type,
+            get_transaction(bindings, &req.state().query_service).await?,
+        ),
+        ApiRouteKey::getunspentrecord => respond(
+            res_type,
+            get_unspent_record(bindings, &req.state().query_service).await?,
+        ),
         ApiRouteKey::getunspentrecordsetinfo => dummy_url_eval(route_pattern, bindings),
         ApiRouteKey::subscribe => subscribe(req, bindings).await,
     }
