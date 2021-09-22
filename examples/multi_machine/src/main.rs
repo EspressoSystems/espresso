@@ -70,7 +70,7 @@ struct NodeOpt {
     /// with `pk_`.
     #[structopt(
         long = "pk_path", 
-        short = "g", 
+        short = "p", 
         default_value = ""      // See fn default_pk_path().
     )]
     pk_path: String,
