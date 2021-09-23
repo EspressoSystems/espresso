@@ -412,9 +412,13 @@ impl WebState {
                     id,
                     message
                 );
+                let error_detail = format!(
+                    "Unable to find connection for ID: {} while attempting to send the message: '{}'",
+                    id, message
+                );
                 Err(tide::Error::from_str(
                     tide::StatusCode::InternalServerError,
-                    "Unable to find connection for ID. See the event log for details.",
+                    error_detail,
                 ))
             }
             Entry::Occupied(mut id_connections) => {
