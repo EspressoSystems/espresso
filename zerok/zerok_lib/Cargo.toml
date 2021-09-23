@@ -36,6 +36,8 @@ async-std = { version = "1.10.0", features = ["unstable", "attributes"] }
 async-trait = "0.1.51"
 async_executors = { version = "0.4.2", features = ["async_std"] }
 futures = "0.3.16"
+strum = "0.20"
+strum_macros = "0.20.1"
 
 [dev-dependencies]
 quickcheck = "1.0"

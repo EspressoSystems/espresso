@@ -125,7 +125,7 @@ pub struct LedgerTransition {
     pub uids: Vec<Vec<u64>>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, strum_macros::AsStaticStr)]
 #[serde(tag = "type")]
 pub enum LedgerEvent {
     /// A new block was added to the ledger.

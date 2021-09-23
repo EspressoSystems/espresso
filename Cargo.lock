@@ -4938,6 +4938,8 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "snafu",
+ "strum",
+ "strum_macros",
  "tagged-base64",
 ]
 

@@ -7,7 +7,7 @@ use phaselock::BlockContents;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;
-use strum::IntoEnumIterator;
+use strum::{AsStaticRef, IntoEnumIterator};
 use strum_macros::{AsRefStr, EnumIter, EnumString};
 use tagged_base64::TaggedBase64;
 use tide::http::mime;
@@ -16,7 +16,7 @@ use tide::sse;
 use tide::StatusCode;
 use tracing::{event, Level};
 use zerok_lib::api::*;
-use zerok_lib::node::{LedgerEvent, LedgerSummary, LedgerTransition, QueryService};
+use zerok_lib::node::{LedgerSummary, LedgerTransition, QueryService};
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -379,14 +379,9 @@ async fn subscribe(
     Ok(sse::upgrade(req, move |req, sender| async move {
         let mut events = req.state().query_service.subscribe(index).await;
         while let Some(event) = events.next().await {
-            let event_type = match event {
-                LedgerEvent::Commit { .. } => "commit",
-                LedgerEvent::Reject { .. } => "reject",
-                LedgerEvent::Memos { .. } => "memos",
-            };
             sender
                 .send(
-                    event_type,
+                    event.as_static(),
                     serde_json::to_string(&event).map_err(server_error)?,
                     None,
                 )

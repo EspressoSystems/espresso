@@ -26,6 +26,7 @@ use serde::Deserialize;
 use std::fmt::Display;
 use std::time::Duration;
 use structopt::StructOpt;
+use strum::AsStaticRef;
 use surf_sse::{EventSource, Url};
 use tracing::{event, Level};
 use zerok_lib::api::*;
@@ -169,6 +170,7 @@ async fn main() {
     // Check validity of the individual events. The events are just serialized LedgerEvents, not an
     // API-specific type, so as long as they deserialize properly they should be fine.
     for event in events1.into_iter() {
-        serde_json::from_str::<LedgerEvent>(event.data.as_str()).unwrap();
+        let ledger_event: LedgerEvent = serde_json::from_str(event.data.as_str()).unwrap();
+        assert_eq!(event.event, ledger_event.as_static());
     }
 }
