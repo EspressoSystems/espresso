@@ -342,7 +342,11 @@ impl<'a> WalletState<'a> {
     ) {
         self.now += 1;
         match event {
-            LedgerEvent::Commit(block, block_id, state_comm) => {
+            LedgerEvent::Commit {
+                block,
+                block_id,
+                state_comm,
+            } => {
                 // Don't trust the network connection that provided us this event; validate it
                 // against our local mirror of the ledger and bail out if it is invalid.
                 let mut uids = match self.validator.validate_and_apply(
@@ -428,7 +432,7 @@ impl<'a> WalletState<'a> {
                 }
             }
 
-            LedgerEvent::Memos(outputs) => {
+            LedgerEvent::Memos { outputs } => {
                 for (memo, comm, uid, proof) in outputs {
                     if let Ok(record_opening) = memo.decrypt(&session.key_pair, &comm, &[]) {
                         // If this record is for us (i.e. its corresponding memo decrypts under our
@@ -448,15 +452,15 @@ impl<'a> WalletState<'a> {
                 }
             }
 
-            LedgerEvent::Reject(block, err) => {
+            LedgerEvent::Reject { block, error } => {
                 for (txn, proofs) in block.block.0.into_iter().zip(block.proofs) {
                     let mut txn = ElaboratedTransaction { txn, proofs };
                     if let Some(pending) = self
-                        .clear_pending_transaction(session, &txn, Err(err.clone()))
+                        .clear_pending_transaction(session, &txn, Err(error.clone()))
                         .await
                     {
                         // Try to resubmit if the error is recoverable.
-                        if let ValidationError::BadNullifierProof {} = err {
+                        if let ValidationError::BadNullifierProof {} = error {
                             if self.update_nullifier_proofs(&mut txn).is_ok() {
                                 println!("recoverable error in txn {:?}, resubmitting", txn);
                                 if self
@@ -1613,17 +1617,17 @@ pub mod test_helpers {
                 ElaboratedBlock::next_block(&self.validator),
             );
             match self.validator.validate_and_apply(
-                self.now(),
+                self.validator.prev_commit_time + 1,
                 block.block.clone(),
                 block.proofs.clone(),
                 true,
             ) {
                 Ok(mut uids) => {
-                    self.generate_event(LedgerEvent::Commit(
-                        block.clone(),
-                        self.committed_blocks.len() as u64,
-                        self.validator.commit(),
-                    ));
+                    self.generate_event(LedgerEvent::Commit {
+                        block: block.clone(),
+                        block_id: self.committed_blocks.len() as u64,
+                        state_comm: self.validator.commit(),
+                    });
                     let mut block_uids = vec![];
                     for txn in block.block.0.iter() {
                         let mut this_txn_uids = uids;
@@ -1633,7 +1637,7 @@ pub mod test_helpers {
                     }
                     self.committed_blocks.push((block, block_uids));
                 }
-                Err(err) => self.generate_event(LedgerEvent::Reject(block, err)),
+                Err(error) => self.generate_event(LedgerEvent::Reject { block, error }),
             }
         }
 
@@ -1665,12 +1669,15 @@ pub mod test_helpers {
                         self.flush();
                     }
                 }
-                Err(err) => {
+                Err(error) => {
                     let rejected = ElaboratedBlock {
                         block: Block(vec![txn.txn]),
                         proofs: vec![txn.proofs],
                     };
-                    self.generate_event(LedgerEvent::Reject(rejected, err));
+                    self.generate_event(LedgerEvent::Reject {
+                        block: rejected,
+                        error,
+                    });
                 }
             }
         }
@@ -1701,9 +1708,9 @@ pub mod test_helpers {
                         .1
                 })
                 .collect::<Vec<_>>();
-            self.generate_event(LedgerEvent::Memos(
-                izip!(memos, comms, uids, merkle_paths).collect(),
-            ));
+            self.generate_event(LedgerEvent::Memos {
+                outputs: izip!(memos, comms, uids, merkle_paths).collect(),
+            });
 
             Ok(())
         }
@@ -1715,7 +1722,7 @@ pub mod test_helpers {
     ) {
         let t = {
             let ledger = ledger.lock().unwrap();
-            if let Some(LedgerEvent::Commit(..)) = ledger.events.last() {
+            if let Some(LedgerEvent::Commit { .. }) = ledger.events.last() {
                 // If the last event is a Commit, wait until the sender receives the Commit event
                 // and posts the receiver memos, generating a new Memos event.
                 ledger.now() + 1

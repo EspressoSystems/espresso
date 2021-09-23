@@ -28,6 +28,7 @@ use phaselock::{
 };
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::error;
 use std::fmt;
@@ -98,7 +99,7 @@ impl Validator for LightWeightNode {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct LedgerSummary {
     pub num_blocks: usize,
@@ -124,25 +125,35 @@ pub struct LedgerTransition {
     pub uids: Vec<Vec<u64>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, strum_macros::AsStaticStr)]
+#[serde(tag = "type")]
 pub enum LedgerEvent {
     /// A new block was added to the ledger.
     ///
     /// Includes the block contents, the unique identifier for the block, and the new state
     /// commitment.
-    Commit(ElaboratedBlock, u64, LedgerStateCommitment),
+    Commit {
+        block: ElaboratedBlock,
+        block_id: u64,
+        state_comm: LedgerStateCommitment,
+    },
 
     /// A proposed block was rejected.
     ///
     /// Includes the block contents and the reason for rejection.
-    Reject(ElaboratedBlock, ValidationError),
+    Reject {
+        block: ElaboratedBlock,
+        error: ValidationError,
+    },
 
     /// Receiver memos were posted for one or more previously accepted transactions.
     ///
     /// For each UTXO corresponding to the posted memos, includes the memo, the record commitment,
     /// the unique identifier for the record, and a proof that the record commitment exists in the
     /// current UTXO set.
-    Memos(Vec<(ReceiverMemo, RecordCommitment, u64, MerklePath)>),
+    Memos {
+        outputs: Vec<(ReceiverMemo, RecordCommitment, u64, MerklePath)>,
+    },
 }
 
 /// A QueryService accumulates the full state of the ledger, making it available for consumption by
@@ -303,7 +314,10 @@ impl FullState {
                             ValidationError::Failed {}
                         }
                     };
-                    self.send_event(LedgerEvent::Reject(self.proposed.clone(), err));
+                    self.send_event(LedgerEvent::Reject {
+                        block: self.proposed.clone(),
+                        error: err,
+                    });
                 }
 
                 // PhaseLock errors that don't relate to blocks being rejected (view timeouts,
@@ -370,11 +384,11 @@ impl FullState {
                         assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
 
                         // Notify subscribers of the new block.
-                        self.send_event(LedgerEvent::Commit(
-                            (*block).clone(),
-                            index as u64,
-                            self.validator.commit(),
-                        ));
+                        self.send_event(LedgerEvent::Commit {
+                            block: (*block).clone(),
+                            block_id: index as u64,
+                            state_comm: self.validator.commit(),
+                        });
                     }
                 }
             }
@@ -476,15 +490,15 @@ impl FullState {
         let merkle_paths = uids
             .iter()
             .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1);
-        let event = LedgerEvent::Memos(
-            izip!(
+        let event = LedgerEvent::Memos {
+            outputs: izip!(
                 new_memos,
                 txn.output_commitments(),
                 uids.iter().cloned(),
                 merkle_paths
             )
             .collect(),
-        );
+        };
         self.send_event(event);
 
         Ok(())
@@ -578,9 +592,9 @@ impl<'a> PhaseLockQueryService<'a> {
                             .into_iter()
                             .map(RecordCommitment::from_field_element)
                             .collect::<Vec<_>>();
-                        state.send_event(LedgerEvent::Memos(
-                            izip!(memos, comms, uids, merkle_paths).collect(),
-                        ));
+                        state.send_event(LedgerEvent::Memos {
+                            outputs: izip!(memos, comms, uids, merkle_paths).collect(),
+                        });
                     }
 
                     // Handle events as they come in from the network.
@@ -1111,7 +1125,7 @@ mod tests {
             let mut events = qs.subscribe(1).await;
             for (_, hist_block, _, hist_state) in history.iter() {
                 match events.next().await.unwrap() {
-                    LedgerEvent::Commit(block, ..) => {
+                    LedgerEvent::Commit { block, .. } => {
                         assert_eq!(block, *hist_block);
 
                         // We should be able to get inclusion proofs for all the nullifiers in the
@@ -1159,10 +1173,11 @@ mod tests {
                         .await
                         .unwrap();
                     match events.next().await.unwrap() {
-                        LedgerEvent::Memos(info) => {
+                        LedgerEvent::Memos { outputs } => {
                             // After successfully posting memos, we should get a Memos event.
                             for ((memo, comm, uid, merkle_path), (expected_memo, expected_comm)) in
-                                info.into_iter()
+                                outputs
+                                    .into_iter()
                                     .zip(memos.iter().zip(txn.output_commitments()))
                             {
                                 // The contents of the event should match the memos we just posted.
