@@ -6,6 +6,7 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use middleware::request_body;
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey,
@@ -441,7 +442,7 @@ impl WebState {
 }
 
 async fn submit_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let tx = req.body_json().await?;
+    let tx = request_body(&mut req).await?;
     let validator = req.state().node.read().await;
     validator
         .submit_transaction(tx)
@@ -451,7 +452,7 @@ async fn submit_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respo
 }
 
 async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let PostMemos { memos, signature } = req.body_json().await?;
+    let PostMemos { memos, signature } = request_body(&mut req).await?;
     let mut bulletin = req.state().node.write().await;
     let TransactionId(BlockId(block), tx) =
         UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
@@ -469,6 +470,15 @@ async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respon
         .await
         .map_err(server_error)?;
     Ok(tide::Response::new(StatusCode::Ok))
+}
+
+async fn users_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    let pub_key = request_body(&mut req).await?;
+    let mut bulletin = req.state().node.write().await;
+    bulletin.introduce(&pub_key)
+        .await
+        .map_err(server_error)?;
+    Ok(tide::Response::new(StatusCode::Ok)) 
 }
 
 async fn landing_page(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
@@ -705,6 +715,7 @@ fn init_web_server(
     // we just handle them here in a pretty ad hoc fashion.
     web_server.at("/submit").post(submit_endpoint);
     web_server.at("/memos/:txid").post(memos_endpoint);
+    web_server.at("/users").post(users_endpoint);
 
     // Add routes from a configuration file.
     println!("Format version: {}", &api["meta"]["FORMAT_VERSION"]);

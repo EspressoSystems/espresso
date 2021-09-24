@@ -416,6 +416,25 @@ pub mod middleware {
     use super::*;
     use http_types::mime;
 
+    /// Deserialize the body of a request.
+    ///
+    /// The Content-Type header is used to determine the serialization format. Currently only JSON
+    /// is supported. Eventually we should also add support for a binary format such as bincode.
+    pub async fn request_body<T: for<'de> Deserialize<'de>, S>(
+        req: &mut tide::Request<S>,
+    ) -> Result<T, tide::Error> {
+        if let Some(content_type) = req.header("Content-Type") {
+            match content_type.as_str() {
+                "application/json" => req.body_json().await,
+                content_type => Err(client_error(Error::UnsupportedContentType {
+                    content_type: String::from(content_type),
+                })),
+            }
+        } else {
+            Err(server_error(Error::UnspecifiedContentType {}))
+        }
+    }
+
     /// Serialize the body of a response.
     ///
     /// The Accept header of the request is used to determine the serialization format. Currently

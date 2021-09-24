@@ -73,7 +73,7 @@ impl<'a> NetworkBackend<'a> {
 impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
     type EventStream = EventStream;
 
-    async fn load(&self, _key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
+    async fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
         // todo !jeb.bearer We don't support storing yet, so this function currently just loads from
         // the initial state of the ledger using the /getsnapshot method of the query service. This
         // is equivalent to creating a new wallet.
@@ -122,6 +122,15 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
                     .collect::<Result<_, _>>()?,
             };
 
+        // Publish the address of the new wallet.
+        self.bulletin_client
+            .post("/users")
+            .body_json(&key_pair.pub_key())
+            .context(ClientError)?
+            .send()
+            .await
+            .context(ClientError)?;
+
         Ok(WalletState {
             validator,
             proving_keys,
@@ -161,7 +170,7 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
             .post("submit")
             .body_json(&txn)
             .context(ClientError)?
-            .recv_bytes()
+            .send()
             .await
             .context(ClientError)?;
         Ok(())
@@ -181,7 +190,7 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
             ))
             .body_json(&api::PostMemos { memos, signature })
             .context(ClientError)?
-            .recv_bytes()
+            .send()
             .await
             .context(ClientError)?;
         Ok(())
