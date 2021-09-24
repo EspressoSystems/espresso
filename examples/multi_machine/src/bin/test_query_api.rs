@@ -140,9 +140,9 @@ async fn main() {
     assert_eq!(num_blocks, get::<usize, _>("/getblockcount").await);
 
     // Check that we can query the 0th block and the last block.
-    for ix in [0, num_blocks - 1] {
-        let block = get(format!("/getblock/index/{}", ix)).await;
-        validate_committed_block(&block, ix, num_blocks, num_records).await;
+    for ix in [0, num_blocks - 1].iter() {
+        let block = get(format!("/getblock/index/{}", *ix)).await;
+        validate_committed_block(&block, *ix, num_blocks, num_records).await;
     }
 
     // Check the event stream. The event stream is technically never-ending; once we have received
