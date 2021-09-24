@@ -9,6 +9,9 @@ function isWebSocketOpen() {
     return webSocket && webSocket.readyState === webSocket.OPEN
 };
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 // Attempt a web socket connection.
 function webSocketConnect() {
     if (!isWebSocketOpen()) {
@@ -22,7 +25,17 @@ function webSocketConnect() {
         console.log(`ws.js:webSocketConnect url:${url}`);
         webSocket = new WebSocket(url);
         webSocket.onmessage = webSocketOnMessage;
+        webSocket.onopen = webSocketOnOpen;
         status('Web Socket enabled.');
+        const SLEEP_MS = 50;
+        for (let i = 1; i <= 10; ++i) {
+            sleep(SLEEP_MS);
+            if (isWebSocketOpen()) {
+                console.log("WebSocket connection opened after "
+                            + SLEEP_MS * i + "ms");
+                break;
+            }
+        }
     }
 }
 
@@ -69,6 +82,10 @@ function redirectClean() {
 function webSocketOnMessage(msg) {
     const data = JSON.parse(msg.data);
     status(`Got webSocket message: clientId:${data.clientId} msg:${data.msg}.`);
+}
+
+function webSocketOnOpen(event) {
+    console.log('got WebSocket.onopen event: '+ JSON.stringify(event));
 }
 
 // Do a thing when the UI "Send" button is pressed.
