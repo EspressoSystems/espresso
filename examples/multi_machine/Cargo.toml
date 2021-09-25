@@ -11,10 +11,10 @@ async-std = { version = "1.9.0", features = ["unstable", "attributes"] }
 async-trait = "0.1.51"
 futures = "0.3.0"
 futures-util = "0.3.8"
-jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "dfb681df8d218f9dca5ddb68b5213f44ef6a8490"}
-jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "dfb681df8d218f9dca5ddb68b5213f44ef6a8490"}
-jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "dfb681df8d218f9dca5ddb68b5213f44ef6a8490"}
-jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "dfb681df8d218f9dca5ddb68b5213f44ef6a8490"}
+jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git" }
+jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git" }
+jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git" }
+jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git" }
 phaselock = { version = "0.0.1", registry = "translucence" }
 rand_chacha = "0.2.2"
 serde = { version = "1.0.123", features = ["derive", "rc"] }

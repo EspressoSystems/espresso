@@ -121,7 +121,7 @@ impl CanonicalSerialize for SetMerkleTerminalNode {
             SetMerkleTerminalNode::Leaf { height, elem } => {
                 writer.write_all(&[1]).map_err(SerializationError::from)?;
                 <usize as CanonicalSerialize>::serialize(height, &mut writer)?;
-                elem.serialize(&mut writer)
+                <Nullifier as CanonicalSerialize>::serialize(elem, &mut writer)
             }
         }
     }
