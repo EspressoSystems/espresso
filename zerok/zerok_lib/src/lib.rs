@@ -9,6 +9,7 @@ mod set_merkle_tree;
 mod util;
 pub mod wallet;
 
+use crate::config::executable_name;
 use ark_serialize::*;
 use canonical::CanonicalBytes;
 use core::fmt::Debug;
@@ -42,6 +43,7 @@ use std::io::Read;
 use std::iter::FromIterator;
 use std::ops::Bound::*;
 use std::path::Path;
+use std::path::PathBuf;
 use std::time::Instant;
 pub use util::canonical;
 
@@ -763,6 +765,36 @@ pub struct MultiXfrTestState {
 
     pub outer_timer: Instant,
     pub inner_timer: Instant,
+}
+
+/// Returns the project directory assuming the executable is in a
+/// default build location.
+///
+/// For example, if the executable path is
+/// ```
+///    ~/tri/systems/system/target/release/multi_machine
+/// ```
+/// then the project path
+/// ```
+///    ~/tri/systems/system/examples/multi_machine/
+/// ```
+// Note: This function will need to be edited if copied to a project
+// that is not under zerok/ or a sibling directory.
+fn project_path() -> PathBuf {
+    const EX_DIR: &str = "zerok";
+    let mut project = PathBuf::from(
+        std::env::current_exe()
+            .expect("current_exe() returned an error")
+            .parent()
+            .expect("Unable to find parent directory (1)")
+            .parent()
+            .expect("Unable to find parent directory (2)")
+            .parent()
+            .expect("Unable to find parent directory (3)"),
+    );
+    project.push(EX_DIR);
+    project.push(&executable_name());
+    project
 }
 
 /// Generates universal parameter and store it to file.
