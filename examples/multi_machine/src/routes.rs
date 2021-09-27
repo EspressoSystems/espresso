@@ -113,6 +113,7 @@ pub enum ApiRouteKey {
     getblockid,
     getinfo,
     getmempool,
+    getnullifier,
     getsnapshot,
     gettransaction,
     getunspentrecord,
@@ -405,6 +406,20 @@ async fn get_user(
         .map_err(server_error)
 }
 
+async fn get_nullifier(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &impl QueryService,
+) -> Result<NullifierProof, tide::Error> {
+    let (spent, proof) = query_service
+        .nullifier_proof(
+            bindings[":root"].value.to()?,
+            bindings[":nullifier"].value.to()?,
+        )
+        .await
+        .map_err(server_error)?;
+    Ok(NullifierProof { spent, proof })
+}
+
 async fn subscribe(
     req: tide::Request<WebState>,
     bindings: &HashMap<String, RouteBinding>,
@@ -454,6 +469,7 @@ pub async fn dispatch_url(
         ApiRouteKey::getunspentrecordsetinfo => dummy_url_eval(route_pattern, bindings),
         ApiRouteKey::getsnapshot => response(&req, get_snapshot(bindings, query_service).await?),
         ApiRouteKey::getuser => response(&req, get_user(bindings, query_service).await?),
+        ApiRouteKey::getnullifier => response(&req, get_nullifier(bindings, query_service).await?),
         ApiRouteKey::subscribe => {
             drop(query_service_guard);
             subscribe(req, bindings).await

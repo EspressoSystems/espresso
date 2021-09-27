@@ -178,6 +178,11 @@ pub trait WalletBackend<'a> {
     ) -> Result<(), WalletError>;
     async fn subscribe(&self, starting_at: u64) -> Self::EventStream;
     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError>;
+    async fn prove_nullifier_unspent(
+        &self,
+        root: set_hash::Hash,
+        nullifier: Nullifier,
+    ) -> Result<SetMerkleProof, WalletError>;
 
     // Submit a transaction to a validator.
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError>;
@@ -509,7 +514,11 @@ impl<'a> WalletState<'a> {
                     {
                         // Try to resubmit if the error is recoverable.
                         if let ValidationError::BadNullifierProof {} = error {
-                            if self.update_nullifier_proofs(&mut txn).is_ok() {
+                            if self
+                                .update_nullifier_proofs(&mut session.backend, &mut txn)
+                                .await
+                                .is_ok()
+                            {
                                 println!("recoverable error in txn {:?}, resubmitting", txn);
                                 if self
                                     .submit_elaborated_transaction(
@@ -697,20 +706,26 @@ impl<'a> WalletState<'a> {
         }
     }
 
-    fn update_nullifier_proofs(&self, txn: &mut ElaboratedTransaction) -> Result<(), WalletError> {
-        txn.proofs = txn
-            .txn
-            .nullifiers()
-            .iter()
-            .map(|n| {
-                let (contains, proof) = self.nullifiers.contains(*n).unwrap();
+    async fn update_nullifier_proofs(
+        &self,
+        backend: &mut impl WalletBackend<'a>,
+        txn: &mut ElaboratedTransaction,
+    ) -> Result<(), WalletError> {
+        txn.proofs = Vec::new();
+        for n in txn.txn.nullifiers() {
+            let proof = if let Some((contains, proof)) = self.nullifiers.contains(n) {
                 if contains {
-                    Err(WalletError::NullifierAlreadyPublished { nullifier: *n })
+                    return Err(WalletError::NullifierAlreadyPublished { nullifier: n });
                 } else {
-                    Ok(proof)
+                    proof
                 }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            } else {
+                backend
+                    .prove_nullifier_unspent(self.nullifiers.hash(), n)
+                    .await?
+            };
+            txn.proofs.push(proof);
+        }
         Ok(())
     }
 
@@ -1174,16 +1189,28 @@ impl<'a> WalletState<'a> {
         sig: Signature,
         freeze_outputs: Vec<RecordOpening>,
     ) -> Result<(), WalletError> {
-        let nullifier_pfs = note
-            .nullifiers()
-            .iter()
-            .map(|n| self.nullifiers.contains(*n).unwrap().1)
-            .collect();
+        let mut nullifier_pfs = Vec::new();
+        for n in note.nullifiers() {
+            let proof = if let Some((contains, proof)) = self.nullifiers.contains(n) {
+                if contains {
+                    return Err(WalletError::NullifierAlreadyPublished { nullifier: n });
+                } else {
+                    proof
+                }
+            } else {
+                let proof = backend
+                    .prove_nullifier_unspent(self.nullifiers.hash(), n)
+                    .await?;
+                self.nullifiers.remember(n, proof.clone()).unwrap();
+                proof
+            };
+            nullifier_pfs.push(proof);
+        }
+
         let txn = ElaboratedTransaction {
             txn: note,
             proofs: nullifier_pfs,
         };
-
         self.submit_elaborated_transaction(backend, txn, memos, sig, freeze_outputs)
             .await
     }
@@ -1629,7 +1656,7 @@ pub fn new_key_pair() -> UserKeyPair {
 pub mod test_helpers {
     use super::*;
     use crate::{
-        Block, ElaboratedBlock, TransactionVerifyingKey, VerifierKeySet, MERKLE_HEIGHT,
+        node, Block, ElaboratedBlock, TransactionVerifyingKey, VerifierKeySet, MERKLE_HEIGHT,
         UNIVERSAL_PARAM,
     };
     use futures::channel::mpsc as channel;
@@ -1865,6 +1892,26 @@ pub mod test_helpers {
                 None => Err(WalletError::InvalidAddress {
                     address: address.clone(),
                 }),
+            }
+        }
+
+        async fn prove_nullifier_unspent(
+            &self,
+            root: set_hash::Hash,
+            nullifier: Nullifier,
+        ) -> Result<SetMerkleProof, WalletError> {
+            let ledger = self.ledger.lock().unwrap();
+            if root == ledger.nullifiers.hash() {
+                let (contains, proof) = ledger.nullifiers.contains(nullifier).unwrap();
+                if contains {
+                    Err(WalletError::NullifierAlreadyPublished { nullifier })
+                } else {
+                    Ok(proof)
+                }
+            } else {
+                Err(WalletError::QueryServiceError {
+                    source: node::QueryServiceError::InvalidNullifierRoot {},
+                })
             }
         }
 

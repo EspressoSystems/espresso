@@ -149,3 +149,14 @@ PATH = ["getuser/:address"]
 ":address" = "TaggedBase64"
 DOC = "Returns the public key of a user with a specified address."
 ERROR_address = "A valid user address is required. User addresses begin with ADDR~, for example, ADDR~Ab12whatever."
+
+[route.getnullifier]
+PATH = ["getnullifier/:root/:nullifier"]
+":root" = "TaggedBase64"
+":nullifier" = "TaggedBase64"
+DOC = """
+Returns whether the designated nullifier has been spent, along with a proof relative to the
+requested root hash. The root must be a historical root hash of the ledger's nullifier set.
+"""
+ERROR_root = "A valid Merkle set root hash is required. Hashes begin with HASH~."
+ERROR_nullifier = "A valid nullifier is required. Nullifiers begin with NUL~."

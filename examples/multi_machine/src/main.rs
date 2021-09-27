@@ -550,7 +550,7 @@ async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respon
 }
 
 async fn users_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let pub_key = request_body(&mut req).await?;
+    let pub_key: UserPubKey = request_body(&mut req).await?;
     let mut bulletin = req.state().node.write().await;
     bulletin.introduce(&pub_key).await.map_err(server_error)?;
     Ok(tide::Response::new(StatusCode::Ok))

@@ -905,6 +905,23 @@ impl<'a> WalletBackend<'a> for FullNode<'a> {
             })
     }
 
+    async fn prove_nullifier_unspent(
+        &self,
+        root: set_hash::Hash,
+        nullifier: Nullifier,
+    ) -> Result<SetMerkleProof, WalletError> {
+        let (spent, proof) = self
+            .as_query_service()
+            .nullifier_proof(root, nullifier)
+            .await
+            .context(QueryServiceWalletError)?;
+        if spent {
+            Err(WalletError::NullifierAlreadyPublished { nullifier })
+        } else {
+            Ok(proof)
+        }
+    }
+
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {
         self.as_validator()
             .submit_transaction(txn)

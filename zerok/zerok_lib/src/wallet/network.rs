@@ -2,6 +2,7 @@ use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletSt
 use crate::api;
 use crate::key_set::SizedKey;
 use crate::node;
+use crate::set_merkle_tree::{set_hash, SetMerkleProof};
 use crate::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
 use api::{middleware, BlockId, ClientError, TransactionId};
 use async_executors::AsyncStd;
@@ -13,7 +14,7 @@ use futures::task::{Context, Poll, SpawnExt};
 use http_types::mime;
 use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey};
 use jf_txn::proof::UniversalParam;
-use jf_txn::structs::ReceiverMemo;
+use jf_txn::structs::{Nullifier, ReceiverMemo};
 use jf_txn::Signature;
 use node::{LedgerEvent, LedgerSnapshot};
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
@@ -166,6 +167,21 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
         self.get(format!("getuser/{}", api::UserAddress(address.clone())))
             .await
+    }
+
+    async fn prove_nullifier_unspent(
+        &self,
+        root: set_hash::Hash,
+        nullifier: Nullifier,
+    ) -> Result<SetMerkleProof, WalletError> {
+        let api::NullifierProof { proof, spent, .. } = self
+            .get(format!("/getnullifier/{}/{}", root, nullifier))
+            .await?;
+        if spent {
+            Err(WalletError::NullifierAlreadyPublished { nullifier })
+        } else {
+            Ok(proof)
+        }
     }
 
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {
