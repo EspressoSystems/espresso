@@ -6,6 +6,8 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
+use jf_txn::{MerkleTree, TransactionVerifyingKey};
 use middleware::request_body;
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
@@ -33,7 +35,8 @@ use toml::Value;
 use tracing::debug;
 use tracing::{event, Level};
 use zerok_lib::{
-    api::*, node::*, ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState,
+    api::*, key_set::KeySet, node::*, ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec,
+    MultiXfrTestState, ValidatorState, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
 };
 
 mod config;
@@ -102,6 +105,15 @@ struct NodeOpt {
         default_value = ""      // See fn default_api_path().
     )]
     api_path: String,
+
+    /// Use an external wallet to generate transactions.
+    ///
+    /// The argument is the path to the wallet's public key. If this option is given, the ledger
+    /// will be initialized with a single record of 2^32 native tokens, owned by the wallet's public
+    /// key. The demo will then wait for the wallet to generate some transactions and submit them to
+    /// the validators using the network API.
+    #[structopt(short, long = "wallet")]
+    wallet_pk_path: Option<PathBuf>,
 }
 
 /// Gets public key of a node from its public key file.
@@ -299,33 +311,98 @@ async fn init_state_and_phaselock(
     node_id: u64,
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
     full_node: bool,
-) -> (MultiXfrTestState, Node) {
+) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state
-    let state = MultiXfrTestState::initialize(
-        STATE_SEED,
-        10,
-        10,
-        (
-            MultiXfrRecordSpec {
-                asset_def_ix: 0,
-                owner_key_ix: 0,
-                asset_amount: 100,
-            },
-            vec![
-                MultiXfrRecordSpec {
-                    asset_def_ix: 1,
-                    owner_key_ix: 0,
-                    asset_amount: 50,
-                },
-                MultiXfrRecordSpec {
-                    asset_def_ix: 0,
-                    owner_key_ix: 0,
-                    asset_amount: 70,
-                },
-            ],
-        ),
-    )
-    .unwrap();
+    let (state, validator, records, nullifiers, memos) =
+        if let Some(pk_path) = NodeOpt::from_args().wallet_pk_path {
+            let mut rng = zerok_lib::crypto_rng_from_seed([0x42u8; 32]);
+
+            // Read in the public key of the wallet which will get the initial grant of native coins.
+            let mut file = File::open(pk_path).unwrap();
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes).unwrap();
+            let pub_key = bincode::deserialize(&bytes).unwrap();
+
+            // Create the initial grant.
+            let ro = RecordOpening::new(
+                &mut rng,
+                1u64 << 32,
+                AssetDefinition::native(),
+                pub_key,
+                FreezeFlag::Unfrozen,
+            );
+            let mut records = MerkleTree::new(MERKLE_HEIGHT).unwrap();
+            records.push(RecordCommitment::from(&ro).to_field_element());
+            let memos = vec![(ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap(), 0)];
+
+            // Set up the validator.
+            let univ_setup = &*UNIVERSAL_PARAM;
+            let (_, xfr_verif_key_12, _) =
+                jf_txn::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
+            let (_, xfr_verif_key_23, _) =
+                jf_txn::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
+            let (_, mint_verif_key, _) =
+                jf_txn::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
+            let (_, freeze_verif_key, _) =
+                jf_txn::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
+            let verif_keys = VerifierKeySet {
+                mint: TransactionVerifyingKey::Mint(mint_verif_key),
+                xfr: KeySet::new(
+                    vec![
+                        TransactionVerifyingKey::Transfer(xfr_verif_key_12),
+                        TransactionVerifyingKey::Transfer(xfr_verif_key_23),
+                    ]
+                    .into_iter(),
+                )
+                .unwrap(),
+                freeze: KeySet::new(
+                    vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
+                )
+                .unwrap(),
+            };
+
+            let nullifiers = Default::default();
+            let validator = ValidatorState::new(verif_keys, records.clone());
+            (None, validator, records, nullifiers, memos)
+        } else {
+            let state = MultiXfrTestState::initialize(
+                STATE_SEED,
+                10,
+                10,
+                (
+                    MultiXfrRecordSpec {
+                        asset_def_ix: 0,
+                        owner_key_ix: 0,
+                        asset_amount: 100,
+                    },
+                    vec![
+                        MultiXfrRecordSpec {
+                            asset_def_ix: 1,
+                            owner_key_ix: 0,
+                            asset_amount: 50,
+                        },
+                        MultiXfrRecordSpec {
+                            asset_def_ix: 0,
+                            owner_key_ix: 0,
+                            asset_amount: 70,
+                        },
+                    ],
+                ),
+            )
+            .unwrap();
+
+            let validator = state.validator.clone();
+            let record_merkle_tree = state.record_merkle_tree.clone();
+            let nullifiers = state.nullifiers.clone();
+            let unspent_memos = state.unspent_memos();
+            (
+                Some(state),
+                validator,
+                record_merkle_tree,
+                nullifiers,
+                unspent_memos,
+            )
+        };
 
     // Create the initial phaselock
     let known_nodes: Vec<_> = (0..nodes).map(get_public_key).collect();
@@ -347,7 +424,7 @@ async fn init_state_and_phaselock(
         secret_key_share,
         node_id,
         config,
-        state.validator.clone(),
+        validator.clone(),
         networking,
         MemoryStorage::default(),
     )
@@ -357,11 +434,11 @@ async fn init_state_and_phaselock(
     let validator = if full_node {
         let node = FullNode::new(
             phaselock,
-            state.univ_setup,
-            state.validator.clone(),
-            state.record_merkle_tree.clone(),
-            state.nullifiers.clone(),
-            state.unspent_memos(),
+            &*UNIVERSAL_PARAM,
+            validator.clone(),
+            records.clone(),
+            nullifiers.clone(),
+            memos,
         );
         Node::Full(node)
     } else {
@@ -475,10 +552,8 @@ async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respon
 async fn users_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
     let pub_key = request_body(&mut req).await?;
     let mut bulletin = req.state().node.write().await;
-    bulletin.introduce(&pub_key)
-        .await
-        .map_err(server_error)?;
-    Ok(tide::Response::new(StatusCode::Ok)) 
+    bulletin.introduce(&pub_key).await.map_err(server_error)?;
+    Ok(tide::Response::new(StatusCode::Ok))
 }
 
 async fn landing_page(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
@@ -696,7 +771,9 @@ fn init_web_server(
         api: api.clone(),
         node: Arc::new(RwLock::new(node)),
     });
-    web_server.with(middleware::add_error_body);
+    web_server
+        .with(middleware::trace)
+        .with(middleware::add_error_body);
 
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;
@@ -852,22 +929,24 @@ async fn main() -> Result<(), std::io::Error> {
         for round in 0..TRANSACTION_COUNT {
             println!("Starting round {}", round + 1);
 
-            // Generate a transaction if the node ID is 0
+            // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
             let mut txn = None;
             if own_id == 0 {
-                println!("  - Proposing a transaction");
-                let mut transactions = state
-                    .generate_transactions(
-                        round as usize,
-                        vec![(true, 0, 0, 0, 0, -2)],
-                        TRANSACTION_COUNT as usize,
-                    )
-                    .unwrap();
-                txn = Some(transactions.remove(0));
-                phaselock
-                    .submit_transaction(txn.clone().unwrap().3)
-                    .await
-                    .unwrap();
+                if let Some(state) = &mut state {
+                    println!("  - Proposing a transaction");
+                    let mut transactions = state
+                        .generate_transactions(
+                            round as usize,
+                            vec![(true, 0, 0, 0, 0, -2)],
+                            TRANSACTION_COUNT as usize,
+                        )
+                        .unwrap();
+                    txn = Some(transactions.remove(0));
+                    phaselock
+                        .submit_transaction(txn.clone().unwrap().3)
+                        .await
+                        .unwrap();
+                }
             }
 
             // Start consensus
@@ -894,8 +973,9 @@ async fn main() -> Result<(), std::io::Error> {
                 }
             }
 
-            // Add the transaction if the node ID is 0
+            // Add the transaction if the node ID is 0 and there is no attached wallet.
             if let Some((ix, keys_and_memos, sig, t)) = txn {
+                let state = state.as_mut().unwrap();
                 println!("  - Adding the transaction");
                 let mut blk = ElaboratedBlock::default();
                 let (owner_memos, kixs) = {

@@ -10,10 +10,10 @@ edition = "2018"
 itertools = "0.10.1"
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
-jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "3faf4400a7ae67de18400051f57afe8e4fb6d4de"}
-jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "3faf4400a7ae67de18400051f57afe8e4fb6d4de"}
-jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "3faf4400a7ae67de18400051f57afe8e4fb6d4de"}
-jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "3faf4400a7ae67de18400051f57afe8e4fb6d4de"}
+jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "927948bf38dd496a7a572995d01ff06707e1dda2"}
+jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "927948bf38dd496a7a572995d01ff06707e1dda2"}
+jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "927948bf38dd496a7a572995d01ff06707e1dda2"}
+jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "927948bf38dd496a7a572995d01ff06707e1dda2"}
 phaselock = { version = "0.0.1", registry = "translucence"}
 ark-std = { version = "0.2.0", default-features = false }
 ark-ff = { version = "0.2.0", default-features = false }
@@ -23,6 +23,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1.0"
 serde_json = "1.0.61"
 serde_cbor = "*"
+serde_with = "1.10.0"
 snafu = { version = "0.6.10", features = ["backtraces"] }
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
 blake2 = "0.9.1"
@@ -42,6 +43,7 @@ http-types = "2.12.0"
 surf = "2.3.1"
 surf-sse = "1.0.0"
 tide = "0.16.0"
+tracing = "0.1.26"
 
 [dev-dependencies]
 quickcheck = "1.0"

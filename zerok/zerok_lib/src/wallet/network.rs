@@ -10,6 +10,7 @@ use futures::channel::mpsc;
 use futures::future::RemoteHandle;
 use futures::prelude::*;
 use futures::task::{Context, Poll, SpawnExt};
+use http_types::mime;
 use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey};
 use jf_txn::proof::UniversalParam;
 use jf_txn::structs::ReceiverMemo;
@@ -60,6 +61,7 @@ impl<'a> NetworkBackend<'a> {
         let mut res = self
             .query_client
             .get(uri)
+            .content_type(mime::JSON)
             .send()
             .await
             .context(ClientError)?;
@@ -82,7 +84,7 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
         let LedgerSnapshot {
             state: validator,
             nullifiers,
-        } = self.get("getsnapshot/0").await?;
+        } = self.get("getsnapshot/0/true").await?;
 
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = self.univ_param;
@@ -125,6 +127,7 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
         // Publish the address of the new wallet.
         self.bulletin_client
             .post("/users")
+            .content_type(mime::JSON)
             .body_json(&key_pair.pub_key())
             .context(ClientError)?
             .send()
@@ -222,20 +225,29 @@ impl EventStream {
             let client = client.clone();
             AsyncStd::new()
                 .spawn_with_handle(async move {
+                    let url = client
+                        .config()
+                        .base_url
+                        .as_ref()
+                        .unwrap()
+                        .join(format!("subscribe/{}", starting_at).as_str())
+                        .unwrap();
                     let mut stream = Box::pin(
                         client
-                            .connect_event_source(
-                                Url::parse(format!("subscribe/{}", starting_at).as_str()).unwrap(),
-                            )
-                            // EventSource emits an error whenever it is transiently disconnected from
-                            // the server, but it reconnects automatically, so we can ignore Err
-                            // variants and just take the Ok results.
+                            .connect_event_source(url)
+                            // EventSource emits an error whenever it is transiently disconnected
+                            // from the server, but it reconnects automatically, so we can ignore
+                            // Err variants and just take the Ok results.
                             .filter_map(|res| async {
                                 res.ok().and_then(|event| {
                                     serde_json::from_str(event.data.as_str()).ok()
                                 })
                             }),
                     );
+                    // We can't `await` in this task, because at each await the executor is allowed
+                    // to move the task to another thread, but this task cannot be moved between
+                    // threads because surf_sse::EventSource is not Send. So we have to block the
+                    // current task when we wait for a future.
                     while let Some(event) = async_std::task::block_on(stream.next()) {
                         if sender.unbounded_send(event).is_err() {
                             // If we failed to send a message, it means the receiver has been dropped,

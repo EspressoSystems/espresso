@@ -31,18 +31,13 @@ use jf_utils::{tagged_blob, Tagged};
 use phaselock::BlockHash;
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, ResultExt, Snafu};
+use std::convert::TryFrom;
 use std::fmt;
 use tagged_base64::TaggedBase64;
 
 #[tagged_blob("HASH")]
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
 pub struct Hash(pub Vec<u8>);
-
-impl Display for Hash {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_using_json_string(self, f)
-    }
-}
 
 impl<const N: usize> From<BlockHash<N>> for Hash {
     fn from(h: BlockHash<N>) -> Self {
@@ -60,33 +55,15 @@ impl<U: ArrayLength<u8>> From<GenericArray<u8, U>> for Hash {
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
 pub struct BlockId(pub usize);
 
-impl Display for BlockId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_using_json_string(self, f)
-    }
-}
-
 #[tagged_blob("TX")]
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
 pub struct TransactionId(pub BlockId, pub usize);
-
-impl Display for TransactionId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_using_json_string(self, f)
-    }
-}
 
 // UserAddress from jf_txn is just a type alias for VerKey, which serializes with the tag VERKEY,
 // which is confusing. This newtype struct lets us a define a more user-friendly tag.
 #[tagged_blob("ADDR")]
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
 pub struct UserAddress(pub jf_txn::keys::UserAddress);
-
-impl Display for UserAddress {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_using_json_string(self, f)
-    }
-}
 
 pub use jf_txn::keys::UserPubKey;
 
@@ -101,7 +78,7 @@ pub struct CommittedBlock {
 
 impl Display for CommittedBlock {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_using_json_object(self, f)
+        fmt_as_json(self, f)
     }
 }
 
@@ -163,7 +140,7 @@ impl From<&CommittedTransaction> for ElaboratedTransaction {
 
 impl Display for CommittedTransaction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_using_json_object(self, f)
+        fmt_as_json(self, f)
     }
 }
 
@@ -176,7 +153,7 @@ pub struct UnspentRecord {
 
 impl Display for UnspentRecord {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_using_json_object(self, f)
+        fmt_as_json(self, f)
     }
 }
 
@@ -189,7 +166,20 @@ pub struct PostMemos {
 
 impl Display for PostMemos {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_using_json_object(self, f)
+        fmt_as_json(self, f)
+    }
+}
+
+/// Response body for the query service endpoint GET /getnullifier.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NullifierProof {
+    pub spent: bool,
+    pub proof: SetMerkleProof,
+}
+
+impl Display for NullifierProof {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        fmt_as_json(self, f)
     }
 }
 
@@ -231,6 +221,7 @@ pub enum Error {
         content_type: String,
     },
     UnspecifiedContentType {},
+    #[snafu(display("{}", msg))]
     InternalError {
         msg: String,
     },
@@ -266,6 +257,14 @@ impl From<phaselock::error::PhaseLockError> for Error {
 
 impl From<serde_json::Error> for Error {
     fn from(source: serde_json::Error) -> Self {
+        Self::InternalError {
+            msg: source.to_string(),
+        }
+    }
+}
+
+impl From<Box<bincode::ErrorKind>> for Error {
+    fn from(source: Box<bincode::ErrorKind>) -> Self {
         Self::InternalError {
             msg: source.to_string(),
         }
@@ -415,18 +414,23 @@ pub fn client_error(error: impl Into<Error>) -> surf::Error {
 pub mod middleware {
     use super::*;
     use http_types::mime;
+    use std::str::FromStr;
+    use tracing::{event, Level};
 
     /// Deserialize the body of a request.
     ///
-    /// The Content-Type header is used to determine the serialization format. Currently only JSON
-    /// is supported. Eventually we should also add support for a binary format such as bincode.
+    /// The Content-Type header is used to determine the serialization format.
     pub async fn request_body<T: for<'de> Deserialize<'de>, S>(
         req: &mut tide::Request<S>,
     ) -> Result<T, tide::Error> {
         if let Some(content_type) = req.header("Content-Type") {
             match content_type.as_str() {
                 "application/json" => req.body_json().await,
-                content_type => Err(client_error(Error::UnsupportedContentType {
+                "application/octet-stream" => {
+                    let bytes = req.body_bytes().await?;
+                    bincode::deserialize(&bytes).map_err(server_error)
+                }
+                content_type => Err(server_error(Error::UnsupportedContentType {
                     content_type: String::from(content_type),
                 })),
             }
@@ -435,37 +439,38 @@ pub mod middleware {
         }
     }
 
-    /// Serialize the body of a response.
-    ///
-    /// The Accept header of the request is used to determine the serialization format. Currently
-    /// only JSON is supported. Eventually we should also add support for a binary format such as
-    /// bincode.
-    ///
-    /// This function combined with the [add_error_body] middleware defines the server-side protocol
-    /// for encoding zerok types in HTTP responses.
-    pub fn response<T: Serialize, S>(
-        req: &tide::Request<S>,
-        body: T,
-    ) -> Result<tide::Response, tide::Error> {
-        // Get the list of acceptable content types from the request headers.
-        let content_types = match req.header("Accept") {
-            Some(values) => values
-                .into_iter()
-                .map(|val| val.as_str())
-                .collect::<Vec<_>>(),
-            None =>
-            // If no content type is explicitly requested, default to JSON.
-            {
-                vec!["application/json"]
-            }
-        };
-
-        // For each acceptable content type, check if it is supported and use it if it is.
+    fn response_types<S>(req: &tide::Request<S>) -> Vec<mime::Mime> {
+        // Get the list of acceptable content types from the request headers. Return a list of
+        // acceptable types.
         //todo !jeb.bearer HTTP has a way for the client to weight acceptable content types by
         // preference. We should respect that ordering when deciding which one to use.
-        for content_type in &content_types {
-            match *content_type {
-                "application/*" | "*/json" | "*/*" | "application/json" => {
+        match req.header("Accept") {
+            Some(values) => values
+                .into_iter()
+                .filter_map(|val| mime::Mime::from_str(val.as_str()).ok())
+                .collect::<Vec<_>>(),
+            None => {
+                // If no content type is explicitly requested, default to JSON.
+                vec![mime::JSON]
+            }
+        }
+    }
+
+    pub fn respond_with<T: Serialize>(
+        accept: &[mime::Mime],
+        body: T,
+    ) -> Result<tide::Response, tide::Error> {
+        // For each acceptable content type, check if it is supported and use it if it is.
+        for content_type in accept {
+            match (content_type.basetype(), content_type.subtype()) {
+                ("application", "octet-stream") => {
+                    let bytes = bincode::serialize(&body)?;
+                    return Ok(tide::Response::builder(tide::StatusCode::Ok)
+                        .body(bytes)
+                        .content_type(mime::BYTE_STREAM)
+                        .build());
+                }
+                ("*", "*") | ("application", "*") | ("application", "json") => {
                     return Ok(tide::Response::builder(tide::StatusCode::Ok)
                         .body(tide::Body::from_json(&body)?)
                         .content_type(mime::JSON)
@@ -478,8 +483,21 @@ pub mod middleware {
         }
 
         Err(server_error(Error::UnsupportedContentType {
-            content_type: String::from(content_types[0]),
+            content_type: accept[0].to_string(),
         }))
+    }
+
+    /// Serialize the body of a response.
+    ///
+    /// The Accept header of the request is used to determine the serialization format.
+    ///
+    /// This function combined with the [add_error_body] middleware defines the server-side protocol
+    /// for encoding zerok types in HTTP responses.
+    pub fn response<T: Serialize, S>(
+        req: &tide::Request<S>,
+        body: T,
+    ) -> Result<tide::Response, tide::Error> {
+        respond_with(&response_types(req), body)
     }
 
     /// Server middleware which automatically populates the body of error responses.
@@ -499,24 +517,47 @@ pub mod middleware {
         next: tide::Next<'a, T>,
     ) -> BoxFuture<'a, tide::Result> {
         Box::pin(async {
+            let accept = response_types(&req);
             let mut res = next.run(req).await;
-            if let Some(error) = res.error() {
-                let body = tide::Body::from_json(&error.downcast_ref::<Error>().unwrap_or(
-                    &Error::InternalError {
-                        msg: error.to_string(),
-                    },
-                ))
-                .unwrap();
-                res.set_body(body);
+            if let Some(error) = res.take_error() {
+                let error = Error::from_client_error(error);
+                event!(Level::WARN, "responding with error: {}", error);
+                let mut res = respond_with(&accept, &error)?;
+                res.set_status(error.status());
+                Ok(res)
+            } else {
+                Ok(res)
             }
+        })
+    }
+
+    /// Server middleware which logs requests and responses.
+    pub fn trace<'a, T: Clone + Send + Sync + 'static>(
+        req: tide::Request<T>,
+        next: tide::Next<'a, T>,
+    ) -> BoxFuture<'a, tide::Result> {
+        Box::pin(async {
+            event!(
+                Level::INFO,
+                "<-- received request {{url: {}, content-type: {:?}, accept: {:?}}}",
+                req.url(),
+                req.content_type(),
+                response_types(&req),
+            );
+            let res = next.run(req).await;
+            event!(
+                Level::INFO,
+                "--> responding with {{content-type: {:?}, error: {:?}}}",
+                res.content_type(),
+                res.error(),
+            );
             Ok(res)
         })
     }
 
     /// Deserialize the body of a response.
     ///
-    /// The Content-Type header is used to determine the serialization format. Currently only JSON
-    /// is supported. Eventually we should also add support for a binary format such as bincode.
+    /// The Content-Type header is used to determine the serialization format.
     ///
     /// This function combined with the [parse_error_body] middleware defines the client-side
     /// protocol for decoding zerok types from HTTP responses.
@@ -526,6 +567,9 @@ pub mod middleware {
         if let Some(content_type) = res.header("Content-Type") {
             match content_type.as_str() {
                 "application/json" => res.body_json().await,
+                "application/octet-stream" => {
+                    bincode::deserialize(&res.body_bytes().await?).map_err(client_error)
+                }
                 content_type => Err(client_error(Error::UnsupportedContentType {
                     content_type: String::from(content_type),
                 })),
@@ -589,16 +633,8 @@ impl<T: Tagged + CanonicalDeserialize> TaggedBlob for T {
     }
 }
 
-// Display implementation for types which serialize to a JSON string. Displays as just the contents
-// of the string, without the enclosing quotation marks. For base 64 strings, this makes the Display
-// impl suitable for embedding in URLs.
-fn fmt_using_json_string<T: Serialize>(v: &T, f: &mut Formatter<'_>) -> fmt::Result {
-    let quoted_string = serde_json::to_string(v).map_err(|_| fmt::Error)?;
-    write!(f, "{}", &quoted_string[1..quoted_string.len() - 1])
-}
-
 // Display implementation for types which serialize to JSON. Displays as a valid JSON object.
-fn fmt_using_json_object<T: Serialize>(v: &T, f: &mut Formatter<'_>) -> fmt::Result {
+fn fmt_as_json<T: Serialize>(v: &T, f: &mut Formatter<'_>) -> fmt::Result {
     let string = serde_json::to_string(v).map_err(|_| fmt::Error)?;
     write!(f, "{}", string)
 }

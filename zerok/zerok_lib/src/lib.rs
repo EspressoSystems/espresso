@@ -36,6 +36,7 @@ use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 pub use set_merkle_tree::*;
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
@@ -218,7 +219,7 @@ impl BlockContents<64> for ElaboratedBlock {
     }
 }
 
-mod key_set {
+pub mod key_set {
     use super::*;
 
     #[derive(Debug, Snafu)]
@@ -303,8 +304,13 @@ mod key_set {
         }
     }
 
+    #[serde_as]
     #[derive(Debug, Clone, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize)]
+    #[serde(bound = "K: Serialize + for<'a> Deserialize<'a>")]
     pub struct KeySet<K: SizedKey, Order: KeyOrder = OrderByInputs> {
+        // serde_json does not support maps where the keys are not Strings (or easily convertible
+        // to/from Strings) so we serialize this map as a sequence of key-value pairs.
+        #[serde_as(as = "Vec<(_, _)>")]
         keys: BTreeMap<Order::SortKey, K>,
     }
 
@@ -1884,6 +1890,14 @@ impl MultiXfrTestState {
             })
             .collect()
     }
+}
+
+pub fn crypto_rng() -> ChaChaRng {
+    ChaChaRng::from_entropy()
+}
+
+pub fn crypto_rng_from_seed(seed: [u8; 32]) -> ChaChaRng {
+    ChaChaRng::from_seed(seed)
 }
 
 // TODO(joe): proper Err returns

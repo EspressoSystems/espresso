@@ -13,6 +13,7 @@ use strum_macros::{AsRefStr, EnumIter, EnumString};
 use tagged_base64::TaggedBase64;
 use tide::sse;
 use tide::StatusCode;
+use tracing::{event, Level};
 use zerok_lib::api::*;
 use zerok_lib::node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
 use zerok_lib::SetMerkleTree;
@@ -399,7 +400,7 @@ async fn get_user(
     query_service: &impl QueryService,
 ) -> Result<UserPubKey, tide::Error> {
     query_service
-        .get_user(&bindings[":address"].value.to()?)
+        .get_user(&bindings[":address"].value.to::<UserAddress>()?.0)
         .await
         .map_err(server_error)
 }
@@ -412,6 +413,7 @@ async fn subscribe(
     Ok(sse::upgrade(req, move |req, sender| async move {
         let mut events = req.state().node.read().await.subscribe(index).await;
         while let Some(event) = events.next().await {
+            event!(Level::INFO, "broadcast event {}", event.as_static());
             sender
                 .send(
                     event.as_static(),

@@ -95,6 +95,7 @@ pub enum WalletError {
         #[snafu(source(false))]
         source: Result<phaselock::error::PhaseLockError, String>,
     },
+    #[snafu(display("{}", msg))]
     Failed {
         msg: String,
     },
@@ -229,6 +230,15 @@ pub struct RecordDatabase {
 }
 
 impl RecordDatabase {
+    fn assets(&self) -> Vec<AssetCode> {
+        self.record_info
+            .values()
+            .map(|rec| rec.ro.asset_def.code)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     /// Find records which can be the input to a transaction, matching the given parameters.
     fn input_records<'a>(
         &'a self,
@@ -367,6 +377,10 @@ impl<'a> WalletState<'a> {
             )
             .map(|record| record.ro.amount)
             .sum()
+    }
+
+    pub fn assets(&self) -> Vec<AssetCode> {
+        self.records.assets()
     }
 
     pub async fn handle_event(
@@ -741,7 +755,7 @@ impl<'a> WalletState<'a> {
     pub async fn transfer(
         &mut self,
         session: &mut WalletSession<'a, impl WalletBackend<'a>>,
-        asset: &AssetDefinition,
+        asset: &AssetCode,
         receivers: &[(UserAddress, u64)],
         fee: u64,
     ) -> Result<(), WalletError> {
@@ -753,7 +767,7 @@ impl<'a> WalletState<'a> {
             .try_collect::<Vec<_>>()
             .await?;
 
-        if *asset == AssetDefinition::native() {
+        if *asset == AssetCode::native() {
             self.transfer_native(session, &receivers, fee).await
         } else {
             self.transfer_non_native(session, asset, &receivers, fee)
@@ -1010,7 +1024,7 @@ impl<'a> WalletState<'a> {
             &mut self.rng,
             inputs,
             &outputs,
-            1,
+            fee,
             UNEXPIRED_VALID_UNTIL,
             proving_key,
         )
@@ -1040,25 +1054,26 @@ impl<'a> WalletState<'a> {
     async fn transfer_non_native(
         &mut self,
         session: &mut WalletSession<'a, impl WalletBackend<'a>>,
-        asset: &AssetDefinition,
+        asset: &AssetCode,
         receivers: &[(UserPubKey, u64)],
         fee: u64,
     ) -> Result<(), WalletError> {
         assert_ne!(
             *asset,
-            AssetDefinition::native(),
+            AssetCode::native(),
             "call `transfer_native()` instead"
         );
         let total_output_amount: u64 = receivers.iter().fold(0, |sum, (_, amount)| sum + *amount);
 
         // find input records of the asset type to spend (this does not include the fee input)
         let (input_records, change) = self.find_records(
-            &asset.code,
+            asset,
             &self.pub_key(session),
             FreezeFlag::Unfrozen,
             total_output_amount,
             None,
         )?;
+        let asset = input_records[0].0.asset_def.clone();
 
         // prepare inputs
         let mut inputs = vec![];
@@ -1117,7 +1132,7 @@ impl<'a> WalletState<'a> {
             &mut self.rng,
             me,
             &self.proving_keys.xfr,
-            asset,
+            &asset,
             &mut inputs,
             &mut outputs,
             change > 0,
@@ -1532,9 +1547,14 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
         state.balance(session, asset, FreezeFlag::Frozen)
     }
 
+    pub async fn assets(&self) -> Vec<AssetCode> {
+        let (state, ..) = &*self.mutex.lock().await;
+        state.assets()
+    }
+
     pub async fn transfer(
         &mut self,
-        asset: &AssetDefinition,
+        asset: &AssetCode,
         receivers: &[(UserAddress, u64)],
         fee: u64,
     ) -> Result<(), WalletError> {
@@ -2219,7 +2239,7 @@ pub mod test_helpers {
                 ledger.lock().unwrap().hold_next_transaction();
                 let sender = &mut wallets[sender_ix + 1];
                 match sender
-                    .transfer(asset, &[(receiver.clone(), amount)], 1)
+                    .transfer(&asset.code, &[(receiver.clone(), amount)], 1)
                     .await
                 {
                     Ok(txn) => txn,
@@ -2243,7 +2263,7 @@ pub mod test_helpers {
 
                             amount = suggested_amount;
                             sender
-                                .transfer(asset, &[(receiver, amount)], 1)
+                                .transfer(&asset.code, &[(receiver, amount)], 1)
                                 .await
                                 .unwrap()
                         } else {
@@ -2373,7 +2393,7 @@ mod tests {
 
         // Construct a transaction to transfer some coins from Alice to Bob.
         wallets[0]
-            .transfer(&coin, &[(bob_address, 3)], 1)
+            .transfer(&coin.code, &[(bob_address, 3)], 1)
             .await
             .unwrap();
         sync(&ledger, &wallets).await;
@@ -2422,7 +2442,7 @@ mod tests {
         // transferred back to Bob, since Bob's only sufficient record has an amount of 3 coins, but
         // the sum of the outputs and fee of this transaction is only 2.
         wallets[1]
-            .transfer(&coin, &[(alice_address, 1)], 1)
+            .transfer(&coin.code, &[(alice_address, 1)], 1)
             .await
             .unwrap();
         sync(&ledger, &wallets).await;
@@ -2563,7 +2583,7 @@ mod tests {
                 .unwrap();
         } else {
             wallets[0]
-                .transfer(&asset, &[(receiver.clone(), 1)], 1)
+                .transfer(&asset.code, &[(receiver.clone(), 1)], 1)
                 .await
                 .unwrap();
         }
@@ -2593,7 +2613,7 @@ mod tests {
                 }
 
                 wallets[2]
-                    .transfer(&asset, &[(receiver.clone(), 1)], 1)
+                    .transfer(&asset.code, &[(receiver.clone(), 1)], 1)
                     .await
                     .unwrap();
                 sync(&ledger, &wallets).await;
@@ -2649,7 +2669,7 @@ mod tests {
             wallets[0].freeze(1, &asset, 1, receiver).await.unwrap();
         } else {
             wallets[0]
-                .transfer(&asset, &[(receiver, 1)], 1)
+                .transfer(&asset.code, &[(receiver, 1)], 1)
                 .await
                 .unwrap();
         }
@@ -2735,7 +2755,7 @@ mod tests {
         ledger.lock().unwrap().hold_next_transaction();
         let receiver = wallets[1].address();
         wallets[0]
-            .transfer(&AssetDefinition::native(), &[(receiver.clone(), 1)], 1)
+            .transfer(&AssetCode::native(), &[(receiver.clone(), 1)], 1)
             .await
             .unwrap();
         println!("transfer generated: {}s", now.elapsed().as_secs_f32());
@@ -2750,7 +2770,7 @@ mod tests {
         now = Instant::now();
         for _ in 0..ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1 {
             wallets[2]
-                .transfer(&AssetDefinition::native(), &[(receiver.clone(), 1)], 1)
+                .transfer(&AssetCode::native(), &[(receiver.clone(), 1)], 1)
                 .await
                 .unwrap();
             sync(&ledger, &wallets).await;
@@ -2835,7 +2855,7 @@ mod tests {
         println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
         let dst = wallets[1].address();
-        match wallets[0].transfer(&asset, &[(dst, 1)], 1).await {
+        match wallets[0].transfer(&asset.code, &[(dst, 1)], 1).await {
             Err(WalletError::InsufficientBalance { .. }) => {
                 println!(
                     "transfer correctly failed due to frozen balance: {}s",
@@ -2860,7 +2880,10 @@ mod tests {
 
         println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
         let dst = wallets[1].address();
-        wallets[0].transfer(&asset, &[(dst, 1)], 1).await.unwrap();
+        wallets[0]
+            .transfer(&asset.code, &[(dst, 1)], 1)
+            .await
+            .unwrap();
         sync(&ledger, &wallets).await;
         assert_eq!(wallets[0].balance(&asset.code).await, 0);
         assert_eq!(wallets[0].frozen_balance(&asset.code).await, 0);

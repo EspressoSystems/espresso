@@ -1383,7 +1383,7 @@ mod tests {
             //  1. our initial 4 coins are put on hold (the transaction is initiated)
             //  2. we receive our 1-coin change record (the transaction is completed)
             wallet
-                .transfer(&state.asset_defs[1], &[(other.address(), 3)], 1)
+                .transfer(&state.asset_defs[1].code, &[(other.address(), 3)], 1)
                 .await
                 .unwrap();
             // Wait for 2 more events: the Commit event and the following Memos event.
