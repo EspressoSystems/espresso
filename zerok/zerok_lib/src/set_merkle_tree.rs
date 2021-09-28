@@ -149,7 +149,6 @@ impl Default for SetMerkleTree {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum SetMerkleTerminalNode {
     EmptySubtree,
     Leaf {

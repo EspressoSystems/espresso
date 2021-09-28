@@ -59,13 +59,40 @@ impl<'a> NetworkBackend<'a> {
         let mut res = self
             .query_client
             .get(uri)
-            .content_type(mime::JSON)
+            .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
             .context(ClientError)?;
         middleware::response_body(&mut res)
             .await
             .context(ClientError)
+    }
+
+    async fn post<T: Serialize>(
+        client: &surf::Client,
+        uri: impl AsRef<str>,
+        body: &T,
+    ) -> Result<(), WalletError> {
+        client
+            .post(uri)
+            .body_bytes(bincode::serialize(body).map_err(WalletError::from_api_error)?)
+            .header(headers::ACCEPT, Self::accept_header())
+            .send()
+            .await
+            .context(ClientError)?;
+        Ok(())
+    }
+
+    fn accept_header() -> Accept {
+        let mut accept = Accept::new();
+        // Signal that we would prefer a byte stream using the efficient bincode serialization,
+        // but failing that we will take any format the server supports.
+        //
+        // MediaTypeProposal::new() only fails if the weight is outside the range [0, 1]. Since we
+        // are using literal values for the weights, unwrap() is appropriate.
+        accept.push(MediaTypeProposal::new(mime::BYTE_STREAM, Some(1.0)).unwrap());
+        accept.set_wildcard(true);
+        accept
     }
 }
 
@@ -123,14 +150,7 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
             };
 
         // Publish the address of the new wallet.
-        self.bulletin_client
-            .post("/users")
-            .content_type(mime::JSON)
-            .body_json(&key_pair.pub_key())
-            .context(ClientError)?
-            .send()
-            .await
-            .context(ClientError)?;
+        Self::post(&self.bulletin_client, "/users", &key_pair.pub_key()).await?;
 
         Ok(WalletState {
             validator,
@@ -228,14 +248,7 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
     }
 
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {
-        self.validator_client
-            .post("submit")
-            .body_json(&txn)
-            .context(ClientError)?
-            .send()
-            .await
-            .context(ClientError)?;
-        Ok(())
+        Self::post(&self.validator_client, "/submit", &txn).await
     }
 
     async fn post_memos(
@@ -245,17 +258,9 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
         memos: Vec<ReceiverMemo>,
         signature: Signature,
     ) -> Result<(), WalletError> {
-        self.bulletin_client
-            .post(format!(
-                "memos/{}",
-                TransactionId(BlockId(block_id as usize), txn_id as usize)
-            ))
-            .body_json(&api::PostMemos { memos, signature })
-            .context(ClientError)?
-            .send()
-            .await
-            .context(ClientError)?;
-        Ok(())
+        let txid = TransactionId(BlockId(block_id as usize), txn_id as usize);
+        let body = api::PostMemos { memos, signature };
+        Self::post(&self.bulletin_client, format!("/memos/{}", txid), &body).await
     }
 }
 

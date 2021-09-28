@@ -191,7 +191,6 @@ impl Display for NullifierProof {
 /// errors (such as errors generated from the [tide] framework) will be serialized as strings using
 /// their [Display] instance and encoded in the [Error::InternalError] variant.
 #[derive(Debug, Serialize, Deserialize, Snafu)]
-#[serde(tag = "type")]
 #[allow(clippy::large_enum_variant)]
 #[non_exhaustive]
 pub enum Error {
@@ -417,8 +416,10 @@ pub fn client_error(error: impl Into<Error>) -> surf::Error {
 
 pub mod middleware {
     use super::*;
-    use http_types::mime;
-    use std::str::FromStr;
+    use http_types::{
+        content::{Accept, ContentType},
+        mime,
+    };
     use tracing::{event, Level};
 
     /// Deserialize the body of a request.
@@ -443,52 +444,34 @@ pub mod middleware {
         }
     }
 
-    fn response_types<S>(req: &tide::Request<S>) -> Vec<mime::Mime> {
-        // Get the list of acceptable content types from the request headers. Return a list of
-        // acceptable types.
-        //todo !jeb.bearer HTTP has a way for the client to weight acceptable content types by
-        // preference. We should respect that ordering when deciding which one to use.
-        match req.header("Accept") {
-            Some(values) => values
-                .into_iter()
-                .filter_map(|val| mime::Mime::from_str(val.as_str()).ok())
-                .collect::<Vec<_>>(),
-            None => {
-                // If no content type is explicitly requested, default to JSON.
-                vec![mime::JSON]
-            }
-        }
-    }
-
-    pub fn respond_with<T: Serialize>(
-        accept: &[mime::Mime],
+    fn respond_with<T: Serialize>(
+        accept: &mut Option<Accept>,
         body: T,
     ) -> Result<tide::Response, tide::Error> {
-        // For each acceptable content type, check if it is supported and use it if it is.
-        for content_type in accept {
-            match (content_type.basetype(), content_type.subtype()) {
-                ("application", "octet-stream") => {
-                    let bytes = bincode::serialize(&body)?;
-                    return Ok(tide::Response::builder(tide::StatusCode::Ok)
-                        .body(bytes)
-                        .content_type(mime::BYTE_STREAM)
-                        .build());
-                }
-                ("*", "*") | ("application", "*") | ("application", "json") => {
-                    return Ok(tide::Response::builder(tide::StatusCode::Ok)
-                        .body(tide::Body::from_json(&body)?)
-                        .content_type(mime::JSON)
-                        .build());
-                }
-                _ => {
-                    continue;
-                }
+        let content_type = match accept {
+            Some(accept) => accept.negotiate(&[mime::JSON, mime::BYTE_STREAM])?,
+            None => {
+                // If no content type is explicitly requested, default to JSON.
+                ContentType::from(mime::JSON)
+            }
+        };
+
+        match content_type.value().as_str() {
+            "application/octet-stream" => {
+                let bytes = bincode::serialize(&body)?;
+                Ok(tide::Response::builder(tide::StatusCode::Ok)
+                    .body(bytes)
+                    .content_type(mime::BYTE_STREAM)
+                    .build())
+            }
+            "application/json" => Ok(tide::Response::builder(tide::StatusCode::Ok)
+                .body(tide::Body::from_json(&body)?)
+                .content_type(mime::JSON)
+                .build()),
+            _ => {
+                unreachable!();
             }
         }
-
-        Err(server_error(Error::UnsupportedContentType {
-            content_type: accept[0].to_string(),
-        }))
     }
 
     /// Serialize the body of a response.
@@ -501,7 +484,7 @@ pub mod middleware {
         req: &tide::Request<S>,
         body: T,
     ) -> Result<tide::Response, tide::Error> {
-        respond_with(&response_types(req), body)
+        respond_with(&mut Accept::from_headers(req)?, body)
     }
 
     /// Server middleware which automatically populates the body of error responses.
@@ -521,12 +504,12 @@ pub mod middleware {
         next: tide::Next<'a, T>,
     ) -> BoxFuture<'a, tide::Result> {
         Box::pin(async {
-            let accept = response_types(&req);
+            let mut accept = Accept::from_headers(&req)?;
             let mut res = next.run(req).await;
             if let Some(error) = res.take_error() {
                 let error = Error::from_client_error(error);
                 event!(Level::WARN, "responding with error: {}", error);
-                let mut res = respond_with(&accept, &error)?;
+                let mut res = respond_with(&mut accept, &error)?;
                 res.set_status(error.status());
                 Ok(res)
             } else {
@@ -546,7 +529,7 @@ pub mod middleware {
                 "<-- received request {{url: {}, content-type: {:?}, accept: {:?}}}",
                 req.url(),
                 req.content_type(),
-                response_types(&req),
+                Accept::from_headers(&req),
             );
             let res = next.run(req).await;
             event!(

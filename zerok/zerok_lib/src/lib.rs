@@ -68,13 +68,10 @@ pub struct Transaction(pub TransactionNote);
     Serialize,
     Deserialize,
 )]
-#[serde(from = "CanonicalBytes", into = "CanonicalBytes")]
 pub struct ElaboratedTransaction {
     pub txn: TransactionNote,
     pub proofs: Vec<SetMerkleProof>,
 }
-
-deserialize_canonical_bytes!(ElaboratedTransaction);
 
 #[derive(
     Default,

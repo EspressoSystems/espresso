@@ -128,7 +128,6 @@ pub struct LedgerTransition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, strum_macros::AsStaticStr)]
-#[serde(tag = "type")]
 pub enum LedgerEvent {
     /// A new block was added to the ledger.
     ///
@@ -243,7 +242,6 @@ pub trait QueryService {
 }
 
 #[derive(Clone, Debug, Snafu, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum QueryServiceError {
     InvalidNullifierRoot {},
     InvalidBlockId {},
