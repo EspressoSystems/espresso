@@ -10,10 +10,10 @@ function isWebSocketOpen() {
 };
 
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  new Promise(resolve => setTimeout(resolve, ms));
 }
 // Attempt a web socket connection.
-function webSocketConnect() {
+async function webSocketConnect() {
     if (!isWebSocketOpen()) {
         let protocol = window.location.protocol === "https:" ? "wss" : "ws";
         let host = window.location.host;
@@ -29,7 +29,7 @@ function webSocketConnect() {
         status('Web Socket enabled.');
         const SLEEP_MS = 50;
         for (let i = 1; i <= 10; ++i) {
-            sleep(SLEEP_MS);
+            await sleep(SLEEP_MS);
             if (isWebSocketOpen()) {
                 console.log("WebSocket connection opened after "
                             + SLEEP_MS * i + "ms");
@@ -42,9 +42,7 @@ function webSocketConnect() {
 // Send a Web Sockets message to the server.
 async function webSocketSend(msg) {
     if (!isWebSocketOpen()) {
-        webSocketConnect();
-        // TODO !corbett Why half a second? There must be a better condition.
-        await new Promise(r => setTimeout(r, 500)); // wait half second to connect
+        await webSocketConnect();
     }
     if (isWebSocketOpen()) {
         status('webSocket: ' + msg);
