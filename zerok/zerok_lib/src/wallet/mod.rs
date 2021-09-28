@@ -468,14 +468,38 @@ impl<'a> WalletState<'a> {
                     self.audit_transaction(session, &txn, &mut this_txn_uids)
                         .await;
 
-                    // Update spent nullifiers.
-                    for nullifier in txn.txn.nullifiers().into_iter() {
-                        self.nullifiers.insert(nullifier);
-                        // TODO prune nullifiers that we don't need for our non-inclusion proofs
-
+                    // Update spent nullifiers. First we have to remember the sub-trees of our
+                    // current sparse tree which will receive the new nullifiers, because
+                    // SetMerkleTree::insert has no effect (not even updating the root hashs) if the
+                    // insert goes into a forgotten sub-tree.
+                    for (nullifier, proof) in txn.txn.nullifiers().into_iter().zip(txn.proofs) {
+                        if self.nullifiers.remember(nullifier, proof).is_err() {
+                            //todo !jeb.bearer handle this case more robustly. If we get here, it
+                            // means the event stream has lied to us, so recovery is quite tricky
+                            // and may require us to fail over to a different query service.
+                            panic!("received block with invalid nullifier proof");
+                        }
+                    }
+                    // Now we can insert the new nullifiers, and none of the inserts should fail.
+                    for nullifier in txn.txn.nullifiers() {
+                        // This should not fail after the remember() above, so we can unwrap().
+                        self.nullifiers.insert(nullifier).unwrap();
+                        // If we have a record with this nullifier, remove it as it has been spent.
                         if let Some(record) = self.records.remove_by_nullifier(nullifier) {
                             self.record_merkle_tree_mut().forget(record.uid);
                         }
+                    }
+                    // Now that the new nullifiers have all been inserted, we can prune our
+                    // nullifiers set back down to restore sparseness.
+                    for nullifier in txn.txn.nullifiers() {
+                        //todo !jeb.bearer for now we unconditionally forget the new nullifier,
+                        // knowing we can get it back from the backend if necessary. However, this
+                        // nullifier may be helping us by representing a branch of the tree that we
+                        // care about, that would allow us to generate a proof that the nullifier
+                        // for one of our owned records is _not_ in the tree. We should be more
+                        // careful about pruning to cut down on the amount we have to ask the
+                        // network.
+                        self.nullifiers.forget(nullifier);
                     }
 
                     // Prune the record Merkle tree of records we don't care about.
@@ -1708,11 +1732,21 @@ pub mod test_helpers {
                 true,
             ) {
                 Ok(mut uids) => {
+                    // Add nullifiers
+                    for txn in &block.block.0 {
+                        for nullifier in txn.nullifiers() {
+                            self.nullifiers.insert(nullifier);
+                        }
+                    }
+
+                    // Broadcast the new block
                     self.generate_event(LedgerEvent::Commit {
                         block: block.clone(),
                         block_id: self.committed_blocks.len() as u64,
                         state_comm: self.validator.commit(),
                     });
+
+                    // Store the block in the history
                     let mut block_uids = vec![];
                     for txn in block.block.0.iter() {
                         let mut this_txn_uids = uids;
