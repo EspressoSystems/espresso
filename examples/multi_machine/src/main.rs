@@ -6,6 +6,7 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use markdown;
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey,
@@ -378,7 +379,7 @@ struct Connection {
 #[derive(Clone)]
 pub struct WebState {
     connections: Arc<RwLock<HashMap<String, Connection>>>,
-    web_path: String,
+    web_path: PathBuf,
     api: toml::Value,
     query_service: FullNode<'static>,
 }
@@ -451,6 +452,17 @@ async fn landing_page(req: tide::Request<WebState>) -> Result<tide::Body, tide::
     let mut index_html: PathBuf = PathBuf::from(req.state().web_path.clone());
     index_html.push("index.html");
     Ok(tide::Body::from_file(index_html).await?)
+    // let api = &req
+    //     .state()
+    //     .api
+    //     .as_array()
+    //     .ok_or_else(|| internal_error("Expecting array"))?;
+    // let mut help: String = "Help\n<br/>".to_string();
+    // for route in api.iter() {
+    //     help += format!("{:?}\n\n", route).as_str();
+    // }
+    // println!("{}", &help);
+    // Ok(tide::Response::builder(200).body(help).build())
 }
 
 /* TODO
@@ -639,6 +651,7 @@ async fn handle_web_socket(
 ///
 // TODO - take the port from the command line instead of the environment.
 fn init_web_server(
+    opt_api_path: &str,
     opt_web_path: &str,
     own_id: u64,
     query_service: FullNode<'static>,
@@ -648,14 +661,16 @@ fn init_web_server(
     // the executable path.
     let web_path = if opt_web_path.is_empty() {
         default_web_path()
-            .into_os_string()
-            .into_string()
-            .expect("Wut?! Asset path isn't UTF-8")
     } else {
-        opt_web_path.to_string()
+        PathBuf::from(opt_web_path)
     };
-    println!("Default API: {:?}", default_api_path());
-    let api = disco::load_messages(&default_api_path());
+    let api_path = if opt_api_path.is_empty() {
+        default_api_path()
+    } else {
+        PathBuf::from(opt_api_path)
+    };
+    println!("API path: {:?}", web_path);
+    let api = disco::load_messages(&api_path);
     let mut web_server = tide::with_state(WebState {
         connections: Default::default(),
         web_path: web_path.clone(),
@@ -701,9 +716,47 @@ fn init_web_server(
     Ok(join_handle)
 }
 
+// Convert api.toml into HTML.
+// TODO !corbett Extract all the web-related stuff into a module.
+fn dump_help(opt_api_path: &str) {
+    // TODO !corbett extract this into a function
+    let api_path = if opt_api_path.is_empty() {
+        default_api_path()
+    } else {
+        PathBuf::from(opt_api_path)
+    };
+    let api = disco::load_messages(&api_path);
+    // TODO !corbett Get header and footer from api.toml
+    println!("\n\n<h1>Spectrum Web Interface</h1>");
+    if let Some(api_map) = api["route"].as_table() {
+        api_map.values().for_each(|v| {
+            println!("<h2>Routes</h2>");
+            for p in v["PATH"].as_array().unwrap().iter() {
+                println!("<p class='path'>{}</p>", p.as_str().unwrap());
+            }
+            println!("<h2>Parameters</h2>");
+            for (k1, v1) in v.as_table().unwrap().iter() {
+                if k1.starts_with(':') {
+                    println!(
+                        "<span class='argument'>{}</span>: <span class='type'>{}</span>",
+                        k1.strip_prefix(':').unwrap(),
+                        v1.as_str().unwrap()
+                    );
+                }
+            }
+            println!(
+                "<h2>Description</h2>\n{}\n",
+                markdown::to_html(v["DOC"].as_str().unwrap().trim())
+            )
+        });
+    }
+    println!("\n\n");
+}
+
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::fmt().init();
+    dump_help(&NodeOpt::from_args().api_path);
 
     // Get configuration
     let node_config = get_node_config();
@@ -799,8 +852,13 @@ async fn main() -> Result<(), std::io::Error> {
         // If we are running a full node, also host a query API to inspect the accumulated state.
         let web_server = if let Node::Full(node) = &phaselock {
             Some(
-                init_web_server(&NodeOpt::from_args().web_path, own_id, node.clone())
-                    .expect("Failed to initialize web server"),
+                init_web_server(
+                    &NodeOpt::from_args().api_path,
+                    &NodeOpt::from_args().web_path,
+                    own_id,
+                    node.clone(),
+                )
+                .expect("Failed to initialize web server"),
             )
         } else {
             None
