@@ -424,7 +424,14 @@ async fn subscribe(
     req: tide::Request<WebState>,
     bindings: &HashMap<String, RouteBinding>,
 ) -> Result<tide::Response, tide::Error> {
-    let index = bindings[":index"].value.as_index()? as u64;
+    let mut index = if let Some(id) = req.header("Last-Event-Id") {
+        // If this is a retry request from a stream which has already progressed but got temporarily
+        // disconnected, the client will set the Last-Event-Id header telling us where they left
+        // off.
+        u64::from_str(id.as_str())? + 1
+    } else {
+        bindings[":index"].value.as_index()? as u64
+    };
     Ok(sse::upgrade(req, move |req, sender| async move {
         let mut events = req.state().node.read().await.subscribe(index).await;
         while let Some(event) = events.next().await {
@@ -433,9 +440,10 @@ async fn subscribe(
                 .send(
                     event.as_static(),
                     serde_json::to_string(&event).map_err(server_error)?,
-                    None,
+                    Some(index.to_string().as_str()),
                 )
                 .await?;
+            index += 1;
         }
         Ok(())
     }))

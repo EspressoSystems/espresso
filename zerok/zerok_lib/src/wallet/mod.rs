@@ -427,8 +427,10 @@ impl<'a> WalletState<'a> {
                         uids.into_iter().map(|uid| (uid, false)).collect::<Vec<_>>()
                     }
                     Err(val_err) => {
-                        println!("received invalid block: {:?}, {:?}", block, val_err);
-                        return;
+                        //todo !jeb.bearer handle this case more robustly. If we get here, it means
+                        // the event stream has lied to us, so recovery is quite tricky and may
+                        // require us to fail over to a different query service.
+                        panic!("received invalid block: {:?}, {:?}", block, val_err);
                     }
                 };
                 // Some transactions may have just expired when we stepped the validator state.

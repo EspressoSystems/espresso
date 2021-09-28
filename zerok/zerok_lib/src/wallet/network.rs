@@ -4,26 +4,23 @@ use crate::key_set::SizedKey;
 use crate::node;
 use crate::set_merkle_tree::{set_hash, SetMerkleProof};
 use crate::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
-use api::{middleware, BlockId, ClientError, TransactionId};
-use async_executors::AsyncStd;
+use api::{middleware, BlockId, ClientError, FromError, TransactionId};
 use async_trait::async_trait;
-use futures::channel::mpsc;
-use futures::future::RemoteHandle;
 use futures::prelude::*;
-use futures::task::{Context, Poll, SpawnExt};
-use http_types::mime;
+use futures_timer::Delay;
+use http_types::content::{Accept, MediaTypeProposal};
+use http_types::{headers, mime};
 use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey};
 use jf_txn::proof::UniversalParam;
 use jf_txn::structs::{Nullifier, ReceiverMemo};
 use jf_txn::Signature;
 use node::{LedgerEvent, LedgerSnapshot};
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::convert::TryInto;
-use std::pin::Pin;
+use std::time::Duration;
 pub use surf::Url;
-use surf_sse::ClientExt;
 
 pub struct NetworkBackend<'a> {
     univ_param: &'a UniversalParam,
@@ -74,7 +71,7 @@ impl<'a> NetworkBackend<'a> {
 
 #[async_trait]
 impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
-    type EventStream = EventStream;
+    type EventStream = node::EventStream<LedgerEvent>;
 
     async fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
         // todo !jeb.bearer We don't support storing yet, so this function currently just loads from
@@ -161,7 +158,53 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
     }
 
     async fn subscribe(&self, starting_at: u64) -> Self::EventStream {
-        EventStream::new(&self.query_client, starting_at)
+        let client = self.query_client.clone();
+        let url = format!("/subscribe/{}", starting_at);
+        let res = client.get(url.clone()).send().await.unwrap();
+        let state = SSEState {
+            client,
+            url,
+            retry_time: Duration::from_secs(3),
+            last_id: None,
+            stream: sse_codec::decode_stream(res),
+        };
+
+        Box::pin(futures::stream::unfold(state, |mut state| async move {
+            // Retry on errors until we get a message or the end of the stream.
+            loop {
+                match state.stream.next().await {
+                    Some(Ok(sse_codec::Event::Retry { retry })) => {
+                        // A retry message instructs us to set the retry duration, but we have
+                        // nothing to yield, so we continue waiting for another message.
+                        state.retry_time = Duration::from_millis(retry);
+                    }
+                    Some(Ok(sse_codec::Event::Message { data, id, .. })) => {
+                        if let Some(id) = id {
+                            // Mark our place in the stream in case we have to reconnect.
+                            state.last_id = Some(id);
+                        }
+                        if let Ok(event) = serde_json::from_str(&data) {
+                            // Yield the event.
+                            return Some((event, state));
+                        } else {
+                            // Got invalid data from the server. Treat this as an error and
+                            // reconnect. This may be a good point to try to fail over to another
+                            // query service.
+                            state.reconnect().await;
+                        }
+                    }
+                    Some(Err(_)) => {
+                        // On errors, we wait for the duration of the retry time and then
+                        // reestablish the connection.
+                        state.reconnect().await;
+                    }
+                    None => {
+                        // End of stream.
+                        return None;
+                    }
+                }
+            }
+        }))
     }
 
     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
@@ -216,87 +259,26 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
     }
 }
 
-// surf_sse::EventSource is annoyingly not Send (which is required of WalletBackend::EventStream) so
-// we need to dedicate a thread to pulling events out of the event source and sending the events
-// themselves to the consumer thread over a channel.
-//
-// This struct facilitates that strategy. It ties a handle for the dedicated thread to the receiver,
-// so that the dedicated event handling task will be cancelled and cleaned up if and when the
-// receiver is dropped.
-//
-// Because we need to implement Stream for this type in terms of its field `receiver`, and because
-// Stream::poll_next takes a Pin<&mut Self>, we use structural pinning to project a
-// Pin<&mutEventStream> into a Pin<&mut UnboundedReceiver>, which is the type that actually
-// implements Stream. See the projection function EventStream::receiver() for details.
-pub struct EventStream {
-    receiver: mpsc::UnboundedReceiver<LedgerEvent>,
-    _producer: RemoteHandle<()>,
+struct SSEState {
+    client: surf::Client,
+    url: String,
+    retry_time: Duration,
+    last_id: Option<String>,
+    stream: sse_codec::DecodeStream<surf::Response>,
 }
 
-impl EventStream {
-    fn new(client: &surf::Client, starting_at: u64) -> Self {
-        let (sender, receiver) = mpsc::unbounded();
-
-        let task = {
-            let client = client.clone();
-            AsyncStd::new()
-                .spawn_with_handle(async move {
-                    let url = client
-                        .config()
-                        .base_url
-                        .as_ref()
-                        .unwrap()
-                        .join(format!("subscribe/{}", starting_at).as_str())
-                        .unwrap();
-                    let mut stream = Box::pin(
-                        client
-                            .connect_event_source(url)
-                            // EventSource emits an error whenever it is transiently disconnected
-                            // from the server, but it reconnects automatically, so we can ignore
-                            // Err variants and just take the Ok results.
-                            .filter_map(|res| async {
-                                res.ok().and_then(|event| {
-                                    serde_json::from_str(event.data.as_str()).ok()
-                                })
-                            }),
-                    );
-                    // We can't `await` in this task, because at each await the executor is allowed
-                    // to move the task to another thread, but this task cannot be moved between
-                    // threads because surf_sse::EventSource is not Send. So we have to block the
-                    // current task when we wait for a future.
-                    while let Some(event) = async_std::task::block_on(stream.next()) {
-                        if sender.unbounded_send(event).is_err() {
-                            // If we failed to send a message, it means the receiver has been dropped,
-                            // so there's no need to send any further messages.
-                            break;
-                        }
-                    }
-                })
-                .unwrap()
-        };
-
-        Self {
-            receiver,
-            _producer: task,
+impl SSEState {
+    async fn reconnect(&mut self) {
+        loop {
+            Delay::new(self.retry_time).await;
+            let mut req = self.client.get(self.url.clone());
+            if let Some(id) = &self.last_id {
+                req = req.header("Last-Event-Id", id);
+            }
+            if let Ok(res) = req.send().await {
+                self.stream = sse_codec::decode_stream(res);
+                break;
+            }
         }
-    }
-
-    fn receiver(self: Pin<&mut Self>) -> Pin<&mut mpsc::UnboundedReceiver<LedgerEvent>> {
-        // This projection function implements structural pinning for the `receiver` field:
-        // `receiver` is pinned whenever `self` is. This makes it possible to impelement
-        // Stream::poll_next (which takes a Pin<&mut Self>) in terms of Self::receiver.
-        //
-        // See https://doc.rust-lang.org/std/pin/index.html#pinning-is-structural-for-field for the
-        // list of requirements that a structurally pinned type must follow for the following unsafe
-        // block to be sound.
-        unsafe { self.map_unchecked_mut(|stream| &mut stream.receiver) }
-    }
-}
-
-impl Stream for EventStream {
-    type Item = LedgerEvent;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver().poll_next(cx)
     }
 }

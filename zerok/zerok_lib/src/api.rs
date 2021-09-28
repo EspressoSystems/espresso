@@ -321,8 +321,8 @@ pub trait FromError: Sized {
         Self::catch_all(String::from("missing Content-Type header"))
     }
 
-    fn from_api_error(source: Error) -> Self {
-        match source {
+    fn from_api_error<E: Into<Error>>(source: E) -> Self {
+        match source.into() {
             Error::QueryServiceError { source } => Self::from_query_service_error(source),
             Error::ValidationError { source } => Self::from_validation_error(source),
             Error::ConsensusError { source } => Self::from_consensus_error(source),
@@ -341,7 +341,7 @@ pub trait FromError: Sized {
     /// [from_api_error]. Otherwise, it is converted to a [String] using [Display] and then
     /// converted to the specific type using [catch_all].
     fn from_client_error(source: surf::Error) -> Self {
-        match source.downcast() {
+        match source.downcast::<Error>() {
             Ok(err) => Self::from_api_error(err),
             Err(err) => Self::catch_all(err.to_string()),
         }
@@ -375,6 +375,10 @@ impl FromError for Error {
 
     fn from_unspecified_content_type() -> Self {
         Self::UnspecifiedContentType {}
+    }
+
+    fn from_api_error<E: Into<Error>>(source: E) -> Self {
+        source.into()
     }
 }
 
