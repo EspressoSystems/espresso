@@ -416,10 +416,7 @@ pub fn client_error(error: impl Into<Error>) -> surf::Error {
 
 pub mod middleware {
     use super::*;
-    use http_types::{
-        content::{Accept, ContentType},
-        mime,
-    };
+    use tide::http::{content::Accept, mime};
     use tracing::{event, Level};
 
     /// Deserialize the body of a request.
@@ -444,33 +441,76 @@ pub mod middleware {
         }
     }
 
+    pub fn best_response_type(
+        accept: &mut Option<Accept>,
+        available: &[mime::Mime],
+    ) -> Result<mime::Mime, tide::Error> {
+        match accept {
+            Some(accept) => {
+                // The Accept type has a `negotiate` method, but it doesn't properly handle
+                // wildcards. It handles * but not */* and basetype/*, because for content type
+                // proposals like */* and basetype/*, it looks for a literal match in `available`,
+                // it does not perform pattern matching. So, we implement negotiation ourselves.
+                //
+                // First sort by the weight parameter, which the Accept type does do correctly.
+                accept.sort();
+                // Go through each proposed content type, in the order specified by the client, and
+                // match them against our available types, respecting wildcards.
+                for proposed in accept.iter() {
+                    if proposed.basetype() == "*" {
+                        // The only acceptable Accept value with a basetype of * is */*, therefore
+                        // this will match any available type.
+                        return Ok(available[0].clone());
+                    } else if proposed.subtype() == "*" {
+                        // If the subtype is * but the basetype is not, look for a proposed type
+                        // with a matching basetype and any subtype.
+                        for mime in available {
+                            if mime.basetype() == proposed.basetype() {
+                                return Ok(mime.clone());
+                            }
+                        }
+                    } else if available.contains(proposed) {
+                        // If neither part of the proposal is a wildcard, look for a literal match.
+                        return Ok((**proposed).clone());
+                    }
+                }
+
+                if accept.wildcard() {
+                    // If no proposals are available but a wildcard flag * was given, return any
+                    // available content type.
+                    Ok(available[0].clone())
+                } else {
+                    Err(tide::Error::from_str(
+                        tide::StatusCode::NotAcceptable,
+                        "No suitable Content-Type found",
+                    ))
+                }
+            }
+            None => {
+                // If no content type is explicitly requested, default to the first available type.
+                Ok(available[0].clone())
+            }
+        }
+    }
+
     fn respond_with<T: Serialize>(
         accept: &mut Option<Accept>,
         body: T,
     ) -> Result<tide::Response, tide::Error> {
-        let content_type = match accept {
-            Some(accept) => accept.negotiate(&[mime::JSON, mime::BYTE_STREAM])?,
-            None => {
-                // If no content type is explicitly requested, default to JSON.
-                ContentType::from(mime::JSON)
-            }
-        };
-
-        match content_type.value().as_str() {
-            "application/octet-stream" => {
-                let bytes = bincode::serialize(&body)?;
-                Ok(tide::Response::builder(tide::StatusCode::Ok)
-                    .body(bytes)
-                    .content_type(mime::BYTE_STREAM)
-                    .build())
-            }
-            "application/json" => Ok(tide::Response::builder(tide::StatusCode::Ok)
+        let ty = best_response_type(accept, &[mime::JSON, mime::BYTE_STREAM])?;
+        if ty == mime::BYTE_STREAM {
+            let bytes = bincode::serialize(&body)?;
+            Ok(tide::Response::builder(tide::StatusCode::Ok)
+                .body(bytes)
+                .content_type(mime::BYTE_STREAM)
+                .build())
+        } else if ty == mime::JSON {
+            Ok(tide::Response::builder(tide::StatusCode::Ok)
                 .body(tide::Body::from_json(&body)?)
                 .content_type(mime::JSON)
-                .build()),
-            _ => {
-                unreachable!();
-            }
+                .build())
+        } else {
+            unreachable!()
         }
     }
 
@@ -566,6 +606,15 @@ pub mod middleware {
         }
     }
 
+    pub async fn response_to_result(mut res: surf::Response) -> surf::Result<surf::Response> {
+        if res.status() == surf::StatusCode::Ok {
+            Ok(res)
+        } else {
+            let err: Error = response_body(&mut res).await?;
+            Err(surf::Error::new(err.status(), err))
+        }
+    }
+
     /// Client middleware which turns responses with non-success statuses into errors.
     ///
     /// If the status code of the response is Ok (200), the response is passed through unchanged.
@@ -584,14 +633,10 @@ pub mod middleware {
         client: surf::Client,
         next: surf::middleware::Next<'_>,
     ) -> BoxFuture<surf::Result<surf::Response>> {
-        Box::pin(next.run(req, client).and_then(|mut res| async {
-            if res.status() == surf::StatusCode::Ok {
-                Ok(res)
-            } else {
-                let err: Error = response_body(&mut res).await?;
-                Err(surf::Error::new(err.status(), err))
-            }
-        }))
+        Box::pin(
+            next.run(req, client)
+                .and_then(|res| async { response_to_result(res).await }),
+        )
     }
 }
 

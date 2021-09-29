@@ -118,6 +118,7 @@ ERROR_mempool = "The mempool parameter must be Boolean. The value 'true' indicat
 
 [route.subscribe]
 PATH = ["subscribe/:index"]
+WEB_SOCKET = true
 ":index" = "Integer"
 DOC = """
 A server-sent event (SSE) endpoint which opens a data stream between the server and client. Each

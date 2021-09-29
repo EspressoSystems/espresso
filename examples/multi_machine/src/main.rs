@@ -1,7 +1,9 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
 use crate::config::executable_name;
-use crate::routes::{dispatch_url, RouteBinding, UrlSegmentType, UrlSegmentValue};
+use crate::routes::{
+    dispatch_url, dispatch_web_socket, RouteBinding, UrlSegmentType, UrlSegmentValue,
+};
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
@@ -15,25 +17,19 @@ use phaselock::{
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::json;
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::hash_map::HashMap;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::{prelude::*, Read};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use threshold_crypto as tc;
 use tide::StatusCode;
-use tide_websockets::{
-    async_tungstenite::tungstenite::protocol::frame::coding::CloseCode, Message::Close, WebSocket,
-    WebSocketConnection,
-};
+use tide_websockets::{WebSocket, WebSocketConnection};
 use toml::Value;
 use tracing::debug;
-use tracing::{event, Level};
 use zerok_lib::{
     api::*, key_set::KeySet, node::*, ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec,
     MultiXfrTestState, ValidatorState, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
@@ -462,62 +458,6 @@ pub struct WebState {
     node: Arc<RwLock<FullNode<'static>>>,
 }
 
-impl WebState {
-    async fn add_connection(&self, id: &str, wsc: WebSocketConnection) -> tide::Result<()> {
-        event!(Level::DEBUG, "main.rs: Adding connection {}", &id);
-        let mut connections = self.connections.write().await;
-        let connection = Connection {
-            id: id.to_string(),
-            wsc,
-        };
-        connections.insert(id.to_string(), connection);
-        Ok(())
-    }
-
-    async fn remove_connection(&self, id: &str) -> tide::Result<()> {
-        event!(Level::DEBUG, "main.rs: Removing connection {}", id);
-        let mut connections = self.connections.write().await;
-        connections.remove(id);
-        Ok(())
-    }
-
-    async fn send_message(&self, id: &str, cmd: &str, message: &str) -> tide::Result<()> {
-        let mut connections = self.connections.write().await;
-        match connections.entry(id.to_string()) {
-            Entry::Vacant(_) => {
-                event!(
-                    Level::DEBUG,
-                    "main.rs:send_message: Vacant {}, {}",
-                    id,
-                    message
-                );
-            }
-            Entry::Occupied(mut id_connections) => {
-                id_connections
-                    .get_mut()
-                    .wsc
-                    .send_json(&json!({"clientId": id, "cmd": cmd, "msg": message }))
-                    .await?
-            }
-        }
-        Ok(())
-    }
-
-    /// Currently a demonstration of messages with delays to suggest processing time.
-    async fn report_transaction_status(&self, id: &str) -> tide::Result<()> {
-        task::sleep(Duration::from_secs(2)).await;
-        self.send_message(id, "FOO", "Here it is.").await?;
-        self.send_message(id, "INIT", "Something something").await?;
-        task::sleep(Duration::from_secs(2)).await;
-        self.send_message(id, "RECV", "Transaction received")
-            .await?;
-        task::sleep(Duration::from_secs(2)).await;
-        self.send_message(id, "RECV", "Transaction accepted")
-            .await?;
-        Ok(())
-    }
-}
-
 async fn submit_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
     let tx = request_body(&mut req).await?;
     let validator = req.state().node.read().await;
@@ -574,25 +514,22 @@ Add an enum for each entry point so we know how to dispatch
 
  */
 
-fn internal_error(msg: &'static str) -> tide::Error {
-    tide::Error::from_str(tide::StatusCode::InternalServerError, msg)
-}
-
-async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+// Get the route pattern that matches the URL of a request, and the bindings for parameters in the
+// pattern. If no route matches, the error is a documentation string explaining what went wrong.
+fn parse_route(
+    req: &tide::Request<WebState>,
+) -> Result<(String, HashMap<String, RouteBinding>), String> {
     let first_segment = &req
         .url()
         .path_segments()
-        .ok_or_else(|| internal_error("No path segments"))?
+        .ok_or_else(|| String::from("No path segments"))?
         .next()
-        .ok_or_else(|| internal_error("Empty path"))?;
+        .ok_or_else(|| String::from("Empty path"))?;
     let api = &req.state().api["route"][first_segment];
     let route_patterns = api["PATH"]
         .as_array()
-        .ok_or_else(|| internal_error("Invalid PATH type. Expecting array."))?;
-    let mut arg_doc: String = api["DOC"]
-        .as_str()
-        .ok_or_else(|| internal_error("Missing DOC"))?
-        .to_string();
+        .expect("Invalid PATH type. Expecting array.");
+    let mut arg_doc: String = api["DOC"].as_str().expect("Missing DOC").to_string();
     let mut matching_route_count = 0u64;
     let mut matching_route = String::new();
     let mut bindings: HashMap<String, HashMap<String, RouteBinding>> = HashMap::new();
@@ -679,61 +616,40 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
         }
     }
     match matching_route_count {
-        0 => arg_doc.push_str("\nNeed documentation"),
-        1 => {
-            return dispatch_url(
-                req,
-                matching_route.as_str(),
-                bindings.get(&matching_route).unwrap_or(&Default::default()),
-            )
-            .await;
+        0 => {
+            arg_doc.push_str("\nNeed documentation");
+            Err(arg_doc)
         }
-        _ => arg_doc.push_str("\nAmbiguity in api.toml"),
+        1 => {
+            let route_bindings = bindings.remove(&matching_route).unwrap_or_default();
+            Ok((matching_route, route_bindings))
+        }
+        _ => {
+            arg_doc.push_str("\nAmbiguity in api.toml");
+            Err(arg_doc)
+        }
     }
+}
 
-    // TODO !corbett set the mime type to text/html and convert the
-    // string from markdown to html
-    Ok(tide::Response::builder(200).body(arg_doc).build())
+async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    match parse_route(&req) {
+        Ok((pattern, bindings)) => dispatch_url(req, pattern.as_str(), &bindings).await,
+        Err(arg_doc) => {
+            // TODO !corbett set the mime type to text/html and convert the string from markdown to
+            // html
+            Ok(tide::Response::builder(200).body(arg_doc).build())
+        }
+    }
 }
 
 async fn handle_web_socket(
     req: tide::Request<WebState>,
-    mut wsc: WebSocketConnection,
+    wsc: WebSocketConnection,
 ) -> tide::Result<()> {
-    event!(Level::DEBUG, "main.rs: id: {}", &req.param("id")?);
-    let id = req.param("id").expect("Route must include :id parameter.");
-    let state = req.state().clone();
-    state.add_connection(id, wsc.clone()).await?;
-    state
-        .send_message(id, "RPT", "Server says, \"Hi!\"")
-        .await?;
-    let mut closed = false;
-    while let Some(result_message) = wsc.next().await {
-        match result_message {
-            Ok(message) => {
-                event!(Level::DEBUG, "main.rs:WebSocket message: {:?}", message);
-                if let Close(Some(cf)) = message {
-                    // See https://docs.rs/tungstenite/0.14.0/tungstenite/protocol/frame/coding/enum.CloseCode.html
-                    if cf.code == CloseCode::Away {
-                        event!(Level::DEBUG, "main.rs:cf Client said goodbye.");
-                        closed = true;
-                        break;
-                    }
-                    event!(Level::DEBUG, "main.rs:cf {:?}", &cf.code);
-                }
-                // Demonstration
-                state.report_transaction_status(id).await?;
-            }
-            Err(err) => {
-                event!(Level::ERROR, "WebSocket stream: {:?}", err)
-            }
-        }
+    match parse_route(&req) {
+        Ok((pattern, bindings)) => dispatch_web_socket(req, wsc, pattern.as_str(), &bindings).await,
+        Err(arg_doc) => Err(tide::Error::from_str(StatusCode::BadRequest, arg_doc)),
     }
-    if !closed {
-        event!(Level::ERROR, "main.rs: Client left without saying goodbye.");
-    }
-    state.remove_connection(id).await?;
-    Ok(())
 }
 
 /// Initialize the web server.
@@ -797,20 +713,36 @@ fn init_web_server(
     // Add routes from a configuration file.
     println!("Format version: {}", &api["meta"]["FORMAT_VERSION"]);
     if let Some(api_map) = api["route"].as_table() {
-        api_map.values().for_each(|v| match &v["PATH"] {
-            toml::Value::String(s) => {
-                web_server.at(s).get(entry_page);
-            }
-            toml::Value::Array(a) => {
-                for v in a {
-                    if let Some(s) = v.as_str() {
-                        web_server.at(s).get(entry_page);
-                    } else {
-                        println!("Oops! Array element: {:?}", v);
-                    }
+        api_map.values().for_each(|v| {
+            let web_socket = v
+                .get("WEB_SOCKET")
+                .map(|v| v.as_bool().expect("expected boolean value for WEB_SOCKET"))
+                .unwrap_or(false);
+            let routes = match &v["PATH"] {
+                toml::Value::String(s) => {
+                    vec![s.clone()]
+                }
+                toml::Value::Array(a) => a
+                    .iter()
+                    .filter_map(|v| {
+                        if let Some(s) = v.as_str() {
+                            Some(String::from(s))
+                        } else {
+                            println!("Oops! Array element: {:?}", v);
+                            None
+                        }
+                    })
+                    .collect(),
+                _ => panic!("Expecting a toml::String or toml::Array, but got: {:?}", &v),
+            };
+            for path in routes {
+                let mut route = web_server.at(&path);
+                if web_socket {
+                    route.get(WebSocket::new(handle_web_socket));
+                } else {
+                    route.get(entry_page);
                 }
             }
-            _ => println!("Expecting a toml::String or toml::Array, but got: {:?}", &v),
         });
     }
 

@@ -11,8 +11,9 @@ use std::str::FromStr;
 use strum::{AsStaticRef, IntoEnumIterator};
 use strum_macros::{AsRefStr, EnumIter, EnumString};
 use tagged_base64::TaggedBase64;
-use tide::sse;
+use tide::http::{content::Accept, mime};
 use tide::StatusCode;
+use tide_websockets::WebSocketConnection;
 use tracing::{event, Level};
 use zerok_lib::api::*;
 use zerok_lib::node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
@@ -422,31 +423,26 @@ async fn get_nullifier(
 
 async fn subscribe(
     req: tide::Request<WebState>,
+    conn: WebSocketConnection,
     bindings: &HashMap<String, RouteBinding>,
-) -> Result<tide::Response, tide::Error> {
-    let mut index = if let Some(id) = req.header("Last-Event-Id") {
-        // If this is a retry request from a stream which has already progressed but got temporarily
-        // disconnected, the client will set the Last-Event-Id header telling us where they left
-        // off.
-        u64::from_str(id.as_str())? + 1
-    } else {
-        bindings[":index"].value.as_index()? as u64
-    };
-    Ok(sse::upgrade(req, move |req, sender| async move {
-        let mut events = req.state().node.read().await.subscribe(index).await;
-        while let Some(event) = events.next().await {
-            event!(Level::INFO, "broadcast event {}", event.as_static());
-            sender
-                .send(
-                    event.as_static(),
-                    serde_json::to_string(&event).map_err(server_error)?,
-                    Some(index.to_string().as_str()),
-                )
-                .await?;
-            index += 1;
+) -> Result<(), tide::Error> {
+    let response_type = middleware::best_response_type(
+        &mut Accept::from_headers(&req)?,
+        &[mime::JSON, mime::BYTE_STREAM],
+    )?;
+    let index = bindings[":index"].value.as_index()? as u64;
+    let mut events = req.state().node.read().await.subscribe(index).await;
+    while let Some(event) = events.next().await {
+        event!(Level::INFO, "broadcast event {}", event.as_static());
+        if response_type == mime::JSON {
+            conn.send_json(&event).await?;
+        } else if response_type == mime::BYTE_STREAM {
+            conn.send_bytes(bincode::serialize(&event)?).await?;
+        } else {
+            unreachable!();
         }
-        Ok(())
-    }))
+    }
+    Ok(())
 }
 
 pub async fn dispatch_url(
@@ -478,9 +474,30 @@ pub async fn dispatch_url(
         ApiRouteKey::getsnapshot => response(&req, get_snapshot(bindings, query_service).await?),
         ApiRouteKey::getuser => response(&req, get_user(bindings, query_service).await?),
         ApiRouteKey::getnullifier => response(&req, get_nullifier(bindings, query_service).await?),
-        ApiRouteKey::subscribe => {
-            drop(query_service_guard);
-            subscribe(req, bindings).await
-        }
+        _ => Err(tide::Error::from_str(
+            StatusCode::InternalServerError,
+            "server called dispatch_url with an unsupported route; perhaps the route has not \
+            been implemented, or requires a different kind of connection like a WebSocket",
+        )),
+    }
+}
+
+pub async fn dispatch_web_socket(
+    req: tide::Request<WebState>,
+    conn: WebSocketConnection,
+    route_pattern: &str,
+    bindings: &HashMap<String, RouteBinding>,
+) -> Result<(), tide::Error> {
+    let first_segment = route_pattern
+        .split_once('/')
+        .unwrap_or((route_pattern, ""))
+        .0;
+    let key = ApiRouteKey::from_str(first_segment).expect("Unknown route");
+    match key {
+        ApiRouteKey::subscribe => subscribe(req, conn, bindings).await,
+        _ => Err(tide::Error::from_str(
+            StatusCode::InternalServerError,
+            "server called dispatch_web_socket with an unsupported route",
+        )),
     }
 }

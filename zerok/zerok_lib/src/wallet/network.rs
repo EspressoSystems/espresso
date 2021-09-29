@@ -6,10 +6,10 @@ use crate::set_merkle_tree::{set_hash, SetMerkleProof};
 use crate::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
 use api::{middleware, BlockId, ClientError, FromError, TransactionId};
 use async_trait::async_trait;
+use async_tungstenite::async_std::connect_async;
+use async_tungstenite::tungstenite::Message;
+use futures::future::ready;
 use futures::prelude::*;
-use futures_timer::Delay;
-use http_types::content::{Accept, MediaTypeProposal};
-use http_types::{headers, mime};
 use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey};
 use jf_txn::proof::UniversalParam;
 use jf_txn::structs::{Nullifier, ReceiverMemo};
@@ -19,7 +19,8 @@ use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::convert::TryInto;
-use std::time::Duration;
+use surf::http::content::{Accept, MediaTypeProposal};
+use surf::http::{headers, mime};
 pub use surf::Url;
 
 pub struct NetworkBackend<'a> {
@@ -178,53 +179,35 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
     }
 
     async fn subscribe(&self, starting_at: u64) -> Self::EventStream {
-        let client = self.query_client.clone();
-        let url = format!("/subscribe/{}", starting_at);
-        let res = client.get(url.clone()).send().await.unwrap();
-        let state = SSEState {
-            client,
-            url,
-            retry_time: Duration::from_secs(3),
-            last_id: None,
-            stream: sse_codec::decode_stream(res),
-        };
+        let mut url = self
+            .query_client
+            .config()
+            .base_url
+            .as_ref()
+            .unwrap()
+            .join(&format!("subscribe/{}", starting_at))
+            .unwrap();
+        url.set_scheme("ws").unwrap();
 
-        Box::pin(futures::stream::unfold(state, |mut state| async move {
-            // Retry on errors until we get a message or the end of the stream.
-            loop {
-                match state.stream.next().await {
-                    Some(Ok(sse_codec::Event::Retry { retry })) => {
-                        // A retry message instructs us to set the retry duration, but we have
-                        // nothing to yield, so we continue waiting for another message.
-                        state.retry_time = Duration::from_millis(retry);
-                    }
-                    Some(Ok(sse_codec::Event::Message { data, id, .. })) => {
-                        if let Some(id) = id {
-                            // Mark our place in the stream in case we have to reconnect.
-                            state.last_id = Some(id);
-                        }
-                        if let Ok(event) = serde_json::from_str(&data) {
-                            // Yield the event.
-                            return Some((event, state));
-                        } else {
-                            // Got invalid data from the server. Treat this as an error and
-                            // reconnect. This may be a good point to try to fail over to another
-                            // query service.
-                            state.reconnect().await;
-                        }
-                    }
-                    Some(Err(_)) => {
-                        // On errors, we wait for the duration of the retry time and then
-                        // reestablish the connection.
-                        state.reconnect().await;
-                    }
-                    None => {
-                        // End of stream.
-                        return None;
-                    }
-                }
-            }
-        }))
+        //todo !jeb.bearer handle connection failures.
+        // This should only fail if the server is incorrect or down, so we should handle by retrying
+        // or failing over to a different server.
+        Box::pin(
+            connect_async(url)
+                .await
+                .expect("failed to connect to server")
+                .0
+                //todo !jeb.bearer handle stream errors
+                // If there is an error in the stream, or the server sends us invalid data, we
+                // should retry or fail over to a different server.
+                .filter_map(|msg| {
+                    ready(match msg {
+                        Ok(Message::Binary(bytes)) => bincode::deserialize(&bytes).ok(),
+                        Ok(Message::Text(json)) => serde_json::from_str(&json).ok(),
+                        _ => None,
+                    })
+                }),
+        )
     }
 
     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
@@ -261,29 +244,5 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
         let txid = TransactionId(BlockId(block_id as usize), txn_id as usize);
         let body = api::PostMemos { memos, signature };
         Self::post(&self.bulletin_client, format!("/memos/{}", txid), &body).await
-    }
-}
-
-struct SSEState {
-    client: surf::Client,
-    url: String,
-    retry_time: Duration,
-    last_id: Option<String>,
-    stream: sse_codec::DecodeStream<surf::Response>,
-}
-
-impl SSEState {
-    async fn reconnect(&mut self) {
-        loop {
-            Delay::new(self.retry_time).await;
-            let mut req = self.client.get(self.url.clone());
-            if let Some(id) = &self.last_id {
-                req = req.header("Last-Event-Id", id);
-            }
-            if let Ok(res) = req.send().await {
-                self.stream = sse_codec::decode_stream(res);
-                break;
-            }
-        }
     }
 }
