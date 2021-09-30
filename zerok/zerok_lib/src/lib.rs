@@ -9,7 +9,6 @@ mod set_merkle_tree;
 mod util;
 pub mod wallet;
 
-use crate::config::executable_name;
 use ark_serialize::*;
 use canonical::CanonicalBytes;
 use core::fmt::Debug;
@@ -38,6 +37,7 @@ use serde::{Deserialize, Serialize};
 pub use set_merkle_tree::*;
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
 use std::iter::FromIterator;
@@ -767,21 +767,24 @@ pub struct MultiXfrTestState {
     pub inner_timer: Instant,
 }
 
-/// Returns the project directory assuming the executable is in a
-/// default build location.
+/// Returns the project directory.
 ///
-/// For example, if the executable path is
+/// Normally, the executable is be in `target/release` or `target/debug`, e.g.:
 /// ```
-///    ~/tri/systems/system/target/release/multi_machine
+///     ~/systems/system/target/release/multi_machine
 /// ```
-/// then the project path
+/// 
+/// Under `cargo test`, the exexutable is in `target/release/deps` or `target/debug/deps` instead, e.g.:
 /// ```
-///    ~/tri/systems/system/examples/multi_machine/
+///     ~/systems/system/target/debug/deps/zerok_lib-5075cb21acd554ea
 /// ```
-// Note: This function will need to be edited if copied to a project
-// that is not under zerok/ or a sibling directory.
+/// 
+/// For either case above, the project path is:
+/// ```
+///     ~/systems/system/zerok/zerok_lib
+/// ```
 fn project_path() -> PathBuf {
-    const EX_DIR: &str = "zerok";
+    const EX: &str = "zerok/zerok_lib";
     let mut project = PathBuf::from(
         std::env::current_exe()
             .expect("current_exe() returned an error")
@@ -792,9 +795,22 @@ fn project_path() -> PathBuf {
             .parent()
             .expect("Unable to find parent directory (3)"),
     );
-    project.push(EX_DIR);
-    project.push(&executable_name());
+    if project.file_name() != Some(OsStr::new("system")) {
+        project = PathBuf::from(
+            project
+                .parent()
+                .expect("Unable to find parent directory (4)"),
+        )
+    };
+    project.push(EX);
     project
+}
+
+/// Returns the path to the universal parameter file.
+fn universal_param_path() -> PathBuf {
+    const FILE: &str = "src/universal_param";
+    let dir = project_path();
+    [&dir, Path::new(FILE)].iter().collect()
 }
 
 /// Generates universal parameter and store it to file.
@@ -834,8 +850,12 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
     .unwrap_or_else(|err| panic!("Error while setting up the universal parameter: {}", err));
     let param_bytes = canonical::serialize(&universal_param)
         .unwrap_or_else(|err| panic!("Error while serializing the universal parameter: {}", err));
-    // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
-    let mut file = File::create("../../zerok/zerok_lib/src/universal_param".to_string())
+    let path = universal_param_path()
+        .into_os_string()
+        .into_string()
+        .expect("Error while converting universal parameter path to a string");
+    println!("path {}", path);
+    let mut file = File::create(path)
         .unwrap_or_else(|err| panic!("Error while creating a universal parameter file: {}", err));
     file.write_all(&param_bytes).unwrap_or_else(|err| {
         panic!(
@@ -848,9 +868,7 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
 /// Reads universal parameter from file if it exists. If not, generates the universal parameter, stores
 /// it to file, and returns it.
 pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalParam {
-    // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
-    let path_str = "../../zerok/zerok_lib/src/universal_param".to_string();
-    let path = Path::new(&path_str);
+    let path = universal_param_path();
 
     // create a new seeded PRNG from the master PRNG when getting the UniversalParam. This ensures a
     // deterministic RNG result after the call, either the UniversalParam is newly generated or loaded
