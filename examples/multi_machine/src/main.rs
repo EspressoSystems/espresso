@@ -1,6 +1,5 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
-use crate::config::executable_name;
 use crate::routes::{dispatch_url, RouteBinding, UrlSegmentType, UrlSegmentValue};
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
@@ -34,7 +33,6 @@ use zerok_lib::{
     node::*, ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState,
 };
 
-mod config;
 mod disco;
 mod ip;
 mod routes;
@@ -115,34 +113,11 @@ fn get_public_key(node_id: u64) -> PubKey {
     serde_json::from_str(&pk_str).expect("Error while reading public key")
 }
 
-/// Returns the project directory assuming the executable is in a
-/// default build location.
-///
-/// For example, if the executable path is
-/// ```
-///    ~/tri/systems/system/target/release/multi_machine
-/// ```
-/// then the project path
-/// ```
-///    ~/tri/systems/system/examples/multi_machine/
-/// ```
-// Note: This function will need to be edited if copied to a project
-// that is not under examples/ or a sibling directory.
+/// Returns the project directory.
 fn project_path() -> PathBuf {
-    const EX_DIR: &str = "examples";
-    let mut project = PathBuf::from(
-        std::env::current_exe()
-            .expect("current_exe() returned an error")
-            .parent()
-            .expect("Unable to find parent directory (1)")
-            .parent()
-            .expect("Unable to find parent directory (2)")
-            .parent()
-            .expect("Unable to find parent directory (3)"),
-    );
-    project.push(EX_DIR);
-    project.push(&executable_name());
-    project
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    println!("path {}", path.display());
+    path
 }
 
 /// Returns "<repo>/public/" where <repo> is
