@@ -24,3 +24,26 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
         * Note: It may take a while until `window 0` displays the prompt message, since `node 0` needs to propose a transaction before starting the consensus. It is important to not hit the enter key if any node is not ready.
     * Check that the `Current commitment`s in all windows are the same.
 * Nodes that have completed all (i.e., 3) rounds will terminate their processes, which may lead to connection errors displayed in other windows. It is okay to ignore these errors as long as the commitments of each round are consistent in all windows.
+
+## Running with a wallet
+By default, one of the validator nodes in the demo will automatically generate transactions to propose to the other nodes. But the demo can also be driven by a wallet,
+running externally to all of the nodes.
+
+To use a wallet with the demo, first generate a key pair for the wallet:
+```
+cd zerok/zerok_client
+cargo run --key-gen $key_file
+```
+The private key will be stored in $key_file, and the public key in $key_file.pub. Next,
+start the demo as you normally would, but pass the extra argument `--wallet $key_file.pub` to each node, and pass `--full` to at least one node. The lead node will initialize a ledger containing a single record of 2^32 native tokens, owned by the wallet.
+
+In a separate terminal, you can now enter the interactive wallet REPL:
+```
+cd zerok/zerok_client
+cargo run -- --key-path $key_file localhost:$port
+```
+where $port is the port number where the full node is serving (50000 + node id, by default).
+
+Open another wallet in yet another terminal using a different `--key-path`. (Or don't specify a key path, and one will be generated in-memory. We only needed the key in a file for the first wallet to give to the validators so they could bootstrap the system with some initial amount of native coins.)
+
+Get the addresses of both of your wallets using the `address` command. View your available assets using the `assets` and `balance` commands. Transfer funds back and forth using `transfer <asset> <address> <amount> <fee>`. Remember to hit enter in all of the validator terminals to start consensus after you generate a transaction.
