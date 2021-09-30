@@ -37,7 +37,6 @@ use serde::{Deserialize, Serialize};
 pub use set_merkle_tree::*;
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
 use std::iter::FromIterator;
@@ -767,49 +766,10 @@ pub struct MultiXfrTestState {
     pub inner_timer: Instant,
 }
 
-/// Returns the project directory.
-///
-/// Normally, the executable is be in `target/release` or `target/debug`, e.g.:
-/// ```
-///     ~/systems/system/target/release/multi_machine
-/// ```
-///
-/// Under `cargo test`, the exexutable is in `target/release/deps` or `target/debug/deps` instead, e.g.:
-/// ```
-///     ~/systems/system/target/debug/deps/zerok_lib-5075cb21acd554ea
-/// ```
-///
-/// For either case above, the project path is:
-/// ```
-///     ~/systems/system/zerok/zerok_lib
-/// ```
-fn project_path() -> PathBuf {
-    const EX: &str = "zerok/zerok_lib";
-    let mut project = PathBuf::from(
-        std::env::current_exe()
-            .expect("current_exe() returned an error")
-            .parent()
-            .expect("Unable to find parent directory (1)")
-            .parent()
-            .expect("Unable to find parent directory (2)")
-            .parent()
-            .expect("Unable to find parent directory (3)"),
-    );
-    if project.file_name() != Some(OsStr::new("system")) {
-        project = PathBuf::from(
-            project
-                .parent()
-                .expect("Unable to find parent directory (4)"),
-        )
-    };
-    project.push(EX);
-    project
-}
-
 /// Returns the path to the universal parameter file.
 fn universal_param_path() -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     const FILE: &str = "src/universal_param";
-    let dir = project_path();
     [&dir, Path::new(FILE)].iter().collect()
 }
 
