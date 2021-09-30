@@ -773,12 +773,12 @@ pub struct MultiXfrTestState {
 /// ```
 ///     ~/systems/system/target/release/multi_machine
 /// ```
-/// 
+///
 /// Under `cargo test`, the exexutable is in `target/release/deps` or `target/debug/deps` instead, e.g.:
 /// ```
 ///     ~/systems/system/target/debug/deps/zerok_lib-5075cb21acd554ea
 /// ```
-/// 
+///
 /// For either case above, the project path is:
 /// ```
 ///     ~/systems/system/zerok/zerok_lib
