@@ -1,11 +1,9 @@
 #![deny(warnings)]
 #![allow(dead_code)]
 
-use crate::deserialize_canonical_bytes;
 use crate::util::{byte_array_to_bits, canonical};
 use ark_serialize::*;
 use bitvec::vec::BitVec;
-use canonical::CanonicalBytes;
 use core::mem;
 use jf_txn::structs::Nullifier;
 use serde::{Deserialize, Serialize};
@@ -15,30 +13,81 @@ pub mod set_hash {
     use super::*;
     use blake2::crypto_mac::Mac;
     use generic_array::GenericArray;
-    pub type Hash = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
+    use jf_utils::tagged_blob;
+    use std::ops::Deref;
+
+    type Array = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
+
+    #[tagged_blob("HASH")]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct Hash(Array);
+
     lazy_static::lazy_static! {
-        pub static ref EMPTY_HASH: Hash = GenericArray::<_,_>::default();
+        pub static ref EMPTY_HASH: Hash = Hash(GenericArray::<_,_>::default());
+    }
+
+    impl Hash {
+        pub fn new(bytes: Array) -> Self {
+            Self(bytes)
+        }
+
+        pub fn into_bits(self) -> BitVec<bitvec::order::Lsb0, u8> {
+            byte_array_to_bits(self.0)
+        }
+    }
+
+    impl CanonicalSerialize for Hash {
+        fn serialize<W: Write>(&self, mut w: W) -> Result<(), SerializationError> {
+            w.write_all(&self.0).map_err(SerializationError::from)
+        }
+
+        fn serialized_size(&self) -> usize {
+            self.0.len()
+        }
+    }
+
+    impl CanonicalDeserialize for Hash {
+        fn deserialize<R: Read>(mut r: R) -> Result<Self, SerializationError> {
+            let mut buf = GenericArray::default();
+            r.read_exact(&mut buf)?;
+            Ok(Hash(buf))
+        }
+    }
+
+    impl IntoIterator for Hash {
+        type Item = u8;
+        type IntoIter = <Array as IntoIterator>::IntoIter;
+        fn into_iter(self) -> Self::IntoIter {
+            self.0.into_iter()
+        }
+    }
+
+    impl Deref for Hash {
+        type Target = [u8];
+        fn deref(&self) -> &[u8] {
+            &*self.0
+        }
     }
 
     pub fn elem_hash(x: Nullifier) -> Hash {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Elem".as_bytes());
         hasher.update(&canonical::serialize(&x).unwrap());
-        hasher.finalize().into_bytes()
+        Hash(hasher.finalize().into_bytes())
     }
 
     pub fn leaf_hash(x: Nullifier) -> Hash {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Leaf".as_bytes());
         hasher.update(&canonical::serialize(&x).unwrap());
-        hasher.finalize().into_bytes()
+        Hash(hasher.finalize().into_bytes())
     }
 
     pub fn branch_hash(l: Hash, r: Hash) -> Hash {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Branch".as_bytes());
         hasher.update("l".as_bytes());
-        hasher.update(&l);
+        hasher.update(&l.0);
         hasher.update("r".as_bytes());
-        hasher.update(&r);
-        hasher.finalize().into_bytes()
+        hasher.update(&r.0);
+        Hash(hasher.finalize().into_bytes())
     }
 }
 
@@ -100,7 +149,7 @@ impl Default for SetMerkleTree {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(from = "CanonicalBytes", into = "CanonicalBytes")]
+#[serde(tag = "type")]
 pub enum SetMerkleTerminalNode {
     EmptySubtree,
     Leaf {
@@ -110,8 +159,6 @@ pub enum SetMerkleTerminalNode {
     },
 }
 
-deserialize_canonical_bytes!(SetMerkleTerminalNode);
-
 impl CanonicalSerialize for SetMerkleTerminalNode {
     fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
         match self {
@@ -120,8 +167,8 @@ impl CanonicalSerialize for SetMerkleTerminalNode {
             }
             SetMerkleTerminalNode::Leaf { height, elem } => {
                 writer.write_all(&[1]).map_err(SerializationError::from)?;
-                <usize as CanonicalSerialize>::serialize(height, &mut writer)?;
-                elem.serialize(&mut writer)
+                CanonicalSerialize::serialize(height, &mut writer)?;
+                CanonicalSerialize::serialize(elem, &mut writer)
             }
         }
     }
@@ -158,7 +205,7 @@ impl SetMerkleTerminalNode {
         match self {
             EmptySubtree => *set_hash::EMPTY_HASH,
             Leaf { height, elem } => {
-                let elem_bit_vec = byte_array_to_bits(set_hash::elem_hash(*elem));
+                let elem_bit_vec = set_hash::elem_hash(*elem).into_bits();
 
                 // the path only goes until a terminal node is reached, so skip
                 // part of the bit-vec
@@ -182,53 +229,27 @@ impl SetMerkleTerminalNode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+    Serialize,
+    Deserialize,
+)]
 pub struct SetMerkleProof {
     terminal_node: SetMerkleTerminalNode,
     path: Vec<set_hash::Hash>,
-}
-
-impl CanonicalSerialize for SetMerkleProof {
-    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-        CanonicalSerialize::serialize(&self.terminal_node, &mut writer)?;
-        CanonicalSerialize::serialize(&self.path.len(), &mut writer)?;
-        for hash in &self.path {
-            writer.write_all(&*hash).map_err(SerializationError::from)?;
-        }
-        Ok(())
-    }
-
-    fn serialized_size(&self) -> usize {
-        return self.terminal_node.serialized_size()
-            + self.path.iter().map(|hash| hash.len()).sum::<usize>();
-    }
-}
-
-impl CanonicalDeserialize for SetMerkleProof {
-    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let terminal_node = CanonicalDeserialize::deserialize(&mut reader)?;
-        let path_len: usize = CanonicalDeserialize::deserialize(&mut reader)?;
-        let path = (0..path_len)
-            .map(|_| {
-                let mut buf = set_hash::Hash::default();
-                reader
-                    .read_exact(&mut buf)
-                    .map_err(SerializationError::from)?;
-                Ok(buf)
-            })
-            .collect::<Result<Vec<_>, SerializationError>>()?;
-        Ok(Self {
-            terminal_node,
-            path,
-        })
-    }
 }
 
 impl SetMerkleProof {
     pub fn check(&self, elem: Nullifier, root: &set_hash::Hash) -> Result<bool, set_hash::Hash> {
         let mut running_hash = self.terminal_node.value();
 
-        let elem_bit_vec = byte_array_to_bits(set_hash::elem_hash(elem));
+        let elem_bit_vec = set_hash::elem_hash(elem).into_bits();
 
         // the path only goes until a terminal node is reached, so skip
         // part of the bit-vec
@@ -625,7 +646,7 @@ mod tests {
         let pfs = elems
             .into_iter()
             .map(|elem| {
-                let elem_bit_vec = byte_array_to_bits(set_hash::elem_hash(elem));
+                let elem_bit_vec = set_hash::elem_hash(elem).into_bits();
                 let pf = elem_bit_vec
                     .iter()
                     .map(|_| {
@@ -633,7 +654,7 @@ mod tests {
                         prng.fill_bytes(&mut buf);
                         let mut hasher = blake2::Blake2b::with_params(&[], &[], "".as_bytes());
                         hasher.update(&buf);
-                        hasher.finalize().into_bytes()
+                        set_hash::Hash::new(hasher.finalize().into_bytes())
                     })
                     .collect();
                 let pf = SetMerkleProof {

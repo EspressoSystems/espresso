@@ -4,12 +4,14 @@
 #[macro_use]
 extern crate proptest;
 
+pub mod api;
 pub mod node;
 mod set_merkle_tree;
 mod util;
 pub mod wallet;
 
 use ark_serialize::*;
+use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use core::fmt::Debug;
 use core::iter::once;
@@ -377,7 +379,7 @@ pub struct VerifierKeySet<Order: key_set::KeyOrder = key_set::OrderByInputs> {
 }
 
 // TODO
-#[derive(Debug, Snafu)]
+#[derive(Debug, Snafu, Serialize, Deserialize)]
 #[snafu(visibility = "pub(crate)")]
 pub enum ValidationError {
     NullifierAlreadyExists {
@@ -392,7 +394,13 @@ pub enum ValidationError {
     BadMerkleRoot {},
     BadMerklePath {},
     CryptoError {
-        err: TxnApiError,
+        // TxnApiError cannot be serialized, and, since it depends on many foreign error types which
+        // are not Serialize, it is infeasible to make it serializable. Instead, if we have to
+        // serialize this variant, we will serialize Ok(err) to Err(format(err)), and when we
+        // deserialize we will at least preserve the variant CryptoError and a String representation
+        // of the underlying error.
+        #[serde(with = "ser_display")]
+        err: Result<TxnApiError, String>,
     },
     UnsupportedTransferSize {
         num_inputs: usize,
@@ -401,6 +409,27 @@ pub enum ValidationError {
     UnsupportedFreezeSize {
         num_inputs: usize,
     },
+}
+
+mod ser_display {
+    use serde::de::{Deserialize, Deserializer};
+    use serde::ser::{Serialize, Serializer};
+    use std::fmt::Display;
+
+    pub fn serialize<S: Serializer, T: Display>(
+        v: &Result<T, String>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let string = match v {
+            Ok(v) => format!("{}", v),
+            Err(string) => string.clone(),
+        };
+        Serialize::serialize(&string, s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T>(d: D) -> Result<Result<T, String>, D::Error> {
+        Ok(Err(Deserialize::deserialize(d)?))
+    }
 }
 
 // TxnApiError doesn't implement Clone :/
@@ -684,7 +713,7 @@ impl ValidatorState {
                 now,
                 &verif_keys,
             )
-            .map_err(|err| CryptoError { err })?;
+            .map_err(|err| CryptoError { err: Ok(err) })?;
         }
 
         Ok((txns, null_pfs))
@@ -1840,7 +1869,7 @@ impl MultiXfrTestState {
 mod tests {
     use super::*;
     use jf_primitives::merkle_tree::LookupResult;
-    use jf_txn::BlsScalar;
+    use jf_txn::BaseField;
     use quickcheck::QuickCheck;
 
     /*
@@ -2301,7 +2330,7 @@ mod tests {
                     Ok(val) => {
                         map.push(val);
 
-                        t.push(BlsScalar::from(pow3(*val)));
+                        t.push(BaseField::from(pow3(*val)));
 
                         // check_path(t.hasher.as_ref(), &path.unwrap(), &leaf_val,
                         //         &leaf_hash, MERKLE_HEIGHT, &t.root_hash)
@@ -2311,7 +2340,7 @@ mod tests {
                     }
                     Err(i) => {
                         match (
-                            map.get(*i).cloned().map(|x| BlsScalar::from(pow3(*x))),
+                            map.get(*i).cloned().map(|x| BaseField::from(pow3(*x))),
                             t.get_leaf(*i as u64),
                         ) {
                             (None, LookupResult::EmptyLeaf) => {}

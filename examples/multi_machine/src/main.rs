@@ -387,16 +387,24 @@ impl WebState {
                     id,
                     message
                 );
+                let error_detail = format!(
+                    "Unable to find connection for ID: {} while attempting to send the message: '{}'",
+                    id, message
+                );
+                Err(tide::Error::from_str(
+                    tide::StatusCode::InternalServerError,
+                    error_detail,
+                ))
             }
             Entry::Occupied(mut id_connections) => {
                 id_connections
                     .get_mut()
                     .wsc
                     .send_json(&json!({"clientId": id, "cmd": cmd, "msg": message }))
-                    .await?
+                    .await?;
+                Ok(())
             }
         }
-        Ok(())
     }
 
     /// Currently a demonstration of messages with delays to suggest processing time.
