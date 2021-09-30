@@ -414,16 +414,18 @@ pub fn client_error(error: impl Into<Error>) -> surf::Error {
     surf::Error::new(error.status(), error)
 }
 
-pub mod middleware {
+pub mod server {
     use super::*;
+    use mime::Mime;
     use tide::http::{content::Accept, mime};
+    use tide::{Body, Next, Request, Response, StatusCode};
     use tracing::{event, Level};
 
     /// Deserialize the body of a request.
     ///
     /// The Content-Type header is used to determine the serialization format.
     pub async fn request_body<T: for<'de> Deserialize<'de>, S>(
-        req: &mut tide::Request<S>,
+        req: &mut Request<S>,
     ) -> Result<T, tide::Error> {
         if let Some(content_type) = req.header("Content-Type") {
             match content_type.as_str() {
@@ -443,8 +445,8 @@ pub mod middleware {
 
     pub fn best_response_type(
         accept: &mut Option<Accept>,
-        available: &[mime::Mime],
-    ) -> Result<mime::Mime, tide::Error> {
+        available: &[Mime],
+    ) -> Result<Mime, tide::Error> {
         match accept {
             Some(accept) => {
                 // The Accept type has a `negotiate` method, but it doesn't properly handle
@@ -481,7 +483,7 @@ pub mod middleware {
                     Ok(available[0].clone())
                 } else {
                     Err(tide::Error::from_str(
-                        tide::StatusCode::NotAcceptable,
+                        StatusCode::NotAcceptable,
                         "No suitable Content-Type found",
                     ))
                 }
@@ -496,17 +498,17 @@ pub mod middleware {
     fn respond_with<T: Serialize>(
         accept: &mut Option<Accept>,
         body: T,
-    ) -> Result<tide::Response, tide::Error> {
+    ) -> Result<Response, tide::Error> {
         let ty = best_response_type(accept, &[mime::JSON, mime::BYTE_STREAM])?;
         if ty == mime::BYTE_STREAM {
             let bytes = bincode::serialize(&body)?;
-            Ok(tide::Response::builder(tide::StatusCode::Ok)
+            Ok(Response::builder(tide::StatusCode::Ok)
                 .body(bytes)
                 .content_type(mime::BYTE_STREAM)
                 .build())
         } else if ty == mime::JSON {
-            Ok(tide::Response::builder(tide::StatusCode::Ok)
-                .body(tide::Body::from_json(&body)?)
+            Ok(Response::builder(tide::StatusCode::Ok)
+                .body(Body::from_json(&body)?)
                 .content_type(mime::JSON)
                 .build())
         } else {
@@ -521,9 +523,9 @@ pub mod middleware {
     /// This function combined with the [add_error_body] middleware defines the server-side protocol
     /// for encoding zerok types in HTTP responses.
     pub fn response<T: Serialize, S>(
-        req: &tide::Request<S>,
+        req: &Request<S>,
         body: T,
-    ) -> Result<tide::Response, tide::Error> {
+    ) -> Result<Response, tide::Error> {
         respond_with(&mut Accept::from_headers(req)?, body)
     }
 
@@ -540,8 +542,8 @@ pub mod middleware {
     /// automatically converts error responses into [Err] variants, assuming the responses follow
     /// the convention implemented by this middleware.
     pub fn add_error_body<'a, T: Clone + Send + Sync + 'static>(
-        req: tide::Request<T>,
-        next: tide::Next<'a, T>,
+        req: Request<T>,
+        next: Next<'a, T>,
     ) -> BoxFuture<'a, tide::Result> {
         Box::pin(async {
             let mut accept = Accept::from_headers(&req)?;
@@ -581,7 +583,12 @@ pub mod middleware {
             Ok(res)
         })
     }
+}
 
+pub mod client {
+    use super::*;
+    use surf::{middleware::Next, Client, Request, Response, StatusCode};
+    
     /// Deserialize the body of a response.
     ///
     /// The Content-Type header is used to determine the serialization format.
@@ -589,7 +596,7 @@ pub mod middleware {
     /// This function combined with the [parse_error_body] middleware defines the client-side
     /// protocol for decoding zerok types from HTTP responses.
     pub async fn response_body<T: for<'de> Deserialize<'de>>(
-        res: &mut surf::Response,
+        res: &mut Response,
     ) -> Result<T, surf::Error> {
         if let Some(content_type) = res.header("Content-Type") {
             match content_type.as_str() {
@@ -606,8 +613,8 @@ pub mod middleware {
         }
     }
 
-    pub async fn response_to_result(mut res: surf::Response) -> surf::Result<surf::Response> {
-        if res.status() == surf::StatusCode::Ok {
+    pub async fn response_to_result(mut res: Response) -> surf::Result<Response> {
+        if res.status() == StatusCode::Ok {
             Ok(res)
         } else {
             let err: Error = response_body(&mut res).await?;
@@ -629,10 +636,10 @@ pub mod middleware {
     /// automatically prepares the body of error responses for interpretation by this client side
     /// middleware.
     pub fn parse_error_body(
-        req: surf::Request,
-        client: surf::Client,
-        next: surf::middleware::Next<'_>,
-    ) -> BoxFuture<surf::Result<surf::Response>> {
+        req: Request,
+        client: Client,
+        next: Next<'_>,
+    ) -> BoxFuture<surf::Result<Response>> {
         Box::pin(
             next.run(req, client)
                 .and_then(|res| async { response_to_result(res).await }),

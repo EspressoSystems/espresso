@@ -10,13 +10,13 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
 use jf_txn::{MerkleTree, TransactionVerifyingKey};
-use middleware::request_body;
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Serialize};
+use server::request_body;
 use std::collections::hash_map::HashMap;
 use std::convert::TryInto;
 use std::fs::File;
@@ -688,8 +688,8 @@ fn init_web_server(
         node: Arc::new(RwLock::new(node)),
     });
     web_server
-        .with(middleware::trace)
-        .with(middleware::add_error_body);
+        .with(server::trace)
+        .with(server::add_error_body);
 
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;

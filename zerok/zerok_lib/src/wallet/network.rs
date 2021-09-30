@@ -4,7 +4,7 @@ use crate::key_set::SizedKey;
 use crate::node;
 use crate::set_merkle_tree::{set_hash, SetMerkleProof};
 use crate::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
-use api::{middleware, BlockId, ClientError, FromError, TransactionId};
+use api::{client::*, BlockId, ClientError, FromError, TransactionId};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
@@ -50,7 +50,7 @@ impl<'a> NetworkBackend<'a> {
             .set_base_url(base_url)
             .try_into()
             .context(ClientConfigError)?;
-        Ok(client.with(middleware::parse_error_body))
+        Ok(client.with(parse_error_body))
     }
 
     async fn get<T: for<'de> Deserialize<'de>>(
@@ -64,7 +64,7 @@ impl<'a> NetworkBackend<'a> {
             .send()
             .await
             .context(ClientError)?;
-        middleware::response_body(&mut res)
+        response_body(&mut res)
             .await
             .context(ClientError)
     }

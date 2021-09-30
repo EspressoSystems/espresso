@@ -3,7 +3,7 @@
 use crate::WebState;
 use futures::prelude::*;
 use itertools::izip;
-use middleware::response;
+use server::{best_response_type, response};
 use phaselock::BlockContents;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -426,7 +426,7 @@ async fn subscribe(
     conn: WebSocketConnection,
     bindings: &HashMap<String, RouteBinding>,
 ) -> Result<(), tide::Error> {
-    let response_type = middleware::best_response_type(
+    let response_type = best_response_type(
         &mut Accept::from_headers(&req)?,
         &[mime::JSON, mime::BYTE_STREAM],
     )?;

@@ -19,7 +19,8 @@
 // test, pointing it at the URL of one of the full nodes.
 
 use async_std::future::timeout;
-use async_tungstenite::{async_std::connect_async, tungstenite};
+use async_tungstenite::{async_std::connect_async};
+use client::*;
 use futures::prelude::*;
 use itertools::izip;
 use phaselock::BlockContents;
@@ -61,9 +62,9 @@ fn url(route: impl Display) -> Url {
 async fn get<T: for<'de> Deserialize<'de>, S: Display>(route: S) -> T {
     let url = url(route);
     event!(Level::INFO, "GET {}", url);
-    middleware::response_body(
+    response_body(
         &mut surf::get(url)
-            .middleware(middleware::parse_error_body)
+            .middleware(parse_error_body)
             .send()
             .await
             .unwrap(),
@@ -76,7 +77,7 @@ async fn get_error(route: impl Display) -> Error {
     let url = url(route);
     event!(Level::INFO, "GET {}", url);
     match surf::get(url)
-        .middleware(middleware::parse_error_body)
+        .middleware(parse_error_body)
         .send()
         .await
         .context(ClientError)
