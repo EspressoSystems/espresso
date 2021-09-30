@@ -687,9 +687,7 @@ fn init_web_server(
         api: api.clone(),
         node: Arc::new(RwLock::new(node)),
     });
-    web_server
-        .with(server::trace)
-        .with(server::add_error_body);
+    web_server.with(server::trace).with(server::add_error_body);
 
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;

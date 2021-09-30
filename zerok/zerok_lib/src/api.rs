@@ -522,10 +522,7 @@ pub mod server {
     ///
     /// This function combined with the [add_error_body] middleware defines the server-side protocol
     /// for encoding zerok types in HTTP responses.
-    pub fn response<T: Serialize, S>(
-        req: &Request<S>,
-        body: T,
-    ) -> Result<Response, tide::Error> {
+    pub fn response<T: Serialize, S>(req: &Request<S>, body: T) -> Result<Response, tide::Error> {
         respond_with(&mut Accept::from_headers(req)?, body)
     }
 
@@ -588,7 +585,7 @@ pub mod server {
 pub mod client {
     use super::*;
     use surf::{middleware::Next, Client, Request, Response, StatusCode};
-    
+
     /// Deserialize the body of a response.
     ///
     /// The Content-Type header is used to determine the serialization format.

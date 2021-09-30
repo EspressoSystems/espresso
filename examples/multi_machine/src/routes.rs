@@ -3,8 +3,8 @@
 use crate::WebState;
 use futures::prelude::*;
 use itertools::izip;
-use server::{best_response_type, response};
 use phaselock::BlockContents;
+use server::{best_response_type, response};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;

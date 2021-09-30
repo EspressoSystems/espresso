@@ -9,8 +9,11 @@ function isWebSocketOpen() {
     return webSocket && webSocket.readyState === webSocket.OPEN
 };
 
+function sleep(ms) {
+  new Promise(resolve => setTimeout(resolve, ms));
+}
 // Attempt a web socket connection.
-function webSocketConnect() {
+async function webSocketConnect() {
     if (!isWebSocketOpen()) {
         let protocol = window.location.protocol === "https:" ? "wss" : "ws";
         let host = window.location.host;
@@ -22,16 +25,24 @@ function webSocketConnect() {
         console.log(`ws.js:webSocketConnect url:${url}`);
         webSocket = new WebSocket(url);
         webSocket.onmessage = webSocketOnMessage;
+        webSocket.onopen = webSocketOnOpen;
         status('Web Socket enabled.');
+        const SLEEP_MS = 50;
+        for (let i = 1; i <= 10; ++i) {
+            await sleep(SLEEP_MS);
+            if (isWebSocketOpen()) {
+                console.log("WebSocket connection opened after "
+                            + SLEEP_MS * i + "ms");
+                break;
+            }
+        }
     }
 }
 
 // Send a Web Sockets message to the server.
 async function webSocketSend(msg) {
     if (!isWebSocketOpen()) {
-        webSocketConnect();
-        // TODO !corbett Why half a second? There must be a better condition.
-        await new Promise(r => setTimeout(r, 500)); // wait half second to connect
+        await webSocketConnect();
     }
     if (isWebSocketOpen()) {
         status('webSocket: ' + msg);
@@ -69,6 +80,10 @@ function redirectClean() {
 function webSocketOnMessage(msg) {
     const data = JSON.parse(msg.data);
     status(`Got webSocket message: clientId:${data.clientId} msg:${data.msg}.`);
+}
+
+function webSocketOnOpen(event) {
+    console.log('got WebSocket.onopen event: '+ JSON.stringify(event));
 }
 
 // Do a thing when the UI "Send" button is pressed.

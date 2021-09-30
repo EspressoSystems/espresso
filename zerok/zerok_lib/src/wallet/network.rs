@@ -64,9 +64,7 @@ impl<'a> NetworkBackend<'a> {
             .send()
             .await
             .context(ClientError)?;
-        response_body(&mut res)
-            .await
-            .context(ClientError)
+        response_body(&mut res).await.context(ClientError)
     }
 
     async fn post<T: Serialize>(
