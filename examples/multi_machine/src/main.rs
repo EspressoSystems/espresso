@@ -449,20 +449,9 @@ impl WebState {
 }
 
 async fn landing_page(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
-    let mut index_html: PathBuf = PathBuf::from(req.state().web_path.clone());
+    let mut index_html: PathBuf = req.state().web_path.clone();
     index_html.push("index.html");
     Ok(tide::Body::from_file(index_html).await?)
-    // let api = &req
-    //     .state()
-    //     .api
-    //     .as_array()
-    //     .ok_or_else(|| internal_error("Expecting array"))?;
-    // let mut help: String = "Help\n<br/>".to_string();
-    // for route in api.iter() {
-    //     help += format!("{:?}\n\n", route).as_str();
-    // }
-    // println!("{}", &help);
-    // Ok(tide::Response::builder(200).body(help).build())
 }
 
 // TODO !corbett report parameter parsing errors
@@ -724,15 +713,15 @@ async fn compose_help(req: tide::Request<WebState>) -> Result<tide::Response, ti
             for p in v["PATH"].as_array().unwrap().iter() {
                 help += &format!("<p class='path'>{}</p>\n", p.as_str().unwrap());
             }
-            help += &format!("<h3>Parameters</h3>\n");
+            help += &"<h3>Parameters</h3>\n<table>\n".to_string();
             let mut has_parameters = false;
-            for (k1, v1) in v.as_table().unwrap().iter() {
-                if k1.starts_with(':') {
+            for (parameter, ptype) in v.as_table().unwrap().iter() {
+                if parameter.starts_with(':') {
                     has_parameters = true;
                     help += &format!(
-                        "<div class='argument'>{}</span>: <span class='type'>{}</div>",
-                        k1.strip_prefix(':').unwrap(),
-                        v1.as_str().unwrap()
+                        "<tr><td class='parameter'>{}</td><td class='type'>{}</td></tr>\n",
+                        parameter.strip_prefix(':').unwrap(),
+                        ptype.as_str().unwrap()
                     );
                 }
             }
@@ -740,7 +729,7 @@ async fn compose_help(req: tide::Request<WebState>) -> Result<tide::Response, ti
                 help += "<div class='meta'>None</div>";
             }
             help += &format!(
-                "<h3>Description</h3>\n{}\n",
+                "</table>\n<h3>Description</h3>\n{}\n",
                 markdown::to_html(v["DOC"].as_str().unwrap().trim())
             )
         });
