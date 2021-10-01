@@ -465,17 +465,7 @@ async fn landing_page(req: tide::Request<WebState>) -> Result<tide::Body, tide::
     // Ok(tide::Response::builder(200).body(help).build())
 }
 
-/* TODO
-
-Collect error messages for parameters that fail to parse, but only
-when there are no literal mismatches
-
-Add comprehensive documentation at /
-
-Add an enum for each entry point so we know how to dispatch
-}
-
- */
+// TODO !corbett report parameter parsing errors
 
 fn internal_error(msg: &'static str) -> tide::Error {
     tide::Error::from_str(tide::StatusCode::InternalServerError, msg)
@@ -594,8 +584,6 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
         _ => arg_doc.push_str("\nAmbiguity in api.toml"),
     }
 
-    // TODO !corbett set the mime type to text/html and convert the
-    // string from markdown to html
     Ok(tide::Response::builder(200).body(arg_doc).build())
 }
 
@@ -680,11 +668,7 @@ fn init_web_server(
 
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;
-    web_server.at("/").get(landing_page);
-    web_server
-        .at("/:id")
-        .with(WebSocket::new(handle_web_socket))
-        .get(landing_page);
+    web_server.at("/").get(compose_help);
     web_server
         .at("/transfer/:id/:recipient/:amount")
         .with(WebSocket::new(handle_web_socket))
@@ -716,47 +700,61 @@ fn init_web_server(
     Ok(join_handle)
 }
 
-// Convert api.toml into HTML.
 // TODO !corbett Extract all the web-related stuff into a module.
-fn dump_help(opt_api_path: &str) {
-    // TODO !corbett extract this into a function
-    let api_path = if opt_api_path.is_empty() {
-        default_api_path()
-    } else {
-        PathBuf::from(opt_api_path)
-    };
-    let api = disco::load_messages(&api_path);
-    // TODO !corbett Get header and footer from api.toml
-    println!("\n\n<h1>Spectrum Web Interface</h1>");
+async fn compose_help(req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    let api = &req.state().api;
+    let mut help = format!(
+        "{}\n<h2>Entries</h2>\n",
+        &api["meta"]["HTML_TOP"].as_str().unwrap()
+    );
     if let Some(api_map) = api["route"].as_table() {
         api_map.values().for_each(|v| {
-            println!("<h2>Routes</h2>");
+            // TODO !corbett extract this into a function
+            let first_route = v["PATH"].as_array().unwrap()[0].as_str().unwrap();
+            let first_segment = v["PATH"].as_array().unwrap()[0]
+                .as_str()
+                .unwrap()
+                .split_once('/')
+                .unwrap_or((first_route, ""))
+                .0;
+            help += &format!(
+                "<a name='{}'><h3 class='entry'>{}</h3></a>\n<h3>Routes</h3>",
+                first_segment, first_segment
+            );
             for p in v["PATH"].as_array().unwrap().iter() {
-                println!("<p class='path'>{}</p>", p.as_str().unwrap());
+                help += &format!("<p class='path'>{}</p>\n", p.as_str().unwrap());
             }
-            println!("<h2>Parameters</h2>");
+            help += &format!("<h3>Parameters</h3>\n");
+            let mut has_parameters = false;
             for (k1, v1) in v.as_table().unwrap().iter() {
                 if k1.starts_with(':') {
-                    println!(
-                        "<span class='argument'>{}</span>: <span class='type'>{}</span>",
+                    has_parameters = true;
+                    help += &format!(
+                        "<div class='argument'>{}</span>: <span class='type'>{}</div>",
                         k1.strip_prefix(':').unwrap(),
                         v1.as_str().unwrap()
                     );
                 }
             }
-            println!(
-                "<h2>Description</h2>\n{}\n",
+            if !has_parameters {
+                help += "<div class='meta'>None</div>";
+            }
+            help += &format!(
+                "<h3>Description</h3>\n{}\n",
                 markdown::to_html(v["DOC"].as_str().unwrap().trim())
             )
         });
     }
-    println!("\n\n");
+    help += &format!("{}\n", &api["meta"]["HTML_BOTTOM"].as_str().unwrap());
+    Ok(tide::Response::builder(200)
+        .content_type(tide::http::mime::HTML)
+        .body(help)
+        .build())
 }
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::fmt().init();
-    dump_help(&NodeOpt::from_args().api_path);
 
     // Get configuration
     let node_config = get_node_config();
@@ -850,18 +848,15 @@ async fn main() -> Result<(), std::io::Error> {
         let mut events = phaselock.subscribe();
 
         // If we are running a full node, also host a query API to inspect the accumulated state.
-        let web_server = if let Node::Full(node) = &phaselock {
-            Some(
-                init_web_server(
-                    &NodeOpt::from_args().api_path,
-                    &NodeOpt::from_args().web_path,
-                    own_id,
-                    node.clone(),
-                )
-                .expect("Failed to initialize web server"),
+        if let Node::Full(node) = &phaselock {
+            init_web_server(
+                &NodeOpt::from_args().api_path,
+                &NodeOpt::from_args().web_path,
+                own_id,
+                node.clone(),
             )
-        } else {
-            None
+            .expect("Failed to initialize web server")
+            .await?;
         };
 
         // Start consensus for each transaction
@@ -948,9 +943,6 @@ async fn main() -> Result<(), std::io::Error> {
                     .unwrap();
             }
             println!("  - Round {} completed.", round + 1);
-        }
-        if let Some(join_handle) = web_server {
-            join_handle.await?;
         }
 
         println!("All rounds completed");
