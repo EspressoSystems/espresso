@@ -447,7 +447,7 @@ impl WebState {
     }
 }
 
-async fn landing_page(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
+async fn form_demonstration(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
     let mut index_html: PathBuf = req.state().web_path.clone();
     index_html.push("index.html");
     Ok(tide::Body::from_file(index_html).await?)
@@ -457,6 +457,11 @@ fn internal_error(msg: &'static str) -> tide::Error {
     tide::Error::from_str(tide::StatusCode::InternalServerError, msg)
 }
 
+/// Handle API requests defined in api.toml.
+///
+/// This function duplicates the logic for deciding which route was requested. This
+/// is an unfortunate side-effect of defining the routes in an external file.
+// todo !corbett Convert the error feedback into HTML
 async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
     let first_segment = &req
         .url()
@@ -613,6 +618,15 @@ async fn handle_web_socket(
     Ok(())
 }
 
+// This route is a demonstration of a form with a WebSocket connection
+// for asynchronous updates. Once we have useful forms, this can go...
+fn add_form_demonstration(web_server: &mut tide::Server<WebState>) {
+    web_server
+        .at("/transfer/:id/:recipient/:amount")
+        .with(WebSocket::new(handle_web_socket))
+        .get(form_demonstration);
+}
+
 /// Initialize the web server.
 ///
 /// `opt_web_path` is the path to the web assets directory. If the path
@@ -622,7 +636,6 @@ async fn handle_web_socket(
 /// `own_id` is the identifier of this instance of the executable. The
 /// port the web server listens on is `own_id + 50000`, unless the
 /// PORT environment variable is set.
-///
 fn init_web_server(
     opt_api_path: &str,
     opt_web_path: &str,
@@ -654,13 +667,10 @@ fn init_web_server(
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;
     web_server.at("/").get(disco::compose_help);
-    web_server
-        .at("/transfer/:id/:recipient/:amount")
-        .with(WebSocket::new(handle_web_socket))
-        .get(landing_page);
+
+    add_form_demonstration(&mut web_server);
 
     // Add routes from a configuration file.
-    println!("Format version: {}", &api["meta"]["FORMAT_VERSION"]);
     if let Some(api_map) = api["route"].as_table() {
         api_map.values().for_each(|v| match &v["PATH"] {
             toml::Value::String(s) => {

@@ -24,7 +24,6 @@ HTML_TOP = """
               alt='Spectrum Logo'
               height='115'/></div>
     <h1>Spectrum Web Interface</h1>
-    <h2>Entries</h2>
 """
 
 HTML_BOTTOM = """
