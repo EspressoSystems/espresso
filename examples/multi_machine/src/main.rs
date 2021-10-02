@@ -6,7 +6,6 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use futures_util::StreamExt;
-//use markdown;
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey,
@@ -454,8 +453,6 @@ async fn landing_page(req: tide::Request<WebState>) -> Result<tide::Body, tide::
     Ok(tide::Body::from_file(index_html).await?)
 }
 
-// TODO !corbett report parameter parsing errors
-
 fn internal_error(msg: &'static str) -> tide::Error {
     tide::Error::from_str(tide::StatusCode::InternalServerError, msg)
 }
@@ -626,7 +623,6 @@ async fn handle_web_socket(
 /// port the web server listens on is `own_id + 50000`, unless the
 /// PORT environment variable is set.
 ///
-// TODO - take the port from the command line instead of the environment.
 fn init_web_server(
     opt_api_path: &str,
     opt_web_path: &str,
@@ -657,7 +653,7 @@ fn init_web_server(
 
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;
-    web_server.at("/").get(compose_help);
+    web_server.at("/").get(disco::compose_help);
     web_server
         .at("/transfer/:id/:recipient/:amount")
         .with(WebSocket::new(handle_web_socket))
@@ -687,58 +683,6 @@ fn init_web_server(
     let addr = format!("127.0.0.1:{}", port);
     let join_handle = async_std::task::spawn(web_server.listen(addr));
     Ok(join_handle)
-}
-
-// TODO !corbett Extract all the web-related stuff into a module.
-async fn compose_help(req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let api = &req.state().api;
-    let mut help = format!(
-        "{}\n<h2>Entries</h2>\n",
-        &api["meta"]["HTML_TOP"].as_str().unwrap()
-    );
-    if let Some(api_map) = api["route"].as_table() {
-        api_map.values().for_each(|v| {
-            // TODO !corbett extract this into a function
-            let first_route = v["PATH"].as_array().unwrap()[0].as_str().unwrap();
-            let first_segment = v["PATH"].as_array().unwrap()[0]
-                .as_str()
-                .unwrap()
-                .split_once('/')
-                .unwrap_or((first_route, ""))
-                .0;
-            help += &format!(
-                "<a name='{}'><h3 class='entry'>{}</h3></a>\n<h3>Routes</h3>",
-                first_segment, first_segment
-            );
-            for p in v["PATH"].as_array().unwrap().iter() {
-                help += &format!("<p class='path'>{}</p>\n", p.as_str().unwrap());
-            }
-            help += &"<h3>Parameters</h3>\n<table>\n".to_string();
-            let mut has_parameters = false;
-            for (parameter, ptype) in v.as_table().unwrap().iter() {
-                if parameter.starts_with(':') {
-                    has_parameters = true;
-                    help += &format!(
-                        "<tr><td class='parameter'>{}</td><td class='type'>{}</td></tr>\n",
-                        parameter.strip_prefix(':').unwrap(),
-                        ptype.as_str().unwrap()
-                    );
-                }
-            }
-            if !has_parameters {
-                help += "<div class='meta'>None</div>";
-            }
-            help += &format!(
-                "</table>\n<h3>Description</h3>\n{}\n",
-                markdown::to_html(v["DOC"].as_str().unwrap().trim())
-            )
-        });
-    }
-    help += &format!("{}\n", &api["meta"]["HTML_BOTTOM"].as_str().unwrap());
-    Ok(tide::Response::builder(200)
-        .content_type(tide::http::mime::HTML)
-        .body(help)
-        .build())
 }
 
 #[async_std::main]
