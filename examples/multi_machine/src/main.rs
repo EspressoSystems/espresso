@@ -521,6 +521,8 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
                 } else {
                     arg_doc.push_str("(Parse failed)\n");
                     argument_parse_failed = true;
+                    // TODO !corbett capture parse failures documentation
+                    // UrlSegmentValue::ParseFailed(segment_type, req_segment)
                 }
             } else {
                 // No type information. Assume pat_segment is a literal.
@@ -532,6 +534,8 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
                         req_segment, pat_segment
                     ));
                 }
+                // TODO !corbett else capture the matching literal in bindings
+                // TODO !corebtt if the edit distance is small, capture spelling suggestion
             }
         }
         if !found_literal_mismatch {
