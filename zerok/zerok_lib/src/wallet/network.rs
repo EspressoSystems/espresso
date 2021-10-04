@@ -1,3 +1,4 @@
+use super::persistence::AtomicWalletStorage;
 use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
 use crate::api;
 use crate::key_set::SizedKey;
@@ -5,6 +6,7 @@ use crate::node;
 use crate::set_merkle_tree::{set_hash, SetMerkleProof};
 use crate::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
 use api::{client::*, BlockId, ClientError, FromError, TransactionId};
+use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
@@ -19,6 +21,7 @@ use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::convert::TryInto;
+use std::path::Path;
 use surf::http::content::{Accept, MediaTypeProposal};
 use surf::http::{headers, mime};
 pub use surf::Url;
@@ -28,6 +31,7 @@ pub struct NetworkBackend<'a> {
     query_client: surf::Client,
     bulletin_client: surf::Client,
     validator_client: surf::Client,
+    storage: Arc<Mutex<AtomicWalletStorage>>,
 }
 
 impl<'a> NetworkBackend<'a> {
@@ -36,12 +40,14 @@ impl<'a> NetworkBackend<'a> {
         query_url: Url,
         bulletin_url: Url,
         validator_url: Url,
+        storage: &Path,
     ) -> Result<Self, WalletError> {
         Ok(Self {
             query_client: Self::client(query_url)?,
             bulletin_client: Self::client(bulletin_url)?,
             validator_client: Self::client(validator_url)?,
             univ_param,
+            storage: Arc::new(Mutex::new(AtomicWalletStorage::new(storage)?)),
         })
     }
 
@@ -98,12 +104,9 @@ impl<'a> NetworkBackend<'a> {
 #[async_trait]
 impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
     type EventStream = node::EventStream<LedgerEvent>;
+    type Storage = AtomicWalletStorage;
 
-    async fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
-        // todo !jeb.bearer We don't support storing yet, so this function currently just loads from
-        // the initial state of the ledger using the /getsnapshot method of the query service. This
-        // is equivalent to creating a new wallet.
-
+    async fn create(&mut self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
         let mut rng = ChaChaRng::from_entropy();
         let LedgerSnapshot {
             state: validator,
@@ -113,7 +116,7 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = self.univ_param;
         let proving_keys =
-            ProverKeySet {
+            Arc::new(ProverKeySet {
                 mint: jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
                     .context(CryptoError)?
                     .0,
@@ -146,12 +149,12 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
                         .0)
                     })
                     .collect::<Result<_, _>>()?,
-            };
+            });
 
         // Publish the address of the new wallet.
         Self::post(&self.bulletin_client, "/users", &key_pair.pub_key()).await?;
 
-        Ok(WalletState {
+        let state = WalletState {
             validator,
             proving_keys,
             nullifiers,
@@ -164,16 +167,13 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
             auditor_key_pair: AuditorKeyPair::generate(&mut rng),
             freezer_key_pair: FreezerKeyPair::generate(&mut rng),
             rng,
-        })
+        };
+        self.storage().await.create(key_pair, &state).await?;
+        Ok(state)
     }
 
-    async fn store(
-        &mut self,
-        _key_pair: &UserKeyPair,
-        _state: &WalletState,
-    ) -> Result<(), WalletError> {
-        //todo !jeb.bearer implement
-        Ok(())
+    async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
+        self.storage.lock().await
     }
 
     async fn subscribe(&self, starting_at: u64) -> Self::EventStream {

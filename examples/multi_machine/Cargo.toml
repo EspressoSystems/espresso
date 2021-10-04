@@ -30,6 +30,7 @@ strum = "0.20"
 strum_macros = "0.20.1"
 surf = "2.3.1"
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
+tempdir = "0.3.7"
 threshold_crypto = "0.4.0"
 tide = "0.16.0"
 tide-websockets = "0.4.0"

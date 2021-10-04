@@ -1,4 +1,5 @@
 pub mod network;
+mod persistence;
 
 use crate::api;
 use crate::key_set;
@@ -6,7 +7,7 @@ use crate::node::LedgerEvent;
 use crate::set_merkle_tree::*;
 use crate::{ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState};
 use async_scoped::AsyncScope;
-use async_std::sync::Mutex;
+use async_std::sync::{Mutex, MutexGuard};
 use async_std::task::block_on;
 use async_trait::async_trait;
 use core::fmt::Debug;
@@ -34,9 +35,12 @@ use jf_txn::{
 use key_set::KeySet;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
+use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::convert::TryFrom;
+use std::iter::FromIterator;
+use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
 #[derive(Debug, Snafu)]
@@ -95,6 +99,15 @@ pub enum WalletError {
         #[snafu(source(false))]
         source: Result<phaselock::error::PhaseLockError, String>,
     },
+    PersistenceError {
+        source: atomic_store::error::PersistenceError,
+    },
+    IoError {
+        source: std::io::Error,
+    },
+    BincodeError {
+        source: bincode::Error,
+    },
     #[snafu(display("{}", msg))]
     Failed {
         msg: String,
@@ -119,13 +132,11 @@ impl api::FromError for WalletError {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct WalletState<'a> {
-    pub(crate) rng: ChaChaRng,
-    // sequence number of the last event processed
-    pub(crate) now: u64,
-    // wallets run validation in tandem with the validators, so that they do not have to trust new
-    // blocks received from the event stream
-    pub(crate) validator: ValidatorState,
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    // Static data
+    //
     // proving key set. The proving keys are ordered by number of outputs first and number of inputs
     // second, because the wallet is less flexible with respect to number of outputs. If we are
     // building a transaction and find we have too many inputs we can always generate a merge
@@ -133,21 +144,32 @@ pub struct WalletState<'a> {
     // there is nothing we can do to decrease that number. So when searching for an appropriate
     // proving key, we will want to find a key with enough outputs first, and then worry about the
     // number of inputs.
-    pub(crate) proving_keys: ProverKeySet<'a, key_set::OrderByOutputs>,
-    // all records we care about, including records we own, records we have audited, and records we
-    // can freeze or unfreeze
-    pub(crate) records: RecordDatabase,
+    //
+    // We keep the prover keys in an Arc because they are large, constant, and depend only on the
+    // universal parameters of the system. This allows sharing them, which drastically decreases the
+    // memory requirements of applications that create multiple wallets. This is not very realistic
+    // for real applications, but it is very important for tests and costs little.
+    pub(crate) proving_keys: Arc<ProverKeySet<'a, key_set::OrderByOutputs>>,
     // key pair for decrypting auditor memos
     pub(crate) auditor_key_pair: AuditorKeyPair,
-    // asset definitions for which we are an auditor, indexed by code
-    pub(crate) auditable_assets: HashMap<AssetCode, AssetDefinition>,
     // key pair for computing nullifiers of records owned by someone else but which we can freeze or
     // unfreeze
     pub(crate) freezer_key_pair: FreezerKeyPair,
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    // Dynamic state
+    //
+    pub(crate) rng: ChaChaRng,
+    // sequence number of the last event processed
+    pub(crate) now: u64,
+    // wallets run validation in tandem with the validators, so that they do not have to trust new
+    // blocks received from the event stream
+    pub(crate) validator: ValidatorState,
+    // all records we care about, including records we own, records we have audited, and records we
+    // can freeze or unfreeze
+    pub(crate) records: RecordDatabase,
     // sparse nullifier set Merkle tree mirrored from validators
     pub(crate) nullifiers: SetMerkleTree,
-    // maps defined asset code to asset definition, seed and description of the asset
-    pub(crate) defined_assets: HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
     // set of unconfirmed transactions, indexed by fee nullifier. We maintain the invariant that
     // every nullifier in this set corresponds to an on-hold record, which ensures that there is
     // never more than one transaction in flight with the same nullifier. Thus it is safe to use the
@@ -158,8 +180,17 @@ pub struct WalletState<'a> {
     pub(crate) pending_txns: HashMap<Nullifier, PendingTransaction>,
     // the fee nullifiers of transactions expiring at each validator timestamp.
     pub(crate) expiring_txns: BTreeMap<u64, HashSet<Nullifier>>,
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    // Monotonic data
+    //
+    // asset definitions for which we are an auditor, indexed by code
+    pub(crate) auditable_assets: HashMap<AssetCode, AssetDefinition>,
+    // maps defined asset code to asset definition, seed and description of the asset
+    pub(crate) defined_assets: HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) struct PendingTransaction {
     receiver_memos: Vec<ReceiverMemo>,
     signature: Signature,
@@ -167,15 +198,231 @@ pub(crate) struct PendingTransaction {
     timeout: u64,
 }
 
+/// The interface required by the wallet from the persistence layer.
+///
+/// The persistent storage needed by the wallet is divided into 3 categories, based on usage
+/// patterns and how often they change.
+///
+/// 1. Static data. This is data which is initialized when the wallet is created and never changes.
+///
+///    There is no interface in the WalletStorage trait for storing static data. When a new wallet
+///    is created, the Wallet will call WalletBackend::create, which is responsible for working with
+///    the storage layer to persist the wallet's static data.
+///
+///    See WalletState for information on which fields count as static data.
+///
+/// 2. Dynamic state. This is data which changes frequently, but grows boundedly or very slowly.
+///
+///    See WalletState for information on which fields count as dynamic state.
+///
+/// 3. Monotonic data. This is data which grows monotonically and never shrinks.
+///
+///    The monotonic data of a wallet is the set of auditable assets, and the set of defined assets
+///    with their seeds.
+///
+/// The storage layer must provide a transactional interface. Updates to the individual storage
+/// categories have no observable affects (that is, their results will not affect the next call to
+/// load()) until commit() succeeds. If there are outstanding changes that have not been committed,
+/// revert() can be used to roll back the state of each individual storage category to its state at
+/// the most recent commit.
+///
+/// This interface is specified separately from the WalletBackend interface to allow the
+/// implementation to separate the persistence layer from the network layer that implements the rest
+/// of the backend with minimal boilerplate.
 #[async_trait]
-pub trait WalletBackend<'a> {
-    type EventStream: 'a + Stream<Item = LedgerEvent> + Unpin + Send;
-    async fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError>;
-    async fn store(
+pub trait WalletStorage<'a> {
+    /// Check if there is already a stored wallet with this key.
+    fn exists(&self, key_pair: &UserKeyPair) -> bool;
+
+    /// Load the stored wallet identified by the given key.
+    ///
+    /// This function may assume `self.exists(key_pair)`.
+    async fn load(&mut self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError>;
+    /// Store a snapshot of the wallet's dynamic state.
+    async fn store_snapshot(
         &mut self,
         key_pair: &UserKeyPair,
-        state: &WalletState,
+        state: &WalletState<'a>,
     ) -> Result<(), WalletError>;
+
+    /// Append a new auditable asset to the growing set.
+    async fn store_auditable_asset(
+        &mut self,
+        key_pair: &UserKeyPair,
+        asset: &AssetDefinition,
+    ) -> Result<(), WalletError>;
+
+    /// Append a new defined asset to the growing set.
+    async fn store_defined_asset(
+        &mut self,
+        key_pair: &UserKeyPair,
+        asset: &AssetDefinition,
+        seed: AssetCodeSeed,
+        desc: &[u8],
+    ) -> Result<(), WalletError>;
+
+    /// Commit to outstanding changes.
+    async fn commit(&mut self, key_pair: &UserKeyPair) -> Result<(), WalletError>;
+
+    /// Roll back the persisted state to the previous commit.
+    async fn revert(&mut self, key_pair: &UserKeyPair);
+}
+
+/// Interface for atomic storage transactions.
+///
+/// Any changes made to the persistent storage state through this struct will be part of a single
+/// transaction. If any operation in the transaction fails, or if the transaction is dropped before
+/// being committed, the entire transaction will be reverted and have no effect.
+///
+/// This struct should not be constructed directly, but instead a transaction should be obtained
+/// through the WalletBackend::store() method, which will automatically commit the transaction after
+/// it succeeds.
+pub struct StorageTransaction<'a, 'l, Storage: WalletStorage<'a>> {
+    storage: MutexGuard<'l, Storage>,
+    key_pair: &'l UserKeyPair,
+    cancelled: bool,
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
+
+impl<'a, 'l, Storage: WalletStorage<'a>> StorageTransaction<'a, 'l, Storage> {
+    fn new(storage: MutexGuard<'l, Storage>, key_pair: &'l UserKeyPair) -> Self {
+        Self {
+            storage,
+            key_pair,
+            cancelled: false,
+            _phantom: Default::default(),
+        }
+    }
+
+    async fn store_snapshot(&mut self, state: &WalletState<'a>) -> Result<(), WalletError> {
+        if !self.cancelled {
+            let res = self.storage.store_snapshot(self.key_pair, state).await;
+            if res.is_err() {
+                self.cancel().await;
+            }
+            res
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn store_auditable_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
+        if !self.cancelled {
+            let res = self
+                .storage
+                .store_auditable_asset(self.key_pair, asset)
+                .await;
+            if res.is_err() {
+                self.cancel().await;
+            }
+            res
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn store_defined_asset(
+        &mut self,
+        asset: &AssetDefinition,
+        seed: AssetCodeSeed,
+        desc: &[u8],
+    ) -> Result<(), WalletError> {
+        if !self.cancelled {
+            let res = self
+                .storage
+                .store_defined_asset(self.key_pair, asset, seed, desc)
+                .await;
+            if res.is_err() {
+                self.cancel().await;
+            }
+            res
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn cancel(&mut self) {
+        if !self.cancelled {
+            self.cancelled = true;
+            self.storage.revert(self.key_pair).await;
+        }
+    }
+}
+
+impl<'a, 'l, Storage: WalletStorage<'a>> Drop for StorageTransaction<'a, 'l, Storage> {
+    fn drop(&mut self) {
+        block_on(self.cancel())
+    }
+}
+
+#[async_trait]
+pub trait WalletBackend<'a>: Send {
+    type EventStream: 'a + Stream<Item = LedgerEvent> + Unpin + Send;
+    type Storage: WalletStorage<'a> + Send;
+
+    /// Access the persistent storage layer.
+    ///
+    /// The interface is specified this way, with the main storage interface in a separate trait and
+    /// an accessor function here, to allow implementations of WalletBackend to split the storage
+    /// layer from the networking layer, since the two concerns are generally separate.
+    ///
+    /// Note that the return type of this function requires the implementation to guard the storage
+    /// layer with a mutex, even if it is not internally shared between threads. This is meant to
+    /// allow shared access to the storage layer internal, not require it. A better interface would
+    /// be to have an associated type
+    ///         `type<'l> StorageRef: 'l +  Deref<Target = Self::Storage> + DerefMut`
+    /// This could be MutexGuard, RwLockWriteGuard, or just `&mut Self::Storage`, depending on the
+    /// needs of the implementation. Maybe we can clean this up if and when GATs stabilize.
+    async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage>;
+
+    async fn load(&mut self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
+        let mut storage = self.storage().await;
+        if storage.exists(key_pair) {
+            // If there is a stored wallet with this key pair, load it.
+            storage.load(key_pair).await
+        } else {
+            // Otherwise, ask the network layer to create and register a brand new wallet.
+            drop(storage);
+            self.create(key_pair).await
+        }
+    }
+
+    /// Make a change to the persisted state using a function describing a transaction.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// backend.store(key_pair, |mut t| async move {
+    ///     t.store_snapshot(wallet_state).await?;
+    ///     // If this store fails, the effects of the previous store will be reverted.
+    ///     t.store_auditable_asset(wallet_state, asset).await?;
+    ///     Ok(t)
+    /// }).await?;
+    /// ```
+    async fn store<'l, F, Fut>(
+        &'l mut self,
+        key_pair: &'l UserKeyPair,
+        update: F,
+    ) -> Result<(), WalletError>
+    where
+        F: Fn(StorageTransaction<'a, 'l, Self::Storage>) -> Fut + Send,
+        Fut: Future<Output = Result<StorageTransaction<'a, 'l, Self::Storage>, WalletError>> + Send,
+        Self::Storage: 'l,
+    {
+        let storage = self.storage().await;
+        let fut =
+            update(StorageTransaction::new(storage, key_pair)).and_then(|mut txn| async move {
+                let res = txn.storage.commit(key_pair).await;
+                if res.is_err() {
+                    txn.storage.revert(key_pair).await;
+                }
+                res
+            });
+        fut.await
+    }
+
+    // Querying the ledger
+    async fn create(&mut self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError>;
     async fn subscribe(&self, starting_at: u64) -> Self::EventStream;
     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError>;
     async fn prove_nullifier_unspent(
@@ -201,7 +448,8 @@ pub struct WalletSession<'a, Backend: WalletBackend<'a>> {
     _marker: std::marker::PhantomData<&'a ()>,
 }
 
-struct RecordInfo {
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct RecordInfo {
     ro: RecordOpening,
     uid: u64,
     // if Some(t), this record is on hold until the validator timestamp surpasses `t`, because this
@@ -223,6 +471,7 @@ impl RecordInfo {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct RecordDatabase {
     // all records in the database, by uid
     record_info: HashMap<u64, RecordInfo>,
@@ -292,6 +541,11 @@ impl RecordDatabase {
         None
     }
 
+    fn record_with_nullifier(&self, nullifier: &Nullifier) -> Option<&RecordInfo> {
+        let uid = self.nullifier_records.get(nullifier)?;
+        self.record_info.get(uid)
+    }
+
     fn record_with_nullifier_mut(&mut self, nullifier: &Nullifier) -> Option<&mut RecordInfo> {
         let uid = self.nullifier_records.get(nullifier)?;
         self.record_info.get_mut(uid)
@@ -330,16 +584,28 @@ impl RecordDatabase {
     fn remove_by_nullifier(&mut self, nullifier: Nullifier) -> Option<RecordInfo> {
         self.nullifier_records.remove(&nullifier).map(|uid| {
             let record = self.record_info.remove(&uid).unwrap();
-            self.asset_records
-                .get_mut(&(
-                    record.ro.asset_def.code,
-                    record.ro.pub_key.clone(),
-                    record.ro.freeze_flag,
-                ))
-                .unwrap()
-                .remove(&(record.ro.amount, uid));
+
+            // Remove the record from `asset_records`, and if the sub-collection it was in becomes
+            // empty, remove the whole collection.
+            let asset_key = &(
+                record.ro.asset_def.code,
+                record.ro.pub_key.clone(),
+                record.ro.freeze_flag,
+            );
+            let asset_records = self.asset_records.get_mut(asset_key).unwrap();
+            asset_records.remove(&(record.ro.amount, uid));
+            if asset_records.is_empty() {
+                self.asset_records.remove(asset_key);
+            }
+
             record
         })
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (Nullifier, &RecordInfo)> {
+        self.nullifier_records
+            .iter()
+            .map(move |(nullifier, uid)| (*nullifier, &self.record_info[uid]))
     }
 }
 
@@ -350,6 +616,38 @@ impl Default for RecordDatabase {
             asset_records: HashMap::new(),
             nullifier_records: HashMap::new(),
         }
+    }
+}
+
+impl Index<Nullifier> for RecordDatabase {
+    type Output = RecordInfo;
+    fn index(&self, index: Nullifier) -> &RecordInfo {
+        self.record_with_nullifier(&index).unwrap()
+    }
+}
+
+impl IndexMut<Nullifier> for RecordDatabase {
+    fn index_mut(&mut self, index: Nullifier) -> &mut RecordInfo {
+        self.record_with_nullifier_mut(&index).unwrap()
+    }
+}
+
+impl FromIterator<(Nullifier, RecordInfo)> for RecordDatabase {
+    fn from_iter<T: IntoIterator<Item = (Nullifier, RecordInfo)>>(iter: T) -> Self {
+        let mut db = Self::default();
+        for (nullifier, info) in iter {
+            db.asset_records
+                .entry((
+                    info.ro.asset_def.code,
+                    info.ro.pub_key.clone(),
+                    info.ro.freeze_flag,
+                ))
+                .or_insert_with(BTreeSet::new)
+                .insert((info.ro.amount, info.uid));
+            db.nullifier_records.insert(nullifier, info.uid);
+            db.record_info.insert(info.uid, info);
+        }
+        db
     }
 }
 
@@ -565,6 +863,23 @@ impl<'a> WalletState<'a> {
                 }
             }
         };
+
+        if let Err(err) = session
+            .backend
+            .store(&session.key_pair, |mut t| {
+                let state = &self;
+                async move {
+                    t.store_snapshot(state).await?;
+                    Ok(t)
+                }
+            })
+            .await
+        {
+            // We can ignore errors when saving the snapshot. If the save fails and then we crash,
+            // we will replay this event when we load from the previously saved snapshot. Just print
+            // a warning and move on.
+            println!("warning: failed to save wallet state to disk: {}", err);
+        }
     }
 
     async fn clear_pending_transaction<'t>(
@@ -755,19 +1070,52 @@ impl<'a> WalletState<'a> {
         Ok(())
     }
 
-    pub fn define_asset(
+    pub async fn define_asset(
         &mut self,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         description: &[u8],
         policy: AssetPolicy,
     ) -> Result<AssetDefinition, WalletError> {
         let seed = AssetCodeSeed::generate(&mut self.rng);
         let code = AssetCode::new(seed, description);
         let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
+        let desc = description.to_vec();
+
+        // If the policy lists ourself as the auditor, we will automatically start auditing
+        // transactions involving this asset.
+        let audit =
+            *asset_definition.policy_ref().auditor_pub_key() == self.auditor_key_pair.pub_key();
+
+        // Persist the change that we're about to make before updating our in-memory state. We can't
+        // report success until we know the new asset has been saved to disk (otherwise we might
+        // lose the seed if we crash at the wrong time) and we don't want it in our in-memory state
+        // if we're not going to report success.
+        session
+            .backend
+            .store(&session.key_pair, |mut t| {
+                let asset_definition = &asset_definition;
+                let desc = &desc;
+                let state = &self;
+                async move {
+                    t.store_defined_asset(asset_definition, seed, desc).await?;
+                    if audit {
+                        // If we are going to be an auditor of the new asset, we must also persist
+                        // that information to disk before doing anything to the in-memory state.
+                        t.store_auditable_asset(asset_definition).await?;
+                    }
+                    // Finally, our dynamic state has changed (for instance, the state of self.rng)
+                    // so we need to save a snapshot.
+                    t.store_snapshot(state).await?;
+
+                    Ok(t)
+                }
+            })
+            .await?;
+
+        // Now we can add the asset definition to the in-memory state.
         self.defined_assets
-            .insert(code, (asset_definition.clone(), seed, description.to_vec()));
-        // If the policy lists ourself as the auditor, automatically start auditing transactions
-        // involving this asset.
-        if *asset_definition.policy_ref().auditor_pub_key() == self.auditor_key_pair.pub_key() {
+            .insert(code, (asset_definition.clone(), seed, desc));
+        if audit {
             self.auditable_assets
                 .insert(asset_definition.code, asset_definition.clone());
         }
@@ -779,7 +1127,11 @@ impl<'a> WalletState<'a> {
     ///
     /// Auditing of assets created by this user with an appropriate asset policy begins
     /// automatically. Calling this function is unnecessary.
-    pub fn audit_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
+    pub async fn audit_asset(
+        &mut self,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        asset: &AssetDefinition,
+    ) -> Result<(), WalletError> {
         let my_key = self.auditor_key_pair.pub_key();
         let asset_key = asset.policy_ref().auditor_pub_key();
         if my_key != *asset_key {
@@ -789,6 +1141,15 @@ impl<'a> WalletState<'a> {
             });
         }
 
+        // Store the new asset on disk before adding it to our in-memory data structure. We don't
+        // want to update the in-memory structure if the persistent store fails.
+        session
+            .backend
+            .store(&session.key_pair, |mut t| async move {
+                t.store_auditable_asset(asset).await?;
+                Ok(t)
+            })
+            .await?;
         self.auditable_assets.insert(asset.code, asset.clone());
         Ok(())
     }
@@ -1513,7 +1874,7 @@ pub struct Wallet<'a, Backend: WalletBackend<'a>> {
 impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
     pub async fn new(
         key_pair: UserKeyPair,
-        backend: Backend,
+        mut backend: Backend,
     ) -> Result<Wallet<'a, Backend>, WalletError> {
         let state = backend.load(&key_pair).await?;
         let mut events = backend.subscribe(state.now).await;
@@ -1551,10 +1912,10 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
                         if let Some(handles) = sync_handles.remove(&state.now) {
                             for handle in handles {
                                 if handle.send(()).is_err() {
-                                    // Errors mean the receiving end has dropped their promise before we
-                                    // could signal it. This signal is a fire-and-forget operation; we
-                                    // don't care if the receiver is listening or not, so just ignore
-                                    // this error.
+                                    // Errors mean the receiving end has dropped their promise
+                                    // before we could signal it. This signal is a fire-and-forget
+                                    // operation; we don't care if the receiver is listening or not,
+                                    // so just ignore this error.
                                 }
                             }
                         }
@@ -1621,8 +1982,14 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
         description: &[u8],
         policy: AssetPolicy,
     ) -> Result<AssetDefinition, WalletError> {
-        let (state, ..) = &mut *self.mutex.lock().await;
-        state.define_asset(description, policy)
+        let (state, session, ..) = &mut *self.mutex.lock().await;
+        state.define_asset(session, description, policy).await
+    }
+
+    /// start auditing transactions with a given asset type
+    pub async fn audit_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
+        let (state, session, ..) = &mut *self.mutex.lock().await;
+        state.audit_asset(session, asset).await
     }
 
     /// create a mint note that assign asset to an owner
@@ -1691,8 +2058,99 @@ pub mod test_helpers {
     use phaselock::BlockContents;
     use rand_chacha::rand_core::RngCore;
     use std::iter::once;
+    use std::pin::Pin;
     use std::sync::Mutex as SyncMutex;
     use std::time::Instant;
+
+    // This function checks probabilistic equality for two wallet states, comparing hashes for
+    // fields that cannot directly be compared for equality. It is sufficient for tests that want
+    // to compare wallet states (like round-trip serialization tests) but since it is deterministic,
+    // we shouldn't make it into a PartialEq instance.
+    pub fn assert_wallet_states_eq(w1: &WalletState, w2: &WalletState) {
+        assert_eq!(w1.rng, w2.rng);
+        assert_eq!(w1.now, w2.now);
+        assert_eq!(w1.validator.commit(), w2.validator.commit());
+        assert_eq!(w1.proving_keys, w2.proving_keys);
+        assert_eq!(w1.records, w2.records);
+        // We can't directly compare key pairs, but if two key pairs have the same public key then
+        // the private keys are equal with overwhelming probability.
+        assert_eq!(w1.auditor_key_pair.pub_key(), w2.auditor_key_pair.pub_key());
+        assert_eq!(w1.auditable_assets, w2.auditable_assets);
+        assert_eq!(w1.freezer_key_pair, w2.freezer_key_pair);
+        assert_eq!(w1.nullifiers, w2.nullifiers);
+        assert_eq!(w1.defined_assets, w2.defined_assets);
+        assert_eq!(w1.pending_txns, w2.pending_txns);
+        assert_eq!(w1.expiring_txns, w2.expiring_txns);
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct MockWalletStorage<'a> {
+        committed: Option<WalletState<'a>>,
+        working: Option<WalletState<'a>>,
+    }
+
+    #[async_trait]
+    impl<'a> WalletStorage<'a> for MockWalletStorage<'a> {
+        fn exists(&self, _key: &UserKeyPair) -> bool {
+            self.committed.is_some()
+        }
+
+        async fn load(&mut self, _key: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
+            Ok(self.committed.as_ref().unwrap().clone())
+        }
+
+        async fn store_snapshot(
+            &mut self,
+            _key: &UserKeyPair,
+            state: &WalletState<'a>,
+        ) -> Result<(), WalletError> {
+            if let Some(working) = &mut self.working {
+                working.rng = state.rng.clone();
+                working.now = state.now;
+                working.validator = state.validator.clone();
+                working.records = state.records.clone();
+                working.nullifiers = state.nullifiers.clone();
+                working.pending_txns = state.pending_txns.clone();
+                working.expiring_txns = state.expiring_txns.clone();
+            }
+            Ok(())
+        }
+
+        async fn store_auditable_asset(
+            &mut self,
+            _key_pair: &UserKeyPair,
+            asset: &AssetDefinition,
+        ) -> Result<(), WalletError> {
+            if let Some(working) = &mut self.working {
+                working.auditable_assets.insert(asset.code, asset.clone());
+            }
+            Ok(())
+        }
+
+        async fn store_defined_asset(
+            &mut self,
+            _key_pair: &UserKeyPair,
+            asset: &AssetDefinition,
+            seed: AssetCodeSeed,
+            desc: &[u8],
+        ) -> Result<(), WalletError> {
+            if let Some(working) = &mut self.working {
+                working
+                    .defined_assets
+                    .insert(asset.code, (asset.clone(), seed, desc.to_vec()));
+            }
+            Ok(())
+        }
+
+        async fn commit(&mut self, _key_pair: &UserKeyPair) -> Result<(), WalletError> {
+            self.committed = self.working.clone();
+            Ok(())
+        }
+
+        async fn revert(&mut self, _key_pair: &UserKeyPair) {
+            self.working = self.committed.clone();
+        }
+    }
 
     pub struct MockLedger<'a> {
         pub validator: ValidatorState,
@@ -1703,9 +2161,10 @@ pub mod test_helpers {
         block_size: usize,
         hold_next_transaction: bool,
         held_transaction: Option<ElaboratedTransaction>,
-        proving_keys: ProverKeySet<'a, key_set::OrderByOutputs>,
+        proving_keys: Arc<ProverKeySet<'a, key_set::OrderByOutputs>>,
         address_map: HashMap<UserAddress, UserPubKey>,
         events: Vec<LedgerEvent>,
+        storage: Vec<Arc<Mutex<MockWalletStorage<'a>>>>,
     }
 
     impl<'a> MockLedger<'a> {
@@ -1850,6 +2309,15 @@ pub mod test_helpers {
             }
         };
         sync_with(wallets, t).await;
+
+        // Since we're syncing with the time stamp from the most recent event, the wallets should
+        // be in a stable state once they have processed up to that event. Check that each wallet
+        // has persisted all of its in-memory state at this point.
+        let ledger = ledger.lock().unwrap();
+        for (wallet, storage) in wallets.iter().zip(&ledger.storage) {
+            let (state, ..) = &*wallet.mutex.lock().await;
+            assert_wallet_states_eq(state, storage.lock().await.committed.as_ref().unwrap());
+        }
     }
 
     pub async fn sync_with<'a>(
@@ -1865,60 +2333,70 @@ pub mod test_helpers {
         ledger: Arc<SyncMutex<MockLedger<'a>>>,
         initial_grants: Vec<(RecordOpening, u64)>,
         seed: [u8; 32],
+        storage: Arc<Mutex<MockWalletStorage<'a>>>,
     }
 
     #[async_trait]
     impl<'a> WalletBackend<'a> for MockWalletBackend<'a> {
-        type EventStream = channel::UnboundedReceiver<LedgerEvent>;
+        type EventStream = Pin<Box<dyn Stream<Item = LedgerEvent> + Send>>;
+        type Storage = MockWalletStorage<'a>;
 
-        async fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
-            let ledger = self.ledger.lock().unwrap();
-            assert_eq!(
-                ledger.now(),
-                0,
-                "MockWalletBackend does not support restartability"
-            );
-            let mut rng = ChaChaRng::from_seed(self.seed);
-            Ok(WalletState {
-                validator: ledger.validator.clone(),
-                proving_keys: ledger.proving_keys.clone(),
-                records: {
-                    let mut db: RecordDatabase = Default::default();
-                    for (ro, uid) in self.initial_grants.iter() {
-                        db.insert(ro.clone(), *uid, key_pair);
-                    }
-                    db
-                },
-                nullifiers: ledger.nullifiers.clone(),
-                defined_assets: HashMap::new(),
-                now: 0,
-                pending_txns: Default::default(),
-                expiring_txns: Default::default(),
-                auditable_assets: Default::default(),
-                auditor_key_pair: AuditorKeyPair::generate(&mut rng),
-                freezer_key_pair: FreezerKeyPair::generate(&mut rng),
-                rng,
-            })
+        async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
+            self.storage.lock().await
         }
 
-        async fn store(
-            &mut self,
-            _key_pair: &UserKeyPair,
-            _state: &WalletState,
-        ) -> Result<(), WalletError> {
-            unimplemented!("MockWalletBackend does not support persistence");
+        async fn create(&mut self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
+            let state = {
+                let ledger = self.ledger.lock().unwrap();
+                let mut rng = ChaChaRng::from_seed(self.seed);
+                WalletState {
+                    validator: ledger.validator.clone(),
+                    proving_keys: ledger.proving_keys.clone(),
+                    records: {
+                        let mut db: RecordDatabase = Default::default();
+                        for (ro, uid) in self.initial_grants.iter() {
+                            db.insert(ro.clone(), *uid, key_pair);
+                        }
+                        db
+                    },
+                    nullifiers: ledger.nullifiers.clone(),
+                    defined_assets: HashMap::new(),
+                    now: 0,
+                    pending_txns: Default::default(),
+                    expiring_txns: Default::default(),
+                    auditable_assets: Default::default(),
+                    auditor_key_pair: AuditorKeyPair::generate(&mut rng),
+                    freezer_key_pair: FreezerKeyPair::generate(&mut rng),
+                    rng,
+                }
+            };
+
+            // Persist the initial state.
+            let mut storage = self.storage().await;
+            storage.committed = Some(state.clone());
+            storage.working = Some(state.clone());
+
+            Ok(state)
         }
 
         async fn subscribe(&self, starting_at: u64) -> Self::EventStream {
             let mut ledger = self.ledger.lock().unwrap();
-            assert_eq!(
-                starting_at,
-                ledger.now(),
-                "subscribing from a historical state is not supported in the MockWalletBackend"
+
+            assert!(
+                starting_at <= ledger.now(),
+                "subscribing from a future state is not supported in the MockWalletBackend"
             );
+            let past_events = ledger
+                .events
+                .iter()
+                .skip(starting_at as usize)
+                .cloned()
+                .collect::<Vec<_>>();
+
             let (sender, receiver) = channel::unbounded();
             ledger.subscribers.push(sender);
-            receiver
+
+            Box::pin(iter(past_events).chain(receiver))
         }
 
         async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
@@ -2049,6 +2527,10 @@ pub mod test_helpers {
         );
 
         let current_block = ElaboratedBlock::next_block(&validator);
+        let mut storage = Vec::new();
+        for _ in &users {
+            storage.push(Arc::new(Mutex::new(MockWalletStorage::default())));
+        }
         let ledger = Arc::new(SyncMutex::new(MockLedger {
             validator,
             nullifiers,
@@ -2058,22 +2540,24 @@ pub mod test_helpers {
             block_size: 1,
             hold_next_transaction: false,
             held_transaction: None,
-            proving_keys: ProverKeySet {
+            proving_keys: Arc::new(ProverKeySet {
                 xfr: KeySet::new(xfr_prove_keys.into_iter()).unwrap(),
                 mint: mint_prove_key,
                 freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
-            },
+            }),
             address_map: users
                 .iter()
                 .map(|(key, _)| (key.address(), key.pub_key()))
                 .collect(),
             events: Vec::new(),
+            storage: storage.clone(),
         }));
 
         // Create a wallet for each user based on the validator and the per-user information
         // computed above.
         let wallets = iter(users)
-            .then(|(key, initial_grants)| {
+            .zip(iter(storage))
+            .then(|((key, initial_grants), storage)| {
                 let mut rng = ChaChaRng::from_rng(&mut rng).unwrap();
                 let ledger = ledger.clone();
                 async move {
@@ -2085,6 +2569,7 @@ pub mod test_helpers {
                             ledger,
                             initial_grants,
                             seed,
+                            storage,
                         },
                     )
                     .await

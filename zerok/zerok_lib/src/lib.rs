@@ -283,7 +283,7 @@ pub mod key_set {
         fn sort_key(num_inputs: usize, num_outputs: usize) -> Self::SortKey;
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     pub struct OrderByInputs;
     impl KeyOrder for OrderByInputs {
         type SortKey = (usize, usize);
@@ -292,7 +292,7 @@ pub mod key_set {
         }
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     pub struct OrderByOutputs;
     impl KeyOrder for OrderByOutputs {
         type SortKey = (usize, usize);
@@ -302,7 +302,9 @@ pub mod key_set {
     }
 
     #[serde_as]
-    #[derive(Debug, Clone, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize)]
+    #[derive(
+        Debug, Clone, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize, PartialEq,
+    )]
     #[serde(bound = "K: Serialize + for<'a> Deserialize<'a>")]
     pub struct KeySet<K: SizedKey, Order: KeyOrder = OrderByInputs> {
         // serde_json does not support maps where the keys are not Strings (or easily convertible
@@ -376,7 +378,9 @@ pub mod key_set {
 }
 use key_set::KeySet;
 
-#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize, PartialEq,
+)]
 pub struct ProverKeySet<'a, Order: key_set::KeyOrder = key_set::OrderByInputs> {
     pub mint: MintProvingKey<'a>,
     pub xfr: KeySet<TransferProvingKey<'a>, Order>,

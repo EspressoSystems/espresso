@@ -42,7 +42,7 @@ In a separate terminal, you can now enter the interactive wallet REPL:
 cd zerok/zerok_client
 cargo run -- --key-path $key_file localhost:$port
 ```
-where $port is the port number where the full node is serving (50000 + node id, by default).
+where $port is the port number where the full node is serving (50000 + node id, by default). It will take a while to connect (actually, most of that time is deserializing the universal parameters and generating proving keys) and will prompt you when it is ready to process commands.
 
 Open another wallet in yet another terminal using a different `--key-path`. (Or don't specify a key path, and one will be generated in-memory. We only needed the key in a file for the first wallet to give to the validators so they could bootstrap the system with some initial amount of native coins.)
 

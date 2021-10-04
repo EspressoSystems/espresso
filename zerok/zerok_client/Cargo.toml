@@ -17,5 +17,7 @@ jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jel
 jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "6c88a961f6ad142501e577d91dbf39f5c58bc1f6"}
 lazy_static = "1.4.0"
 rustyline = "9.0.0"
+shutdown_hooks = "0.1.0"
 structopt = { version = "0.3", features = ["paw"] }
+tempdir = "0.3.7"
 zerok_lib = { path = "../zerok_lib/" }

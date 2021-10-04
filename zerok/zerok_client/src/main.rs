@@ -13,15 +13,17 @@ use fmt::{Display, Formatter};
 use futures::future::BoxFuture;
 use jf_txn::structs::AssetCode;
 use lazy_static::lazy_static;
+use shutdown_hooks::add_shutdown_hook;
 use std::any::type_name;
 use std::fmt;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::iter::once;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::str::FromStr;
 use structopt::StructOpt;
+use tempdir::TempDir;
 use wallet::network::*;
 use zerok_lib::{api, wallet, UNIVERSAL_PARAM};
 
@@ -40,6 +42,13 @@ struct Args {
     ///
     /// If not given, new keys are generated randomly.
     key_path: Option<PathBuf>,
+
+    #[structopt(short, long)]
+    /// Path to a saved wallet, or a new directory where this wallet will be saved.
+    ///
+    /// If not given, a temporary directory is created and will be deleted when the program is
+    /// closed.
+    storage: Option<PathBuf>,
 
     /// URL of a server for interacting with the ledger
     server: Option<Url>,
@@ -254,7 +263,28 @@ lazy_static! {
 }
 
 lazy_static! {
+    static ref STORAGE: (PathBuf, Arc<Mutex<Option<TempDir>>>) = {
+        match Args::from_args().storage {
+            Some(storage) => (storage, Arc::new(Mutex::new(None))),
+            None => {
+                let tmp_dir = TempDir::new("wallet").unwrap_or_else(|err| {
+                    println!("error creating temporary directory: {}", err);
+                    exit(1);
+                });
+                add_shutdown_hook(close_storage);
+                (
+                    PathBuf::from(tmp_dir.path()),
+                    Arc::new(Mutex::new(Some(tmp_dir))),
+                )
+            }
+        }
+    };
+    static ref STORAGE_PATH: &'static Path = &STORAGE.0;
     static ref WALLET: Arc<Mutex<Wallet>> = Arc::new(Mutex::new(block_on(init_repl())));
+}
+
+extern "C" fn close_storage() {
+    block_on(STORAGE.1.lock()).take();
 }
 
 async fn init_repl() -> Wallet {
@@ -294,6 +324,7 @@ async fn init_repl() -> Wallet {
         server.clone(),
         server.clone(),
         server.clone(),
+        *STORAGE_PATH,
     )
     .unwrap_or_else(|err| {
         println!("Failed to connect to backend: {}", err);

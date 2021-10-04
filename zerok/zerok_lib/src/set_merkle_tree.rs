@@ -91,7 +91,7 @@ pub mod set_hash {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SetMerkleTree {
     EmptySubtree,
     ForgottenSubtree {
