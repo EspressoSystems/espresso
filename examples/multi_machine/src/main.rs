@@ -353,7 +353,7 @@ struct Connection {
 #[derive(Clone)]
 pub struct WebState {
     connections: Arc<RwLock<HashMap<String, Connection>>>,
-    web_path: String,
+    web_path: PathBuf,
     api: toml::Value,
     query_service: FullNode<'static>,
 }
@@ -422,28 +422,21 @@ impl WebState {
     }
 }
 
-async fn landing_page(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
-    let mut index_html: PathBuf = PathBuf::from(req.state().web_path.clone());
+async fn form_demonstration(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
+    let mut index_html: PathBuf = req.state().web_path.clone();
     index_html.push("index.html");
     Ok(tide::Body::from_file(index_html).await?)
 }
-
-/* TODO
-
-Collect error messages for parameters that fail to parse, but only
-when there are no literal mismatches
-
-Add comprehensive documentation at /
-
-Add an enum for each entry point so we know how to dispatch
-}
-
- */
 
 fn internal_error(msg: &'static str) -> tide::Error {
     tide::Error::from_str(tide::StatusCode::InternalServerError, msg)
 }
 
+/// Handle API requests defined in api.toml.
+///
+/// This function duplicates the logic for deciding which route was requested. This
+/// is an unfortunate side-effect of defining the routes in an external file.
+// todo !corbett Convert the error feedback into HTML
 async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
     let first_segment = &req
         .url()
@@ -503,6 +496,8 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
                 } else {
                     arg_doc.push_str("(Parse failed)\n");
                     argument_parse_failed = true;
+                    // TODO !corbett capture parse failures documentation
+                    // UrlSegmentValue::ParseFailed(segment_type, req_segment)
                 }
             } else {
                 // No type information. Assume pat_segment is a literal.
@@ -514,6 +509,8 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
                         req_segment, pat_segment
                     ));
                 }
+                // TODO !corbett else capture the matching literal in bindings
+                // TODO !corebtt if the edit distance is small, capture spelling suggestion
             }
         }
         if !found_literal_mismatch {
@@ -557,8 +554,6 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
         _ => arg_doc.push_str("\nAmbiguity in api.toml"),
     }
 
-    // TODO !corbett set the mime type to text/html and convert the
-    // string from markdown to html
     Ok(tide::Response::builder(200).body(arg_doc).build())
 }
 
@@ -602,6 +597,15 @@ async fn handle_web_socket(
     Ok(())
 }
 
+// This route is a demonstration of a form with a WebSocket connection
+// for asynchronous updates. Once we have useful forms, this can go...
+fn add_form_demonstration(web_server: &mut tide::Server<WebState>) {
+    web_server
+        .at("/transfer/:id/:recipient/:amount")
+        .with(WebSocket::new(handle_web_socket))
+        .get(form_demonstration);
+}
+
 /// Initialize the web server.
 ///
 /// `opt_web_path` is the path to the web assets directory. If the path
@@ -611,9 +615,8 @@ async fn handle_web_socket(
 /// `own_id` is the identifier of this instance of the executable. The
 /// port the web server listens on is `own_id + 50000`, unless the
 /// PORT environment variable is set.
-///
-// TODO - take the port from the command line instead of the environment.
 fn init_web_server(
+    opt_api_path: &str,
     opt_web_path: &str,
     own_id: u64,
     query_service: FullNode<'static>,
@@ -623,14 +626,16 @@ fn init_web_server(
     // the executable path.
     let web_path = if opt_web_path.is_empty() {
         default_web_path()
-            .into_os_string()
-            .into_string()
-            .expect("Wut?! Asset path isn't UTF-8")
     } else {
-        opt_web_path.to_string()
+        PathBuf::from(opt_web_path)
     };
-    println!("Default API: {:?}", default_api_path());
-    let api = disco::load_messages(&default_api_path());
+    let api_path = if opt_api_path.is_empty() {
+        default_api_path()
+    } else {
+        PathBuf::from(opt_api_path)
+    };
+    println!("API path: {:?}", web_path);
+    let api = disco::load_messages(&api_path);
     let mut web_server = tide::with_state(WebState {
         connections: Default::default(),
         web_path: web_path.clone(),
@@ -640,18 +645,11 @@ fn init_web_server(
 
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;
-    web_server.at("/").get(landing_page);
-    web_server
-        .at("/:id")
-        .with(WebSocket::new(handle_web_socket))
-        .get(landing_page);
-    web_server
-        .at("/transfer/:id/:recipient/:amount")
-        .with(WebSocket::new(handle_web_socket))
-        .get(landing_page);
+    web_server.at("/").get(disco::compose_help);
+
+    add_form_demonstration(&mut web_server);
 
     // Add routes from a configuration file.
-    println!("Format version: {}", &api["meta"]["FORMAT_VERSION"]);
     if let Some(api_map) = api["route"].as_table() {
         api_map.values().for_each(|v| match &v["PATH"] {
             toml::Value::String(s) => {
@@ -772,13 +770,15 @@ async fn main() -> Result<(), std::io::Error> {
         let mut events = phaselock.subscribe();
 
         // If we are running a full node, also host a query API to inspect the accumulated state.
-        let web_server = if let Node::Full(node) = &phaselock {
-            Some(
-                init_web_server(&NodeOpt::from_args().web_path, own_id, node.clone())
-                    .expect("Failed to initialize web server"),
+        if let Node::Full(node) = &phaselock {
+            init_web_server(
+                &NodeOpt::from_args().api_path,
+                &NodeOpt::from_args().web_path,
+                own_id,
+                node.clone(),
             )
-        } else {
-            None
+            .expect("Failed to initialize web server")
+            .await?;
         };
 
         // Start consensus for each transaction
@@ -865,9 +865,6 @@ async fn main() -> Result<(), std::io::Error> {
                     .unwrap();
             }
             println!("  - Round {} completed.", round + 1);
-        }
-        if let Some(join_handle) = web_server {
-            join_handle.await?;
         }
 
         println!("All rounds completed");

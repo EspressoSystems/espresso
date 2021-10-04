@@ -8,6 +8,33 @@
 [meta]
 FORMAT_VERSION = "0.1.0"
 
+# Logo is 1093x230
+
+HTML_TOP = """
+<!DOCTYPE html>
+<html lang='en'>
+  <head>
+    <meta charset='utf-8'>
+    <title>Spectrum Web Help</title>
+    <link rel='stylesheet' href='public/css/style.css'>
+    <script src='public/js/script.js'></script>
+  </head>
+  <body>
+    <div><img src='public/media/Horizontal02.png'
+              alt='Spectrum Logo'
+              height='115'/></div>
+    <h1>Spectrum Web Interface</h1>
+"""
+
+HTML_BOTTOM = """
+  </body>
+</html>
+"""
+
+HEADING_ROUTES = "Routes"
+HEADING_PARAMETERS = "Parameters"
+HEADING_DESCRIPTION = "Description"
+
 [route.getinfo]
 PATH = [ "getinfo" ]
 DOC = """
