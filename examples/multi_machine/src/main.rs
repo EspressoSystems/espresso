@@ -818,18 +818,14 @@ async fn main() -> Result<(), std::io::Error> {
 
         // If we are running a full node, also host a query API to inspect the accumulated state.
         if let Node::Full(node) = &phaselock {
-            Some(
-                init_web_server(
-                    &NodeOpt::from_args().api_path,
-                    &NodeOpt::from_args().web_path,
-                    own_id,
-                    node.clone(),
-                )
-                .expect("Failed to initialize web server")
+            init_web_server(
+                &NodeOpt::from_args().api_path,
+                &NodeOpt::from_args().web_path,
+                own_id,
+                node.clone(),
             )
-        } else {
-            None
-        };
+            .expect("Failed to initialize web server");
+        }
 
         // Start consensus for each transaction
         for round in 0..TRANSACTION_COUNT {
