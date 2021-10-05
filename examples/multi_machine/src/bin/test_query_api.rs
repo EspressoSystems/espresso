@@ -19,19 +19,25 @@
 // test, pointing it at the URL of one of the full nodes.
 
 use async_std::future::timeout;
+use async_tungstenite::async_std::connect_async;
+use client::*;
 use futures::prelude::*;
 use itertools::izip;
 use phaselock::BlockContents;
 use serde::Deserialize;
+use snafu::ResultExt;
 use std::fmt::Display;
 use std::time::Duration;
 use structopt::StructOpt;
-use strum::AsStaticRef;
-use surf_sse::{EventSource, Url};
 use tracing::{event, Level};
+use wallet::{
+    network::{NetworkBackend, Url},
+    Wallet,
+};
 use zerok_lib::api::*;
-use zerok_lib::node::{LedgerEvent, LedgerSummary};
-use zerok_lib::ElaboratedBlock;
+use zerok_lib::node::{LedgerEvent, LedgerSummary, QueryServiceError};
+use zerok_lib::wallet;
+use zerok_lib::{ElaboratedBlock, UNIVERSAL_PARAM};
 
 #[derive(StructOpt)]
 struct Args {
@@ -44,15 +50,46 @@ struct Args {
     port: u64,
 }
 
-fn url(route: impl Display) -> Url {
+fn url_with_scheme(scheme: impl Display, route: impl Display) -> Url {
     let Args { host, port } = Args::from_args();
-    Url::parse(format!("http://{}:{}{}", host, port, route).as_str()).unwrap()
+    Url::parse(format!("{}://{}:{}{}", scheme, host, port, route).as_str()).unwrap()
+}
+
+fn url(route: impl Display) -> Url {
+    url_with_scheme("http", route)
 }
 
 async fn get<T: for<'de> Deserialize<'de>, S: Display>(route: S) -> T {
     let url = url(route);
     event!(Level::INFO, "GET {}", url);
-    serde_json::from_value(surf::get(url).recv_json().await.unwrap()).unwrap()
+    response_body(
+        &mut surf::get(url)
+            .middleware(parse_error_body)
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+
+async fn get_error(route: impl Display) -> Error {
+    let url = url(route);
+    event!(Level::INFO, "GET {}", url);
+    match surf::get(url)
+        .middleware(parse_error_body)
+        .send()
+        .await
+        .context(ClientError)
+    {
+        Err(err) => err,
+        Ok(mut res) => {
+            panic!(
+                "expected error, but got Ok response: {}",
+                res.body_string().await.unwrap()
+            )
+        }
+    }
 }
 
 async fn validate_committed_block(
@@ -151,7 +188,10 @@ async fn main() {
     // second delay between events, at which point we will consider the stream to have reached a
     // steady-state.
     let mut events1 = vec![];
-    let mut stream1 = EventSource::new(url("/subscribe/0"));
+    let mut stream1 = connect_async(url_with_scheme("ws", "/subscribe/0"))
+        .await
+        .unwrap()
+        .0;
     while let Ok(Some(event)) = timeout(Duration::from_secs(5), stream1.next()).await {
         events1.push(event.unwrap());
     }
@@ -160,7 +200,10 @@ async fn main() {
 
     //Subscribe again at a different offset so we can check consistency between streams starting at
     // different times.
-    let events2 = EventSource::new(url("/subscribe/1"))
+    let events2 = connect_async(url_with_scheme("ws", "/subscribe/1"))
+        .await
+        .unwrap()
+        .0
         .take(events1.len() - 1)
         .try_collect::<Vec<_>>()
         .await
@@ -170,7 +213,21 @@ async fn main() {
     // Check validity of the individual events. The events are just serialized LedgerEvents, not an
     // API-specific type, so as long as they deserialize properly they should be fine.
     for event in events1.into_iter() {
-        let ledger_event: LedgerEvent = serde_json::from_str(event.data.as_str()).unwrap();
-        assert_eq!(event.event, ledger_event.as_static());
+        serde_json::from_str::<LedgerEvent>(event.to_text().unwrap()).unwrap();
     }
+
+    // Test some invalid endpoints; check that error response bodies contain error descriptions.
+    match get_error(format!("/getblock/index/{}", num_blocks)).await {
+        Error::QueryServiceError {
+            source: QueryServiceError::InvalidBlockId { .. },
+        } => {}
+        err => panic!("expected InvalidBlockId, got {}", err),
+    }
+
+    // Check that we can create a wallet using this server as a backend.
+    let url = url("/");
+    let _wallet = Wallet::new(
+        wallet::new_key_pair(),
+        NetworkBackend::new(&*UNIVERSAL_PARAM, url.clone(), url.clone(), url).unwrap(),
+    );
 }

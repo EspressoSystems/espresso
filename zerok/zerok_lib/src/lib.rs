@@ -36,6 +36,7 @@ use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 pub use set_merkle_tree::*;
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
@@ -68,15 +69,23 @@ pub struct Transaction(pub TransactionNote);
     Serialize,
     Deserialize,
 )]
-#[serde(from = "CanonicalBytes", into = "CanonicalBytes")]
 pub struct ElaboratedTransaction {
     pub txn: TransactionNote,
     pub proofs: Vec<SetMerkleProof>,
 }
 
-deserialize_canonical_bytes!(ElaboratedTransaction);
-
-#[derive(Default, Debug, Clone, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq, Hash)]
+#[derive(
+    Default,
+    Debug,
+    Clone,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+)]
 pub struct Block(pub Vec<TransactionNote>);
 
 // A block with nullifier set non-membership proofs
@@ -208,7 +217,7 @@ impl BlockContents<64> for ElaboratedBlock {
     }
 }
 
-mod key_set {
+pub mod key_set {
     use super::*;
 
     #[derive(Debug, Snafu)]
@@ -293,8 +302,13 @@ mod key_set {
         }
     }
 
+    #[serde_as]
     #[derive(Debug, Clone, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize)]
+    #[serde(bound = "K: Serialize + for<'a> Deserialize<'a>")]
     pub struct KeySet<K: SizedKey, Order: KeyOrder = OrderByInputs> {
+        // serde_json does not support maps where the keys are not Strings (or easily convertible
+        // to/from Strings) so we serialize this map as a sequence of key-value pairs.
+        #[serde_as(as = "Vec<(_, _)>")]
         keys: BTreeMap<Order::SortKey, K>,
     }
 
@@ -363,14 +377,14 @@ mod key_set {
 }
 use key_set::KeySet;
 
-#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize)]
 pub struct ProverKeySet<'a, Order: key_set::KeyOrder = key_set::OrderByInputs> {
     pub mint: MintProvingKey<'a>,
     pub xfr: KeySet<TransferProvingKey<'a>, Order>,
     pub freeze: KeySet<FreezeProvingKey<'a>, Order>,
 }
 
-#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize)]
 pub struct VerifierKeySet<Order: key_set::KeyOrder = key_set::OrderByInputs> {
     // TODO: is there a way to keep these types distinct?
     pub mint: TransactionVerifyingKey,
@@ -422,6 +436,27 @@ mod ser_display {
     ) -> Result<S::Ok, S::Error> {
         let string = match v {
             Ok(v) => format!("{}", v),
+            Err(string) => string.clone(),
+        };
+        Serialize::serialize(&string, s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T>(d: D) -> Result<Result<T, String>, D::Error> {
+        Ok(Err(Deserialize::deserialize(d)?))
+    }
+}
+
+mod ser_debug {
+    use serde::de::{Deserialize, Deserializer};
+    use serde::ser::{Serialize, Serializer};
+    use std::fmt::Debug;
+
+    pub fn serialize<S: Serializer, T: Debug>(
+        v: &Result<T, String>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let string = match v {
+            Ok(v) => format!("{:?}", v),
             Err(string) => string.clone(),
         };
         Serialize::serialize(&string, s)
@@ -568,7 +603,7 @@ pub mod state_comm {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: state_comm::LedgerStateCommitment,
@@ -884,7 +919,7 @@ pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalPara
 }
 
 lazy_static! {
-    static ref UNIVERSAL_PARAM: jf_txn::proof::UniversalParam =
+    pub static ref UNIVERSAL_PARAM: jf_txn::proof::UniversalParam =
         get_universal_param(&mut ChaChaRng::from_seed([0x8au8; 32]));
 }
 
@@ -1862,6 +1897,14 @@ impl MultiXfrTestState {
             })
             .collect()
     }
+}
+
+pub fn crypto_rng() -> ChaChaRng {
+    ChaChaRng::from_entropy()
+}
+
+pub fn crypto_rng_from_seed(seed: [u8; 32]) -> ChaChaRng {
+    ChaChaRng::from_seed(seed)
 }
 
 // TODO(joe): proper Err returns

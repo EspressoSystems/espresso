@@ -4,19 +4,20 @@ use crate::WebState;
 use futures::prelude::*;
 use itertools::izip;
 use phaselock::BlockContents;
+use server::{best_response_type, response};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;
 use strum::{AsStaticRef, IntoEnumIterator};
 use strum_macros::{AsRefStr, EnumIter, EnumString};
 use tagged_base64::TaggedBase64;
-use tide::http::mime;
-use tide::prelude::*;
-use tide::sse;
+use tide::http::{content::Accept, mime};
 use tide::StatusCode;
+use tide_websockets::WebSocketConnection;
 use tracing::{event, Level};
 use zerok_lib::api::*;
-use zerok_lib::node::{LedgerSummary, LedgerTransition, QueryService};
+use zerok_lib::node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
+use zerok_lib::SetMerkleTree;
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -91,15 +92,6 @@ impl UrlSegmentValue {
     }
 }
 
-fn server_error(err: impl std::error::Error + Debug + Send + Sync + 'static) -> tide::Error {
-    event!(
-        Level::ERROR,
-        "internal error while processing request: {:?}",
-        err
-    );
-    tide::Error::new(StatusCode::InternalServerError, err)
-}
-
 #[derive(Debug)]
 pub struct RouteBinding {
     /// Placeholder from the route pattern, e.g. :id
@@ -122,9 +114,12 @@ pub enum ApiRouteKey {
     getblockid,
     getinfo,
     getmempool,
+    getnullifier,
+    getsnapshot,
     gettransaction,
     getunspentrecord,
     getunspentrecordsetinfo,
+    getuser,
     subscribe,
 }
 
@@ -371,34 +366,83 @@ async fn get_unspent_record(
     })
 }
 
-async fn subscribe(
-    req: tide::Request<WebState>,
+async fn get_snapshot(
     bindings: &HashMap<String, RouteBinding>,
-) -> Result<tide::Response, tide::Error> {
-    let index = bindings[":index"].value.as_index()? as u64;
-    Ok(sse::upgrade(req, move |req, sender| async move {
-        let mut events = req.state().query_service.subscribe(index).await;
-        while let Some(event) = events.next().await {
-            sender
-                .send(
-                    event.as_static(),
-                    serde_json::to_string(&event).map_err(server_error)?,
-                    None,
-                )
-                .await?;
+    query_service: &impl QueryService,
+) -> Result<LedgerSnapshot, tide::Error> {
+    let index = match bindings.get(":index") {
+        Some(ix) => ix.value.as_index()?,
+        None => {
+            // No :index parameter indicates they want the latest snapshot.
+            let LedgerSummary { num_blocks, .. } =
+                query_service.get_summary().await.map_err(server_error)?;
+            // Since block represent state transitions, there is a block in between each pair of
+            // snapshots, and so the index of the last snapshot is one greater than the index of the
+            // last block, or, equal to the total number of blocks.
+            num_blocks
         }
-        Ok(())
-    }))
+    };
+    let mut snapshot = query_service
+        .get_snapshot(index)
+        .await
+        .map_err(server_error)?;
+    if bindings[":sparse"].value.as_boolean()? {
+        snapshot.nullifiers = SetMerkleTree::sparse(snapshot.nullifiers.hash());
+
+        //todo! jeb.bearer There must be a way to quickly sparsify an entire Merkle tree.
+        for i in 0..snapshot.state.record_merkle_frontier.num_leaves() {
+            snapshot.state.record_merkle_frontier.forget(i);
+        }
+    }
+    Ok(snapshot)
 }
 
-fn respond<T: Serialize>(content_type: mime::Mime, res: T) -> Result<tide::Response, tide::Error> {
-    match content_type.subtype() {
-        "json" => Ok(tide::Response::from(json!(res))),
-        _ => Err(tide::Error::from_str(
-            StatusCode::UnsupportedMediaType,
-            format!("unsupported content type {}", content_type),
-        )),
+async fn get_user(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &impl QueryService,
+) -> Result<UserPubKey, tide::Error> {
+    query_service
+        .get_user(&bindings[":address"].value.to::<UserAddress>()?.0)
+        .await
+        .map_err(server_error)
+}
+
+async fn get_nullifier(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &impl QueryService,
+) -> Result<NullifierProof, tide::Error> {
+    let (spent, proof) = query_service
+        .nullifier_proof(
+            bindings[":root"].value.to()?,
+            bindings[":nullifier"].value.to()?,
+        )
+        .await
+        .map_err(server_error)?;
+    Ok(NullifierProof { spent, proof })
+}
+
+async fn subscribe(
+    req: tide::Request<WebState>,
+    conn: WebSocketConnection,
+    bindings: &HashMap<String, RouteBinding>,
+) -> Result<(), tide::Error> {
+    let response_type = best_response_type(
+        &mut Accept::from_headers(&req)?,
+        &[mime::JSON, mime::BYTE_STREAM],
+    )?;
+    let index = bindings[":index"].value.as_index()? as u64;
+    let mut events = req.state().node.read().await.subscribe(index).await;
+    while let Some(event) = events.next().await {
+        event!(Level::INFO, "broadcast event {}", event.as_static());
+        if response_type == mime::JSON {
+            conn.send_json(&event).await?;
+        } else if response_type == mime::BYTE_STREAM {
+            conn.send_bytes(bincode::serialize(&event)?).await?;
+        } else {
+            unreachable!();
+        }
     }
+    Ok(())
 }
 
 pub async fn dispatch_url(
@@ -411,37 +455,49 @@ pub async fn dispatch_url(
         .unwrap_or((route_pattern, ""))
         .0;
     let key = ApiRouteKey::from_str(first_segment).expect("Unknown route");
-    //todo !jeb.bearer Get the content type to respond with from the request (URL parameter or
-    // header or something). All endpoint functions return a serializable structure, so we can
-    // respond with any content type that serde can target.
-    let res_type = mime::JSON;
+    let query_service_guard = req.state().node.read().await;
+    let query_service = &*query_service_guard;
     match key {
-        ApiRouteKey::getblock => respond(
-            res_type,
-            get_block(bindings, &req.state().query_service).await?,
-        ),
-        ApiRouteKey::getblockcount => {
-            respond(res_type, get_block_count(&req.state().query_service).await?)
-        }
-        ApiRouteKey::getblockhash => respond(
-            res_type,
-            get_block_hash(bindings, &req.state().query_service).await?,
-        ),
-        ApiRouteKey::getblockid => respond(
-            res_type,
-            get_block_id(bindings, &req.state().query_service).await?,
-        ),
-        ApiRouteKey::getinfo => respond(res_type, get_info(&req.state().query_service).await?),
+        ApiRouteKey::getblock => response(&req, get_block(bindings, query_service).await?),
+        ApiRouteKey::getblockcount => response(&req, get_block_count(query_service).await?),
+        ApiRouteKey::getblockhash => response(&req, get_block_hash(bindings, query_service).await?),
+        ApiRouteKey::getblockid => response(&req, get_block_id(bindings, query_service).await?),
+        ApiRouteKey::getinfo => response(&req, get_info(query_service).await?),
         ApiRouteKey::getmempool => dummy_url_eval(route_pattern, bindings),
-        ApiRouteKey::gettransaction => respond(
-            res_type,
-            get_transaction(bindings, &req.state().query_service).await?,
-        ),
-        ApiRouteKey::getunspentrecord => respond(
-            res_type,
-            get_unspent_record(bindings, &req.state().query_service).await?,
-        ),
+        ApiRouteKey::gettransaction => {
+            response(&req, get_transaction(bindings, query_service).await?)
+        }
+        ApiRouteKey::getunspentrecord => {
+            response(&req, get_unspent_record(bindings, query_service).await?)
+        }
         ApiRouteKey::getunspentrecordsetinfo => dummy_url_eval(route_pattern, bindings),
-        ApiRouteKey::subscribe => subscribe(req, bindings).await,
+        ApiRouteKey::getsnapshot => response(&req, get_snapshot(bindings, query_service).await?),
+        ApiRouteKey::getuser => response(&req, get_user(bindings, query_service).await?),
+        ApiRouteKey::getnullifier => response(&req, get_nullifier(bindings, query_service).await?),
+        _ => Err(tide::Error::from_str(
+            StatusCode::InternalServerError,
+            "server called dispatch_url with an unsupported route; perhaps the route has not \
+            been implemented, or requires a different kind of connection like a WebSocket",
+        )),
+    }
+}
+
+pub async fn dispatch_web_socket(
+    req: tide::Request<WebState>,
+    conn: WebSocketConnection,
+    route_pattern: &str,
+    bindings: &HashMap<String, RouteBinding>,
+) -> Result<(), tide::Error> {
+    let first_segment = route_pattern
+        .split_once('/')
+        .unwrap_or((route_pattern, ""))
+        .0;
+    let key = ApiRouteKey::from_str(first_segment).expect("Unknown route");
+    match key {
+        ApiRouteKey::subscribe => subscribe(req, conn, bindings).await,
+        _ => Err(tide::Error::from_str(
+            StatusCode::InternalServerError,
+            "server called dispatch_web_socket with an unsupported route",
+        )),
     }
 }

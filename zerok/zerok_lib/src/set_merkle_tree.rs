@@ -91,7 +91,7 @@ pub mod set_hash {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SetMerkleTree {
     EmptySubtree,
     ForgottenSubtree {
@@ -149,7 +149,6 @@ impl Default for SetMerkleTree {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum SetMerkleTerminalNode {
     EmptySubtree,
     Leaf {
@@ -279,6 +278,10 @@ impl SetMerkleProof {
 }
 
 impl SetMerkleTree {
+    pub fn sparse(root: set_hash::Hash) -> Self {
+        Self::ForgottenSubtree { value: root }
+    }
+
     pub fn hash(&self) -> set_hash::Hash {
         use SetMerkleTree::*;
         match self {
