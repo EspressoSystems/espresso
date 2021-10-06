@@ -166,7 +166,6 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
             auditable_assets: Default::default(),
             auditor_key_pair: AuditorKeyPair::generate(&mut rng),
             freezer_key_pair: FreezerKeyPair::generate(&mut rng),
-            rng,
         };
         self.storage().await.create(key_pair, &state).await?;
         Ok(state)

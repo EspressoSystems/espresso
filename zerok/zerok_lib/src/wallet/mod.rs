@@ -159,7 +159,6 @@ pub struct WalletState<'a> {
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Dynamic state
     //
-    pub(crate) rng: ChaChaRng,
     // sequence number of the last event processed
     pub(crate) now: u64,
     // wallets run validation in tandem with the validators, so that they do not have to trust new
@@ -445,6 +444,7 @@ pub trait WalletBackend<'a>: Send {
 pub struct WalletSession<'a, Backend: WalletBackend<'a>> {
     backend: Backend,
     key_pair: UserKeyPair,
+    rng: ChaChaRng,
     _marker: std::marker::PhantomData<&'a ()>,
 }
 
@@ -1076,7 +1076,7 @@ impl<'a> WalletState<'a> {
         description: &[u8],
         policy: AssetPolicy,
     ) -> Result<AssetDefinition, WalletError> {
-        let seed = AssetCodeSeed::generate(&mut self.rng);
+        let seed = AssetCodeSeed::generate(&mut session.rng);
         let code = AssetCode::new(seed, description);
         let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
         let desc = description.to_vec();
@@ -1095,7 +1095,6 @@ impl<'a> WalletState<'a> {
             .store(&session.key_pair, |mut t| {
                 let asset_definition = &asset_definition;
                 let desc = &desc;
-                let state = &self;
                 async move {
                     t.store_defined_asset(asset_definition, seed, desc).await?;
                     if audit {
@@ -1103,10 +1102,6 @@ impl<'a> WalletState<'a> {
                         // that information to disk before doing anything to the in-memory state.
                         t.store_auditable_asset(asset_definition).await?;
                     }
-                    // Finally, our dynamic state has changed (for instance, the state of self.rng)
-                    // so we need to save a snapshot.
-                    t.store_snapshot(state).await?;
-
                     Ok(t)
                 }
             })
@@ -1199,7 +1194,7 @@ impl<'a> WalletState<'a> {
             asset_def: asset_def.clone(),
             pub_key: session.backend.get_public_key(&owner).await?,
             freeze_flag: FreezeFlag::Unfrozen,
-            blind: BlindFactor::rand(&mut self.rng),
+            blind: BlindFactor::rand(&mut session.rng),
         };
 
         let fee_input = FeeInput {
@@ -1207,15 +1202,15 @@ impl<'a> WalletState<'a> {
             acc_member_witness,
             owner_keypair: &session.key_pair,
         };
-        let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut self.rng, fee_input, fee).unwrap();
-        let rng = &mut self.rng;
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut session.rng, fee_input, fee).unwrap();
+        let rng = &mut session.rng;
         let recv_memos = vec![&fee_out_rec, &mint_record]
             .into_iter()
             .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         let (mint_note, sig_key) = jf_txn::mint::MintNote::generate(
-            &mut self.rng,
+            &mut session.rng,
             mint_record,
             *seed,
             asset_description.as_slice(),
@@ -1342,14 +1337,14 @@ impl<'a> WalletState<'a> {
         let proving_key = Self::freeze_proving_key(&self.proving_keys.freeze, asset, &mut inputs)?;
 
         // generate transfer note and receiver memos
-        let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut self.rng, fee_input, fee).unwrap();
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut session.rng, fee_input, fee).unwrap();
         let (note, sig_key, outputs) =
-            FreezeNote::generate(&mut self.rng, inputs, fee_info, proving_key)
+            FreezeNote::generate(&mut session.rng, inputs, fee_info, proving_key)
                 .context(CryptoError)?;
         let recv_memos = vec![&fee_out_rec]
             .into_iter()
             .chain(outputs.iter())
-            .map(|r| ReceiverMemo::from_ro(&mut self.rng, r, &[]))
+            .map(|r| ReceiverMemo::from_ro(&mut session.rng, r, &[]))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
@@ -1401,7 +1396,7 @@ impl<'a> WalletState<'a> {
         let mut outputs = vec![];
         for (pub_key, amount) in receivers {
             outputs.push(RecordOpening::new(
-                &mut self.rng,
+                &mut session.rng,
                 *amount,
                 AssetDefinition::native(),
                 pub_key.clone(),
@@ -1412,7 +1407,7 @@ impl<'a> WalletState<'a> {
         // find a proving key which can handle this transaction size
         let me = self.pub_key(session);
         let proving_key = Self::xfr_proving_key(
-            &mut self.rng,
+            &mut session.rng,
             me,
             &self.proving_keys.xfr,
             &AssetDefinition::native(),
@@ -1423,7 +1418,7 @@ impl<'a> WalletState<'a> {
 
         // generate transfer note and receiver memos
         let (note, kp, fee_change_ro) = TransferNote::generate_native(
-            &mut self.rng,
+            &mut session.rng,
             inputs,
             &outputs,
             fee,
@@ -1439,7 +1434,7 @@ impl<'a> WalletState<'a> {
 
         let recv_memos: Vec<_> = outputs
             .iter()
-            .map(|ro| ReceiverMemo::from_ro(&mut self.rng, ro, &[]))
+            .map(|ro| ReceiverMemo::from_ro(&mut session.rng, ro, &[]))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         let sig = sign_receiver_memos(&kp, &recv_memos).context(CryptoError)?;
@@ -1497,7 +1492,7 @@ impl<'a> WalletState<'a> {
         let mut outputs = vec![];
         for (pub_key, amount) in receivers {
             outputs.push(RecordOpening::new(
-                &mut self.rng,
+                &mut session.rng,
                 *amount,
                 asset.clone(),
                 pub_key.clone(),
@@ -1507,7 +1502,7 @@ impl<'a> WalletState<'a> {
         // change in the asset type being transfered (not fee change)
         if change > 0 {
             let change_ro = RecordOpening::new(
-                &mut self.rng,
+                &mut session.rng,
                 change,
                 asset.clone(),
                 me.clone(),
@@ -1531,7 +1526,7 @@ impl<'a> WalletState<'a> {
 
         // find a proving key which can handle this transaction size
         let proving_key = Self::xfr_proving_key(
-            &mut self.rng,
+            &mut session.rng,
             me,
             &self.proving_keys.xfr,
             &asset,
@@ -1541,9 +1536,9 @@ impl<'a> WalletState<'a> {
         )?;
 
         // generate transfer note and receiver memos
-        let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut self.rng, fee_input, fee).unwrap();
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut session.rng, fee_input, fee).unwrap();
         let (note, sig_key) = TransferNote::generate_non_native(
-            &mut self.rng,
+            &mut session.rng,
             inputs,
             &outputs,
             fee_info,
@@ -1554,7 +1549,7 @@ impl<'a> WalletState<'a> {
         let recv_memos = vec![&fee_out_rec]
             .into_iter()
             .chain(outputs.iter())
-            .map(|r| ReceiverMemo::from_ro(&mut self.rng, r, &[]))
+            .map(|r| ReceiverMemo::from_ro(&mut session.rng, r, &[]))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
@@ -1881,6 +1876,7 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
         let session = WalletSession {
             key_pair,
             backend,
+            rng: ChaChaRng::from_entropy(),
             _marker: Default::default(),
         };
         let sync_handles: SyncHandles = HashMap::new();
@@ -2067,7 +2063,6 @@ pub mod test_helpers {
     // to compare wallet states (like round-trip serialization tests) but since it is deterministic,
     // we shouldn't make it into a PartialEq instance.
     pub fn assert_wallet_states_eq(w1: &WalletState, w2: &WalletState) {
-        assert_eq!(w1.rng, w2.rng);
         assert_eq!(w1.now, w2.now);
         assert_eq!(w1.validator.commit(), w2.validator.commit());
         assert_eq!(w1.proving_keys, w2.proving_keys);
@@ -2105,7 +2100,6 @@ pub mod test_helpers {
             state: &WalletState<'a>,
         ) -> Result<(), WalletError> {
             if let Some(working) = &mut self.working {
-                working.rng = state.rng.clone();
                 working.now = state.now;
                 working.validator = state.validator.clone();
                 working.records = state.records.clone();
@@ -2367,7 +2361,6 @@ pub mod test_helpers {
                     auditable_assets: Default::default(),
                     auditor_key_pair: AuditorKeyPair::generate(&mut rng),
                     freezer_key_pair: FreezerKeyPair::generate(&mut rng),
-                    rng,
                 }
             };
 

@@ -8,7 +8,6 @@ use atomic_store::{
 };
 use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserKeyPair};
 use jf_txn::structs::AssetDefinition;
-use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::fs::{File, OpenOptions};
@@ -36,7 +35,6 @@ impl<'a> From<&WalletState<'a>> for WalletStaticState<'a> {
 // Serialization intermediate for the dynamic part of a WalletState.
 #[derive(Deserialize, Serialize)]
 struct WalletSnapshot {
-    rng: ChaChaRng,
     now: u64,
     validator: ValidatorState,
     records: Vec<(Nullifier, RecordInfo)>,
@@ -47,7 +45,6 @@ struct WalletSnapshot {
 impl<'a> From<&WalletState<'a>> for WalletSnapshot {
     fn from(w: &WalletState<'a>) -> Self {
         Self {
-            rng: w.rng.clone(),
             now: w.now,
             validator: w.validator.clone(),
             records: w.records.iter().map(|(n, r)| (n, r.clone())).collect(),
@@ -150,7 +147,6 @@ impl<'a> WalletStorage<'a> for AtomicWalletStorage {
 
             // Dynamic state
             validator: dynamic_state.validator,
-            rng: dynamic_state.rng,
             now: dynamic_state.now,
             records: dynamic_state.records.into_iter().collect(),
             nullifiers: dynamic_state.nullifiers,
@@ -295,7 +291,7 @@ mod tests {
     use super::*;
     use crate::{VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM};
     use jf_txn::{KeyPair, TransactionVerifyingKey};
-    use rand_chacha::rand_core::{RngCore, SeedableRng};
+    use rand_chacha::{rand_core::{RngCore, SeedableRng}, ChaChaRng};
     use std::iter::{once, repeat_with};
     use tempdir::TempDir;
     use test_helpers::*;
@@ -326,7 +322,7 @@ mod tests {
         (memos, sig)
     }
 
-    async fn get_test_state(name: &str) -> (UserKeyPair, WalletState<'static>, TempDir) {
+    async fn get_test_state(name: &str) -> (UserKeyPair, WalletState<'static>, ChaChaRng, TempDir) {
         let mut rng = ChaChaRng::from_seed([0x42u8; 32]);
 
         // Pick a few different sizes. It doesn't matter since all we're going to be doing is
@@ -373,7 +369,6 @@ mod tests {
             auditor_key_pair: AuditorKeyPair::generate(&mut rng),
             freezer_key_pair: FreezerKeyPair::generate(&mut rng),
             validator,
-            rng,
             now: 0,
 
             records: Default::default(),
@@ -390,12 +385,12 @@ mod tests {
             storage.create(&key_pair, &state).await.unwrap();
         }
 
-        (key_pair, state, dir)
+        (key_pair, state, rng, dir)
     }
 
     #[async_std::test]
     async fn test_round_trip() -> std::io::Result<()> {
-        let (key_pair, mut stored, dir) = get_test_state("test_round_trip").await;
+        let (key_pair, mut stored, mut rng, dir) = get_test_state("test_round_trip").await;
 
         // Create a new storage instance to load the wallet back from disk, to ensure that what we
         // load comes only from persistent storage and not from any in-memory state of the first
@@ -407,7 +402,7 @@ mod tests {
         assert_wallet_states_eq(&stored, &loaded);
 
         // Modify some dynamic state and load the wallet again.
-        let ro = random_ro(&mut stored.rng, &key_pair);
+        let ro = random_ro(&mut rng, &key_pair);
         let comm = RecordCommitment::from(&ro);
         stored
             .validator
@@ -420,7 +415,7 @@ mod tests {
         stored.validator.record_merkle_root =
             stored.validator.record_merkle_frontier.get_root_value();
         let mut nullifiers = SetMerkleTree::default();
-        nullifiers.insert(Nullifier::random_for_test(&mut stored.rng));
+        nullifiers.insert(Nullifier::random_for_test(&mut rng));
         stored.validator.nullifiers_root = nullifiers.hash();
         stored.nullifiers = nullifiers;
         stored.now += 1;
@@ -429,14 +424,14 @@ mod tests {
             stored.validator.record_merkle_frontier.num_leaves(),
             &key_pair,
         );
-        let (receiver_memos, signature) = random_memos(&mut stored.rng, &key_pair);
-        let nullifier = Nullifier::random_for_test(&mut stored.rng);
+        let (receiver_memos, signature) = random_memos(&mut rng, &key_pair);
+        let nullifier = Nullifier::random_for_test(&mut rng);
         stored.pending_txns.insert(
             nullifier,
             PendingTransaction {
                 receiver_memos,
                 signature,
-                freeze_outputs: random_ros(&mut stored.rng, &key_pair),
+                freeze_outputs: random_ros(&mut rng, &key_pair),
                 timeout: 5000,
             },
         );
@@ -456,12 +451,10 @@ mod tests {
 
         // Append to monotonic state and then reload.
         let asset =
-            AssetDefinition::new(AssetCode::random(&mut stored.rng).0, Default::default()).unwrap();
+            AssetDefinition::new(AssetCode::random(&mut rng).0, Default::default()).unwrap();
         stored.auditable_assets.insert(asset.code, asset.clone());
         {
             let mut storage = AtomicWalletStorage::new(dir.path()).unwrap();
-            // Rng state changed, so we need to store a snapshot.
-            storage.store_snapshot(&key_pair, &stored).await.unwrap();
             storage
                 .store_auditable_asset(&key_pair, &asset)
                 .await
@@ -474,15 +467,13 @@ mod tests {
         };
         assert_wallet_states_eq(&stored, &loaded);
 
-        let (code, seed) = AssetCode::random(&mut stored.rng);
+        let (code, seed) = AssetCode::random(&mut rng);
         let asset = AssetDefinition::new(code, Default::default()).unwrap();
         stored
             .defined_assets
             .insert(asset.code, (asset.clone(), seed, vec![]));
         {
             let mut storage = AtomicWalletStorage::new(dir.path()).unwrap();
-            // Rng state changed, so we need to store a snapshot.
-            storage.store_snapshot(&key_pair, &stored).await.unwrap();
             storage
                 .store_defined_asset(&key_pair, &asset, seed, &[])
                 .await
@@ -500,7 +491,7 @@ mod tests {
 
     #[async_std::test]
     async fn test_revert() -> std::io::Result<()> {
-        let (key_pair, mut stored, dir) = get_test_state("test_revert").await;
+        let (key_pair, mut stored, mut rng, dir) = get_test_state("test_revert").await;
 
         // Make a change to one of the data structures, but revert it.
         let loaded = {
@@ -520,17 +511,14 @@ mod tests {
         let loaded = {
             let mut storage = AtomicWalletStorage::new(dir.path()).unwrap();
 
-            let (code, seed) = AssetCode::random(&mut stored.rng);
+            let (code, seed) = AssetCode::random(&mut rng);
             let asset = AssetDefinition::new(code, Default::default()).unwrap();
-            let ro = random_ro(&mut stored.rng, &key_pair);
+            let ro = random_ro(&mut rng, &key_pair);
             let nullifier = key_pair.nullify(
                 ro.asset_def.policy_ref().freezer_pub_key(),
                 0,
                 &RecordCommitment::from(&ro),
             );
-            // Commit the changed rng state.
-            storage.store_snapshot(&key_pair, &stored).await.unwrap();
-            storage.commit(&key_pair).await.unwrap();
 
             // Store some data.
             stored.records.insert(ro, 0, &key_pair);
