@@ -786,7 +786,13 @@ impl ValidatorState {
             let uid = self.next_uid;
             self.record_merkle_frontier.push(o.to_field_element());
             if !remember_commitments {
-                self.record_merkle_frontier.forget(uid).expect_ok().unwrap();
+                // Always keep the latest leaf, but forget the prior leafs
+                if uid > 0 {
+                    self.record_merkle_frontier
+                        .forget(uid - 1)
+                        .expect_ok()
+                        .unwrap();
+                }
             }
             ret.push(uid);
             self.next_uid += 1;
