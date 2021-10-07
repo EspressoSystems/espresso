@@ -1,9 +1,5 @@
 #![deny(warnings)]
 
-#[cfg(test)]
-#[macro_use]
-extern crate proptest;
-
 pub mod api;
 pub mod node;
 mod set_merkle_tree;
