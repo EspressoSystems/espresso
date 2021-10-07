@@ -291,7 +291,10 @@ mod tests {
     use super::*;
     use crate::{VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM};
     use jf_txn::{KeyPair, TransactionVerifyingKey};
-    use rand_chacha::{rand_core::{RngCore, SeedableRng}, ChaChaRng};
+    use rand_chacha::{
+        rand_core::{RngCore, SeedableRng},
+        ChaChaRng,
+    };
     use std::iter::{once, repeat_with};
     use tempdir::TempDir;
     use test_helpers::*;
