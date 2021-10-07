@@ -45,6 +45,7 @@ use std::io::Read;
 use std::iter::FromIterator;
 use std::ops::Bound::*;
 use std::path::Path;
+use std::path::PathBuf;
 use std::time::Instant;
 pub use util::canonical;
 
@@ -833,6 +834,13 @@ pub struct MultiXfrTestState {
     pub inner_timer: Instant,
 }
 
+/// Returns the path to the universal parameter file.
+fn universal_param_path() -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    const FILE: &str = "src/universal_param";
+    [&dir, Path::new(FILE)].iter().collect()
+}
+
 /// Generates universal parameter and store it to file.
 pub fn set_universal_param(prng: &mut ChaChaRng) {
     let universal_param = jf_txn::proof::universal_setup(
@@ -870,8 +878,12 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
     .unwrap_or_else(|err| panic!("Error while setting up the universal parameter: {}", err));
     let param_bytes = canonical::serialize(&universal_param)
         .unwrap_or_else(|err| panic!("Error while serializing the universal parameter: {}", err));
-    // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
-    let mut file = File::create("../../zerok/zerok_lib/src/universal_param".to_string())
+    let path = universal_param_path()
+        .into_os_string()
+        .into_string()
+        .expect("Error while converting universal parameter path to a string");
+    println!("path {}", path);
+    let mut file = File::create(path)
         .unwrap_or_else(|err| panic!("Error while creating a universal parameter file: {}", err));
     file.write_all(&param_bytes).unwrap_or_else(|err| {
         panic!(
@@ -884,9 +896,7 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
 /// Reads universal parameter from file if it exists. If not, generates the universal parameter, stores
 /// it to file, and returns it.
 pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalParam {
-    // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
-    let path_str = "../../zerok/zerok_lib/src/universal_param".to_string();
-    let path = Path::new(&path_str);
+    let path = universal_param_path();
 
     // create a new seeded PRNG from the master PRNG when getting the UniversalParam. This ensures a
     // deterministic RNG result after the call, either the UniversalParam is newly generated or loaded
