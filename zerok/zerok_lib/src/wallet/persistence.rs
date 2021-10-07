@@ -57,7 +57,7 @@ impl<'a> From<&WalletState<'a>> for WalletSnapshot {
 type AppendLogHandle<T> = Arc<Mutex<AppendLog<BincodeLoadStore<T>>>>;
 type RollingLogHandle<T> = Arc<Mutex<RollingLog<BincodeLoadStore<T>>>>;
 
-pub struct AtomicWalletStorage {
+pub struct AtomicWalletStorage<'a> {
     directory: PathBuf,
     static_path: PathBuf,
     store: AtomicStore,
@@ -67,9 +67,10 @@ pub struct AtomicWalletStorage {
     auditable_assets_dirty: bool,
     defined_assets: AppendLogHandle<(AssetDefinition, AssetCodeSeed, Vec<u8>)>,
     defined_assets_dirty: bool,
+    _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl AtomicWalletStorage {
+impl<'a> AtomicWalletStorage<'a> {
     pub fn new(directory: &Path) -> Result<Self, WalletError> {
         let mut loader = AtomicStoreLoader::load(directory, "wallet").context(PersistenceError)?;
         let dynamic_state = Arc::new(Mutex::new(
@@ -94,13 +95,14 @@ impl AtomicWalletStorage {
             auditable_assets_dirty: false,
             defined_assets,
             defined_assets_dirty: false,
+            _marker: Default::default(),
         })
     }
 
     pub async fn create(
         &mut self,
         key: &UserKeyPair,
-        w: &WalletState<'_>,
+        w: &WalletState<'a>,
     ) -> Result<(), WalletError> {
         let static_bytes = bincode::serialize(&WalletStaticState::from(w)).context(BincodeError)?;
         let mut static_file = OpenOptions::new()
@@ -115,7 +117,7 @@ impl AtomicWalletStorage {
 }
 
 #[async_trait]
-impl<'a> WalletStorage<'a> for AtomicWalletStorage {
+impl<'a> WalletStorage<'a> for AtomicWalletStorage<'a> {
     fn exists(&self, _key: &UserKeyPair) -> bool {
         self.static_path.exists()
     }

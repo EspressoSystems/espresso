@@ -31,7 +31,7 @@ pub struct NetworkBackend<'a> {
     query_client: surf::Client,
     bulletin_client: surf::Client,
     validator_client: surf::Client,
-    storage: Arc<Mutex<AtomicWalletStorage>>,
+    storage: Arc<Mutex<AtomicWalletStorage<'a>>>,
 }
 
 impl<'a> NetworkBackend<'a> {
@@ -104,7 +104,7 @@ impl<'a> NetworkBackend<'a> {
 #[async_trait]
 impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
     type EventStream = node::EventStream<LedgerEvent>;
-    type Storage = AtomicWalletStorage;
+    type Storage = AtomicWalletStorage<'a>;
 
     async fn create(&mut self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
         let mut rng = ChaChaRng::from_entropy();

@@ -276,79 +276,80 @@ pub trait WalletStorage<'a> {
 /// This struct should not be constructed directly, but instead a transaction should be obtained
 /// through the WalletBackend::store() method, which will automatically commit the transaction after
 /// it succeeds.
-pub struct StorageTransaction<'a, 'l, Storage: WalletStorage<'a>> {
-    storage: MutexGuard<'l, Storage>,
-    key_pair: &'l UserKeyPair,
+pub struct StorageTransaction<'a, 'l, Storage> {
+    // storage: MutexGuard<'l, Storage>,
+    _key_pair: &'l UserKeyPair,
     cancelled: bool,
     _phantom: std::marker::PhantomData<&'a ()>,
+    _phantom3: std::marker::PhantomData<Storage>,
 }
 
-impl<'a, 'l, Storage: WalletStorage<'a>> StorageTransaction<'a, 'l, Storage> {
-    fn new(storage: MutexGuard<'l, Storage>, key_pair: &'l UserKeyPair) -> Self {
-        Self {
-            storage,
-            key_pair,
-            cancelled: false,
-            _phantom: Default::default(),
-        }
-    }
+impl<'a, 'l, Storage> StorageTransaction<'a, 'l, Storage> {
+    // fn new(storage: MutexGuard<'l, Storage>, key_pair: &'l UserKeyPair) -> Self {
+    //     Self {
+    //         storage,
+    //         key_pair,
+    //         cancelled: false,
+    //         _phantom: Default::default(),
+    //     }
+    // }
 
-    async fn store_snapshot(&mut self, state: &WalletState<'a>) -> Result<(), WalletError> {
-        if !self.cancelled {
-            let res = self.storage.store_snapshot(self.key_pair, state).await;
-            if res.is_err() {
-                self.cancel().await;
-            }
-            res
-        } else {
-            Ok(())
-        }
-    }
+    // async fn store_snapshot(&mut self, state: &WalletState<'a>) -> Result<(), WalletError> {
+    //     if !self.cancelled {
+    //         let res = self.storage.store_snapshot(self.key_pair, state).await;
+    //         if res.is_err() {
+    //             self.cancel().await;
+    //         }
+    //         res
+    //     } else {
+    //         Ok(())
+    //     }
+    // }
 
-    async fn store_auditable_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
-        if !self.cancelled {
-            let res = self
-                .storage
-                .store_auditable_asset(self.key_pair, asset)
-                .await;
-            if res.is_err() {
-                self.cancel().await;
-            }
-            res
-        } else {
-            Ok(())
-        }
-    }
+    // async fn store_auditable_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
+    //     if !self.cancelled {
+    //         let res = self
+    //             .storage
+    //             .store_auditable_asset(self.key_pair, asset)
+    //             .await;
+    //         if res.is_err() {
+    //             self.cancel().await;
+    //         }
+    //         res
+    //     } else {
+    //         Ok(())
+    //     }
+    // }
 
-    async fn store_defined_asset(
-        &mut self,
-        asset: &AssetDefinition,
-        seed: AssetCodeSeed,
-        desc: &[u8],
-    ) -> Result<(), WalletError> {
-        if !self.cancelled {
-            let res = self
-                .storage
-                .store_defined_asset(self.key_pair, asset, seed, desc)
-                .await;
-            if res.is_err() {
-                self.cancel().await;
-            }
-            res
-        } else {
-            Ok(())
-        }
-    }
+    // async fn store_defined_asset(
+    //     &mut self,
+    //     asset: &AssetDefinition,
+    //     seed: AssetCodeSeed,
+    //     desc: &[u8],
+    // ) -> Result<(), WalletError> {
+    //     if !self.cancelled {
+    //         let res = self
+    //             .storage
+    //             .store_defined_asset(self.key_pair, asset, seed, desc)
+    //             .await;
+    //         if res.is_err() {
+    //             self.cancel().await;
+    //         }
+    //         res
+    //     } else {
+    //         Ok(())
+    //     }
+    // }
 
     async fn cancel(&mut self) {
         if !self.cancelled {
             self.cancelled = true;
-            self.storage.revert(self.key_pair).await;
+            // self.storage.revert(self.key_pair).await;
         }
     }
 }
 
-impl<'a, 'l, Storage: WalletStorage<'a>> Drop for StorageTransaction<'a, 'l, Storage> {
+impl<'a, 'l, Storage> Drop for StorageTransaction<'a, 'l, Storage> {
     fn drop(&mut self) {
         block_on(self.cancel())
     }
@@ -400,24 +401,25 @@ pub trait WalletBackend<'a>: Send {
     /// ```
     async fn store<'l, F, Fut>(
         &'l mut self,
-        key_pair: &'l UserKeyPair,
-        update: F,
+        _key_pair: &'l UserKeyPair,
+        _update: F,
     ) -> Result<(), WalletError>
     where
-        F: Fn(StorageTransaction<'a, 'l, Self::Storage>) -> Fut + Send,
-        Fut: Future<Output = Result<StorageTransaction<'a, 'l, Self::Storage>, WalletError>> + Send,
-        Self::Storage: 'l,
+        F: Fn(Self::Storage) -> Fut + Send,
+        Fut: Future<Output = Result<(), WalletError>> + Send,
+        // Self::Storage: 'l,
     {
-        let storage = self.storage().await;
-        let fut =
-            update(StorageTransaction::new(storage, key_pair)).and_then(|mut txn| async move {
-                let res = txn.storage.commit(key_pair).await;
-                if res.is_err() {
-                    txn.storage.revert(key_pair).await;
-                }
-                res
-            });
-        fut.await
+        // let storage = self.storage().await;
+        // let fut =
+        //     update(StorageTransaction::new(storage, key_pair)).and_then(|mut txn| async move {
+        //         let res = txn.storage.commit(key_pair).await;
+        //         if res.is_err() {
+        //             txn.storage.revert(key_pair).await;
+        //         }
+        //         res
+        //     });
+        // fut.await
+        Ok(())
     }
 
     // Querying the ledger
@@ -846,7 +848,7 @@ impl<'a> WalletState<'a> {
                                 println!("recoverable error in txn {:?}, resubmitting", txn);
                                 if self
                                     .submit_elaborated_transaction(
-                                        &mut session.backend,
+                                        session,
                                         txn,
                                         pending.receiver_memos,
                                         pending.signature,
@@ -866,11 +868,11 @@ impl<'a> WalletState<'a> {
 
         if let Err(err) = session
             .backend
-            .store(&session.key_pair, |mut t| {
-                let state = &self;
+            .store(&session.key_pair, |_t| {
+                // let state = &self;
                 async move {
-                    t.store_snapshot(state).await?;
-                    Ok(t)
+                    // t.store_snapshot(state).await?;
+                    Ok(())
                 }
             })
             .await
@@ -1092,17 +1094,17 @@ impl<'a> WalletState<'a> {
         // if we're not going to report success.
         session
             .backend
-            .store(&session.key_pair, |mut t| {
-                let asset_definition = &asset_definition;
-                let desc = &desc;
+            .store(&session.key_pair, |_t| {
+                // let asset_definition = &asset_definition;
+                // let desc = &desc;
                 async move {
-                    t.store_defined_asset(asset_definition, seed, desc).await?;
-                    if audit {
-                        // If we are going to be an auditor of the new asset, we must also persist
-                        // that information to disk before doing anything to the in-memory state.
-                        t.store_auditable_asset(asset_definition).await?;
-                    }
-                    Ok(t)
+                    // t.store_defined_asset(asset_definition, seed, desc).await?;
+                    // if audit {
+                    //     // If we are going to be an auditor of the new asset, we must also persist
+                    //     // that information to disk before doing anything to the in-memory state.
+                    //     t.store_auditable_asset(asset_definition).await?;
+                    // }
+                    Ok(())
                 }
             })
             .await?;
@@ -1140,9 +1142,9 @@ impl<'a> WalletState<'a> {
         // want to update the in-memory structure if the persistent store fails.
         session
             .backend
-            .store(&session.key_pair, |mut t| async move {
-                t.store_auditable_asset(asset).await?;
-                Ok(t)
+            .store(&session.key_pair, |_t| async move {
+                // t.store_auditable_asset(asset).await?;
+                Ok(())
             })
             .await?;
         self.auditable_assets.insert(asset.code, asset.clone());
@@ -1220,7 +1222,7 @@ impl<'a> WalletState<'a> {
         .context(CryptoError)?;
         let signature = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
         self.submit_transaction(
-            &mut session.backend,
+            session,
             TransactionNote::Mint(Box::new(mint_note)),
             recv_memos,
             signature,
@@ -1349,7 +1351,7 @@ impl<'a> WalletState<'a> {
             .unwrap();
         let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
         self.submit_transaction(
-            &mut session.backend,
+            session,
             TransactionNote::Freeze(Box::new(note)),
             recv_memos,
             sig,
@@ -1439,7 +1441,7 @@ impl<'a> WalletState<'a> {
             .unwrap();
         let sig = sign_receiver_memos(&kp, &recv_memos).context(CryptoError)?;
         self.submit_transaction(
-            &mut session.backend,
+            session,
             TransactionNote::Transfer(Box::new(note)),
             recv_memos,
             sig,
@@ -1554,7 +1556,7 @@ impl<'a> WalletState<'a> {
             .unwrap();
         let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
         self.submit_transaction(
-            &mut session.backend,
+            session,
             TransactionNote::Transfer(Box::new(note)),
             recv_memos,
             sig,
@@ -1565,7 +1567,7 @@ impl<'a> WalletState<'a> {
 
     async fn submit_transaction(
         &mut self,
-        backend: &mut impl WalletBackend<'a>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         note: TransactionNote,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
@@ -1580,7 +1582,7 @@ impl<'a> WalletState<'a> {
                     proof
                 }
             } else {
-                let proof = backend
+                let proof = session.backend
                     .prove_nullifier_unspent(self.nullifiers.hash(), n)
                     .await?;
                 self.nullifiers.remember(n, proof.clone()).unwrap();
@@ -1593,20 +1595,44 @@ impl<'a> WalletState<'a> {
             txn: note,
             proofs: nullifier_pfs,
         };
-        self.submit_elaborated_transaction(backend, txn, memos, sig, freeze_outputs)
+        self.submit_elaborated_transaction(session, txn, memos, sig, freeze_outputs)
             .await
     }
 
     async fn submit_elaborated_transaction(
         &mut self,
-        backend: &mut impl WalletBackend<'a>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         txn: ElaboratedTransaction,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
         freeze_outputs: Vec<RecordOpening>,
     ) -> Result<(), WalletError> {
         self.add_pending_transaction(&txn, memos.clone(), sig.clone(), freeze_outputs);
-        backend.submit(txn).await
+        
+        // Persist the pending transaction.
+        if let Err(err) = session
+            .backend
+            .store(&session.key_pair, |_t| {
+                // let state = &self;
+                async move {
+                    // t.store_snapshot(state).await?;
+                    Ok(())
+                }
+            })
+            .await
+        {
+            // If we failed to persist the pending transaction, we cannot submit it, because if we
+            // then exit and reload the process from storage, there will be an in-flight transaction
+            // which is not accounted for in our pending transaction data structures. Instead, we
+            // remove the pending transaction from our in-memory data structures and return the
+            // error.
+            self.clear_pending_transaction(session, &txn, Err(ValidationError::Failed {})).await;
+            return Err(err);
+        }
+
+        // If we succeeded in creating and persisting the pending transaction, submit it to the
+        // validators.
+        session.backend.submit(txn).await
     }
 
     fn add_pending_transaction(

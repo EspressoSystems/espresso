@@ -114,7 +114,7 @@ macro_rules! command {
                     };
                 )*
 
-                let $wallet = &mut *WALLET.lock().await;
+                let $wallet: &mut Wallet = &mut *WALLET.lock().await;
                 $run
             }))
         }
@@ -222,6 +222,15 @@ impl Listable for AssetCode {
     }
 }
 
+async fn transfer_cmd(wallet: &mut wallet::Wallet<'static, NetworkBackend<'static>>, asset: AssetCode, address: UserAddress, amount: u64, fee: u64) {
+    if let Err(err) = wallet
+        .transfer(&asset, &[(address.0, amount)], fee)
+        .await
+    {
+        println!("{}\nAssets were not transferred.", err);
+    }
+}
+
 lazy_static! {
     static ref COMMANDS: Vec<Command> = vec![
         command!(address, "print the address of this wallet", |wallet| {
@@ -242,18 +251,79 @@ lazy_static! {
                 println!("{}", wallet.balance(&asset.item).await);
             }
         ),
-        command!(
-            transfer,
-            "transfer some owned assets to another user",
-            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64| {
-                if let Err(err) = wallet
-                    .transfer(&asset.item, &[(address.0, amount)], fee)
-                    .await
-                {
-                    println!("{}\nAssets were not transferred.", err);
+        // command!(
+        //     transfer,
+        //     "transfer some owned assets to another user",
+        //     |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64| {
+        //         if let Err(err) = wallet
+        //             .transfer(&asset.item, &[(address.0, amount)], fee)
+        //             .await
+        //         {
+        //             println!("{}\nAssets were not transferred.", err);
+        //         }
+        //     }
+        // ),
+        Command {
+            name: String::from("transfer"),
+            params: vec![],
+            help: String::from("help"),
+            run: Box::new(|args| Box::pin(async {
+                if args.len() != 4 {
+                    println!("incorrect number of arguments (expected {})", 4);
+                    return;
                 }
-            }
-        ),
+
+                // For each (arg, ty) pair in the signature of the handler function, create a local
+                // variable `arg: ty` by converting from the corresponding string in the `args`
+                // vector. `args` will be unused if $($arg)* is empty, hence the following allows.
+                #[allow(unused_mut)]
+                #[allow(unused_variables)]
+                let mut args = args.into_iter();
+                let asset = match ListItem::<AssetCode>::from_str(args.next().unwrap().as_str()) {
+                    Ok(arg) => arg,
+                    Err(_) => {
+                        println!(
+                            "invalid value for argument {} (expected {})",
+                            "asset",
+                            "AssetCode");
+                        return;
+                    }
+                };
+                let address = match UserAddress::from_str(args.next().unwrap().as_str()) {
+                    Ok(arg) => arg,
+                    Err(_) => {
+                        println!(
+                            "invalid value for argument {} (expected {})",
+                            "address",
+                            "UserAddress");
+                        return;
+                    }
+                };
+                let amount = match u64::from_str(args.next().unwrap().as_str()) {
+                    Ok(arg) => arg,
+                    Err(_) => {
+                        println!(
+                            "invalid value for argument {} (expected {})",
+                            stringify!(amount),
+                            type_name::<u64>());
+                        return;
+                    }
+                };
+                let fee = match u64::from_str(args.next().unwrap().as_str()) {
+                    Ok(arg) => arg,
+                    Err(_) => {
+                        println!(
+                            "invalid value for argument {} (expected {})",
+                            stringify!(fee),
+                            type_name::<u64>());
+                        return;
+                    }
+                };
+
+                let wallet: &mut Wallet = &mut *WALLET.lock().await;
+                transfer_cmd(wallet, asset.item, address, amount, fee).await;
+            }))
+        },
         command!(help, "display list of available commands", || {
             for command in COMMANDS.iter() {
                 println!("{}", command);
