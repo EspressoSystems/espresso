@@ -754,6 +754,10 @@ impl ValidatorState {
         Ok((txns, null_pfs))
     }
 
+    /// Performs validation for a block, updating the ValidatorState.
+    ///
+    /// For a given instance of ValidatorState, all calls to validate_and_apply must pass the
+    /// same remember_commitments value. This identity holds for clones of the original as well.
     pub fn validate_and_apply(
         &mut self,
         now: u64,
@@ -761,6 +765,10 @@ impl ValidatorState {
         null_pfs: Vec<Vec<SetMerkleProof>>,
         remember_commitments: bool,
     ) -> Result<Vec<u64> /* new uids */, ValidationError> {
+        // If the block successfully validates, and the nullifier proofs apply correctly,
+        // the remaining (mutating) operations cannot fail, as this would result in an
+        // inconsistent state. Currenlty, no operations after the first assignement to a member
+        // of self have a possible error; this must remain true if code changes.
         let (txns, _null_pfs) = self.validate_block(now, txns, null_pfs.clone())?;
         let comm = self.commit();
         self.prev_commit_time = now;
