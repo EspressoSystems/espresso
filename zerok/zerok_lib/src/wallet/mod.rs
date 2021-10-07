@@ -404,8 +404,8 @@ pub trait WalletBackend<'a>: Send {
         update: F,
     ) -> Result<(), WalletError>
     where
-        F: Fn(StorageTransaction<'a, 'l, Self::Storage>) -> Fut + Send,
-        Fut: Future<Output = Result<StorageTransaction<'a, 'l, Self::Storage>, WalletError>> + Send,
+        F: Send + Fn(StorageTransaction<'a, 'l, Self::Storage>) -> Fut,
+        Fut: Send + Future<Output = Result<StorageTransaction<'a, 'l, Self::Storage>, WalletError>>,
         Self::Storage: 'l,
     {
         let storage = self.storage().await;
@@ -659,6 +659,11 @@ const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN
 const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
 // (block_id, txn_id, [(uid, remember)])
 type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
+
+// Trait used to indicate that an abstract return type captures a reference with the lifetime 'a.
+// See https://stackoverflow.com/questions/50547766/how-can-i-get-impl-trait-to-use-the-appropriate-lifetime-for-a-mutable-reference
+pub trait Captures<'a> {}
+impl<'a, T: ?Sized> Captures<'a> for T {}
 
 impl<'a> WalletState<'a> {
     pub fn pub_key(&self, session: &WalletSession<'a, impl WalletBackend<'a>>) -> UserPubKey {
@@ -1598,38 +1603,58 @@ impl<'a> WalletState<'a> {
             .await
     }
 
-    async fn submit_elaborated_transaction(
-        &mut self,
-        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+    // For reasons that are not clearly understood, the default async desugaring for this function
+    // loses track of the fact that the result type implements Send, which causes very confusing
+    // error messages farther up the call stack (apparently at the point where this function is
+    // monomorphized) which do not point back to this location. This is likely due to a bug in type
+    // inference, or at least a deficiency around async sugar combined with a bug in diagnostics.
+    //
+    // As a work-around, we do the desugaring manually so that we can explicitly specify that the
+    // return type implements Send. The return type also captures a reference with lifetime 'a,
+    // which is different from (but related to) the lifetime 'b of the returned Future, and
+    // `impl 'a + 'b + ...` does not work, so we use the work-around described at
+    // https://stackoverflow.com/questions/50547766/how-can-i-get-impl-trait-to-use-the-appropriate-lifetime-for-a-mutable-reference
+    // to indicate the captured lifetime using the Captures trait.
+    fn submit_elaborated_transaction<'b>(
+        &'b mut self,
+        session: &'b mut WalletSession<'a, impl WalletBackend<'a>>,
         txn: ElaboratedTransaction,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
         freeze_outputs: Vec<RecordOpening>,
-    ) -> Result<(), WalletError> {
-        self.add_pending_transaction(&txn, memos.clone(), sig.clone(), freeze_outputs);
+    ) -> impl 'b + Captures<'a> + Future<Output = Result<(), WalletError>> + Send
+    where
+        'a: 'b,
+    {
+        async move {
+            self.add_pending_transaction(&txn, memos.clone(), sig.clone(), freeze_outputs);
 
-        // Persist the pending transaction.
-        let fut = session.backend.store(&session.key_pair, |mut t| {
-            let state = &self;
-            async move {
-                t.store_snapshot(state).await?;
-                Ok(t)
+            // Persist the pending transaction.
+            if let Err(err) = session
+                .backend
+                .store(&session.key_pair, |mut t| {
+                    let state = &self;
+                    async move {
+                        t.store_snapshot(state).await?;
+                        Ok(t)
+                    }
+                })
+                .await
+            {
+                // If we failed to persist the pending transaction, we cannot submit it, because if
+                // we then exit and reload the process from storage, there will be an in-flight
+                // transaction which is not accounted for in our pending transaction data
+                // structures. Instead, we remove the pending transaction from our in-memory data
+                // structures and return the error.
+                self.clear_pending_transaction(session, &txn, Err(ValidationError::Failed {}))
+                    .await;
+                return Err(err);
             }
-        });
-        if let Err(err) = fut.await {
-            // If we failed to persist the pending transaction, we cannot submit it, because if we
-            // then exit and reload the process from storage, there will be an in-flight transaction
-            // which is not accounted for in our pending transaction data structures. Instead, we
-            // remove the pending transaction from our in-memory data structures and return the
-            // error.
-            self.clear_pending_transaction(session, &txn, Err(ValidationError::Failed {}))
-                .await;
-            return Err(err);
-        }
 
-        // If we succeeded in creating and persisting the pending transaction, submit it to the
-        // validators.
-        session.backend.submit(txn).await
+            // If we succeeded in creating and persisting the pending transaction, submit it to the
+            // validators.
+            session.backend.submit(txn).await
+        }
     }
 
     fn add_pending_transaction(
