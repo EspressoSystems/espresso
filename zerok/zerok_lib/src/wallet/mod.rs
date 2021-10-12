@@ -235,13 +235,10 @@ pub struct RecordDatabase {
 }
 
 impl RecordDatabase {
-    fn assets(&self) -> Vec<AssetCode> {
+    fn assets(&'_ self) -> impl '_ + Iterator<Item = AssetDefinition> {
         self.record_info
             .values()
-            .map(|rec| rec.ro.asset_def.code)
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect()
+            .map(|rec| rec.ro.asset_def.clone())
     }
 
     /// Find records which can be the input to a transaction, matching the given parameters.
@@ -362,6 +359,40 @@ const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
 // (block_id, txn_id, [(uid, remember)])
 type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
 
+pub struct AssetInfo {
+    pub asset: AssetDefinition,
+    pub mint_info: Option<MintInfo>,
+}
+
+impl AssetInfo {
+    pub fn new(asset: AssetDefinition, mint_info: MintInfo) -> Self {
+        Self {
+            asset,
+            mint_info: Some(mint_info),
+        }
+    }
+}
+
+impl From<AssetDefinition> for AssetInfo {
+    fn from(asset: AssetDefinition) -> Self {
+        Self {
+            asset,
+            mint_info: None,
+        }
+    }
+}
+
+pub struct MintInfo {
+    pub seed: AssetCodeSeed,
+    pub desc: Vec<u8>,
+}
+
+impl MintInfo {
+    pub fn new(seed: AssetCodeSeed, desc: Vec<u8>) -> Self {
+        Self { seed, desc }
+    }
+}
+
 impl<'a> WalletState<'a> {
     pub fn pub_key(&self, session: &WalletSession<'a, impl WalletBackend<'a>>) -> UserPubKey {
         session.key_pair.pub_key()
@@ -384,8 +415,25 @@ impl<'a> WalletState<'a> {
             .sum()
     }
 
-    pub fn assets(&self) -> Vec<AssetCode> {
-        self.records.assets()
+    pub fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
+        // Get the asset definitions of each record we own.
+        let mut assets: HashMap<AssetCode, AssetInfo> = self
+            .records
+            .assets()
+            .map(|def| (def.code, AssetInfo::from(def)))
+            .collect();
+        // Add any assets that we know about through auditing.
+        for (code, def) in &self.auditable_assets {
+            assets.insert(*code, AssetInfo::from(def.clone()));
+        }
+        // Add the minting information (seed and description) for each asset we've defined.
+        for (code, (def, seed, desc)) in &self.defined_assets {
+            assets.insert(
+                *code,
+                AssetInfo::new(def.clone(), MintInfo::new(*seed, desc.clone())),
+            );
+        }
+        assets
     }
 
     pub async fn handle_event(
@@ -1600,7 +1648,7 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
         state.balance(session, asset, FreezeFlag::Frozen)
     }
 
-    pub async fn assets(&self) -> Vec<AssetCode> {
+    pub async fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
         let (state, ..) = &*self.mutex.lock().await;
         state.assets()
     }

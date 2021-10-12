@@ -11,9 +11,11 @@ use async_std::task::block_on;
 use async_trait::async_trait;
 use fmt::{Display, Formatter};
 use futures::future::BoxFuture;
-use jf_txn::structs::AssetCode;
+use jf_txn::keys::{AuditorPubKey, FreezerPubKey};
+use jf_txn::structs::{AssetCode, AssetDefinition, AssetPolicy};
 use lazy_static::lazy_static;
 use std::any::type_name;
+use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -22,7 +24,8 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
 use structopt::StructOpt;
-use wallet::network::*;
+use tagged_base64::TaggedBase64;
+use wallet::{network::*, AssetInfo, MintInfo};
 use zerok_lib::{api, wallet, UNIVERSAL_PARAM};
 
 type Wallet = wallet::Wallet<'static, NetworkBackend<'static>>;
@@ -52,18 +55,25 @@ struct Command {
     // The parameters of the command and their types, as strings, for display purposes in the 'help'
     // command.
     params: Vec<(String, String)>,
+    // The keyword parameters of the command and their types, as strings, for display purposes in
+    // the 'help' command.
+    kwargs: Vec<(String, String)>,
     // A brief description of what the command does.
     help: String,
     // Run the command with a list of arguments.
     run: CommandFunc,
 }
 
-type CommandFunc = Box<dyn Sync + for<'a> Fn(Vec<String>) -> BoxFuture<'static, ()>>;
+type CommandFunc =
+    Box<dyn Sync + for<'a> Fn(Vec<String>, HashMap<String, String>) -> BoxFuture<'static, ()>>;
 
 impl Display for Command {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)?;
         for (param, ty) in &self.params {
+            write!(f, " {}: {}", param, ty)?;
+        }
+        for (param, ty) in &self.kwargs {
             write!(f, " [{}: {}]", param, ty)?;
         }
         write!(f, "\n    {}", self.help)?;
@@ -72,15 +82,22 @@ impl Display for Command {
 }
 
 macro_rules! command {
-    ($name:ident, $help:expr, |$wallet:pat, $($arg:ident : $argty:ty),*| $run:expr) => {
+    ($name:ident,
+     $help:expr,
+     |$wallet:pat, $($arg:ident : $argty:ty),*
+      $(; $($kwarg:ident : Option<$kwargty:ty>),*)?| $run:expr) => {
         Command {
             name: String::from(stringify!($name)),
             params: vec![$((
                 String::from(stringify!($arg)),
                 String::from(type_name::<$argty>()),
             )),*],
+            kwargs: vec![$($((
+                String::from(stringify!($kwarg)),
+                String::from(type_name::<$kwargty>()),
+            )),*)?],
             help: String::from($help),
-            run: Box::new(|args| Box::pin(async {
+            run: Box::new(|args, kwargs| Box::pin(async move {
                 if args.len() != count!($($arg)*) {
                     println!("incorrect number of arguments (expected {})", count!($($arg)*));
                     return;
@@ -104,6 +121,27 @@ macro_rules! command {
                         }
                     };
                 )*
+
+                // For each (kwarg, ty) pair in the signature of the handler function, create a
+                // local variable `kwarg: Option<ty>` by converting the value associated with
+                // `kwarg` in `kwargs` to tye type `ty`.
+                $($(
+                    let $kwarg = match kwargs.get(stringify!($kwarg)) {
+                        Some(val) => match <$kwargty>::from_str(val) {
+                            Ok(arg) => Some(arg),
+                            Err(_) => {
+                                println!(
+                                    "invalid value for argument {} (expected {})",
+                                    stringify!($kwarg),
+                                    type_name::<$kwargty>());
+                                return;
+                            }
+                        }
+                        None => None,
+                    };
+                )*)?
+                // `kwargs` will be unused if there are no keyword params.
+                let _ = kwargs;
 
                 let $wallet = &mut *WALLET.lock().await;
                 $run
@@ -189,25 +227,50 @@ impl Listable for AssetCode {
             .assets()
             .await
             .into_iter()
-            .filter(|asset| *asset != AssetCode::native())
+            .filter_map(|(code, asset)| {
+                if code == AssetCode::native() {
+                    None
+                } else {
+                    Some(asset)
+                }
+            })
             .collect::<Vec<_>>();
         // Sort alphabetically for consistent ordering as long as the set of known assets remains
         // stable.
-        assets.sort_by_key(|asset| asset.to_string());
+        assets.sort_by_key(|info| info.asset.code.to_string());
 
         // Convert to ListItems and prepend the native asset code.
-        once(AssetCode::native())
+        once(AssetInfo::from(AssetDefinition::native()))
             .chain(assets)
             .into_iter()
             .enumerate()
-            .map(|(index, asset)| ListItem {
+            .map(|(index, info)| ListItem {
                 index,
-                annotation: if asset == AssetCode::native() {
+                annotation: if info.asset.code == AssetCode::native() {
                     Some(String::from("native"))
                 } else {
-                    None
+                    // Annotate the listing with attributes indicating whether the asset is
+                    // auditable, freezable, and mintable by us.
+                    let mut attributes = String::new();
+                    let policy = info.asset.policy_ref();
+                    let auditor_pub_key = wallet.auditor_pub_key();
+                    let freezer_pub_key = wallet.freezer_pub_key();
+                    if *policy.auditor_pub_key() == auditor_pub_key {
+                        attributes.push('a');
+                    }
+                    if *policy.freezer_pub_key() == freezer_pub_key {
+                        attributes.push('f');
+                    }
+                    if info.mint_info.is_some() {
+                        attributes.push('m');
+                    }
+                    if attributes.is_empty() {
+                        None
+                    } else {
+                        Some(attributes)
+                    }
                 },
-                item: asset,
+                item: info.asset.code,
             })
             .collect()
     }
@@ -223,9 +286,73 @@ lazy_static! {
         }),
         command!(assets, "list assets known to the wallet", |wallet| {
             for item in AssetCode::list(wallet).await {
-                println!("{}", item)
+                println!("{}", item);
             }
+            println!("(a=auditable, f=freezeable, m=mintable)");
         }),
+        command!(
+            asset,
+            "print information about an asset",
+            |wallet, asset: ListItem<AssetCode>| {
+                let assets = wallet.assets().await;
+                let info = match assets.get(&asset.item) {
+                    Some(info) => info,
+                    None => {
+                        println!("No such asset {}", asset.item);
+                        return;
+                    }
+                };
+
+                // Try to format the asset description as human-readable as possible.
+                let desc = if let Some(MintInfo { desc, .. }) = &info.mint_info {
+                    // If it looks like it came from a string, interpret as a string. Otherwise,
+                    // encode the binary blob as tagged base64.
+                    match std::str::from_utf8(desc) {
+                        Ok(s) => String::from(s),
+                        Err(_) => TaggedBase64::new("DESC", desc).unwrap().to_string(),
+                    }
+                } else if info.asset.code == AssetCode::native() {
+                    String::from("Native")
+                } else {
+                    String::from("Asset")
+                };
+                println!("{} {}", desc, info.asset.code);
+
+                // Print the auditor, noting if it is us.
+                let policy = info.asset.policy_ref();
+                if policy.is_auditor_pub_key_set() {
+                    let auditor_key = policy.auditor_pub_key();
+                    if *auditor_key == wallet.auditor_pub_key() {
+                        println!("Auditor: me");
+                    } else {
+                        println!("Auditor: {}", *auditor_key);
+                    }
+                } else {
+                    println!("Not auditable");
+                }
+
+                // Print the freezer, noting if it is us.
+                if policy.is_freezer_pub_key_set() {
+                    let freezer_key = policy.freezer_pub_key();
+                    if *freezer_key == wallet.freezer_pub_key() {
+                        println!("Freezer: me");
+                    } else {
+                        println!("Freezer: {}", *freezer_key);
+                    }
+                } else {
+                    println!("Not freezeable");
+                }
+
+                // Print the minter, noting if it is us.
+                if info.mint_info.is_some() {
+                    println!("Minter: me");
+                } else if info.asset.code == AssetCode::native() {
+                    println!("Not mintable");
+                } else {
+                    println!("Minter: unknown");
+                }
+            }
+        ),
         command!(
             balance,
             "print owned balance of asset",
@@ -243,6 +370,46 @@ lazy_static! {
                 {
                     println!("{}\nAssets were not transferred.", err);
                 }
+            }
+        ),
+        command!(
+            issue,
+            "create a new asset",
+            |wallet, desc: String; auditor: Option<AuditorPubKey>, freezer: Option<FreezerPubKey>| {
+                let mut policy = AssetPolicy::default();
+                if let Some(auditor) = auditor {
+                    policy = policy.set_auditor_pub_key(auditor);
+                }
+                if let Some(freezer) = freezer {
+                    policy = policy.set_freezer_pub_key(freezer);
+                }
+                match wallet.define_asset(desc.as_bytes(), policy).await {
+                    Ok(def) => {
+                        println!("{}", def.code);
+                    }
+                    Err(err) => {
+                        println!("{}\nAsset was not created.", err);
+                    }
+                }
+            }
+        ),
+        command!(
+            mint,
+            "mint an asset",
+            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64| {
+                if let Err(err) = wallet.mint(fee, &asset.item, amount, address.0).await {
+                    println!("{}\nAssets were not minted.", err);
+                }
+            }
+        ),
+        command!(
+            info,
+            "print general information about this wallet",
+            |wallet| {
+                println!("Address: {}", wallet.address());
+                println!("Public key: {}", wallet.pub_key());
+                println!("Audit key: {}", wallet.auditor_pub_key());
+                println!("Freeze key: {}", wallet.freezer_pub_key());
             }
         ),
         command!(help, "display list of available commands", || {
@@ -357,7 +524,16 @@ async fn main() {
         }
         for Command { name, run, .. } in COMMANDS.iter() {
             if name == tokens[0] {
-                run(tokens.into_iter().skip(1).map(String::from).collect()).await;
+                let mut args = Vec::new();
+                let mut kwargs = HashMap::new();
+                for tok in tokens.into_iter().skip(1) {
+                    if let Some((key, value)) = tok.split_once("=") {
+                        kwargs.insert(String::from(key), String::from(value));
+                    } else {
+                        args.push(String::from(tok));
+                    }
+                }
+                run(args, kwargs).await;
                 continue 'repl;
             }
         }
