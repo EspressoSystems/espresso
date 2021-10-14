@@ -93,6 +93,7 @@ impl TestState {
             self.load(None)?;
         }
         let command = self.substitute(command)?;
+        println!("{}> {}", wallet, command);
         self.prev_output = self.wallets[wallet].command(&command)?;
         Ok(self)
     }
@@ -261,11 +262,12 @@ impl Drop for TestState {
 struct Wallet {
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    process: Child,
 }
 
 impl Wallet {
     fn new(server: String, key_path: Option<PathBuf>) -> Result<Self, String> {
-        let child = cargo_run("zerok_client")?
+        let mut child = cargo_run("zerok_client")?
             .args(
                 key_path
                     .map(|k| {
@@ -286,11 +288,12 @@ impl Wallet {
             .stdout(Stdio::piped())
             .spawn()
             .map_err(err)?;
-        let stdin = child.stdin.ok_or("failed to open stdin for wallet")?;
-        let stdout = child.stdout.ok_or("failed to open stdin for wallet")?;
+        let stdin = child.stdin.take().ok_or("failed to open stdin for wallet")?;
+        let stdout = child.stdout.take().ok_or("failed to open stdin for wallet")?;
         let mut wallet = Self {
             stdin,
             stdout: BufReader::new(stdout),
+            process: child,
         };
         wallet.read_until_prompt()?;
         Ok(wallet)
@@ -319,6 +322,13 @@ impl Wallet {
             }
         }
         Ok(lines)
+    }
+}
+
+impl Drop for Wallet {
+    fn drop(&mut self) {
+        self.process.kill().ok();
+        self.process.wait().ok();
     }
 }
 
