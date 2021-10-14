@@ -1,5 +1,5 @@
-use assert_cmd::cargo::cargo_bin;
 use async_std::task::{block_on, spawn_blocking};
+use escargot::CargoBuild;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
@@ -43,7 +43,7 @@ impl TestState {
         let tmp_dir = TempDir::new("test_wallet_cli").map_err(err)?;
         let mut key_path = PathBuf::from(tmp_dir.path());
         key_path.push("primary_key");
-        Command::new(cargo_bin("zerok_client"))
+        cargo_run("zerok_client")?
             .args([
                 "-g",
                 key_path
@@ -173,7 +173,8 @@ impl TestState {
         ) -> Child {
             let id = id.to_string();
             key_path.set_extension("pub");
-            let mut child = Command::new(cargo_bin("multi_machine"))
+            let mut child = cargo_run("multi_machine")
+                .unwrap()
                 .args([
                     "--config",
                     cfg_path.as_os_str().to_str().unwrap(),
@@ -264,7 +265,7 @@ struct Wallet {
 
 impl Wallet {
     fn new(server: String, key_path: Option<PathBuf>) -> Result<Self, String> {
-        let child = Command::new(cargo_bin("zerok_client"))
+        let child = cargo_run("zerok_client")?
             .args(
                 key_path
                     .map(|k| {
@@ -345,4 +346,15 @@ fn get_port() -> u64 {
     let port = *first_free_port;
     *first_free_port += 1;
     port
+}
+
+fn cargo_run(bin: impl AsRef<str>) -> Result<Command, String> {
+    Ok(CargoBuild::new()
+        .package(bin.as_ref())
+        .bin(bin.as_ref())
+        .current_release()
+        .current_target()
+        .run()
+        .map_err(err)?
+        .command())
 }
