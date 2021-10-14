@@ -44,6 +44,13 @@ struct Args {
     /// If not given, new keys are generated randomly.
     key_path: Option<PathBuf>,
 
+    #[structopt(long)]
+    /// Run in a mode which is friendlier to automated scripting.
+    ///
+    /// Instead of prompting the user for input with a line editor, the prompt will be printed,
+    /// followed by a newline, and the input will be read without an editor.
+    non_interactive: bool,
+
     /// URL of a server for interacting with the ledger
     server: Option<Url>,
 }
@@ -406,7 +413,7 @@ lazy_static! {
             info,
             "print general information about this wallet",
             |wallet| {
-                println!("Address: {}", wallet.address());
+                println!("Address: {}", api::UserAddress(wallet.address()));
                 println!("Public key: {}", wallet.pub_key());
                 println!("Audit key: {}", wallet.auditor_pub_key());
                 println!("Freeze key: {}", wallet.freezer_pub_key());
@@ -475,6 +482,33 @@ async fn init_repl() -> Wallet {
     wallet
 }
 
+enum Reader {
+    Interactive(rustyline::Editor<()>),
+    Automated,
+}
+
+impl Reader {
+    fn new(args: &Args) -> Self {
+        if args.non_interactive {
+            Self::Automated
+        } else {
+            Self::Interactive(rustyline::Editor::<()>::new())
+        }
+    }
+
+    fn read_line(&mut self) -> Option<String> {
+        let prompt = "> ";
+        match self {
+            Self::Interactive(editor) => editor.readline(prompt).ok(),
+            Self::Automated => {
+                println!("{}", prompt);
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line).ok().map(|_| line)
+            }
+        }
+    }
+}
+
 #[async_std::main]
 async fn main() {
     let args = Args::from_args();
@@ -516,8 +550,8 @@ async fn main() {
     // after the user has started using the wallet.
     let _ = &*WALLET;
 
-    let mut input = rustyline::Editor::<()>::new();
-    'repl: while let Ok(line) = input.readline("> ") {
+    let mut input = Reader::new(&args);
+    'repl: while let Some(line) = input.read_line() {
         let tokens = line.split_whitespace().collect::<Vec<_>>();
         if tokens.is_empty() {
             continue;
