@@ -11,7 +11,7 @@ use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitmen
 use jf_txn::{MerkleTree, TransactionVerifyingKey};
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
-    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey,
+    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_512,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Serialize};
@@ -30,8 +30,12 @@ use tide_websockets::{WebSocket, WebSocketConnection};
 use toml::Value;
 use tracing::debug;
 use zerok_lib::{
-    api::*, key_set::KeySet, node::*, ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec,
-    MultiXfrTestState, ValidatorState, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
+    api::*,
+    key_set::KeySet,
+    node,
+    node::{EventStream, PhaseLockEvent, QueryService, Validator},
+    ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
+    VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
 };
 
 mod disco;
@@ -242,8 +246,13 @@ async fn get_networking<
     panic!("Failed to open a port");
 }
 
+type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_512>>;
+type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_512>;
+type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
+type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
+
 enum Node {
-    Light(LightWeightNode),
+    Light(LWNode),
     Full(FullNode<'static>),
 }
 
@@ -253,7 +262,7 @@ impl Validator for Node {
 
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
         match self {
-            Node::Light(n) => <LightWeightNode as Validator>::submit_transaction(n, tx).await,
+            Node::Light(n) => <LWNode as Validator>::submit_transaction(n, tx).await,
             Node::Full(n) => n.submit_transaction(tx).await,
         }
     }
@@ -386,6 +395,7 @@ async fn init_state_and_phaselock(
         next_view_timeout: 10000,
         timeout_ratio: (11, 10),
         round_start_delay: 1,
+        start_delay: 1,
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
@@ -865,11 +875,13 @@ async fn main() -> Result<(), std::io::Error> {
                 let event = events.next().await.expect("PhaseLock unexpectedly closed");
 
                 if let EventType::Decide { block: _, state } = event.event {
-                    let commitment = TaggedBase64::new("LEDG", &state.commit())
-                        .unwrap()
-                        .to_string();
-                    println!("  - Current commitment: {}", commitment);
-                    break;
+                    if !state.is_empty() {
+                        let commitment = TaggedBase64::new("LEDG", &state[0].commit())
+                            .unwrap()
+                            .to_string();
+                        println!("  - Current commitment: {}", commitment);
+                        break;
+                    }
                 } else {
                     println!("EVENT: {:?}", event);
                 }

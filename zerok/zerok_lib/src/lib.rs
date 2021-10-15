@@ -8,6 +8,7 @@ pub mod api;
 pub mod node;
 mod set_merkle_tree;
 mod util;
+pub mod validator_node;
 pub mod wallet;
 
 use ark_serialize::*;
@@ -31,7 +32,7 @@ use jf_txn::{
     AccMemberWitness, MerkleTree, NodeValue, Signature, TransactionNote, TransactionVerifyingKey,
 };
 use lazy_static::lazy_static;
-use phaselock::BlockContents;
+use phaselock::{traits::state::State, BlockContents, H_512};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
@@ -41,6 +42,7 @@ pub use set_merkle_tree::*;
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::iter::FromIterator;
 use std::ops::Bound::*;
@@ -109,20 +111,11 @@ pub struct ElaboratedBlock {
 
 deserialize_canonical_bytes!(ElaboratedBlock);
 
-impl BlockContents<64> for ElaboratedBlock {
-    type State = ValidatorState;
+impl BlockContents<H_512> for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
 
-    fn next_block(_: &Self::State) -> Self {
-        Default::default()
-    }
-
-    fn add_transaction(
-        &self,
-        _state: &ValidatorState,
-        txn: &ElaboratedTransaction,
-    ) -> Result<Self, ValidationError> {
+    fn add_transaction_raw(&self, txn: &ElaboratedTransaction) -> Result<Self, ValidationError> {
         let mut ret = self.clone();
 
         let mut nulls = self
@@ -142,26 +135,6 @@ impl BlockContents<64> for ElaboratedBlock {
         ret.proofs.push(txn.proofs.clone());
 
         Ok(ret)
-    }
-
-    fn validate_block(&self, state: &ValidatorState) -> bool {
-        state
-            .validate_block(
-                state.prev_commit_time + 1,
-                self.block.clone(),
-                self.proofs.clone(),
-            )
-            .is_ok()
-    }
-    fn append_to(&self, state: &ValidatorState) -> Result<ValidatorState, ValidationError> {
-        let mut state = state.clone();
-        state.validate_and_apply(
-            state.prev_commit_time + 1,
-            self.block.clone(),
-            self.proofs.clone(),
-            false,
-        )?;
-        Ok(state)
     }
 
     fn hash(&self) -> phaselock::BlockHash<64> {
@@ -676,7 +649,7 @@ impl ValidatorState {
         inputs.commit()
     }
 
-    pub fn validate_block(
+    pub fn validate_block_check(
         &self,
         now: u64,
         txns: Block,
@@ -769,7 +742,7 @@ impl ValidatorState {
         // the remaining (mutating) operations cannot fail, as this would result in an
         // inconsistent state. Currenlty, no operations after the first assignement to a member
         // of self have a possible error; this must remain true if code changes.
-        let (txns, _null_pfs) = self.validate_block(now, txns, null_pfs.clone())?;
+        let (txns, _null_pfs) = self.validate_block_check(now, txns, null_pfs.clone())?;
         let comm = self.commit();
         self.prev_commit_time = now;
         self.prev_block = txns.clone();
@@ -816,6 +789,52 @@ impl ValidatorState {
         self.prev_state = comm;
         Ok(ret)
     }
+}
+
+impl PartialEq for ValidatorState {
+    fn eq(&self, other: &ValidatorState) -> bool {
+        self.commit() == other.commit()
+    }
+}
+
+impl Eq for ValidatorState {}
+
+impl Hash for ValidatorState {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.commit().hash(state);
+    }
+}
+
+impl State<H_512> for ValidatorState {
+    type Error = ValidationError;
+
+    type Block = ElaboratedBlock;
+
+    fn next_block(&self) -> Self::Block {
+        Self::Block::default()
+    }
+
+    fn validate_block(&self, block: &Self::Block) -> bool {
+        self.validate_block_check(
+            self.prev_commit_time + 1,
+            block.block.clone(),
+            block.proofs.clone(),
+        )
+        .is_ok()
+    }
+
+    fn append(&self, block: &Self::Block) -> Result<Self, Self::Error> {
+        let mut state = self.clone();
+        state.validate_and_apply(
+            state.prev_commit_time + 1,
+            block.block.clone(),
+            block.proofs.clone(),
+            false,
+        )?;
+        Ok(state)
+    }
+
+    fn on_commit(&self) {}
 }
 
 pub struct MultiXfrTestState {
@@ -1073,7 +1092,7 @@ impl MultiXfrTestState {
             inner_timer: Instant::now(),
         };
 
-        let mut setup_block = ElaboratedBlock::next_block(&ret.validator);
+        let mut setup_block = ret.validator.next_block();
 
         let mut keys_in_block = HashSet::<usize>::new();
 
@@ -1223,7 +1242,7 @@ impl MultiXfrTestState {
             ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
                 .unwrap();
 
-            setup_block = ElaboratedBlock::next_block(&ret.validator);
+            setup_block = ret.validator.next_block();
         }
 
         ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
@@ -1813,7 +1832,7 @@ impl MultiXfrTestState {
                 .iter()
                 .map(|x| x.output_commitments().len() as u64)
                 .sum::<u64>();
-        let newblk = blk.add_transaction(&self.validator, &txn)?;
+        let newblk = blk.add_transaction_raw(&txn)?;
         println!("Block {}/{} adding {}", round + 1, num_txs, ix);
         self.memos.extend(owner_memos);
         self.fee_records[kixs[0]] = base_ix;
@@ -1836,15 +1855,12 @@ impl MultiXfrTestState {
     ) -> Result<(), ValidationError> {
         Self::update_timer(&mut self.inner_timer, |_| ());
 
-        if !blk.validate_block(&self.validator) {
-            self.validator.validate_block(
-                self.validator.prev_commit_time + 1,
-                blk.block.clone(),
-                blk.proofs,
-            )?;
-            return Err(ValidationError::Failed {});
-        }
-        let new_state = blk.append_to(&self.validator).unwrap();
+        self.validator.validate_block_check(
+            self.validator.prev_commit_time + 1,
+            blk.block.clone(),
+            blk.proofs.clone(),
+        )?;
+        let new_state = self.validator.append(&blk).unwrap();
 
         for n in blk.block.0.iter().flat_map(|x| x.nullifiers().into_iter()) {
             assert!(!self.nullifiers.contains(n).unwrap().0);

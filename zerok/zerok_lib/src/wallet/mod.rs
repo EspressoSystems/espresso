@@ -1736,6 +1736,7 @@ pub mod test_helpers {
     use futures::channel::mpsc as channel;
     use futures::future;
     use itertools::izip;
+    use phaselock::traits::state::State;
     use phaselock::BlockContents;
     use rand_chacha::rand_core::RngCore;
     use std::iter::once;
@@ -1769,10 +1770,7 @@ pub mod test_helpers {
         }
 
         fn flush(&mut self) {
-            let block = std::mem::replace(
-                &mut self.current_block,
-                ElaboratedBlock::next_block(&self.validator),
-            );
+            let block = std::mem::replace(&mut self.current_block, self.validator.next_block());
             match self.validator.validate_and_apply(
                 self.validator.prev_commit_time + 1,
                 block.block.clone(),
@@ -1828,7 +1826,7 @@ pub mod test_helpers {
                 return;
             }
 
-            match self.current_block.add_transaction(&self.validator, &txn) {
+            match self.current_block.add_transaction_raw(&txn) {
                 Ok(block) => {
                     self.current_block = block;
                     // self.current_memos.push(memos);
@@ -2096,7 +2094,7 @@ pub mod test_helpers {
             now.elapsed().as_secs_f32()
         );
 
-        let current_block = ElaboratedBlock::next_block(&validator);
+        let current_block = validator.next_block();
         let ledger = Arc::new(SyncMutex::new(MockLedger {
             validator,
             nullifiers,
