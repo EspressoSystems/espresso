@@ -83,9 +83,14 @@ pub mod set_hash {
 
     pub fn branch_hash(l: Hash, r: Hash) -> Hash {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Branch".as_bytes());
-        hasher.update("l".as_bytes());
+        //
+        // NOTE temporarily remove "l" and "r" to reduce input size to 128 bytes
+        // as solidity blake implementation behaves correctly only up to 128
+        // bytes input size.
+        //
+        // hasher.update("l".as_bytes());
         hasher.update(&l.0);
-        hasher.update("r".as_bytes());
+        // hasher.update("r".as_bytes());
         hasher.update(&r.0);
         Hash(hasher.finalize().into_bytes())
     }
