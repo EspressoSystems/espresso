@@ -4,7 +4,7 @@ use crate::api;
 use crate::key_set;
 use crate::node::LedgerEvent;
 use crate::set_merkle_tree::*;
-use crate::{ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState};
+use crate::{ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState, MERKLE_HEIGHT};
 use async_scoped::AsyncScope;
 use async_std::sync::Mutex;
 use async_std::task::block_on;
@@ -562,18 +562,20 @@ impl<'a> WalletState<'a> {
             LedgerEvent::Memos { outputs } => {
                 for (memo, comm, uid, proof) in outputs {
                     if let Ok(record_opening) = memo.decrypt(&session.key_pair, &comm, &[]) {
-                        // If this record is for us (i.e. its corresponding memo decrypts under our
-                        // key), then add it to our owned records.
-                        self.records.insert(record_opening, uid, &session.key_pair);
-                        if self
-                            .record_merkle_tree_mut()
-                            .remember(uid, comm.to_field_element(), &proof)
-                            .is_err()
-                        {
-                            println!(
-                                "error: got bad merkle proof from backend for commitment {:?}",
-                                comm
-                            );
+                        if !record_opening.is_dummy() {
+                            // If this record is for us (i.e. its corresponding memo decrypts under
+                            // our key) and not a dummy, then add it to our owned records.
+                            self.records.insert(record_opening, uid, &session.key_pair);
+                            if self
+                                .record_merkle_tree_mut()
+                                .remember(uid, comm.to_field_element(), &proof)
+                                .is_err()
+                            {
+                                println!(
+                                    "error: got bad merkle proof from backend for commitment {:?}",
+                                    comm
+                                );
+                            }
                         }
                     }
                 }
@@ -1026,7 +1028,13 @@ impl<'a> WalletState<'a> {
         };
 
         // find a proving key which can handle this transaction size
-        let proving_key = Self::freeze_proving_key(&self.proving_keys.freeze, asset, &mut inputs)?;
+        let proving_key = Self::freeze_proving_key(
+            &mut self.rng,
+            &self.proving_keys.freeze,
+            asset,
+            &mut inputs,
+            &self.freezer_key_pair,
+        )?;
 
         // generate transfer note and receiver memos
         let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut self.rng, fee_input, fee).unwrap();
@@ -1097,16 +1105,29 @@ impl<'a> WalletState<'a> {
         }
 
         // find a proving key which can handle this transaction size
-        let me = self.pub_key(session);
-        let proving_key = Self::xfr_proving_key(
-            &mut self.rng,
-            me,
+        let rng = &mut self.rng;
+        let (proving_key, dummy_inputs) = Self::xfr_proving_key(
+            rng,
+            session.key_pair.pub_key(),
             &self.proving_keys.xfr,
             &AssetDefinition::native(),
             &mut inputs,
             &mut outputs,
             false,
         )?;
+        // pad with dummy inputs if necessary
+        let dummy_inputs = (0..dummy_inputs)
+            .map(|_| RecordOpening::dummy(rng, FreezeFlag::Unfrozen))
+            .collect::<Vec<_>>();
+        for (ro, owner_keypair) in &dummy_inputs {
+            let dummy_input = TransferNoteInput {
+                ro: ro.clone(),
+                acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
+                owner_keypair,
+                cred: None,
+            };
+            inputs.push(dummy_input);
+        }
 
         // generate transfer note and receiver memos
         let (note, kp, fee_change_ro) = TransferNote::generate_native(
@@ -1180,7 +1201,6 @@ impl<'a> WalletState<'a> {
         }
 
         // prepare outputs, excluding fee change (which will be automatically generated)
-        let me = self.pub_key(session);
         let mut outputs = vec![];
         for (pub_key, amount) in receivers {
             outputs.push(RecordOpening::new(
@@ -1193,11 +1213,12 @@ impl<'a> WalletState<'a> {
         }
         // change in the asset type being transfered (not fee change)
         if change > 0 {
+            let me = self.pub_key(session);
             let change_ro = RecordOpening::new(
                 &mut self.rng,
                 change,
                 asset.clone(),
-                me.clone(),
+                me,
                 FreezeFlag::Unfrozen,
             );
             outputs.push(change_ro);
@@ -1217,15 +1238,29 @@ impl<'a> WalletState<'a> {
         };
 
         // find a proving key which can handle this transaction size
-        let proving_key = Self::xfr_proving_key(
-            &mut self.rng,
-            me,
+        let rng = &mut self.rng;
+        let (proving_key, dummy_inputs) = Self::xfr_proving_key(
+            rng,
+            session.key_pair.pub_key(),
             &self.proving_keys.xfr,
             &asset,
             &mut inputs,
             &mut outputs,
             change > 0,
         )?;
+        // pad with dummy inputs if necessary
+        let dummy_inputs = (0..dummy_inputs)
+            .map(|_| RecordOpening::dummy(rng, FreezeFlag::Unfrozen))
+            .collect::<Vec<_>>();
+        for (ro, owner_keypair) in &dummy_inputs {
+            let dummy_input = TransferNoteInput {
+                ro: ro.clone(),
+                acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
+                owner_keypair,
+                cred: None,
+            };
+            inputs.push(dummy_input);
+        }
 
         // generate transfer note and receiver memos
         let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut self.rng, fee_input, fee).unwrap();
@@ -1314,9 +1349,10 @@ impl<'a> WalletState<'a> {
         for nullifier in txn.txn.nullifiers() {
             // hold the record corresponding to this nullifier until the transaction is committed,
             // rejected, or expired.
-            let record = self.records.record_with_nullifier_mut(&nullifier).unwrap();
-            assert!(!record.on_hold(now));
-            record.hold_until(timeout);
+            if let Some(record) = self.records.record_with_nullifier_mut(&nullifier) {
+                assert!(!record.on_hold(now));
+                record.hold_until(timeout);
+            }
         }
 
         // Add the fee nullifier to `pending_txns` and `expiring_txns`. We know it corresponds to an
@@ -1417,21 +1453,22 @@ impl<'a> WalletState<'a> {
         .map(|(ros, _change)| ros.into_iter().next().unwrap())
     }
 
-    // Find a proving key large enough to prove the given transaction, padding with dummy records if
-    // necessary.
+    // Find a proving key large enough to prove the given transaction, returning the number of dummy
+    // inputs needed to pad the transaction.
     //
     // `proving_keys` should always be `&self.proving_key`. This is a non-member function in order
     // to prove to the compiler that the result only borrows from `&self.proving_key`, not all of
     // `&self`.
+    #[allow(clippy::too_many_arguments)]
     fn xfr_proving_key<'k>(
         rng: &mut ChaChaRng,
         me: UserPubKey,
         proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
         asset: &AssetDefinition,
-        inputs: &mut Vec<TransferNoteInput>,
+        inputs: &mut Vec<TransferNoteInput<'k>>,
         outputs: &mut Vec<RecordOpening>,
         change_record: bool,
-    ) -> Result<&'k TransferProvingKey<'a>, WalletError> {
+    ) -> Result<(&'k TransferProvingKey<'a>, usize), WalletError> {
         let total_output_amount = outputs.iter().map(|ro| ro.amount).sum();
         // non-native transfers have an extra fee input, which is not included in `inputs`.
         let fee_inputs = if *asset == AssetDefinition::native() {
@@ -1475,13 +1512,8 @@ impl<'a> WalletState<'a> {
         assert!(num_inputs <= key_inputs);
         assert!(num_outputs <= key_outputs);
 
-        if num_inputs < key_inputs {
-            // TODO pad with dummy inputs, (leaving room for the fee input if applicable)
-            unimplemented!("dummy inputs");
-        }
         if num_outputs < key_outputs {
-            // pad with dummy (0-amount) outputs (leaving room for the fee change output if
-            // applicable)
+            // pad with dummy (0-amount) outputs,leaving room for the fee change output
             while {
                 outputs.push(RecordOpening::new(
                     rng,
@@ -1490,17 +1522,23 @@ impl<'a> WalletState<'a> {
                     me.clone(),
                     FreezeFlag::Unfrozen,
                 ));
-                outputs.len() < key_outputs - 1
+                outputs.len() < key_outputs - fee_outputs
             } {}
         }
 
-        Ok(proving_key)
+        // Return the required number of dummy inputs. We can't easily create the dummy inputs here,
+        // because it requires creating a new dummy key pair and then borrowing from the key pair to
+        // form the transfer input, so the key pair must be owned by the caller.
+        let dummy_inputs = key_inputs.saturating_sub(num_inputs);
+        Ok((proving_key, dummy_inputs))
     }
 
     fn freeze_proving_key<'k>(
+        rng: &mut ChaChaRng,
         proving_keys: &'k KeySet<FreezeProvingKey<'a>, key_set::OrderByOutputs>,
         asset: &AssetDefinition,
-        inputs: &mut Vec<FreezeNoteInput>,
+        inputs: &mut Vec<FreezeNoteInput<'k>>,
+        keypair: &'k FreezerKeyPair,
     ) -> Result<&'k FreezeProvingKey<'a>, WalletError> {
         let total_output_amount = inputs.iter().map(|input| input.ro.amount).sum();
 
@@ -1524,8 +1562,16 @@ impl<'a> WalletState<'a> {
         assert!(num_outputs <= key_outputs);
 
         if num_inputs < key_inputs {
-            // TODO pad with dummy inputs, (leaving room for the fee input if applicable)
-            unimplemented!("dummy inputs");
+            // pad with dummy inputs, leaving room for the fee input
+            while {
+                let (ro, _) = RecordOpening::dummy(rng, FreezeFlag::Unfrozen);
+                inputs.push(FreezeNoteInput {
+                    ro,
+                    acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
+                    keypair,
+                });
+                inputs.len() < key_inputs - 1
+            } {}
         }
 
         Ok(proving_key)
@@ -2472,11 +2518,9 @@ mod tests {
     async fn test_two_wallets(native: bool) {
         let mut now = Instant::now();
 
-        // Each transaction in this test will be a transfer of 1 record, with an additional
-        // fee change output. We need to fix the transfer arity because although the wallet
-        // supports variable arities, the validator currently does not.
-        let num_inputs = if native { 1 } else { 2 }; // non-native transfers have a separate fee input
-        let num_outputs = if native { 2 } else { 3 }; // non-native transfers have an extra change output
+        // One more input and one more output than we will ever need, to test dummy records.
+        let num_inputs = 3;
+        let num_outputs = 4;
 
         // Give Alice an initial grant of 5 native coins. If using non-native transfers, give Bob an
         // initial grant with which to pay his transaction fee, since he will not be receiving any
@@ -2936,7 +2980,10 @@ mod tests {
         // will act as the receiver, and wallets[2] will be a third party which issues and freezes
         // some of wallets[0]'s assets. It gets a grant of 3, for a mint fee, a freeze fee and an
         // unfreeze fee.
-        let (ledger, mut wallets) = create_test_network(&[(2, 3)], vec![1, 0, 3], &mut now).await;
+        //
+        // Note that the transfer proving key size (3, 4) used here is chosen to be 1 larger than
+        // necessary in both inputs and outputs, to test dummy records.
+        let (ledger, mut wallets) = create_test_network(&[(3, 4)], vec![1, 0, 3], &mut now).await;
 
         let asset = {
             let policy = AssetPolicy::default()
