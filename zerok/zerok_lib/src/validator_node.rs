@@ -1,7 +1,7 @@
-use crate::{ElaboratedBlock, ElaboratedTransaction, ValidatorState};
+use crate::{ElaboratedBlock, ElaboratedTransaction, ValidatorState, LWPersistence};
 
 use phaselock::{
-    message::Message, networking::NetworkingImplementation, NodeImplementation, Storage, H_512,
+    message::Message, networking::NetworkingImplementation,  NodeImplementation, Storage, H_512,
 };
 
 use core::fmt::Debug;
@@ -43,7 +43,7 @@ pub struct ValidatorNodeImpl<NET: PLNet, STORE: PLStore> {
 }
 
 impl<NET: PLNet, STORE: PLStore> Debug for ValidatorNodeImpl<NET, STORE> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ValidatorNodeImpl").finish()
     }
 }
@@ -56,4 +56,6 @@ impl<NET: PLNet, STORE: PLStore> NodeImplementation<H_512> for ValidatorNodeImpl
     type Storage = STORE;
 
     type Networking = NET;
+
+    type StatefulHandler = LWPersistence;
 }

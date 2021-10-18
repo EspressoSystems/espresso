@@ -3024,7 +3024,7 @@ dependencies = [
 [[package]]
 name = "phaselock"
 version = "0.0.2-dev"
-source = "git+ssh://git@gitlab.com/translucence/systems/phaselock.git?branch=state-machine-refactor#7cebe12fd544dc7c54c255bfb77a4a70d51bb0ce"
+source = "git+ssh://git@gitlab.com/translucence/systems/phaselock.git?branch=state-machine-refactor#b8fffec9b2ecd4c6c5567cb21280ca65173e0307"
 dependencies = [
  "async-std",
  "async-tungstenite 0.14.0",

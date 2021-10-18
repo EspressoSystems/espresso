@@ -1363,6 +1363,7 @@ mod tests {
                 state.validator.clone(),
                 network,
                 MemoryStorage::default(),
+                LWPersistence::new("test_full_node_wallet_backend_load"),
             )
             .await;
 

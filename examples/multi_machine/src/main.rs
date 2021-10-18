@@ -34,7 +34,7 @@ use zerok_lib::{
     key_set::KeySet,
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
-    ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
+    ElaboratedBlock, ElaboratedTransaction, LWPersistence, MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
     VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
 };
 
@@ -408,6 +408,7 @@ async fn init_state_and_phaselock(
         validator.clone(),
         networking,
         MemoryStorage::default(),
+        LWPersistence::new("multi_machine_demo"),
     )
     .await;
     debug!("phaselock launched");

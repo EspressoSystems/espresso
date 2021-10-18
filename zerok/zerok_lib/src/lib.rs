@@ -10,6 +10,7 @@ mod set_merkle_tree;
 mod util;
 pub mod validator_node;
 pub mod wallet;
+pub mod lw_persistence;
 
 use ark_serialize::*;
 use canonical::deserialize_canonical_bytes;
@@ -32,6 +33,7 @@ use jf_txn::{
     AccMemberWitness, MerkleTree, NodeValue, Signature, TransactionNote, TransactionVerifyingKey,
 };
 use lazy_static::lazy_static;
+pub use lw_persistence::LWPersistence;
 use phaselock::{traits::state::State, BlockContents, H_512};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;

@@ -21,7 +21,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use tagged_base64::TaggedBase64;
 use threshold_crypto as tc;
 use zerok_lib::{
-    validator_node::ValidatorNodeImpl, ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec,
+    validator_node::ValidatorNodeImpl, ElaboratedBlock, ElaboratedTransaction, LWPersistence, MultiXfrRecordSpec,
     MultiXfrTestState, ValidatorState,
 };
 
@@ -88,6 +88,7 @@ pub async fn try_phaselock(
         initial_state,
         networking.clone(),
         MemoryStorage::default(),
+        LWPersistence::new("demo1"),
     )
     .await;
     (phaselock, pub_key, port, networking)
