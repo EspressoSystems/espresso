@@ -1,20 +1,16 @@
-use phaselock::{traits::StatefulHandler, H_512};
 use crate::{ElaboratedBlock, ValidatorState};
+use phaselock::{traits::StatefulHandler, H_512};
 
 use core::fmt::Debug;
 
-pub struct LWPersistence {
-
-}
+pub struct LWPersistence {}
 
 impl LWPersistence {
     pub fn new(_key_tag: &str) -> LWPersistence {
         LWPersistence {}
     }
 
-    pub fn store_latest_state(&mut self, _block: &ElaboratedBlock, _state: &ValidatorState) {
-
-    }    
+    pub fn store_latest_state(&mut self, _block: &ElaboratedBlock, _state: &ValidatorState) {}
 }
 
 impl Debug for LWPersistence {

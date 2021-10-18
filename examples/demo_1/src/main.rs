@@ -21,8 +21,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use tagged_base64::TaggedBase64;
 use threshold_crypto as tc;
 use zerok_lib::{
-    validator_node::ValidatorNodeImpl, ElaboratedBlock, ElaboratedTransaction, LWPersistence, MultiXfrRecordSpec,
-    MultiXfrTestState, ValidatorState,
+    validator_node::ValidatorNodeImpl, ElaboratedBlock, ElaboratedTransaction, LWPersistence,
+    MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
 };
 
 type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_512>>;

@@ -5,12 +5,12 @@
 extern crate proptest;
 
 pub mod api;
+pub mod lw_persistence;
 pub mod node;
 mod set_merkle_tree;
 mod util;
 pub mod validator_node;
 pub mod wallet;
-pub mod lw_persistence;
 
 use ark_serialize::*;
 use canonical::deserialize_canonical_bytes;

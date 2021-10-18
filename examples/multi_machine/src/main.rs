@@ -34,8 +34,8 @@ use zerok_lib::{
     key_set::KeySet,
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
-    ElaboratedBlock, ElaboratedTransaction, LWPersistence, MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
-    VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
+    ElaboratedBlock, ElaboratedTransaction, LWPersistence, MultiXfrRecordSpec, MultiXfrTestState,
+    ValidatorState, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
 };
 
 mod disco;
