@@ -50,7 +50,7 @@ lint:audit:
   tags:
     - docker
   script:
-    - cargo audit
+    - cargo audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071
   cache:
     key: audit-cache
     paths:
