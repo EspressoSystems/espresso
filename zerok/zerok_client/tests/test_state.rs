@@ -298,7 +298,7 @@ impl Wallet {
         let stdout = child
             .stdout
             .take()
-            .ok_or("failed to open stdin for wallet")?;
+            .ok_or("failed to open stdout for wallet")?;
         let mut wallet = Self {
             stdin,
             stdout: BufReader::new(stdout),
