@@ -8,8 +8,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::thread::sleep;
-use std::time::Duration;
 use tempdir::TempDir;
 use toml::Value;
 
@@ -57,7 +55,7 @@ impl TestState {
             .map_err(err)?;
 
         // Each validator gets two ports: one for its PhaseLock node and one for the web sever.
-        let mut ports = [(0, 0); 7];
+        let mut ports = [(0, 0); 6];
         for p in &mut ports {
             *p = (get_port(), get_port());
         }
@@ -128,9 +126,15 @@ impl TestState {
         ));
     }
 
-    pub fn sleep(&mut self, dur: Duration) -> &mut Self {
-        sleep(dur);
-        self
+    pub fn start_consensus(&mut self) -> Result<&mut Self, String> {
+        for child in &mut self.validators {
+            writeln!(child
+                .stdin
+                .as_mut()
+                .ok_or("failed to open stdin for validator")?)
+            .map_err(err)?;
+        }
+        Ok(self)
     }
 
     fn load(&mut self, key_path: Option<PathBuf>) -> Result<&mut Self, String> {
@@ -193,7 +197,6 @@ impl TestState {
             for line in BufReader::new(child.stdout.as_mut().unwrap()).lines() {
                 let line = line.unwrap();
                 if line.trim() == "Hit the return key when ready to start the consensus..." {
-                    writeln!(child.stdin.as_mut().unwrap()).unwrap();
                     return child;
                 }
             }
@@ -288,8 +291,14 @@ impl Wallet {
             .stdout(Stdio::piped())
             .spawn()
             .map_err(err)?;
-        let stdin = child.stdin.take().ok_or("failed to open stdin for wallet")?;
-        let stdout = child.stdout.take().ok_or("failed to open stdin for wallet")?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or("failed to open stdin for wallet")?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or("failed to open stdin for wallet")?;
         let mut wallet = Self {
             stdin,
             stdout: BufReader::new(stdout),
@@ -318,6 +327,7 @@ impl Wallet {
                 return Err(String::from(line));
             }
             if !line.is_empty() {
+                println!("< {}", line);
                 lines.push(String::from(line));
             }
         }

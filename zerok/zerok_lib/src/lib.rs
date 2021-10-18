@@ -30,6 +30,7 @@ use jf_txn::{
     utils::compute_universal_param_size,
     AccMemberWitness, MerkleTree, NodeValue, Signature, TransactionNote, TransactionVerifyingKey,
 };
+use jf_utils::tagged_blob;
 use lazy_static::lazy_static;
 use phaselock::BlockContents;
 use rand_chacha::rand_core::SeedableRng;
@@ -40,6 +41,7 @@ use serde_with::serde_as;
 pub use set_merkle_tree::*;
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::convert::TryFrom;
 use std::fs::File;
 use std::io::Read;
 use std::iter::FromIterator;
@@ -72,6 +74,41 @@ pub struct Transaction(pub TransactionNote);
 pub struct ElaboratedTransaction {
     pub txn: TransactionNote,
     pub proofs: Vec<SetMerkleProof>,
+}
+
+impl ElaboratedTransaction {
+    fn hash(&self) -> ElaboratedTransactionHash {
+        ElaboratedTransactionHash(ElaboratedBlock::hash_transaction(self))
+    }
+}
+
+#[tagged_blob("TXN")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ElaboratedTransactionHash(phaselock::BlockHash<64>);
+
+impl CanonicalSerialize for ElaboratedTransactionHash {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), ark_serialize::SerializationError> {
+        writer
+            .write_all(self.0.as_ref())
+            .map_err(ark_serialize::SerializationError::from)
+    }
+
+    fn serialized_size(&self) -> usize {
+        64
+    }
+}
+
+impl CanonicalDeserialize for ElaboratedTransactionHash {
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, ark_serialize::SerializationError> {
+        use std::convert::TryInto;
+        let mut buf = vec![0; 64];
+        reader
+            .read_exact(&mut buf)
+            .map_err(ark_serialize::SerializationError::from)?;
+        Ok(ElaboratedTransactionHash(phaselock::BlockHash::from_array(
+            buf.as_slice().try_into().unwrap(),
+        )))
+    }
 }
 
 #[derive(
@@ -200,8 +237,7 @@ impl BlockContents<64> for ElaboratedBlock {
     fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<64> {
         use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
-        let mut hasher =
-            blake2::Blake2b::with_params(&[], &[], "ElaboratedTransaction Hash".as_bytes());
+        let mut hasher = blake2::Blake2b::with_params(&[], &[], "ElaboratedTxn".as_bytes());
         hasher.update("Txn contents".as_bytes());
         hasher.update(&txn_comm::txn_commit(&txn.txn));
         hasher.update("Txn proofs".as_bytes());

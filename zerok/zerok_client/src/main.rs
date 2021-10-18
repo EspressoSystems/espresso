@@ -25,7 +25,7 @@ use std::process::exit;
 use std::str::FromStr;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
-use wallet::{network::*, AssetInfo, MintInfo};
+use wallet::{network::*, AssetInfo, MintInfo, TransactionReceipt, TransactionState};
 use zerok_lib::{api, wallet, UNIVERSAL_PARAM};
 
 type Wallet = wallet::Wallet<'static, NetworkBackend<'static>>;
@@ -370,12 +370,29 @@ lazy_static! {
         command!(
             transfer,
             "transfer some owned assets to another user",
-            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64| {
-                if let Err(err) = wallet
+            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64; wait: Option<bool>| {
+                match wallet
                     .transfer(&asset.item, &[(address.0, amount)], fee)
                     .await
                 {
-                    println!("{}\nAssets were not transferred.", err);
+                    Ok(receipt) => {
+                        if wait == Some(true) {
+                            match wallet.await_transaction(&receipt).await {
+                                Err(err) => {
+                                    println!("Error waiting for transaction to complete: {}", err);
+                                }
+                                Ok(TransactionState::Retired) => {},
+                                _ => {
+                                    println!("Transaction failed");
+                                }
+                            }
+                        } else {
+                            println!("Transaction {}", receipt);
+                        }
+                    }
+                    Err(err) => {
+                        println!("{}\nAssets were not transferred.", err);
+                    }
                 }
             }
         ),
@@ -403,9 +420,49 @@ lazy_static! {
         command!(
             mint,
             "mint an asset",
-            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64| {
-                if let Err(err) = wallet.mint(fee, &asset.item, amount, address.0).await {
-                    println!("{}\nAssets were not minted.", err);
+            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64; wait: Option<bool>| {
+                match wallet
+                    .mint(fee, &asset.item, amount, address.0)
+                    .await
+                {
+                    Ok(receipt) => {
+                        if wait == Some(true) {
+                            match wallet.await_transaction(&receipt).await {
+                                Err(err) => {
+                                    println!("Error waiting for transaction to complete: {}", err);
+                                }
+                                Ok(TransactionState::Retired) => {},
+                                _ => {
+                                    println!("Transaction failed");
+                                }
+                            }
+                        } else {
+                            println!("Transaction {}", receipt);
+                        }
+                    }
+                    Err(err) => {
+                        println!("{}\nAssets were not minted.", err);
+                    }
+                }
+            }
+        ),
+        command!(
+            transaction,
+            "print the status of a transaction",
+            |wallet, receipt: TransactionReceipt| {
+                match wallet.transaction_status(&receipt).await {
+                    Ok(status) => println!("{}", status),
+                    Err(err) => println!("Error getting transaction status: {}", err),
+                }
+            }
+        ),
+        command!(
+            wait,
+            "wait for a transaction to complete",
+            |wallet, receipt: TransactionReceipt| {
+                match wallet.await_transaction(&receipt).await {
+                    Ok(status) => println!("{}", status),
+                    Err(err) => println!("Error waiting for transaction: {}", err),
                 }
             }
         ),
