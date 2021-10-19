@@ -411,6 +411,7 @@ const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
 // (block_id, txn_id, [(uid, remember)])
 type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct AssetInfo {
     pub asset: AssetDefinition,
     pub mint_info: Option<MintInfo>,
@@ -434,6 +435,7 @@ impl From<AssetDefinition> for AssetInfo {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct MintInfo {
     pub seed: AssetCodeSeed,
     pub desc: Vec<u8>,

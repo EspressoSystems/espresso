@@ -302,13 +302,20 @@ lazy_static! {
             "print information about an asset",
             |wallet, asset: ListItem<AssetCode>| {
                 let assets = wallet.assets().await;
-                let info = match assets.get(&asset.item) {
-                    Some(info) => info,
-                    None => {
-                        println!("No such asset {}", asset.item);
-                        return;
-                    }
-                };
+                let info =
+                    if asset.item == AssetCode::native() {
+                        // We always recognize the native asset type in the CLI, even if it's not
+                        // included in the wallet's assets yet.
+                        AssetInfo::from(AssetDefinition::native())
+                    } else {
+                        match assets.get(&asset.item) {
+                            Some(info) => info.clone(),
+                            None => {
+                                println!("No such asset {}", asset.item);
+                                return;
+                            }
+                        }
+                    };
 
                 // Try to format the asset description as human-readable as possible.
                 let desc = if let Some(MintInfo { desc, .. }) = &info.mint_info {
