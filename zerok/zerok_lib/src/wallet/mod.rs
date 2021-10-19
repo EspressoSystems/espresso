@@ -484,13 +484,10 @@ pub struct RecordDatabase {
 }
 
 impl RecordDatabase {
-    fn assets(&self) -> Vec<AssetCode> {
+    fn assets(&'_ self) -> impl '_ + Iterator<Item = AssetDefinition> {
         self.record_info
             .values()
-            .map(|rec| rec.ro.asset_def.code)
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect()
+            .map(|rec| rec.ro.asset_def.clone())
     }
 
     /// Find records which can be the input to a transaction, matching the given parameters.
@@ -665,6 +662,40 @@ type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
 pub trait Captures<'a> {}
 impl<'a, T: ?Sized> Captures<'a> for T {}
 
+pub struct AssetInfo {
+    pub asset: AssetDefinition,
+    pub mint_info: Option<MintInfo>,
+}
+
+impl AssetInfo {
+    pub fn new(asset: AssetDefinition, mint_info: MintInfo) -> Self {
+        Self {
+            asset,
+            mint_info: Some(mint_info),
+        }
+    }
+}
+
+impl From<AssetDefinition> for AssetInfo {
+    fn from(asset: AssetDefinition) -> Self {
+        Self {
+            asset,
+            mint_info: None,
+        }
+    }
+}
+
+pub struct MintInfo {
+    pub seed: AssetCodeSeed,
+    pub desc: Vec<u8>,
+}
+
+impl MintInfo {
+    pub fn new(seed: AssetCodeSeed, desc: Vec<u8>) -> Self {
+        Self { seed, desc }
+    }
+}
+
 impl<'a> WalletState<'a> {
     pub fn pub_key(&self, session: &WalletSession<'a, impl WalletBackend<'a>>) -> UserPubKey {
         session.key_pair.pub_key()
@@ -687,8 +718,25 @@ impl<'a> WalletState<'a> {
             .sum()
     }
 
-    pub fn assets(&self) -> Vec<AssetCode> {
-        self.records.assets()
+    pub fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
+        // Get the asset definitions of each record we own.
+        let mut assets: HashMap<AssetCode, AssetInfo> = self
+            .records
+            .assets()
+            .map(|def| (def.code, AssetInfo::from(def)))
+            .collect();
+        // Add any assets that we know about through auditing.
+        for (code, def) in &self.auditable_assets {
+            assets.insert(*code, AssetInfo::from(def.clone()));
+        }
+        // Add the minting information (seed and description) for each asset we've defined.
+        for (code, (def, seed, desc)) in &self.defined_assets {
+            assets.insert(
+                *code,
+                AssetInfo::new(def.clone(), MintInfo::new(*seed, desc.clone())),
+            );
+        }
+        assets
     }
 
     pub async fn handle_event(
@@ -1075,51 +1123,61 @@ impl<'a> WalletState<'a> {
         Ok(())
     }
 
-    pub async fn define_asset(
-        &mut self,
-        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
-        description: &[u8],
+    // This function ran into the same mystifying compiler behavior as 
+    // `submit_elaborated_transaction`, where the default async desugaring loses track of the `Send`
+    // impl for the result type. As with the other function, this can be fixed by manually 
+    // desugaring the type signature.
+    fn define_asset<'b>(
+        &'b mut self,
+        session: &'b mut WalletSession<'a, impl WalletBackend<'a>>,
+        description: &'b [u8],
         policy: AssetPolicy,
-    ) -> Result<AssetDefinition, WalletError> {
-        let seed = AssetCodeSeed::generate(&mut session.rng);
-        let code = AssetCode::new(seed, description);
-        let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
-        let desc = description.to_vec();
+    ) -> impl 'b + Captures<'a> + Future<Output = Result<AssetDefinition, WalletError>> + Send
+    where
+        'a: 'b,
+    {
+        async move {
+            let seed = AssetCodeSeed::generate(&mut session.rng);
+            let code = AssetCode::new(seed, description);
+            let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
+            let desc = description.to_vec();
 
-        // If the policy lists ourself as the auditor, we will automatically start auditing
-        // transactions involving this asset.
-        let audit =
-            *asset_definition.policy_ref().auditor_pub_key() == self.auditor_key_pair.pub_key();
+            // If the policy lists ourself as the auditor, we will automatically start auditing
+            // transactions involving this asset.
+            let audit =
+                *asset_definition.policy_ref().auditor_pub_key() == self.auditor_key_pair.pub_key();
 
-        // Persist the change that we're about to make before updating our in-memory state. We can't
-        // report success until we know the new asset has been saved to disk (otherwise we might
-        // lose the seed if we crash at the wrong time) and we don't want it in our in-memory state
-        // if we're not going to report success.
-        session
-            .backend
-            .store(&session.key_pair, |mut t| {
-                let asset_definition = &asset_definition;
-                let desc = &desc;
-                async move {
-                    t.store_defined_asset(asset_definition, seed, desc).await?;
-                    if audit {
-                        // If we are going to be an auditor of the new asset, we must also persist
-                        // that information to disk before doing anything to the in-memory state.
-                        t.store_auditable_asset(asset_definition).await?;
+            // Persist the change that we're about to make before updating our in-memory state. We
+            // can't report success until we know the new asset has been saved to disk (otherwise we
+            // might lose the seed if we crash at the wrong time) and we don't want it in our
+            // in-memory state if we're not going to report success.
+            session
+                .backend
+                .store(&session.key_pair, |mut t| {
+                    let asset_definition = &asset_definition;
+                    let desc = &desc;
+                    async move {
+                        t.store_defined_asset(asset_definition, seed, desc).await?;
+                        if audit {
+                            // If we are going to be an auditor of the new asset, we must also
+                            // persist that information to disk before doing anything to the
+                            // in-memory state.
+                            t.store_auditable_asset(asset_definition).await?;
+                        }
+                        Ok(t)
                     }
-                    Ok(t)
-                }
-            })
-            .await?;
+                })
+                .await?;
 
-        // Now we can add the asset definition to the in-memory state.
-        self.defined_assets
-            .insert(code, (asset_definition.clone(), seed, desc));
-        if audit {
-            self.auditable_assets
-                .insert(asset_definition.code, asset_definition.clone());
+            // Now we can add the asset definition to the in-memory state.
+            self.defined_assets
+                .insert(code, (asset_definition.clone(), seed, desc));
+            if audit {
+                self.auditable_assets
+                    .insert(asset_definition.code, asset_definition.clone());
+            }
+            Ok(asset_definition)
         }
-        Ok(asset_definition)
     }
 
     /// Use `audit_asset` to start auditing transactions with a given asset type, when the asset
@@ -2005,7 +2063,7 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
         state.balance(session, asset, FreezeFlag::Frozen)
     }
 
-    pub async fn assets(&self) -> Vec<AssetCode> {
+    pub async fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
         let (state, ..) = &*self.mutex.lock().await;
         state.assets()
     }
