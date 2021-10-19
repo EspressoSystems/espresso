@@ -957,7 +957,9 @@ impl<'a, NET: PLNet, STORE: PLStore> WalletBackend<'a> for FullNode<'a, NET, STO
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{wallet::Wallet, LWPersistence, MultiXfrRecordSpec, MultiXfrTestState, UNIVERSAL_PARAM};
+    use crate::{
+        wallet::Wallet, LWPersistence, MultiXfrRecordSpec, MultiXfrTestState, UNIVERSAL_PARAM,
+    };
     use async_std::task::block_on;
     use jf_primitives::jubjub_dsa::KeyPair;
     use jf_txn::{sign_receiver_memos, structs::AssetCode, MerkleTree};
