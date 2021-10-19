@@ -1123,9 +1123,9 @@ impl<'a> WalletState<'a> {
         Ok(())
     }
 
-    // This function ran into the same mystifying compiler behavior as 
+    // This function ran into the same mystifying compiler behavior as
     // `submit_elaborated_transaction`, where the default async desugaring loses track of the `Send`
-    // impl for the result type. As with the other function, this can be fixed by manually 
+    // impl for the result type. As with the other function, this can be fixed by manually
     // desugaring the type signature.
     fn define_asset<'b>(
         &'b mut self,
