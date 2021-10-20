@@ -5120,6 +5120,7 @@ dependencies = [
  "strum_macros",
  "surf",
  "tagged-base64",
+ "threshold_crypto",
  "tide",
  "tracing",
 ]
