@@ -58,7 +58,6 @@ type AppendLogHandle<T> = Arc<Mutex<AppendLog<BincodeLoadStore<T>>>>;
 type RollingLogHandle<T> = Arc<Mutex<RollingLog<BincodeLoadStore<T>>>>;
 
 pub struct AtomicWalletStorage {
-    directory: PathBuf,
     static_path: PathBuf,
     store: AtomicStore,
     dynamic_state: RollingLogHandle<WalletSnapshot>,
@@ -73,19 +72,21 @@ impl AtomicWalletStorage {
     pub fn new(directory: &Path) -> Result<Self, WalletError> {
         let mut loader = AtomicStoreLoader::load(directory, "wallet").context(PersistenceError)?;
         let dynamic_state = Arc::new(Mutex::new(
-            RollingLog::load(&mut loader, "wallet_dyn", 1024).context(PersistenceError)?,
+            RollingLog::load(&mut loader, Default::default(), "wallet_dyn", 1024)
+                .context(PersistenceError)?,
         ));
         let auditable_assets = Arc::new(Mutex::new(
-            AppendLog::load(&mut loader, "wallet_aud", 1024).context(PersistenceError)?,
+            AppendLog::load(&mut loader, Default::default(), "wallet_aud", 1024)
+                .context(PersistenceError)?,
         ));
         let defined_assets = Arc::new(Mutex::new(
-            AppendLog::load(&mut loader, "wallet_def", 1024).context(PersistenceError)?,
+            AppendLog::load(&mut loader, Default::default(), "wallet_def", 1024)
+                .context(PersistenceError)?,
         ));
         let store = AtomicStore::open(loader).context(PersistenceError)?;
         let mut static_path = PathBuf::from(directory);
         static_path.push("wallet_static");
         Ok(Self {
-            directory: PathBuf::from(directory),
             static_path,
             store,
             dynamic_state,
@@ -110,7 +111,8 @@ impl AtomicWalletStorage {
             .context(IoError)?;
         static_file.write_all(&static_bytes).context(IoError)?;
         self.store_snapshot(key, w).await?;
-        self.commit(key).await
+        self.commit(key).await;
+        Ok(())
     }
 }
 
@@ -225,64 +227,42 @@ impl<'a> WalletStorage<'a> for AtomicWalletStorage {
         Ok(())
     }
 
-    async fn commit(&mut self, _key_pair: &UserKeyPair) -> Result<(), WalletError> {
+    async fn commit(&mut self, _key_pair: &UserKeyPair) {
         {
             let mut dynamic_state = self.dynamic_state.lock().await;
             let mut auditable_assets = self.auditable_assets.lock().await;
             let mut defined_assets = self.defined_assets.lock().await;
 
             if self.dynamic_state_dirty {
-                dynamic_state.commit_version().context(PersistenceError)?;
+                dynamic_state.commit_version().unwrap();
             } else {
-                dynamic_state.skip_version().context(PersistenceError)?;
+                dynamic_state.skip_version().unwrap();
             }
 
             if self.auditable_assets_dirty {
-                auditable_assets
-                    .commit_version()
-                    .context(PersistenceError)?;
+                auditable_assets.commit_version().unwrap();
             } else {
-                auditable_assets.skip_version().context(PersistenceError)?;
+                auditable_assets.skip_version().unwrap();
             }
 
             if self.defined_assets_dirty {
-                defined_assets.commit_version().context(PersistenceError)?;
+                defined_assets.commit_version().unwrap();
             } else {
-                defined_assets.skip_version().context(PersistenceError)?;
+                defined_assets.skip_version().unwrap();
             }
         }
 
-        self.store.commit_version().context(PersistenceError)?;
+        self.store.commit_version().unwrap();
 
         self.dynamic_state_dirty = false;
         self.auditable_assets_dirty = false;
         self.defined_assets_dirty = false;
-
-        Ok(())
     }
 
     async fn revert(&mut self, _key_pair: &UserKeyPair) {
-        // This is a hacky implementation of revert: we reload the entire store from the last
-        // committed version and replace our in-memory data structures with the reloaded ones. This
-        // should be replaced with an actual implementation of a roll back operation once
-        // atomic_store supports it.
-
-        let mut loader = AtomicStoreLoader::load(&self.directory, "wallet").unwrap();
-        let dynamic_state = Arc::new(Mutex::new(
-            RollingLog::load(&mut loader, "wallet_dyn", 1024).unwrap(),
-        ));
-        let auditable_assets = Arc::new(Mutex::new(
-            AppendLog::load(&mut loader, "wallet_aud", 1024).unwrap(),
-        ));
-        let defined_assets = Arc::new(Mutex::new(
-            AppendLog::load(&mut loader, "wallet_def", 1024).unwrap(),
-        ));
-        let store = AtomicStore::open(loader).unwrap();
-
-        self.store = store;
-        self.defined_assets = defined_assets;
-        self.auditable_assets = auditable_assets;
-        self.dynamic_state = dynamic_state;
+        self.dynamic_state.lock().await.revert_version().unwrap();
+        self.auditable_assets.lock().await.revert_version().unwrap();
+        self.defined_assets.lock().await.revert_version().unwrap();
     }
 }
 
@@ -441,10 +421,10 @@ mod tests {
         stored.expiring_txns.insert(5000, once(nullifier).collect());
 
         // Snapshot the modified dynamic state and then reload.
-        {
+        { 
             let mut storage = AtomicWalletStorage::new(dir.path()).unwrap();
             storage.store_snapshot(&key_pair, &stored).await.unwrap();
-            storage.commit(&key_pair).await.unwrap()
+            storage.commit(&key_pair).await;
         }
         let loaded = {
             let mut storage = AtomicWalletStorage::new(dir.path()).unwrap();
@@ -462,7 +442,7 @@ mod tests {
                 .store_auditable_asset(&key_pair, &asset)
                 .await
                 .unwrap();
-            storage.commit(&key_pair).await.unwrap()
+            storage.commit(&key_pair).await;
         }
         let loaded = {
             let mut storage = AtomicWalletStorage::new(dir.path()).unwrap();
@@ -481,7 +461,7 @@ mod tests {
                 .store_defined_asset(&key_pair, &asset, seed, &[])
                 .await
                 .unwrap();
-            storage.commit(&key_pair).await.unwrap();
+            storage.commit(&key_pair).await;
         }
         let loaded = {
             let mut storage = AtomicWalletStorage::new(dir.path()).unwrap();
@@ -505,7 +485,7 @@ mod tests {
                 .unwrap();
             storage.revert(&key_pair).await;
             // Make sure committing after a revert does not commit the reverted changes.
-            storage.commit(&key_pair).await.unwrap();
+            storage.commit(&key_pair).await;
             storage.load(&key_pair).await.unwrap()
         };
         assert_wallet_states_eq(&stored, &loaded);
@@ -539,7 +519,7 @@ mod tests {
             storage.revert(&key_pair).await;
 
             // Commit after revert should be a no-op.
-            storage.commit(&key_pair).await.unwrap();
+            storage.commit(&key_pair).await;
             storage.load(&key_pair).await.unwrap()
         };
         assert_wallet_states_eq(&stored, &loaded);

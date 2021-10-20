@@ -261,7 +261,7 @@ pub trait WalletStorage<'a> {
     ) -> Result<(), WalletError>;
 
     /// Commit to outstanding changes.
-    async fn commit(&mut self, key_pair: &UserKeyPair) -> Result<(), WalletError>;
+    async fn commit(&mut self, key_pair: &UserKeyPair);
 
     /// Roll back the persisted state to the previous commit.
     async fn revert(&mut self, key_pair: &UserKeyPair);
@@ -411,11 +411,8 @@ pub trait WalletBackend<'a>: Send {
         let storage = self.storage().await;
         let fut =
             update(StorageTransaction::new(storage, key_pair)).and_then(|mut txn| async move {
-                let res = txn.storage.commit(key_pair).await;
-                if res.is_err() {
-                    txn.storage.revert(key_pair).await;
-                }
-                res
+                txn.storage.commit(key_pair).await;
+                Ok(())
             });
         fut.await
     }
@@ -2288,9 +2285,8 @@ pub mod test_helpers {
             Ok(())
         }
 
-        async fn commit(&mut self, _key_pair: &UserKeyPair) -> Result<(), WalletError> {
+        async fn commit(&mut self, _key_pair: &UserKeyPair) {
             self.committed = self.working.clone();
-            Ok(())
         }
 
         async fn revert(&mut self, _key_pair: &UserKeyPair) {
