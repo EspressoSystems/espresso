@@ -421,7 +421,7 @@ mod tests {
         stored.expiring_txns.insert(5000, once(nullifier).collect());
 
         // Snapshot the modified dynamic state and then reload.
-        { 
+        {
             let mut storage = AtomicWalletStorage::new(dir.path()).unwrap();
             storage.store_snapshot(&key_pair, &stored).await.unwrap();
             storage.commit(&key_pair).await;
