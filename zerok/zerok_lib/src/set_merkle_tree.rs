@@ -11,12 +11,12 @@ use std::convert::TryFrom;
 
 pub mod set_hash {
     use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
+    use generic_array::{typenum::U32, GenericArray};
     use jf_utils::tagged_blob;
     use std::ops::Deref;
+    use tiny_keccak::{Hasher, Keccak};
 
-    type Array = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
+    type Array = GenericArray<u8, U32>;
 
     #[tagged_blob("HASH")]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -70,29 +70,33 @@ pub mod set_hash {
     }
 
     pub fn elem_hash(x: Nullifier) -> Hash {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Elem".as_bytes());
+        let mut output = GenericArray::default();
+        let mut hasher = Keccak::v256();
+        hasher.update("AAPSet Elem".as_ref());
         hasher.update(&canonical::serialize(&x).unwrap());
-        Hash(hasher.finalize().into_bytes())
+        hasher.finalize(&mut output);
+        Hash::new(output)
     }
 
     pub fn leaf_hash(x: Nullifier) -> Hash {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Leaf".as_bytes());
+        let mut output = GenericArray::default();
+        let mut hasher = Keccak::v256();
+        hasher.update("AAPSet Leaf".as_ref());
         hasher.update(&canonical::serialize(&x).unwrap());
-        Hash(hasher.finalize().into_bytes())
+        hasher.finalize(&mut output);
+        Hash::new(output)
     }
 
     pub fn branch_hash(l: Hash, r: Hash) -> Hash {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Branch".as_bytes());
-        //
-        // NOTE temporarily remove "l" and "r" to reduce input size to 128 bytes
-        // as solidity blake implementation behaves correctly only up to 128
-        // bytes input size.
-        //
-        // hasher.update("l".as_bytes());
-        hasher.update(&l.0);
-        // hasher.update("r".as_bytes());
-        hasher.update(&r.0);
-        Hash(hasher.finalize().into_bytes())
+        let mut output = GenericArray::default();
+        let mut hasher = Keccak::v256();
+        hasher.update("AAPSet Branch".as_ref());
+        hasher.update("l".as_ref());
+        hasher.update(&canonical::serialize(&l).unwrap());
+        hasher.update("r".as_ref());
+        hasher.update(&canonical::serialize(&r).unwrap());
+        hasher.finalize(&mut output);
+        Hash::new(output)
     }
 }
 
