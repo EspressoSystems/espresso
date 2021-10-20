@@ -130,8 +130,8 @@ version = "0.3.0"
 source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_et_param#8990c1c9c55094ce0968d6897c351aa442adf1ba"
 dependencies = [
  "ark-ec",
- "ark-ff 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-std",
 ]
 
 [[package]]
@@ -141,8 +141,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65be532f9dd1e98ad0150b037276cde464c6f371059e6dd02c0222395761f6aa"
 dependencies = [
  "ark-ec",
- "ark-ff 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-std",
 ]
 
 [[package]]
@@ -152,8 +152,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea691771ebbb28aea556c044e2e5c5227398d840cee0c34d4d20fa8eb2689e8c"
 dependencies = [
  "ark-ec",
- "ark-ff 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-std",
 ]
 
 [[package]]
@@ -163,8 +163,8 @@ source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_et_
 dependencies = [
  "ark-bls12-377",
  "ark-ec",
- "ark-ff 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-std",
 ]
 
 [[package]]
@@ -173,9 +173,9 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dea978406c4b1ca13c2db2373b05cc55429c3575b8b21f1b9ee859aa5b03dd42"
 dependencies = [
- "ark-ff 0.3.0",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
  "derivative",
  "num-traits",
  "rayon",
@@ -189,8 +189,8 @@ source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_et_
 dependencies = [
  "ark-bls12-377",
  "ark-ec",
- "ark-ff 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-std",
 ]
 
 [[package]]
@@ -201,8 +201,8 @@ checksum = "43b7ada17db3854f5994e74e60b18e10e818594935ee7e1d329800c117b32970"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
- "ark-ff 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-std",
 ]
 
 [[package]]
@@ -213,24 +213,8 @@ checksum = "7fdc786b806fdbff4abebb08ec2fcb50cfe3941918e57120ab121228452903fd"
 dependencies = [
  "ark-bn254",
  "ark-ec",
- "ark-ff 0.3.0",
- "ark-std 0.3.0",
-]
-
-[[package]]
-name = "ark-ff"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4d8802d40fce9212c5c09be08f75c4b3becc0c488e87f60fff787b01250ce33"
-dependencies = [
- "ark-ff-asm 0.2.0",
- "ark-ff-macros 0.2.0",
- "ark-serialize 0.2.0",
- "ark-std 0.2.0",
- "derivative",
- "num-traits",
- "rustc_version 0.3.3",
- "zeroize",
+ "ark-ff",
+ "ark-std",
 ]
 
 [[package]]
@@ -239,10 +223,10 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b3235cc41ee7a12aaaf2c575a2ad7b46713a8a50bda2fc3b003a04845c05dd6"
 dependencies = [
- "ark-ff-asm 0.3.0",
- "ark-ff-macros 0.3.0",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff-asm",
+ "ark-ff-macros",
+ "ark-serialize",
+ "ark-std",
  "derivative",
  "num-bigint 0.4.2",
  "num-traits",
@@ -254,32 +238,10 @@ dependencies = [
 
 [[package]]
 name = "ark-ff-asm"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e8cb28c2137af1ef058aa59616db3f7df67dbb70bf2be4ee6920008cc30d98c"
-dependencies = [
- "quote",
- "syn",
-]
-
-[[package]]
-name = "ark-ff-asm"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db02d390bf6643fb404d3d22d31aee1c4bc4459600aef9113833d17e786c6e44"
 dependencies = [
- "quote",
- "syn",
-]
-
-[[package]]
-name = "ark-ff-macros"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b9c256a93a10ed9708c16a517d6dcfaba3d215c0d7fab44d29a9affefb5eeb8"
-dependencies = [
- "num-bigint 0.4.2",
- "num-traits",
  "quote",
  "syn",
 ]
@@ -302,9 +264,9 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b0f78f47537c2f15706db7e98fe64cc1711dbf9def81218194e17239e53e5aa"
 dependencies = [
- "ark-ff 0.3.0",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
  "derivative",
  "hashbrown",
  "rayon",
@@ -316,22 +278,13 @@ version = "0.3.0"
 source = "git+https://github.com/arkworks-rs/poly-commit/?rev=cafc05e39692bbc5c383990063ad851f0b94a553#cafc05e39692bbc5c383990063ad851f0b94a553"
 dependencies = [
  "ark-ec",
- "ark-ff 0.3.0",
+ "ark-ff",
  "ark-poly",
- "ark-serialize 0.3.0",
+ "ark-serialize",
  "ark-sponge",
- "ark-std 0.3.0",
+ "ark-std",
  "derivative",
  "digest",
-]
-
-[[package]]
-name = "ark-serialize"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e9b59329dc9b92086b3dc619f31cef4a0c802f10829b575a3666d48a48387d"
-dependencies = [
- "ark-std 0.2.0",
 ]
 
 [[package]]
@@ -341,7 +294,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d6c2b318ee6e10f8c2853e73a83adc0ccb88995aa978d8a3408d492ab2ee671"
 dependencies = [
  "ark-serialize-derive",
- "ark-std 0.3.0",
+ "ark-std",
  "digest",
 ]
 
@@ -363,22 +316,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0c7a8ce8c0b0dad619872efd707395884fc05f46e9b0e7ac3903b51fa0e59ac"
 dependencies = [
  "ark-ec",
- "ark-ff 0.3.0",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
  "derivative",
  "digest",
  "rand_chacha 0.3.1",
-]
-
-[[package]]
-name = "ark-std"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb5b856a29bea7b810858116a596beee3d20fc4c5aeb240e8e5a8bca4845a470"
-dependencies = [
- "rand 0.7.3",
- "rand_xorshift",
 ]
 
 [[package]]
@@ -2218,11 +2161,11 @@ dependencies = [
  "ark-bls12-381",
  "ark-ec",
  "ark-ed-on-bls12-381",
- "ark-ff 0.3.0",
+ "ark-ff",
  "ark-poly",
  "ark-poly-commit",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-serialize",
+ "ark-std",
  "displaydoc",
  "downcast-rs",
  "itertools 0.10.1",
@@ -2236,21 +2179,21 @@ dependencies = [
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd#db56d801e502f5882c31c1bc0d47eb3d31a706fd"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
 dependencies = [
  "ark-bls12-377",
  "ark-ec",
- "ark-ff 0.3.0",
+ "ark-ff",
  "ark-poly",
  "ark-poly-commit",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-serialize",
+ "ark-std",
  "derivative",
  "displaydoc",
  "downcast-rs",
  "itertools 0.10.1",
  "jf-rescue",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
+ "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "merlin",
  "num-bigint 0.4.2",
  "rayon",
@@ -2266,9 +2209,9 @@ dependencies = [
  "ark-bls12-381",
  "ark-ec",
  "ark-ed-on-bls12-381",
- "ark-ff 0.3.0",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
  "crypto_box",
  "displaydoc",
  "generic-array",
@@ -2284,7 +2227,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd#db56d801e502f5882c31c1bc0d47eb3d31a706fd"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2294,17 +2237,17 @@ dependencies = [
  "ark-ed-on-bls12-377",
  "ark-ed-on-bls12-381",
  "ark-ed-on-bn254",
- "ark-ff 0.3.0",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
  "crypto_box",
  "derivative",
  "displaydoc",
  "generic-array",
  "itertools 0.10.1",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
+ "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "jf-rescue",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
+ "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "rayon",
  "serde",
  "thiserror",
@@ -2314,7 +2257,7 @@ dependencies = [
 [[package]]
 name = "jf-rescue"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd#db56d801e502f5882c31c1bc0d47eb3d31a706fd"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2324,15 +2267,15 @@ dependencies = [
  "ark-ed-on-bls12-377",
  "ark-ed-on-bls12-381",
  "ark-ed-on-bn254",
- "ark-ff 0.3.0",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
  "crypto_box",
  "derivative",
  "displaydoc",
  "generic-array",
  "itertools 0.10.1",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
+ "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "rayon",
  "serde",
  "thiserror",
@@ -2348,9 +2291,9 @@ dependencies = [
  "ark-bls12-381",
  "ark-ec",
  "ark-ed-on-bls12-381",
- "ark-ff 0.3.0",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
  "bincode",
  "csv",
  "displaydoc",
@@ -2373,7 +2316,7 @@ dependencies = [
 [[package]]
 name = "jf-txn"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd#db56d801e502f5882c31c1bc0d47eb3d31a706fd"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
 dependencies = [
  "anyhow",
  "ark-bls12-377",
@@ -2383,18 +2326,18 @@ dependencies = [
  "ark-ed-on-bls12-377",
  "ark-ed-on-bls12-381",
  "ark-ed-on-bn254",
- "ark-ff 0.3.0",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
  "bincode",
  "csv",
  "derivative",
  "displaydoc",
  "itertools 0.10.1",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
- "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
+ "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "jf-rescue",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
+ "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "num_cpus",
  "percentage",
  "rand 0.8.4",
@@ -2413,20 +2356,20 @@ name = "jf-utils"
 version = "0.0.1"
 source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f#5333c1868c7b7f9d8931a7888ddd54eed295309f"
 dependencies = [
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-serialize",
+ "ark-std",
  "serde",
 ]
 
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd#db56d801e502f5882c31c1bc0d47eb3d31a706fd"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
 dependencies = [
  "ark-ec",
- "ark-ff 0.3.0",
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
  "jf-utils-derive",
  "serde",
  "sha2",
@@ -2436,10 +2379,10 @@ dependencies = [
 [[package]]
 name = "jf-utils-derive"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd#db56d801e502f5882c31c1bc0d47eb3d31a706fd"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
 dependencies = [
- "ark-serialize 0.3.0",
- "ark-std 0.3.0",
+ "ark-serialize",
+ "ark-std",
  "quote",
  "syn",
 ]
@@ -2666,10 +2609,10 @@ dependencies = [
  "futures",
  "futures-util",
  "itertools 0.10.1",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
- "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
- "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
+ "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "markdown",
  "phaselock",
  "rand_chacha 0.2.2",
@@ -2997,10 +2940,12 @@ dependencies = [
 
 [[package]]
 name = "phaselock"
-version = "0.0.1"
+version = "0.0.2"
 source = "registry+https://dl.cloudsmith.io/basic/translucence/tl/cargo/index.git"
-checksum = "16be1cb8d75e682663d8a3892d9c24875e1bda7add0ec1b4fd3e9f3250ed0327"
+checksum = "6b342bdceb285ab4527d7a398ab435f515d0dc9057bc5cc21bcc0325ffcf9c3a"
 dependencies = [
+ "ark-ec",
+ "ark-ed-on-bls12-381",
  "async-std",
  "async-tungstenite 0.14.0",
  "bincode",
@@ -3011,10 +2956,10 @@ dependencies = [
  "futures",
  "hex_fmt",
  "rand 0.7.3",
+ "rand_chacha 0.2.2",
  "serde",
  "snafu",
  "threshold_crypto",
- "tokio 1.12.0",
  "tracing",
  "tracing-error",
  "tracing-futures",
@@ -5124,10 +5069,10 @@ dependencies = [
  "async-trait",
  "bincode",
  "futures",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
- "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
- "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
+ "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "lazy_static",
  "rustyline",
  "structopt",
@@ -5139,9 +5084,9 @@ dependencies = [
 name = "zerok_lib"
 version = "0.1.0"
 dependencies = [
- "ark-ff 0.2.0",
- "ark-serialize 0.3.0",
- "ark-std 0.2.0",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
  "async-scoped",
  "async-std",
  "async-trait",
@@ -5153,10 +5098,10 @@ dependencies = [
  "futures",
  "generic-array",
  "itertools 0.10.1",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
- "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
- "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=db56d801e502f5882c31c1bc0d47eb3d31a706fd)",
+ "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "lazy_static",
  "phaselock",
  "proptest",
