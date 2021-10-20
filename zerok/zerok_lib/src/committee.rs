@@ -1,18 +1,13 @@
 use crate::ValidatorState;
-use phaselock::{
-    committee::DynamicCommittee, traits::Election, BlockHash, PrivKey, PubKey, H_256, H_512,
-};
+use phaselock::{committee::DynamicCommittee, traits::Election, BlockHash, PrivKey, PubKey, H_256};
 use std::collections::{hash_map::HashMap, HashSet};
 
 use threshold_crypto as tc;
 
-type S = ValidatorState;
-const N: usize = H_512;
-
 /// A structure for committee election.
-pub struct Committee(DynamicCommittee<S, N>);
+pub struct Committee<const N: usize>(DynamicCommittee<ValidatorState, N>);
 
-impl Election<N> for Committee {
+impl<const N: usize> Election<N> for Committee<N> {
     /// A table mapping public keys with their associated stake.
     type StakeTable = HashMap<PubKey, u64>;
 
@@ -22,7 +17,7 @@ impl Election<N> for Committee {
     type SelectionThreshold = [u8; H_256];
 
     /// The state this election implementation is bound to.
-    type State = S;
+    type State = ValidatorState;
 
     /// A membership proof.
     type VoteToken = tc::SignatureShare;
