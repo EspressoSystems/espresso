@@ -176,16 +176,8 @@ pub struct WalletState<'a> {
     pub(crate) records: RecordDatabase,
     // sparse nullifier set Merkle tree mirrored from validators
     pub(crate) nullifiers: SetMerkleTree,
-    // set of unconfirmed transactions, indexed by UID
-    pub(crate) pending_txns: HashMap<TransactionUID, PendingTransaction>,
-    // the UIDs of transactions expiring at each validator timestamp.
-    pub(crate) expiring_txns: BTreeMap<u64, HashSet<TransactionUID>>,
-    // all transactions which have been committed but for which memos have not yet been posted.
-    pub(crate) transactions_awaiting_memos: HashMap<TransactionUID, TransactionAwaitingMemos>,
-    // indices into `transactions_awaiting_memos`, indexed by each output UID of each transaction.
-    pub(crate) uids_awaiting_memos: HashMap<u64, TransactionUID>,
-    // the transaction owning a particular hash
-    pub(crate) transactions: HashMap<ElaboratedTransactionHash, TransactionUID>,
+    // set of pending transactions
+    pub(crate) transactions: TransactionDatabase,
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Monotonic data
@@ -194,61 +186,6 @@ pub struct WalletState<'a> {
     pub(crate) auditable_assets: HashMap<AssetCode, AssetDefinition>,
     // maps defined asset code to asset definition, seed and description of the asset
     pub(crate) defined_assets: HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
-}
-
-pub type TransactionUID = ElaboratedTransactionHash;
-
-#[tagged_blob("TXN")]
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct TransactionReceipt {
-    uid: TransactionUID,
-    fee_nullifier: Nullifier,
-    submitter: UserAddress,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub(crate) struct PendingTransaction {
-    receiver_memos: Vec<ReceiverMemo>,
-    signature: Signature,
-    freeze_outputs: Vec<RecordOpening>,
-    timeout: u64,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub(crate) struct TransactionAwaitingMemos {
-    // The uids of the outputs of this transaction for which memos have not yet been posted.
-    pending_uids: HashSet<u64>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TransactionState {
-    Pending,
-    AwaitingMemos,
-    Retired,
-    Rejected,
-    Unknown,
-}
-
-impl std::fmt::Display for TransactionState {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Self::Pending => write!(f, "pending"),
-            Self::AwaitingMemos => write!(f, "accepted, waiting for owner memos"),
-            Self::Retired => write!(f, "accepted"),
-            Self::Rejected => write!(f, "rejected"),
-            Self::Unknown => write!(f, "unknown"),
-        }
-    }
-}
-
-impl TransactionState {
-    pub fn is_final(&self) -> bool {
-        matches!(self, Self::Retired | Self::Rejected)
-    }
-
-    pub fn succeeded(&self) -> bool {
-        matches!(self, Self::Retired)
-    }
 }
 
 /// The interface required by the wallet from the persistence layer.
@@ -503,6 +440,7 @@ pub struct WalletSession<'a, Backend: WalletBackend<'a>> {
 pub struct RecordInfo {
     ro: RecordOpening,
     uid: u64,
+    nullifier: Nullifier,
     // if Some(t), this record is on hold until the validator timestamp surpasses `t`, because this
     // record has been used as an input to a transaction that is not yet confirmed.
     hold_until: Option<u64>,
@@ -522,7 +460,8 @@ impl RecordInfo {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "Vec<RecordInfo>", into = "Vec<RecordInfo>")]
 pub struct RecordDatabase {
     // all records in the database, by uid
     record_info: HashMap<u64, RecordInfo>,
@@ -614,19 +553,25 @@ impl RecordDatabase {
     }
 
     fn insert_with_nullifier(&mut self, ro: RecordOpening, uid: u64, nullifier: Nullifier) {
-        self.asset_records
-            .entry((ro.asset_def.code, ro.pub_key.clone(), ro.freeze_flag))
-            .or_insert_with(BTreeSet::new)
-            .insert((ro.amount, uid));
-        self.nullifier_records.insert(nullifier, uid);
-        self.record_info.insert(
+        self.insert_record(RecordInfo {
+            ro,
             uid,
-            RecordInfo {
-                ro,
-                uid,
-                hold_until: None,
-            },
-        );
+            nullifier,
+            hold_until: None,
+        });
+    }
+
+    fn insert_record(&mut self, rec: RecordInfo) {
+        self.asset_records
+            .entry((
+                rec.ro.asset_def.code,
+                rec.ro.pub_key.clone(),
+                rec.ro.freeze_flag,
+            ))
+            .or_insert_with(BTreeSet::new)
+            .insert((rec.ro.amount, rec.uid));
+        self.nullifier_records.insert(rec.nullifier, rec.uid);
+        self.record_info.insert(rec.uid, rec);
     }
 
     fn remove_by_nullifier(&mut self, nullifier: Nullifier) -> Option<RecordInfo> {
@@ -649,22 +594,6 @@ impl RecordDatabase {
             record
         })
     }
-
-    fn iter(&self) -> impl Iterator<Item = (Nullifier, &RecordInfo)> {
-        self.nullifier_records
-            .iter()
-            .map(move |(nullifier, uid)| (*nullifier, &self.record_info[uid]))
-    }
-}
-
-impl Default for RecordDatabase {
-    fn default() -> Self {
-        Self {
-            record_info: HashMap::new(),
-            asset_records: HashMap::new(),
-            nullifier_records: HashMap::new(),
-        }
-    }
 }
 
 impl Index<Nullifier> for RecordDatabase {
@@ -680,22 +609,219 @@ impl IndexMut<Nullifier> for RecordDatabase {
     }
 }
 
-impl FromIterator<(Nullifier, RecordInfo)> for RecordDatabase {
-    fn from_iter<T: IntoIterator<Item = (Nullifier, RecordInfo)>>(iter: T) -> Self {
+impl FromIterator<RecordInfo> for RecordDatabase {
+    fn from_iter<T: IntoIterator<Item = RecordInfo>>(iter: T) -> Self {
         let mut db = Self::default();
-        for (nullifier, info) in iter {
-            db.asset_records
-                .entry((
-                    info.ro.asset_def.code,
-                    info.ro.pub_key.clone(),
-                    info.ro.freeze_flag,
-                ))
-                .or_insert_with(BTreeSet::new)
-                .insert((info.ro.amount, info.uid));
-            db.nullifier_records.insert(nullifier, info.uid);
-            db.record_info.insert(info.uid, info);
+        for info in iter {
+            db.insert_record(info)
         }
         db
+    }
+}
+
+impl From<Vec<RecordInfo>> for RecordDatabase {
+    fn from(records: Vec<RecordInfo>) -> Self {
+        records.into_iter().collect()
+    }
+}
+
+impl From<RecordDatabase> for Vec<RecordInfo> {
+    fn from(db: RecordDatabase) -> Self {
+        db.record_info.into_values().collect()
+    }
+}
+
+// Serialization intermediate for TransactionDatabase, which eliminates the redundancy of the
+// in-memory indices in TransactionDatabase.
+#[derive(Serialize, Deserialize)]
+struct TransactionStorage {
+    pending_txns: Vec<PendingTransaction>,
+    txns_awaiting_memos: Vec<TransactionAwaitingMemos>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "TransactionStorage", into = "TransactionStorage")]
+pub(crate) struct TransactionDatabase {
+    // The base storage. Every in-flight transaction is either pending or accepted and awaiting
+    // memos. All the auxiliary data in this database is just an index into one of these two tables.
+    pending_txns: HashMap<TransactionUID, PendingTransaction>,
+    txns_awaiting_memos: HashMap<TransactionUID, TransactionAwaitingMemos>,
+
+    txn_uids: HashMap<ElaboratedTransactionHash, TransactionUID>,
+    expiring_txns: BTreeMap<u64, HashSet<TransactionUID>>,
+    uids_awaiting_memos: HashMap<u64, TransactionUID>,
+}
+
+impl TransactionDatabase {
+    fn status(&self, uid: &TransactionUID) -> TransactionState {
+        if self.pending_txns.contains_key(uid) {
+            TransactionState::Pending
+        } else if self.txns_awaiting_memos.contains_key(uid) {
+            TransactionState::AwaitingMemos
+        } else {
+            TransactionState::Unknown
+        }
+    }
+
+    // Inform the database that we have received memos for the given record UIDs. Return a list of
+    // the transactions that are completed as a result.
+    fn received_memos(&mut self, uids: impl Iterator<Item = u64>) -> Vec<TransactionUID> {
+        let mut completed = Vec::new();
+        for uid in uids {
+            if let Some(txn_uid) = self.uids_awaiting_memos.remove(&uid) {
+                let txn = self.txns_awaiting_memos.get_mut(&txn_uid).unwrap();
+                txn.pending_uids.remove(&uid);
+                if txn.pending_uids.is_empty() {
+                    self.txns_awaiting_memos.remove(&txn_uid);
+                    completed.push(txn_uid);
+                }
+            }
+        }
+        completed
+    }
+
+    fn await_memos(&mut self, uid: TransactionUID, pending_uids: impl IntoIterator<Item = u64>) {
+        self.insert_awaiting_memos(TransactionAwaitingMemos {
+            uid,
+            pending_uids: pending_uids.into_iter().collect(),
+        })
+    }
+
+    fn remove_pending(&mut self, hash: &ElaboratedTransactionHash) -> Option<PendingTransaction> {
+        self.txn_uids.remove(hash).and_then(|uid| {
+            let pending = self.pending_txns.remove(&uid);
+            if let Some(pending) = &pending {
+                if let Some(expiring) = self.expiring_txns.get_mut(&pending.timeout) {
+                    expiring.remove(&uid);
+                    if expiring.is_empty() {
+                        self.expiring_txns.remove(&pending.timeout);
+                    }
+                }
+            }
+            pending
+        })
+    }
+
+    fn remove_expired(&mut self, now: u64) -> Vec<PendingTransaction> {
+        #[cfg(any(test, debug_assertions))]
+        {
+            if let Some(earliest_timeout) = self.expiring_txns.keys().next() {
+                // Transactions expiring before now should already have been removed from the
+                // expiring_txns set, because we clear expired transactions every time we step the
+                // validator state.
+                assert!(*earliest_timeout >= now);
+            }
+        }
+
+        self.expiring_txns
+            .remove(&now)
+            .into_iter()
+            .flatten()
+            .map(|uid| {
+                let pending = self.pending_txns.remove(&uid).unwrap();
+                self.txn_uids.remove(&pending.hash);
+                pending
+            })
+            .collect()
+    }
+
+    fn insert_pending(&mut self, txn: PendingTransaction) {
+        self.txn_uids.insert(txn.hash.clone(), txn.uid.clone());
+        self.expiring_txns
+            .entry(txn.timeout)
+            .or_insert_with(HashSet::default)
+            .insert(txn.uid.clone());
+        self.pending_txns.insert(txn.uid.clone(), txn);
+    }
+
+    fn insert_awaiting_memos(&mut self, txn: TransactionAwaitingMemos) {
+        for uid in &txn.pending_uids {
+            self.uids_awaiting_memos.insert(*uid, txn.uid.clone());
+        }
+        self.txns_awaiting_memos.insert(txn.uid.clone(), txn);
+    }
+}
+
+impl From<TransactionStorage> for TransactionDatabase {
+    fn from(txns: TransactionStorage) -> Self {
+        let mut db = Self::default();
+        for txn in txns.pending_txns {
+            db.insert_pending(txn);
+        }
+        for txn in txns.txns_awaiting_memos {
+            db.insert_awaiting_memos(txn);
+        }
+        db
+    }
+}
+
+impl From<TransactionDatabase> for TransactionStorage {
+    fn from(db: TransactionDatabase) -> Self {
+        Self {
+            pending_txns: db.pending_txns.into_values().collect(),
+            txns_awaiting_memos: db.txns_awaiting_memos.into_values().collect(),
+        }
+    }
+}
+
+#[tagged_blob("TXUID")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+pub struct TransactionUID(ElaboratedTransactionHash);
+
+#[tagged_blob("TXN")]
+#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
+pub struct TransactionReceipt {
+    uid: TransactionUID,
+    fee_nullifier: Nullifier,
+    submitter: UserAddress,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub(crate) struct PendingTransaction {
+    receiver_memos: Vec<ReceiverMemo>,
+    signature: Signature,
+    freeze_outputs: Vec<RecordOpening>,
+    timeout: u64,
+    uid: TransactionUID,
+    hash: ElaboratedTransactionHash,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct TransactionAwaitingMemos {
+    // The uid of this transaction.
+    uid: TransactionUID,
+    // The uids of the outputs of this transaction for which memos have not yet been posted.
+    pending_uids: HashSet<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransactionState {
+    Pending,
+    AwaitingMemos,
+    Retired,
+    Rejected,
+    Unknown,
+}
+
+impl std::fmt::Display for TransactionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "pending"),
+            Self::AwaitingMemos => write!(f, "accepted, waiting for owner memos"),
+            Self::Retired => write!(f, "accepted"),
+            Self::Rejected => write!(f, "rejected"),
+            Self::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+impl TransactionState {
+    pub fn is_final(&self) -> bool {
+        matches!(self, Self::Retired | Self::Rejected)
+    }
+
+    pub fn succeeded(&self) -> bool {
+        matches!(self, Self::Retired)
     }
 }
 
@@ -805,26 +931,30 @@ impl<'a> WalletState<'a> {
         session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         receipt: &TransactionReceipt,
     ) -> Result<TransactionState, WalletError> {
-        if self.pending_txns.contains_key(&receipt.uid) {
-            Ok(TransactionState::Pending)
-        } else if self.transactions_awaiting_memos.contains_key(&receipt.uid) {
-            Ok(TransactionState::AwaitingMemos)
-        } else {
-            let (spent, _) = self
-                .get_nullifier_proof(session, receipt.fee_nullifier)
-                .await?;
-            if spent {
-                Ok(TransactionState::Retired)
-            } else {
-                // If the transaction isn't in our pending data structures, but its fee record has
-                // not been spent, then either it was rejected, or it's someone else's transaction
-                // that we haven't been tracking through the lifecycle.
-                if receipt.submitter == session.key_pair.address() {
-                    Ok(TransactionState::Rejected)
+        match self.transactions.status(&receipt.uid) {
+            TransactionState::Unknown => {
+                // If the transactions database returns Unknown, it means the transaction is not in-
+                // flight (the database only tracks in-flight transactions). So it must be retired,
+                // rejected, or a foreign transaction that we were never tracking to begin with.
+                // Check if it has been accepted by seeing if its fee nullifier is spent.
+                let (spent, _) = self
+                    .get_nullifier_proof(session, receipt.fee_nullifier)
+                    .await?;
+                if spent {
+                    Ok(TransactionState::Retired)
                 } else {
-                    Ok(TransactionState::Unknown)
+                    // If the transaction isn't in our pending data structures, but its fee record
+                    // has not been spent, then either it was rejected, or it's someone else's
+                    // transaction that we haven't been tracking through the lifecycle.
+                    if receipt.submitter == session.key_pair.address() {
+                        Ok(TransactionState::Rejected)
+                    } else {
+                        Ok(TransactionState::Unknown)
+                    }
                 }
             }
+
+            state => Ok(state),
         }
     }
 
@@ -897,7 +1027,7 @@ impl<'a> WalletState<'a> {
                     //
                     // This is a transaction we submitted and have been
                     // awaiting confirmation.
-                    if let Some((txn_uid, _)) = self
+                    if let Some(pending) = self
                         .clear_pending_transaction(
                             session,
                             &txn,
@@ -907,7 +1037,7 @@ impl<'a> WalletState<'a> {
                     {
                         summary
                             .updated_txns
-                            .push((txn_uid, TransactionState::AwaitingMemos));
+                            .push((pending.uid, TransactionState::AwaitingMemos));
                     }
 
                     // This is someone else's transaction but we can audit it.
@@ -970,6 +1100,16 @@ impl<'a> WalletState<'a> {
             }
 
             LedgerEvent::Memos { outputs } => {
+                let completed = self
+                    .transactions
+                    .received_memos(outputs.iter().map(|info| info.2));
+                summary.updated_txns.extend(
+                    completed
+                        .into_iter()
+                        .map(|txn_uid| (txn_uid, TransactionState::Retired))
+                        .collect::<Vec<_>>(),
+                );
+
                 for (memo, comm, uid, proof) in outputs {
                     summary.received_memos.push((memo.clone(), uid));
 
@@ -990,17 +1130,6 @@ impl<'a> WalletState<'a> {
                             }
                         }
                     }
-
-                    if let Some(txn_uid) = self.uids_awaiting_memos.remove(&uid) {
-                        let txn = self.transactions_awaiting_memos.get_mut(&txn_uid).unwrap();
-                        txn.pending_uids.remove(&uid);
-                        if txn.pending_uids.is_empty() {
-                            self.transactions_awaiting_memos.remove(&txn_uid);
-                            summary
-                                .updated_txns
-                                .push((txn_uid, TransactionState::Retired));
-                        }
-                    }
                 }
             }
 
@@ -1008,8 +1137,7 @@ impl<'a> WalletState<'a> {
                 for (txn, proofs) in block.block.0.into_iter().zip(block.proofs) {
                     summary.rejected_nullifiers.append(&mut txn.nullifiers());
                     let mut txn = ElaboratedTransaction { txn, proofs };
-                    if let Some((txn_uid, pending)) =
-                        self.clear_pending_transaction(session, &txn, None).await
+                    if let Some(pending) = self.clear_pending_transaction(session, &txn, None).await
                     {
                         // Try to resubmit if the error is recoverable.
                         if let ValidationError::BadNullifierProof {} = &error {
@@ -1024,7 +1152,7 @@ impl<'a> WalletState<'a> {
                                         pending.receiver_memos,
                                         pending.signature,
                                         pending.freeze_outputs,
-                                        Some(txn_uid.clone()),
+                                        Some(pending.uid.clone()),
                                     )
                                     .await
                                     .is_ok()
@@ -1036,12 +1164,12 @@ impl<'a> WalletState<'a> {
                                 // If we failed to resubmit, then the rejection is final.
                                 summary
                                     .updated_txns
-                                    .push((txn_uid, TransactionState::Rejected));
+                                    .push((pending.uid, TransactionState::Rejected));
                             }
                         } else {
                             summary
                                 .updated_txns
-                                .push((txn_uid, TransactionState::Rejected));
+                                .push((pending.uid, TransactionState::Rejected));
                         }
                     }
                 }
@@ -1073,20 +1201,12 @@ impl<'a> WalletState<'a> {
         session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         txn: &ElaboratedTransaction,
         res: Option<CommittedTxn<'t>>,
-    ) -> Option<(TransactionUID, PendingTransaction)> {
+    ) -> Option<PendingTransaction> {
         let now = self.validator.prev_commit_time;
 
         // Remove the transaction from pending transaction data structures.
         let txn_hash = txn.hash();
-        let pending = self.pending_txns.remove(&txn_hash);
-        if let Some(pending) = &pending {
-            // Remove the transaction from the set of transactions set to expire.
-            if let Some(expiring) = self.expiring_txns.get_mut(&pending.timeout) {
-                expiring.remove(&txn_hash);
-            }
-        }
-        let txn_uid = self.transactions.remove(&txn_hash);
-        assert_eq!(txn_uid.is_some(), pending.is_some());
+        let pending = self.transactions.remove_pending(&txn_hash);
 
         for nullifier in txn.txn.nullifiers() {
             if let Some(record) = self.records.record_with_nullifier_mut(&nullifier) {
@@ -1127,17 +1247,8 @@ impl<'a> WalletState<'a> {
                         block_id, txn_id, err
                     );
                 } else {
-                    let uids = uids
-                        .iter()
-                        .map(|(uid, _)| {
-                            self.uids_awaiting_memos.insert(*uid, txn_hash.clone());
-                            *uid
-                        })
-                        .collect();
-                    self.transactions_awaiting_memos.insert(
-                        txn_hash.clone(),
-                        TransactionAwaitingMemos { pending_uids: uids },
-                    );
+                    self.transactions
+                        .await_memos(pending.uid.clone(), uids.iter().map(|(uid, _)| *uid));
                 }
 
                 // the first uid corresponds to the fee change output, which is not one of the
@@ -1150,31 +1261,14 @@ impl<'a> WalletState<'a> {
             }
         }
 
-        pending.map(|txn| (txn_uid.unwrap(), txn))
+        pending
     }
 
     fn clear_expired_transactions(&mut self) -> Vec<TransactionUID> {
-        let now = self.validator.prev_commit_time;
-
-        #[cfg(any(test, debug_assertions))]
-        {
-            if let Some(earliest_timeout) = self.expiring_txns.keys().next() {
-                // Transactions expiring before now should already have been removed from the
-                // expiring_txns set, because we clear expired transactions every time we step the
-                // validator state.
-                assert!(*earliest_timeout >= now);
-            }
-        }
-
-        self.expiring_txns
-            .remove(&now)
+        self.transactions
+            .remove_expired(self.validator.prev_commit_time)
             .into_iter()
-            .flatten()
-            .map(|txn_hash| {
-                let txn_uid = self.transactions.remove(&txn_hash).unwrap();
-                self.pending_txns.remove(&txn_hash);
-                txn_uid
-            })
+            .map(|txn| txn.uid)
             .collect()
     }
 
@@ -1898,7 +1992,7 @@ impl<'a> WalletState<'a> {
         let now = self.validator.prev_commit_time;
         let timeout = now + RECORD_HOLD_TIME;
         let hash = txn.hash();
-        let uid = uid.unwrap_or_else(|| hash.clone());
+        let uid = uid.unwrap_or_else(|| TransactionUID(hash.clone()));
 
         for nullifier in txn.txn.nullifiers() {
             // hold the record corresponding to this nullifier until the transaction is committed,
@@ -1915,12 +2009,10 @@ impl<'a> WalletState<'a> {
             signature,
             timeout,
             freeze_outputs,
+            uid: uid.clone(),
+            hash,
         };
-        self.transactions.insert(hash.clone(), uid.clone());
-
-        // Add the transaction to `pending_txns` and `expiring_txns` while it is in flight..
-        self.pending_txns.insert(hash.clone(), pending);
-        self.expiring_txns.entry(timeout).or_default().insert(hash);
+        self.transactions.insert_pending(pending);
 
         TransactionReceipt {
             uid,
@@ -2508,13 +2600,6 @@ pub mod test_helpers {
         assert_eq!(w1.freezer_key_pair, w2.freezer_key_pair);
         assert_eq!(w1.nullifiers, w2.nullifiers);
         assert_eq!(w1.defined_assets, w2.defined_assets);
-        assert_eq!(w1.pending_txns, w2.pending_txns);
-        assert_eq!(w1.expiring_txns, w2.expiring_txns);
-        assert_eq!(
-            w1.transactions_awaiting_memos,
-            w2.transactions_awaiting_memos
-        );
-        assert_eq!(w1.uids_awaiting_memos, w2.uids_awaiting_memos);
         assert_eq!(w1.transactions, w2.transactions);
     }
 
@@ -2544,11 +2629,7 @@ pub mod test_helpers {
                 working.validator = state.validator.clone();
                 working.records = state.records.clone();
                 working.nullifiers = state.nullifiers.clone();
-                working.pending_txns = state.pending_txns.clone();
-                working.expiring_txns = state.expiring_txns.clone();
                 working.transactions = state.transactions.clone();
-                working.transactions_awaiting_memos = state.transactions_awaiting_memos.clone();
-                working.uids_awaiting_memos = state.uids_awaiting_memos.clone();
             }
             Ok(())
         }
@@ -2795,10 +2876,6 @@ pub mod test_helpers {
                     nullifiers: ledger.nullifiers.clone(),
                     defined_assets: HashMap::new(),
                     now: 0,
-                    pending_txns: Default::default(),
-                    expiring_txns: Default::default(),
-                    transactions_awaiting_memos: Default::default(),
-                    uids_awaiting_memos: Default::default(),
                     transactions: Default::default(),
                     auditable_assets: Default::default(),
                     auditor_key_pair: AuditorKeyPair::generate(&mut rng),
