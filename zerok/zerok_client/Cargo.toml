@@ -3,6 +3,7 @@ name = "zerok_client"
 version = "0.1.0"
 authors = ["Joe Doyle <joe@translucence.net>"]
 edition = "2018"
+default-run = "zerok_client"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -10,13 +11,19 @@ edition = "2018"
 async-std = { version = "1.10.0", features = ["unstable", "attributes"] }
 async-trait = "0.1.51"
 bincode = "1.3.3"
+escargot = "0.5.2"
 futures = "0.3.16"
 jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5b500854579d58f2988ba0249b97203351a49290"}
 jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5b500854579d58f2988ba0249b97203351a49290"}
 jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5b500854579d58f2988ba0249b97203351a49290"}
 jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5b500854579d58f2988ba0249b97203351a49290"}
 lazy_static = "1.4.0"
+regex = "1.5.4"
 rustyline = "9.0.0"
 structopt = { version = "0.3", features = ["paw"] }
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
 zerok_lib = { path = "../zerok_lib/" }
+
+[dev-dependencies]
+tempdir = "0.3.7"
+toml = "0.5"

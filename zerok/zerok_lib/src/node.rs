@@ -874,6 +874,9 @@ impl<'a, NET: PLNet, STORE: PLStore> WalletBackend<'a> for FullNode<'a, NET, STO
             defined_assets: Default::default(),
             pending_txns: Default::default(),
             expiring_txns: Default::default(),
+            transactions_awaiting_memos: Default::default(),
+            uids_awaiting_memos: Default::default(),
+            transactions: Default::default(),
             auditable_assets: Default::default(),
             auditor_key_pair: AuditorKeyPair::generate(&mut rng),
             freezer_key_pair: FreezerKeyPair::generate(&mut rng),
@@ -905,21 +908,15 @@ impl<'a, NET: PLNet, STORE: PLStore> WalletBackend<'a> for FullNode<'a, NET, STO
             })
     }
 
-    async fn prove_nullifier_unspent(
+    async fn get_nullifier_proof(
         &self,
         root: set_hash::Hash,
         nullifier: Nullifier,
-    ) -> Result<SetMerkleProof, WalletError> {
-        let (spent, proof) = self
-            .as_query_service()
+    ) -> Result<(bool, SetMerkleProof), WalletError> {
+        self.as_query_service()
             .nullifier_proof(root, nullifier)
             .await
-            .context(QueryServiceWalletError)?;
-        if spent {
-            Err(WalletError::NullifierAlreadyPublished { nullifier })
-        } else {
-            Ok(proof)
-        }
+            .context(QueryServiceWalletError)
     }
 
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {
