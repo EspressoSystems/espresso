@@ -1,7 +1,7 @@
 #![deny(warnings)]
 #![allow(dead_code)]
 
-use crate::util::{byte_array_to_bits, canonical};
+use crate::util::{canonical, commit};
 use ark_serialize::*;
 use bitvec::vec::BitVec;
 use core::mem;
@@ -11,83 +11,68 @@ use std::convert::TryFrom;
 
 pub mod set_hash {
     use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
+    use commit::Committable;
     use jf_utils::tagged_blob;
-    use std::ops::Deref;
 
-    type Array = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+    struct Elem(Nullifier);
 
-    #[tagged_blob("HASH")]
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub struct Hash(Array);
+    impl commit::Committable for Elem {
+        fn commit(&self) -> commit::Commitment<Self> {
+            commit::RawCommitmentBuilder::new("AAPSet Elem")
+                .var_size_bytes(&canonical::serialize(&self.0).unwrap())
+                .finalize()
+        }
+    }
+
+    enum SetMerkleTreeNode {
+        EmptySubtree,
+        Leaf { elem: Nullifier },
+        Branch { l: Hash, r: Hash },
+    }
+
+    impl SetMerkleTreeNode {
+        fn hash(&self) -> Hash {
+            Hash(self.commit())
+        }
+    }
+
+    impl commit::Committable for SetMerkleTreeNode {
+        fn commit(&self) -> commit::Commitment<Self> {
+            use commit::RawCommitmentBuilder;
+            use SetMerkleTreeNode::*;
+            match self {
+                EmptySubtree => RawCommitmentBuilder::new("AAPSet Empty").finalize(),
+                Leaf { elem } => RawCommitmentBuilder::new("AAPSet Leaf")
+                    .var_size_bytes(&canonical::serialize(elem).unwrap())
+                    .finalize(),
+
+                Branch { l, r } => RawCommitmentBuilder::new("AAPSet Branch")
+                    .field("l", l.0)
+                    .field("r", r.0)
+                    .finalize(),
+            }
+        }
+    }
+
+    #[tagged_blob("SET")]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+    pub struct Hash(commit::Commitment<SetMerkleTreeNode>);
 
     lazy_static::lazy_static! {
-        pub static ref EMPTY_HASH: Hash = Hash(GenericArray::<_,_>::default());
+        pub static ref EMPTY_HASH: Hash = Hash(SetMerkleTreeNode::EmptySubtree.commit());
     }
 
-    impl Hash {
-        pub fn new(bytes: Array) -> Self {
-            Self(bytes)
-        }
-
-        pub fn into_bits(self) -> BitVec<bitvec::order::Lsb0, u8> {
-            byte_array_to_bits(self.0)
-        }
-    }
-
-    impl CanonicalSerialize for Hash {
-        fn serialize<W: Write>(&self, mut w: W) -> Result<(), SerializationError> {
-            w.write_all(&self.0).map_err(SerializationError::from)
-        }
-
-        fn serialized_size(&self) -> usize {
-            self.0.len()
-        }
-    }
-
-    impl CanonicalDeserialize for Hash {
-        fn deserialize<R: Read>(mut r: R) -> Result<Self, SerializationError> {
-            let mut buf = GenericArray::default();
-            r.read_exact(&mut buf)?;
-            Ok(Hash(buf))
-        }
-    }
-
-    impl IntoIterator for Hash {
-        type Item = u8;
-        type IntoIter = <Array as IntoIterator>::IntoIter;
-        fn into_iter(self) -> Self::IntoIter {
-            self.0.into_iter()
-        }
-    }
-
-    impl Deref for Hash {
-        type Target = [u8];
-        fn deref(&self) -> &[u8] {
-            &*self.0
-        }
-    }
-
-    pub fn elem_hash(x: Nullifier) -> Hash {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Elem".as_bytes());
-        hasher.update(&canonical::serialize(&x).unwrap());
-        Hash(hasher.finalize().into_bytes())
-    }
-
-    pub fn leaf_hash(x: Nullifier) -> Hash {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Leaf".as_bytes());
-        hasher.update(&canonical::serialize(&x).unwrap());
-        Hash(hasher.finalize().into_bytes())
+    pub fn leaf_hash(elem: Nullifier) -> Hash {
+        SetMerkleTreeNode::Leaf { elem }.hash()
     }
 
     pub fn branch_hash(l: Hash, r: Hash) -> Hash {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "AAPSet Branch".as_bytes());
-        hasher.update("l".as_bytes());
-        hasher.update(&l.0);
-        hasher.update("r".as_bytes());
-        hasher.update(&r.0);
-        Hash(hasher.finalize().into_bytes())
+        SetMerkleTreeNode::Branch { l, r }.hash()
+    }
+
+    pub fn elem_bits(x: Nullifier) -> BitVec<bitvec::order::Lsb0, u8> {
+        Elem(x).commit().into_bits()
     }
 }
 
@@ -112,8 +97,7 @@ pub enum SetMerkleTree {
 
 impl SetMerkleTree {
     fn new_leaf(height: usize, elem: Nullifier) -> Self {
-        let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
-        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
+        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = set_hash::elem_bits(elem);
         let elem_bits = elem_bit_vec.into_iter();
 
         let mut h = set_hash::leaf_hash(elem);
@@ -123,7 +107,7 @@ impl SetMerkleTree {
             } else {
                 (h, *set_hash::EMPTY_HASH)
             };
-            h = set_hash::branch_hash(l, r)
+            h = set_hash::branch_hash(l, r);
         }
 
         Self::Leaf {
@@ -204,7 +188,7 @@ impl SetMerkleTerminalNode {
         match self {
             EmptySubtree => *set_hash::EMPTY_HASH,
             Leaf { height, elem } => {
-                let elem_bit_vec = set_hash::elem_hash(*elem).into_bits();
+                let elem_bit_vec = set_hash::elem_bits(*elem);
 
                 // the path only goes until a terminal node is reached, so skip
                 // part of the bit-vec
@@ -248,7 +232,7 @@ impl SetMerkleProof {
     pub fn check(&self, elem: Nullifier, root: &set_hash::Hash) -> Result<bool, set_hash::Hash> {
         let mut running_hash = self.terminal_node.value();
 
-        let elem_bit_vec = set_hash::elem_hash(elem).into_bits();
+        let elem_bit_vec = set_hash::elem_bits(elem);
 
         // the path only goes until a terminal node is reached, so skip
         // part of the bit-vec
@@ -295,8 +279,7 @@ impl SetMerkleTree {
     /// Returns `None` if the element is in a forgotten subtree
     pub fn contains(&self, elem: Nullifier) -> Option<(bool, SetMerkleProof)> {
         use SetMerkleTree::*;
-        let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
-        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
+        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = set_hash::elem_bits(elem);
         let elem_bits = elem_bit_vec.into_iter().rev();
 
         let mut path = vec![];
@@ -348,8 +331,7 @@ impl SetMerkleTree {
 
     pub fn insert(&mut self, elem: Nullifier) -> Option<()> {
         use SetMerkleTree::*;
-        let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
-        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
+        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = set_hash::elem_bits(elem);
         let mut end_height = elem_bit_vec.len();
         let elem_bits = elem_bit_vec.into_iter().rev();
 
@@ -374,9 +356,8 @@ impl SetMerkleTree {
                     // Figure out if this leaf is down the same tree or if it's a sibling
                     let leaf_is_left = {
                         debug_assert!(height > 0);
-                        let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
                         let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> =
-                            BitVec::try_from(elem_bytes).unwrap();
+                            set_hash::elem_bits(elem);
                         !elem_bit_vec[height - 1]
                     };
 
@@ -437,8 +418,7 @@ impl SetMerkleTree {
 
     pub fn forget(&mut self, elem: Nullifier) -> Option<SetMerkleProof> {
         use SetMerkleTree::*;
-        let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
-        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
+        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = set_hash::elem_bits(elem);
         let elem_bits = elem_bit_vec.into_iter().rev();
 
         let mut siblings = vec![];
@@ -514,8 +494,7 @@ impl SetMerkleTree {
         let elem_in_set = proof.check(elem, &self.hash())?;
 
         use SetMerkleTree::*;
-        let elem_bytes: Vec<u8> = set_hash::elem_hash(elem).into_iter().collect();
-        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = BitVec::try_from(elem_bytes).unwrap();
+        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = set_hash::elem_bits(elem);
 
         let mut siblings = vec![];
         let mut end_branch = mem::replace(self, EmptySubtree);
@@ -649,7 +628,7 @@ mod tests {
         let pfs = elems
             .into_iter()
             .map(|elem| {
-                let elem_bit_vec = set_hash::elem_hash(elem).into_bits();
+                let elem_bit_vec = set_hash::elem_bits(elem);
                 let pf = elem_bit_vec
                     .iter()
                     .map(|_| {

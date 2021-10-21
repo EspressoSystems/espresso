@@ -139,7 +139,7 @@ impl BlockContents<H_512> for ElaboratedBlock {
         Ok(ret)
     }
 
-    fn hash(&self) -> phaselock::BlockHash<64> {
+    fn hash(&self) -> phaselock::BlockHash<32> {
         use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "ElaboratedBlock".as_bytes());
@@ -147,7 +147,7 @@ impl BlockContents<H_512> for ElaboratedBlock {
         hasher.update(&block_comm::block_commit(&self.block));
         hasher.update("Block proofs".as_bytes());
         hasher.update(&bincode::serialize(&self.proofs).unwrap());
-        phaselock::BlockHash::<64>::from_array(
+        phaselock::BlockHash::<32>::from_array(
             hasher
                 .finalize()
                 .into_bytes()
@@ -157,12 +157,12 @@ impl BlockContents<H_512> for ElaboratedBlock {
         )
     }
 
-    fn hash_bytes(bytes: &[u8]) -> phaselock::BlockHash<64> {
+    fn hash_bytes(bytes: &[u8]) -> phaselock::BlockHash<32> {
         use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "PhaseLock bytes".as_bytes());
         hasher.update(bytes);
-        phaselock::BlockHash::<64>::from_array(
+        phaselock::BlockHash::<32>::from_array(
             hasher
                 .finalize()
                 .into_bytes()
@@ -172,7 +172,7 @@ impl BlockContents<H_512> for ElaboratedBlock {
         )
     }
 
-    fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<64> {
+    fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<32> {
         use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
         let mut hasher =
@@ -181,7 +181,7 @@ impl BlockContents<H_512> for ElaboratedBlock {
         hasher.update(&txn_comm::txn_commit(&txn.txn));
         hasher.update("Txn proofs".as_bytes());
         hasher.update(&bincode::serialize(&txn.proofs).unwrap());
-        phaselock::BlockHash::<64>::from_array(
+        phaselock::BlockHash::<32>::from_array(
             hasher
                 .finalize()
                 .into_bytes()
@@ -473,70 +473,52 @@ impl Clone for ValidationError {
     }
 }
 
-mod verif_crs_comm {
-    use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
-    pub type VerifCRSCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
-
-    pub fn verif_crs_commit(p: &VerifierKeySet) -> VerifCRSCommitment {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "VerifCRS Comm".as_bytes());
-        hasher.update(&canonical::serialize(p).unwrap());
-        hasher.finalize().into_bytes()
+impl Committable for VerifierKeySet {
+    fn commit(&self) -> Commitment<Self> {
+        RawCommitmentBuilder::new("VerifCRS Comm")
+            .var_size_bytes(canonical::serialize(self).unwrap())
+            .finalize()
     }
 }
 
-mod txn_comm {
-    use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
-    pub type TxnCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
-
-    pub fn txn_commit(p: &TransactionNote) -> TxnCommitment {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "Txn Comm".as_bytes());
-        let byte_stream = canonical::serialize(p).unwrap();
-        hasher.update(&byte_stream);
-        hasher.finalize().into_bytes()
+impl Committable for TransactionNote {
+    fn commit(&self) -> Commitment<Self> {
+        RawCommitmentBuilder::new("Txn Comm")
+            .var_size_bytes(canonical::serialize(self).unwrap())
+            .finalize()
     }
 }
 
-mod block_comm {
-    use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
-    pub type BlockCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
+#[tagged_blob("BLOCK")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+pub struct BlockCommitment(pub commit::Commitment<Block>);
 
-    pub fn block_commit(p: &Block) -> BlockCommitment {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "Block Comm".as_bytes());
-        hasher.update(&p.0.len().to_le_bytes());
-        for t in p.0.iter() {
-            hasher.update(&txn_comm::txn_commit(t));
-        }
-        hasher.finalize().into_bytes()
+impl Committable for Block {
+    fn commit(&self) -> commit::Commitment<Self> {
+        RawCommitmentBuilder::new("Block Comm")
+            .array_field("txns", &self.0.iter().map(|x| x.commit()).collect::<Vec<_>>())
+            .finalize()
     }
 }
 
-mod record_merkle_hist_comm {
-    use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
-    pub type RecordMerkleHistCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecordMerkleHistory(pub VecDeque<NodeValue>);
 
-    pub fn record_merkle_hist_commit(p: &VecDeque<NodeValue>) -> RecordMerkleHistCommitment {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "Hist Comm".as_bytes());
-        hasher.update(&p.len().to_le_bytes());
-        for hash in p {
-            hasher.update(&canonical::serialize(hash).unwrap());
-        }
-        hasher.finalize().into_bytes()
+impl Committable for RecordMerkleHistory {
+    fn commit(&self) -> commit::Commitment<Self> {
+        RawCommitmentBuilder::new("Hist Comm")
+            .array_field("roots", &self.0.iter().map(|x| x.commit()).collect::<Vec<_>>())
+            .finalize()
+
     }
 }
 
 pub mod state_comm {
     use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
-    pub type LedgerStateCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
+
+    #[tagged_blob("STATE")]
+    pub type LedgerStateCommitment(pub Commitment<ValidatorState>);
+
     lazy_static::lazy_static! {
         pub static ref INITIAL_PREV_COMM: LedgerStateCommitment = GenericArray::<_,_>::default();
     }
@@ -586,7 +568,7 @@ pub struct ValidatorState {
     // The current record Merkle root hash
     pub record_merkle_root: NodeValue,
     // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
-    pub past_record_merkle_roots: VecDeque<NodeValue>,
+    pub past_record_merkle_roots: RecordMerkleHistory,
     pub record_merkle_frontier: MerkleTree,
     pub nullifiers_root: set_hash::Hash,
     pub next_uid: u64,
