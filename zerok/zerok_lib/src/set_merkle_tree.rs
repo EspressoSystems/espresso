@@ -208,7 +208,7 @@ impl CanonicalDeserialize for SetMerkleTerminalNode {
 }
 
 impl SetMerkleTerminalNode {
-    fn value(&self) -> set_hash::Hash {
+    pub fn value(&self) -> set_hash::Hash {
         use SetMerkleTerminalNode::*;
         match self {
             EmptySubtree => *set_hash::EMPTY_HASH,
