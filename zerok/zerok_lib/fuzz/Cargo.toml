@@ -10,6 +10,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+async-std = { version = "1.10.0", features = ["unstable", "attributes"] }
 
 [dependencies.zerok_lib]
 path = ".."
