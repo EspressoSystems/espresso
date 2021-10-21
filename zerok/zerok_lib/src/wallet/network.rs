@@ -164,6 +164,9 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
             pending_txns: Default::default(),
             expiring_txns: Default::default(),
             auditable_assets: Default::default(),
+            transactions_awaiting_memos: Default::default(),
+            uids_awaiting_memos: Default::default(),
+            transactions: Default::default(),
             auditor_key_pair: AuditorKeyPair::generate(&mut rng),
             freezer_key_pair: FreezerKeyPair::generate(&mut rng),
         };
@@ -212,19 +215,15 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
             .await
     }
 
-    async fn prove_nullifier_unspent(
+    async fn get_nullifier_proof(
         &self,
         root: set_hash::Hash,
         nullifier: Nullifier,
-    ) -> Result<SetMerkleProof, WalletError> {
+    ) -> Result<(bool, SetMerkleProof), WalletError> {
         let api::NullifierProof { proof, spent, .. } = self
             .get(format!("/getnullifier/{}/{}", root, nullifier))
             .await?;
-        if spent {
-            Err(WalletError::NullifierAlreadyPublished { nullifier })
-        } else {
-            Ok(proof)
-        }
+        Ok((spent, proof))
     }
 
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {

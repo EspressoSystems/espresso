@@ -39,7 +39,12 @@ struct WalletSnapshot {
     validator: ValidatorState,
     records: Vec<(Nullifier, RecordInfo)>,
     nullifiers: SetMerkleTree,
-    pending_txns: HashMap<Nullifier, PendingTransaction>,
+    transactions_awaiting_memos: HashMap<TransactionUID, TransactionAwaitingMemos>,
+    pending_txns: Vec<(
+        TransactionUID,
+        ElaboratedTransactionHash,
+        PendingTransaction,
+    )>,
 }
 
 impl<'a> From<&WalletState<'a>> for WalletSnapshot {
@@ -49,7 +54,12 @@ impl<'a> From<&WalletState<'a>> for WalletSnapshot {
             validator: w.validator.clone(),
             records: w.records.iter().map(|(n, r)| (n, r.clone())).collect(),
             nullifiers: w.nullifiers.clone(),
-            pending_txns: w.pending_txns.clone(),
+            pending_txns: w
+                .transactions
+                .iter()
+                .map(|(hash, uid)| (uid.clone(), hash.clone(), w.pending_txns[uid].clone()))
+                .collect(),
+            transactions_awaiting_memos: w.transactions_awaiting_memos.clone(),
         }
     }
 }
@@ -156,14 +166,33 @@ impl<'a> WalletStorage<'a> for AtomicWalletStorage {
                 // Expiring transactions are not stored, because we can reconstruct them from
                 // `pending_txns` like so:
                 let mut txns = BTreeMap::new();
-                for (nullifier, txn) in &dynamic_state.pending_txns {
+                for (uid, _hash, txn) in &dynamic_state.pending_txns {
                     txns.entry(txn.timeout)
                         .or_insert_with(HashSet::default)
-                        .insert(*nullifier);
+                        .insert(uid.clone());
                 }
                 txns
             },
-            pending_txns: dynamic_state.pending_txns,
+            pending_txns: dynamic_state
+                .pending_txns
+                .iter()
+                .map(|(uid, _hash, txn)| (uid.clone(), txn.clone()))
+                .collect(),
+            transactions: dynamic_state
+                .pending_txns
+                .into_iter()
+                .map(|(uid, hash, _txn)| (hash, uid))
+                .collect(),
+            uids_awaiting_memos: {
+                let mut uids = HashMap::new();
+                for (txn_uid, txn) in &dynamic_state.transactions_awaiting_memos {
+                    for uid in &txn.pending_uids {
+                        uids.insert(*uid, txn_uid.clone());
+                    }
+                }
+                uids
+            },
+            transactions_awaiting_memos: dynamic_state.transactions_awaiting_memos,
 
             // Monotonic state
             auditable_assets: self
@@ -305,6 +334,12 @@ mod tests {
         (memos, sig)
     }
 
+    fn random_txn_hash(rng: &mut ChaChaRng) -> ElaboratedTransactionHash {
+        let mut hash = [0; 64];
+        rng.fill_bytes(&mut hash);
+        ElaboratedTransactionHash(phaselock::BlockHash::from(hash))
+    }
+
     async fn get_test_state(name: &str) -> (UserKeyPair, WalletState<'static>, ChaChaRng, TempDir) {
         let mut rng = ChaChaRng::from_seed([0x42u8; 32]);
 
@@ -360,6 +395,9 @@ mod tests {
             defined_assets: Default::default(),
             pending_txns: Default::default(),
             expiring_txns: Default::default(),
+            transactions: Default::default(),
+            transactions_awaiting_memos: Default::default(),
+            uids_awaiting_memos: Default::default(),
         };
 
         let dir = TempDir::new(name).unwrap();
@@ -408,17 +446,28 @@ mod tests {
             &key_pair,
         );
         let (receiver_memos, signature) = random_memos(&mut rng, &key_pair);
-        let nullifier = Nullifier::random_for_test(&mut rng);
-        stored.pending_txns.insert(
-            nullifier,
-            PendingTransaction {
-                receiver_memos,
-                signature,
-                freeze_outputs: random_ros(&mut rng, &key_pair),
-                timeout: 5000,
+        let txn = PendingTransaction {
+            receiver_memos,
+            signature,
+            freeze_outputs: random_ros(&mut rng, &key_pair),
+            timeout: 5000,
+        };
+        let txn_uid = random_txn_hash(&mut rng);
+        let txn_hash = random_txn_hash(&mut rng);
+        stored.pending_txns.insert(txn_uid.clone(), txn);
+        stored
+            .expiring_txns
+            .insert(5000, once(txn_uid.clone()).collect());
+        stored.transactions.insert(txn_hash, txn_uid.clone());
+        stored.transactions_awaiting_memos.insert(
+            txn_uid.clone(),
+            TransactionAwaitingMemos {
+                pending_uids: vec![1, 2, 3].into_iter().collect(),
             },
         );
-        stored.expiring_txns.insert(5000, once(nullifier).collect());
+        stored.uids_awaiting_memos.insert(1, txn_uid.clone());
+        stored.uids_awaiting_memos.insert(2, txn_uid.clone());
+        stored.uids_awaiting_memos.insert(3, txn_uid.clone());
 
         // Snapshot the modified dynamic state and then reload.
         {

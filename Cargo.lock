@@ -1522,6 +1522,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "escargot"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44bb3f795fe1b9d34f089c7fab034c2b757998d65361d95ef008045b57665262"
+dependencies = [
+ "log",
+ "once_cell",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "event-listener"
 version = "2.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5125,17 +5137,20 @@ dependencies = [
  "async-std",
  "async-trait",
  "bincode",
+ "escargot",
  "futures",
  "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "lazy_static",
+ "regex",
  "rustyline",
  "shutdown_hooks",
  "structopt",
  "tagged-base64",
  "tempdir",
+ "toml 0.5.8",
  "zerok_lib",
 ]
 
