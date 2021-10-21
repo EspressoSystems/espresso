@@ -86,13 +86,6 @@ struct NodeOpt {
     #[structopt(long = "id", short = "i")]
     id: Option<u64>,
 
-    /// Whether to automate the consensus process.
-    ///
-    /// With this option, the node which proposes transactions will pause for a minute to
-    /// wait for other nodes before starting the consensus. The default way is to skip this
-    /// option and wait for user prompts instead.
-    #[structopt(long = "auto", short = "a")]
-    auto: bool,
     /// Whether the current node should run a full node.
     #[structopt(long = "full", short = "f")]
     full: bool,
@@ -849,7 +842,7 @@ async fn main() -> Result<(), std::io::Error> {
         for round in 0..TRANSACTION_COUNT {
             println!("Starting round {}", round + 1);
 
-            // Generate a transaction if the node ID is the largest and if there isn't a wallet to generate it.
+            // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
             let mut txn = None;
             if own_id == 0 {
                 if let Some(state) = &mut state {
@@ -866,44 +859,40 @@ async fn main() -> Result<(), std::io::Error> {
                         .submit_transaction(txn.clone().unwrap().3)
                         .await
                         .unwrap();
-
-                    // Pause to wait for other nodes. Otherwise, this node will never reaches decision.
-                    // Issue: https://gitlab.com/translucence/systems/system/-/issues/15
-                    if NodeOpt::from_args().auto && round == 0 {
-                        async_std::task::sleep(std::time::Duration::from_millis(60_000)).await;
-                    }
                 }
             }
 
-            // Start consensus
-            if !NodeOpt::from_args().auto {
-                // Note: wait until the transaction is proposed before starting consensus. Otherwise,
-                // the node will never reaches decision.
-                // Issue: https://gitlab.com/translucence/systems/system/-/issues/15.
-                let mut line = String::new();
-                println!("Hit the return key when ready to start the consensus...");
-                std::io::stdin().read_line(&mut line).unwrap();
-                phaselock.start_consensus().await;
-            }
             println!("  - Starting consensus");
+            phaselock.start_consensus().await;
             loop {
                 println!("Waiting for PhaseLock event");
                 let event = events.next().await.expect("PhaseLock unexpectedly closed");
 
-                if let EventType::Decide { block: _, state } = event.event {
-                    if !state.is_empty() {
-                        let commitment = TaggedBase64::new("LEDG", &state[0].commit())
-                            .unwrap()
-                            .to_string();
-                        println!("  - Current commitment: {}", commitment);
+                match event.event {
+                    EventType::Decide { block: _, state } => {
+                        if !state.is_empty() {
+                            let commitment = TaggedBase64::new("LEDG", &state[0].commit())
+                                .unwrap()
+                                .to_string();
+                            println!("  - Current commitment: {}", commitment);
+                            break;
+                        }
+                    }
+                    // A timed out node doesn't indicate a failed consensus. The consensus
+                    // succeeds as long as the number of nodes that reach to the same decision
+                    // >= threshold.
+                    EventType::ViewTimeout { view_number } => {
+                        println!("  - Timed out at view : {}", view_number);
                         break;
                     }
-                } else {
-                    println!("EVENT: {:?}", event);
+                    _ => {
+                        println!("EVENT: {:?}", event);
+                    }
                 }
             }
 
-            // Add the transaction if the node ID is 0 and there is no attached wallet.
+            // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
+            // current node), and there is no attached wallet.
             if let Some((ix, keys_and_memos, sig, t)) = txn {
                 let state = state.as_mut().unwrap();
                 println!("  - Adding the transaction");
