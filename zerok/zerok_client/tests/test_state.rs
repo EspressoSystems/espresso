@@ -27,7 +27,7 @@ pub fn cli_test(test: impl Fn(&mut TestState) -> Result<(), String>) {
 }
 
 pub struct TestState {
-    validators: Vec<Child>,
+    validators: Vec<Validator>,
     wallets: Vec<Wallet>,
     variables: HashMap<String, String>,
     prev_output: Vec<String>,
@@ -127,14 +127,17 @@ impl TestState {
     }
 
     pub fn start_consensus(&mut self) -> Result<&mut Self, String> {
-        for child in &mut self.validators {
-            writeln!(child
-                .stdin
-                .as_mut()
-                .ok_or("failed to open stdin for validator")?)
-            .map_err(err)?;
+        for validator in &mut self.validators {
+            validator.start_consensus()?;
         }
         Ok(self)
+    }
+
+    pub fn var(&self, var: impl AsRef<str>) -> Result<String, String> {
+        self.variables
+            .get(var.as_ref())
+            .cloned()
+            .ok_or_else(|| format!("no such variable {}", var.as_ref()))
     }
 
     fn load(&mut self, key_path: Option<PathBuf>) -> Result<&mut Self, String> {
@@ -169,40 +172,7 @@ impl TestState {
         Ok(String::from(replaced))
     }
 
-    fn start_validators(tmp_dir: &Path, key_path: &Path, ports: &[(u64, u64)]) -> Vec<Child> {
-        fn start_validator(
-            cfg_path: PathBuf,
-            mut key_path: PathBuf,
-            id: usize,
-            port: u64,
-        ) -> Child {
-            let id = id.to_string();
-            key_path.set_extension("pub");
-            let mut child = cargo_run("multi_machine")
-                .unwrap()
-                .args([
-                    "--config",
-                    cfg_path.as_os_str().to_str().unwrap(),
-                    "--full",
-                    "--id",
-                    &id,
-                    "--wallet",
-                    key_path.as_os_str().to_str().unwrap(),
-                ])
-                .env("PORT", port.to_string())
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .unwrap();
-            for line in BufReader::new(child.stdout.as_mut().unwrap()).lines() {
-                let line = line.unwrap();
-                if line.trim() == "Hit the return key when ready to start the consensus..." {
-                    return child;
-                }
-            }
-            panic!("validator {} exited", id);
-        }
-
+    fn start_validators(tmp_dir: &Path, key_path: &Path, ports: &[(u64, u64)]) -> Vec<Validator> {
         let (phaselock_ports, server_ports): (Vec<_>, Vec<_>) = ports.iter().cloned().unzip();
         let seed = vec![
             1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5,
@@ -245,20 +215,11 @@ impl TestState {
 
         block_on(futures::future::join_all(
             server_ports.into_iter().enumerate().map(|(i, port)| {
-                let key = PathBuf::from(key_path);
-                let cfg = config_file.clone();
-                spawn_blocking(move || start_validator(cfg, key, i, port))
+                // let key = PathBuf::from(key_path);
+                // let cfg = config_file.clone();
+                Validator::new(&config_file, key_path, i, port)
             }),
         ))
-    }
-}
-
-impl Drop for TestState {
-    fn drop(&mut self) {
-        for v in &mut self.validators {
-            v.kill().ok();
-            v.wait().ok();
-        }
     }
 }
 
@@ -336,6 +297,63 @@ impl Wallet {
 }
 
 impl Drop for Wallet {
+    fn drop(&mut self) {
+        self.process.kill().ok();
+        self.process.wait().ok();
+    }
+}
+
+struct Validator {
+    stdin: ChildStdin,
+    process: Child,
+}
+
+impl Validator {
+    async fn new(cfg_path: &Path, key_path: &Path, id: usize, port: u64) -> Self {
+        let cfg_path = PathBuf::from(cfg_path);
+        let mut key_path = PathBuf::from(key_path);
+        key_path.set_extension("pub");
+        spawn_blocking(move || {
+            let mut child = cargo_run("multi_machine")
+                .unwrap()
+                .args([
+                    "--config",
+                    cfg_path.as_os_str().to_str().unwrap(),
+                    "--full",
+                    "--id",
+                    &id.to_string(),
+                    "--wallet",
+                    key_path.as_os_str().to_str().unwrap(),
+                ])
+                .env("PORT", port.to_string())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+            while let Some(line) = lines.next() {
+                let line = line.unwrap();
+                if line.trim() == "Hit the return key when ready to start the consensus..." {
+                    // Spawn a detached task to consume the validator's stdout. If we don't do this,
+                    // the validator will eventually fill up its output pipe and block.
+                    async_std::task::spawn(async move { while lines.next().is_some() {} });
+                    return Validator {
+                        stdin: child.stdin.take().unwrap(),
+                        process: child,
+                    };
+                }
+            }
+            panic!("validator {} exited", id);
+        })
+        .await
+    }
+
+    fn start_consensus(&mut self) -> Result<(), String> {
+        writeln!(self.stdin).map_err(err)
+    }
+}
+
+impl Drop for Validator {
     fn drop(&mut self) {
         self.process.kill().ok();
         self.process.wait().ok();
