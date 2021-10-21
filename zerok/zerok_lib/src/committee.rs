@@ -1,13 +1,33 @@
-use crate::ValidatorState;
 use phaselock::{committee::DynamicCommittee, traits::Election, BlockHash, PrivKey, PubKey, H_256};
 use std::collections::{hash_map::HashMap, HashSet};
+use std::marker::PhantomData;
 
 use threshold_crypto as tc;
 
 /// A structure for committee election.
-pub struct Committee<const N: usize>(DynamicCommittee<ValidatorState, N>);
+pub struct Committee<S, const N: usize> {
+    /// A table mapping public keys with their associated stake.
+    stake_table: HashMap<PubKey, u64>,
 
-impl<const N: usize> Election<N> for Committee<N> {
+    /// Inner structure for committee election.
+    election: DynamicCommittee<S, N>,
+
+    /// State phantom.
+    _state_phantom: PhantomData<S>,
+}
+
+impl<S, const N: usize> Committee<S, N> {
+    /// Creates a new committee.
+    pub fn new(stake_table: HashMap<PubKey, u64>) -> Self {
+        Self {
+            stake_table,
+            election: DynamicCommittee::<S, N>::new(),
+            _state_phantom: PhantomData,
+        }
+    }
+}
+
+impl<S, const N: usize> Election<N> for Committee<S, N> {
     /// A table mapping public keys with their associated stake.
     type StakeTable = HashMap<PubKey, u64>;
 
@@ -16,8 +36,8 @@ impl<const N: usize> Election<N> for Committee<N> {
     /// selection threshold.
     type SelectionThreshold = [u8; H_256];
 
-    /// The state this election implementation is bound to.
-    type State = ValidatorState;
+    /// Arbitrary state type. It's not used since the stake table is stateless for now.
+    type State = S;
 
     /// A membership proof.
     type VoteToken = tc::SignatureShare;
@@ -25,13 +45,14 @@ impl<const N: usize> Election<N> for Committee<N> {
     /// A tuple of a validated vote token and the associated selected stake.
     type ValidatedVoteToken = (PubKey, tc::SignatureShare, HashSet<u64>);
 
+    /// The stake table is stateless for now.
     fn get_stake_table(&self, _state: &Self::State) -> Self::StakeTable {
-        unimplemented!("TODO");
+        self.stake_table.clone()
     }
 
     /// Determines the leader.
     fn get_leader(&self, table: &Self::StakeTable, view_number: u64) -> PubKey {
-        self.0.get_leader(table, view_number)
+        self.election.get_leader(table, view_number)
     }
 
     /// Validates a vote token.
@@ -44,7 +65,7 @@ impl<const N: usize> Election<N> for Committee<N> {
         token: Self::VoteToken,
         next_state: BlockHash<N>,
     ) -> Option<Self::ValidatedVoteToken> {
-        self.0.get_votes(
+        self.election.get_votes(
             table,
             selection_threshold,
             view_number,
@@ -56,7 +77,7 @@ impl<const N: usize> Election<N> for Committee<N> {
 
     /// Returns the number of votes a validated token has.
     fn get_vote_count(&self, token: &Self::ValidatedVoteToken) -> u64 {
-        self.0.get_vote_count(token)
+        self.election.get_vote_count(token)
     }
 
     /// Attempts to generate a vote token for self.
@@ -70,7 +91,7 @@ impl<const N: usize> Election<N> for Committee<N> {
         private_key: &PrivKey,
         next_state: BlockHash<N>,
     ) -> Option<Self::VoteToken> {
-        self.0.make_vote_token(
+        self.election.make_vote_token(
             table,
             selection_threshold,
             view_number,
