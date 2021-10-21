@@ -1,6 +1,7 @@
 pub use crate::state_comm::LedgerStateCommitment;
 use crate::{
-    set_merkle_tree::*, ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState,
+    set_merkle_tree::*, validator_node::*, ElaboratedBlock, ElaboratedTransaction, ValidationError,
+    ValidatorState,
 };
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
@@ -20,7 +21,7 @@ use phaselock::{
     error::PhaseLockError,
     event::EventType,
     handle::{HandleError, PhaseLockHandle},
-    BlockContents,
+    BlockContents, H_512,
 };
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -49,11 +50,10 @@ pub trait Validator {
     fn subscribe(&self) -> EventStream<Self::Event>;
 }
 
-/// A lightweight node handles consensus, and nothing more.
-pub type LightWeightNode = PhaseLockHandle<ElaboratedBlock, 64>;
+pub type LightWeightNode<NET, STORE> = PhaseLockHandle<ValidatorNodeImpl<NET, STORE>, H_512>;
 
 #[async_trait]
-impl Validator for LightWeightNode {
+impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
     type Event = PhaseLockEvent;
 
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
@@ -80,9 +80,6 @@ impl Validator for LightWeightNode {
             match handle.next_event().await {
                 Ok(event) => Some((event, handle)),
                 Err(HandleError::ShutDown) => None,
-                Err(HandleError::Skipped { ammount }) => {
-                    unimplemented!("handling for {:?} skipped events", ammount)
-                }
                 Err(err) => panic!(
                     "unexpected error from PhaseLockHandle::next_event: {:?}",
                     err
@@ -313,66 +310,69 @@ impl FullState {
             }
 
             Decide { block, state } => {
-                let prev_state = self.validator.clone();
+                for (block, state) in block.iter().zip(state.iter()).rev() {
+                    let prev_state = self.validator.clone();
 
-                // A block has been committed. Update our mirror of the ValidatorState by applying
-                // the new block, and generate a Commit event.
-                match self.validator.validate_and_apply(
-                    self.validator.prev_commit_time + 1,
-                    block.block.clone(),
-                    block.proofs.clone(),
-                    true,
-                ) {
-                    // We update our ValidatorState for each block committed by the PhaseLock event
-                    // source, so we shouldn't ever get out of sync.
-                    Err(_) => panic!("state is out of sync with validator"),
-                    Ok(_) if self.validator.commit() != state.commit() => {
-                        panic!("state is out of sync with validator")
-                    }
+                    // A block has been committed. Update our mirror of the ValidatorState by applying
+                    // the new block, and generate a Commit event.
 
-                    Ok(mut uids) => {
-                        // Archive the old state.
-                        let index = self.history.len();
-                        self.past_nullifiers.insert(self.nullifiers.hash(), index);
-                        self.block_hashes
-                            .insert(Vec::from(block.hash().as_ref()), index);
-                        let block_uids = block
-                            .block
-                            .0
-                            .iter()
-                            .map(|txn| {
-                                // Split the uids corresponding to this transaction off the front of
-                                // the list of uids for the whole block.
-                                let mut this_txn_uids = uids.split_off(txn.output_len());
-                                std::mem::swap(&mut this_txn_uids, &mut uids);
-                                assert_eq!(this_txn_uids.len(), txn.output_len());
-                                this_txn_uids
-                            })
-                            .collect();
-                        self.history.push(LedgerTransition {
-                            from_state: LedgerSnapshot {
-                                state: prev_state,
-                                nullifiers: self.nullifiers.clone(),
-                            },
-                            block: (*block).clone(),
-                            memos: vec![None; block.block.0.len()],
-                            uids: block_uids,
-                        });
-
-                        // Add the results of this block to our current state.
-                        for txn in block.block.0.iter() {
-                            for n in txn.nullifiers() {
-                                self.nullifiers.insert(n);
-                            }
+                    match self.validator.validate_and_apply(
+                        self.validator.prev_commit_time + 1,
+                        block.block.clone(),
+                        block.proofs.clone(),
+                        true,
+                    ) {
+                        // We update our ValidatorState for each block committed by the PhaseLock event
+                        // source, so we shouldn't ever get out of sync.
+                        Err(_) => panic!("state is out of sync with validator"),
+                        Ok(_) if self.validator.commit() != state.commit() => {
+                            panic!("state is out of sync with validator")
                         }
-                        assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
 
-                        // Notify subscribers of the new block.
-                        self.send_event(LedgerEvent::Commit {
-                            block: (*block).clone(),
-                            block_id: index as u64,
-                            state_comm: self.validator.commit(),
-                        });
+                        Ok(mut uids) => {
+                            // Archive the old state.
+                            let index = self.history.len();
+                            self.past_nullifiers.insert(self.nullifiers.hash(), index);
+                            self.block_hashes
+                                .insert(Vec::from(block.hash().as_ref()), index);
+                            let block_uids = block
+                                .block
+                                .0
+                                .iter()
+                                .map(|txn| {
+                                    // Split the uids corresponding to this transaction off the front of
+                                    // the list of uids for the whole block.
+                                    let mut this_txn_uids = uids.split_off(txn.output_len());
+                                    std::mem::swap(&mut this_txn_uids, &mut uids);
+                                    assert_eq!(this_txn_uids.len(), txn.output_len());
+                                    this_txn_uids
+                                })
+                                .collect();
+                            self.history.push(LedgerTransition {
+                                from_state: LedgerSnapshot {
+                                    state: prev_state,
+                                    nullifiers: self.nullifiers.clone(),
+                                },
+                                block: (*block).clone(),
+                                memos: vec![None; block.block.0.len()],
+                                uids: block_uids,
+                            });
+
+                            // Add the results of this block to our current state.
+                            for txn in block.block.0.iter() {
+                                for n in txn.nullifiers() {
+                                    self.nullifiers.insert(n);
+                                }
+                            }
+                            assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
+
+                            // Notify subscribers of the new block.
+                            self.send_event(LedgerEvent::Commit {
+                                block: (*block).clone(),
+                                block_id: index as u64,
+                                state_comm: self.validator.commit(),
+                            });
+                        }
                     }
                 }
             }
@@ -685,14 +685,14 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
 
 /// A full node is a QueryService running alongside a lightweight validator.
 #[derive(Clone)]
-pub struct FullNode<'a> {
-    validator: LightWeightNode,
+pub struct FullNode<'a, NET: PLNet, STORE: PLStore> {
+    validator: LightWeightNode<NET, STORE>,
     query_service: PhaseLockQueryService<'a>,
 }
 
-impl<'a> FullNode<'a> {
+impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
     pub fn new(
-        validator: LightWeightNode,
+        validator: LightWeightNode<NET, STORE>,
 
         // The current state of the network.
         //todo !jeb.bearer Query these parameters from another full node if we are not starting off
@@ -717,7 +717,9 @@ impl<'a> FullNode<'a> {
         }
     }
 
-    fn as_validator(&self) -> &impl Validator<Event = <FullNode<'a> as Validator>::Event> {
+    fn as_validator(
+        &self,
+    ) -> &impl Validator<Event = <FullNode<'a, NET, STORE> as Validator>::Event> {
         &self.validator
     }
 
@@ -731,8 +733,8 @@ impl<'a> FullNode<'a> {
 }
 
 #[async_trait]
-impl<'a> Validator for FullNode<'a> {
-    type Event = <LightWeightNode as Validator>::Event;
+impl<'a, NET: PLNet, STORE: PLStore> Validator for FullNode<'a, NET, STORE> {
+    type Event = <LightWeightNode<NET, STORE> as Validator>::Event;
 
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
         self.as_validator().submit_transaction(tx).await
@@ -748,7 +750,7 @@ impl<'a> Validator for FullNode<'a> {
 }
 
 #[async_trait]
-impl<'a> QueryService for FullNode<'a> {
+impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
     async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError> {
         self.as_query_service().get_summary().await
     }
@@ -952,8 +954,8 @@ mod tests {
             let events = Box::pin(stream::iter(history.clone().into_iter().map(
                 |(_, block, _, state)| MockConsensusEvent {
                     event: EventType::Decide {
-                        block: Arc::new(block),
-                        state: Arc::new(state),
+                        block: Arc::new(vec![block]),
+                        state: Arc::new(vec![state]),
                     },
                 },
             )));
