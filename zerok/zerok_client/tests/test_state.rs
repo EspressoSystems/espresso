@@ -328,9 +328,7 @@ impl Validator {
                     // Spawn a detached task to consume the validator's stdout. If we don't do this,
                     // the validator will eventually fill up its output pipe and block.
                     async_std::task::spawn(async move { while lines.next().is_some() {} });
-                    return Validator {
-                        process: child,
-                    };
+                    return Validator { process: child };
                 }
             }
             panic!("validator {} exited", id);
