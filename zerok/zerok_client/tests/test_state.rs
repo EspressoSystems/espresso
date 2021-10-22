@@ -332,7 +332,7 @@ impl Validator {
             let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
             while let Some(line) = lines.next() {
                 let line = line.unwrap();
-                if line.trim() == "Hit the return key when ready to start the consensus..." {
+                if line.trim() == "- Starting consensus" {
                     // Spawn a detached task to consume the validator's stdout. If we don't do this,
                     // the validator will eventually fill up its output pipe and block.
                     async_std::task::spawn(async move { while lines.next().is_some() {} });

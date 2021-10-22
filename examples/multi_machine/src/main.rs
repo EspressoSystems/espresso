@@ -862,6 +862,7 @@ async fn main() -> Result<(), std::io::Error> {
                 }
             }
 
+            // If the output below is changed, update the message for line.trim() in Validator::new as well
             println!("  - Starting consensus");
             phaselock.start_consensus().await;
             loop {
