@@ -214,11 +214,10 @@ impl TestState {
             .unwrap();
 
         block_on(futures::future::join_all(
-            server_ports.into_iter().enumerate().map(|(i, port)| {
-                // let key = PathBuf::from(key_path);
-                // let cfg = config_file.clone();
-                Validator::new(&config_file, key_path, i, port)
-            }),
+            server_ports
+                .into_iter()
+                .enumerate()
+                .map(|(i, port)| Validator::new(&config_file, key_path, i, port)),
         ))
     }
 }
@@ -246,7 +245,7 @@ impl Wallet {
                     .iter()
                     .flatten(),
             )
-            .arg("--non-interactive")
+            .args(&["--non-interactive", "--tmp-storage"])
             .arg(server)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

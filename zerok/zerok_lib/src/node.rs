@@ -1,14 +1,7 @@
 pub use crate::state_comm::LedgerStateCommitment;
 use crate::{
-    key_set::SizedKey,
-    set_merkle_tree::*,
-    validator_node::*,
-    wallet::{
-        CryptoError, QueryServiceError as QueryServiceWalletError, WalletBackend, WalletError,
-        WalletState,
-    },
-    ElaboratedBlock, ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState,
-    MERKLE_HEIGHT,
+    set_merkle_tree::*, validator_node::*, ElaboratedBlock, ElaboratedTransaction, ValidationError,
+    ValidatorState,
 };
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
@@ -20,7 +13,7 @@ pub use futures::stream::Stream;
 use futures::task::SpawnExt;
 use itertools::izip;
 use jf_txn::{
-    keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey},
+    keys::{UserAddress, UserPubKey},
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
     MerklePath, MerkleTree, Signature,
 };
@@ -30,10 +23,8 @@ use phaselock::{
     handle::{HandleError, PhaseLockHandle},
     BlockContents, H_512,
 };
-use rand_chacha::rand_core::SeedableRng;
-use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
-use snafu::{ResultExt, Snafu};
+use snafu::Snafu;
 use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 
@@ -809,168 +800,15 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
     }
 }
 
-#[async_trait]
-impl<'a, NET: PLNet, STORE: PLStore> WalletBackend<'a> for FullNode<'a, NET, STORE> {
-    type EventStream = EventStream<LedgerEvent>;
-
-    async fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
-        // There is no storage backend implemented yet, so load() always returns a fresh wallet from
-        // the start of the history of the ledger.
-        let mut rng = ChaChaRng::from_entropy();
-        let snapshot = self.as_query_service().get_snapshot(0).await.unwrap();
-        let validator = snapshot.state;
-
-        // Construct proving keys of the same arities as the verifier keys from the validator.
-        let univ_param = self.query_service.univ_param;
-        let proving_keys =
-            ProverKeySet {
-                mint: jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
-                    .context(CryptoError)?
-                    .0,
-                freeze: validator
-                    .verif_crs
-                    .freeze
-                    .iter()
-                    .map(|k| {
-                        Ok(jf_txn::proof::freeze::preprocess(
-                            univ_param,
-                            k.num_inputs(),
-                            MERKLE_HEIGHT,
-                        )
-                        .context(CryptoError)?
-                        .0)
-                    })
-                    .collect::<Result<_, _>>()?,
-                xfr: validator
-                    .verif_crs
-                    .xfr
-                    .iter()
-                    .map(|k| {
-                        Ok(jf_txn::proof::transfer::preprocess(
-                            univ_param,
-                            k.num_inputs(),
-                            k.num_outputs(),
-                            MERKLE_HEIGHT,
-                        )
-                        .context(CryptoError)?
-                        .0)
-                    })
-                    .collect::<Result<_, _>>()?,
-            };
-
-        // Publish the address of the new wallet.
-        self.query_service
-            .state
-            .write()
-            .await
-            .introduce(&key_pair.pub_key());
-
-        Ok(WalletState {
-            validator,
-            proving_keys,
-            nullifiers: snapshot.nullifiers,
-            now: 0,
-            records: Default::default(),
-            defined_assets: Default::default(),
-            pending_txns: Default::default(),
-            expiring_txns: Default::default(),
-            transactions_awaiting_memos: Default::default(),
-            uids_awaiting_memos: Default::default(),
-            transactions: Default::default(),
-            auditable_assets: Default::default(),
-            auditor_key_pair: AuditorKeyPair::generate(&mut rng),
-            freezer_key_pair: FreezerKeyPair::generate(&mut rng),
-            rng,
-        })
-    }
-
-    async fn store(
-        &mut self,
-        _key_pair: &UserKeyPair,
-        _state: &WalletState,
-    ) -> Result<(), WalletError> {
-        Ok(())
-    }
-
-    async fn subscribe(&self, starting_at: u64) -> Self::EventStream {
-        self.as_query_service().subscribe(starting_at).await
-    }
-
-    async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
-        self.as_query_service()
-            .get_user(address)
-            .await
-            .map_err(|err| match err {
-                QueryServiceError::InvalidAddress {} => WalletError::InvalidAddress {
-                    address: address.clone(),
-                },
-                _ => WalletError::QueryServiceError { source: err },
-            })
-    }
-
-    async fn get_nullifier_proof(
-        &self,
-        root: set_hash::Hash,
-        nullifier: Nullifier,
-    ) -> Result<(bool, SetMerkleProof), WalletError> {
-        self.as_query_service()
-            .nullifier_proof(root, nullifier)
-            .await
-            .context(QueryServiceWalletError)
-    }
-
-    async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {
-        self.as_validator()
-            .submit_transaction(txn)
-            .await
-            .map_err(|err| match err {
-                PhaseLockError::NetworkFault { source } => WalletError::NetworkError { source },
-                _ => {
-                    // PhaseLock is not supposed to return errors besides NetworkFault
-                    WalletError::Failed {
-                        msg: format!(
-                            "unexpected error from Validator::submit_transaction: {:?}",
-                            err
-                        ),
-                    }
-                }
-            })
-    }
-
-    async fn post_memos(
-        &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), WalletError> {
-        self.as_query_service_mut()
-            .post_memos(block_id, txn_id, memos, sig)
-            .await
-            .context(QueryServiceWalletError)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        wallet::Wallet, LWPersistence, MultiXfrRecordSpec, MultiXfrTestState, UNIVERSAL_PARAM,
-    };
+    use crate::{MultiXfrRecordSpec, MultiXfrTestState, UNIVERSAL_PARAM};
     use async_std::task::block_on;
     use jf_primitives::jubjub_dsa::KeyPair;
-    use jf_txn::{sign_receiver_memos, structs::AssetCode, MerkleTree};
-    use phaselock::{
-        tc::SecretKeySet,
-        traits::storage::memory_storage::MemoryStorage,
-        {PhaseLock, PhaseLockConfig},
-    };
+    use jf_txn::{sign_receiver_memos, MerkleTree};
     use quickcheck::QuickCheck;
-    use rand_chacha::{
-        rand_core::{RngCore, SeedableRng},
-        ChaChaRng,
-    };
-    use rand_xoshiro::Xoshiro256StarStar;
+    use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 
     #[derive(Debug)]
     struct MockConsensusEvent {
@@ -1306,108 +1144,5 @@ mod tests {
         QuickCheck::new()
             .tests(1)
             .quickcheck(test_query_service as fn(Vec<_>, u8, u8, _, Vec<_>) -> ())
-    }
-
-    #[test]
-    fn test_full_node_wallet_backend_load() {
-        block_on(async {
-            // Initialize ledger state
-            let records = (
-                MultiXfrRecordSpec {
-                    asset_def_ix: 1,
-                    owner_key_ix: 0,
-                    asset_amount: 2,
-                },
-                vec![],
-            );
-            let mut state = MultiXfrTestState::initialize([0x42u8; 32], 2, 2, records).unwrap();
-
-            // Set up a validator.
-            let id = 0;
-            let secret_keys = SecretKeySet::random(
-                0,
-                &mut <Xoshiro256StarStar as phaselock::rand::SeedableRng>::seed_from_u64(
-                    state.prng.next_u64(),
-                ),
-            );
-            let secret_key_share = secret_keys.secret_key_share(id);
-            let public_keys = secret_keys.public_keys();
-            let pub_key = phaselock::PubKey::from_secret_key_set_escape_hatch(&secret_keys, id);
-            let port = 10010;
-            let network =
-                phaselock::networking::w_network::WNetwork::new(pub_key.clone(), port, None)
-                    .await
-                    .unwrap();
-            let (c, sync) = futures::channel::oneshot::channel();
-            for task in network.generate_task(c).unwrap() {
-                async_std::task::spawn(task);
-            }
-            sync.await.unwrap();
-            let config = PhaseLockConfig {
-                total_nodes: 1,
-                threshold: 1,
-                max_transactions: 100,
-                known_nodes: vec![pub_key],
-                next_view_timeout: 10000,
-                timeout_ratio: (11, 10),
-                round_start_delay: 1,
-                start_delay: 1,
-            };
-            let (_, phaselock) = PhaseLock::init(
-                ElaboratedBlock::default(),
-                public_keys,
-                secret_key_share,
-                id,
-                config,
-                state.validator.clone(),
-                network,
-                MemoryStorage::default(),
-                LWPersistence::new("test_full_node_wallet_backend_load"),
-            )
-            .await;
-
-            // Set up a full node
-            let unspent_memos = state.unspent_memos();
-            let mut node = FullNode::new(
-                phaselock,
-                state.univ_setup,
-                state.validator,
-                state.record_merkle_tree,
-                state.nullifiers,
-                unspent_memos,
-            );
-
-            // Introduce another user whom we will transfer some assets to.
-            let mut pub_keys = state.keys;
-            let me = pub_keys.remove(0);
-            let other = pub_keys.remove(1);
-            node.introduce(&other.pub_key()).await.unwrap();
-
-            // Set up a wallet
-            node.start_consensus().await;
-            let mut wallet = Wallet::new(me, node).await.unwrap();
-
-            // Wait for the wallet to process the initial receiver memos and check that it correctly
-            // discovers its initial balance.
-            wallet.sync(1).await.unwrap();
-            // MultiXfrTestState doubles all the initial records for some reason, so we expect to
-            // have 4 coins, not 2.
-            assert_eq!(wallet.balance(&state.asset_defs[1].code).await, 4);
-            // We start with 2^32 native tokens, but spend 2 minting our two non-native records.
-            assert_eq!(wallet.balance(&AssetCode::native()).await, (1u64 << 32) - 2);
-
-            // Transfer 3 of our 4 coins away to another user. We should end up with only 1 coin,
-            // which can only happen if
-            //  1. our initial 4 coins are put on hold (the transaction is initiated)
-            //  2. we receive our 1-coin change record (the transaction is completed)
-            wallet
-                .transfer(&state.asset_defs[1].code, &[(other.address(), 3)], 1)
-                .await
-                .unwrap();
-            // Wait for 2 more events: the Commit event and the following Memos event.
-            wallet.sync(3).await.unwrap();
-            assert_eq!(wallet.balance(&state.asset_defs[1].code).await, 1);
-            assert_eq!(wallet.balance(&AssetCode::native()).await, (1u64 << 32) - 3);
-        });
     }
 }

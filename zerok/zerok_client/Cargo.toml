@@ -20,8 +20,10 @@ jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/j
 lazy_static = "1.4.0"
 regex = "1.5.4"
 rustyline = "9.0.0"
+shutdown_hooks = "0.1.0"
 structopt = { version = "0.3", features = ["paw"] }
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
+tempdir = "0.3.7"
 zerok_lib = { path = "../zerok_lib/" }
 
 [dev-dependencies]
