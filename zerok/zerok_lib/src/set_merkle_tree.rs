@@ -25,7 +25,7 @@ pub mod set_hash {
         }
     }
 
-    enum SetMerkleTreeNode {
+    pub enum SetMerkleTreeNode {
         EmptySubtree,
         Leaf { elem: Nullifier },
         Branch { l: Hash, r: Hash },
@@ -58,6 +58,12 @@ pub mod set_hash {
     #[tagged_blob("SET")]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
     pub struct Hash(commit::Commitment<SetMerkleTreeNode>);
+
+    impl From<Hash> for commit::Commitment<SetMerkleTreeNode> {
+        fn from(h: Hash) -> Self {
+            h.0
+        }
+    }
 
     lazy_static::lazy_static! {
         pub static ref EMPTY_HASH: Hash = Hash(SetMerkleTreeNode::EmptySubtree.commit());
@@ -613,14 +619,12 @@ pub fn set_merkle_lw_multi_insert(
 mod tests {
     use super::*;
     use quickcheck::QuickCheck;
-    use rand_chacha::rand_core::{RngCore, SeedableRng};
+    use rand_chacha::rand_core::SeedableRng;
     use rand_chacha::ChaChaRng;
     use std::time::Instant; //????/
 
     #[test]
     fn test_set_merkle_speed() {
-        use blake2::crypto_mac::Mac;
-
         let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
         let elems = (1..1000)
             .map(|_| Nullifier::random_for_test(&mut prng))
@@ -631,13 +635,7 @@ mod tests {
                 let elem_bit_vec = set_hash::elem_bits(elem);
                 let pf = elem_bit_vec
                     .iter()
-                    .map(|_| {
-                        let mut buf = [0u8; 32];
-                        prng.fill_bytes(&mut buf);
-                        let mut hasher = blake2::Blake2b::with_params(&[], &[], "".as_bytes());
-                        hasher.update(&buf);
-                        set_hash::Hash::new(hasher.finalize().into_bytes())
-                    })
+                    .map(|_| set_hash::leaf_hash(Nullifier::random_for_test(&mut prng)))
                     .collect();
                 let pf = SetMerkleProof {
                     terminal_node: SetMerkleTerminalNode::EmptySubtree,

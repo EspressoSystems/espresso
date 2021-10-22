@@ -17,7 +17,11 @@
 // object with the appropriate Serialize implementation.
 //
 
-use crate::{Block, ElaboratedBlock, ElaboratedTransaction, SetMerkleProof};
+use crate::util::commit;
+use crate::{
+    state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction,
+    SetMerkleProof,
+};
 use ark_serialize::*;
 use fmt::{Display, Formatter};
 use futures::future::BoxFuture;
@@ -45,9 +49,27 @@ impl<const N: usize> From<BlockHash<N>> for Hash {
     }
 }
 
+impl<const N: usize> From<[u8; N]> for Hash {
+    fn from(h: [u8; N]) -> Self {
+        Self(h.as_ref().to_vec())
+    }
+}
+
 impl<U: ArrayLength<u8>> From<GenericArray<u8, U>> for Hash {
     fn from(a: GenericArray<u8, U>) -> Self {
         Self((&*a).to_vec())
+    }
+}
+
+impl<T: commit::Committable> From<commit::Commitment<T>> for Hash {
+    fn from(c: commit::Commitment<T>) -> Self {
+        Self::from(<[u8; 32]>::from(c))
+    }
+}
+
+impl From<LedgerStateCommitment> for Hash {
+    fn from(c: LedgerStateCommitment) -> Self {
+        Self::from(commit::Commitment::<_>::from(c))
     }
 }
 

@@ -37,14 +37,31 @@ pub mod commit {
     const INVALID_UTF8: [u8; 2] = [0xC0u8, 0x7Fu8];
 
     #[cfg(test)]
-    #[quickcheck]
-    fn invalid_utf8_is_invalid(pref: Vec<u8>, suff: Vec<u8>) {
-        let s = pref
-            .into_iter()
-            .chain(INVALID_UTF8.iter().cloned())
-            .chain(suff.into_iter())
-            .collect::<Vec<_>>();
-        assert!(std::str::from_utf8(&s).is_err());
+    mod tests {
+        use super::INVALID_UTF8;
+        use quickcheck::quickcheck;
+
+        #[quickcheck]
+        fn invalid_utf8_is_invalid(pref: Vec<u8>, suff: Vec<u8>) {
+            let s = pref
+                .into_iter()
+                .chain(INVALID_UTF8.iter().cloned())
+                .chain(suff.into_iter())
+                .collect::<Vec<_>>();
+            assert!(std::str::from_utf8(&s).is_err());
+        }
+
+        #[quickcheck]
+        fn invalid_utf8_is_invalid_strs_only(pref: String, suff: String) {
+            let s = pref
+                .as_bytes()
+                .iter()
+                .chain(INVALID_UTF8.iter())
+                .chain(suff.as_bytes().iter())
+                .cloned()
+                .collect::<Vec<_>>();
+            assert!(std::str::from_utf8(&s).is_err());
+        }
     }
 
     pub trait Committable {
@@ -52,6 +69,12 @@ pub mod commit {
     }
 
     pub struct Commitment<T: ?Sized + Committable>(Array, PhantomData<T>);
+
+    impl<T: ?Sized + Committable> AsRef<[u8]> for Commitment<T> {
+        fn as_ref(&self) -> &[u8] {
+            &self.0
+        }
+    }
 
     // we need custom impls because `T` doesn't actually need to satisfy
     // these traits
@@ -67,7 +90,7 @@ pub mod commit {
 
     impl<T: ?Sized + Committable> Clone for Commitment<T> {
         fn clone(&self) -> Self {
-            Self(self.0.clone(), self.1.clone())
+            Self(self.0, self.1)
         }
     }
     impl<T: ?Sized + Committable> Copy for Commitment<T> {}
@@ -123,16 +146,15 @@ pub mod commit {
 
     impl<T: Committable> RawCommitmentBuilder<T> {
         pub fn new(tag: &str) -> Self {
-            let mut hasher = Keccak::v256();
             Self {
-                hasher,
+                hasher: Keccak::v256(),
                 _marker: Default::default(),
             }
             .constant_str(tag)
         }
 
         pub fn constant_str(mut self, s: &str) -> Self {
-            self.hasher.update(&s.as_ref());
+            self.hasher.update(s.as_ref());
             self.fixed_size_bytes(&INVALID_UTF8)
         }
 
@@ -141,6 +163,7 @@ pub mod commit {
             self
         }
 
+        #[allow(dead_code)]
         pub fn generic_byte_array<N: ArrayLength<u8>>(mut self, f: &GenericArray<u8, N>) -> Self {
             self.hasher.update(f);
             self
@@ -152,23 +175,28 @@ pub mod commit {
 
         pub fn var_size_bytes(self, f: &[u8]) -> Self {
             let mut ret = self.u64(f.len() as u64);
-            ret.hasher.update(&f);
+            ret.hasher.update(f);
             ret
         }
 
-        pub fn fixed_size_field<const N: usize>(mut self, name: &str, val: &[u8; N]) -> Self {
+        #[allow(dead_code)]
+        pub fn fixed_size_field<const N: usize>(self, name: &str, val: &[u8; N]) -> Self {
             self.constant_str(name).fixed_size_bytes(val)
         }
 
-        pub fn var_size_field<const N: usize>(mut self, name: &str, val: &[u8; N]) -> Self {
+        pub fn var_size_field(self, name: &str, val: &[u8]) -> Self {
             self.constant_str(name).var_size_bytes(val)
         }
 
-        pub fn field<S: Committable>(mut self, name: &str, val: Commitment<S>) -> Self {
+        pub fn field<S: Committable>(self, name: &str, val: Commitment<S>) -> Self {
             self.constant_str(name).fixed_size_bytes(&val.0)
         }
 
-        pub fn array_field<S: Committable>(mut self, name: &str, val: &[Commitment<S>]) -> Self {
+        pub fn u64_field(self, name: &str, val: u64) -> Self {
+            self.constant_str(name).u64(val)
+        }
+
+        pub fn array_field<S: Committable>(self, name: &str, val: &[Commitment<S>]) -> Self {
             let mut ret = self.constant_str(name).u64(val.len() as u64);
             for v in val.iter() {
                 ret = ret.fixed_size_bytes(&v.0);

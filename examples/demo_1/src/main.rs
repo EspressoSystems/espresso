@@ -14,7 +14,7 @@ use tracing::{debug, error, info};
 use phaselock::message::Message;
 use phaselock::networking::w_network::WNetwork;
 use phaselock::traits::storage::memory_storage::MemoryStorage;
-use phaselock::H_512;
+use phaselock::H_256;
 use phaselock::{PhaseLock, PhaseLockConfig, PubKey};
 use rand::Rng;
 use serde::{de::DeserializeOwned, Serialize};
@@ -25,8 +25,8 @@ use zerok_lib::{
     MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
 };
 
-type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_512>>;
-type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_512>;
+type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>;
+type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_256>;
 
 /// Generates the `SecretKeySet` for this BFT instance
 pub fn gen_keys(threshold: usize) -> tc::SecretKeySet {
@@ -57,7 +57,7 @@ pub async fn try_phaselock(
     node_number: usize,
     initial_state: ValidatorState,
 ) -> (
-    PhaseLock<ValidatorNodeImpl<PLNetwork, PLStorage>, H_512>,
+    PhaseLock<ValidatorNodeImpl<PLNetwork, PLStorage>, H_256>,
     PubKey,
     u16,
     PLNetwork,
@@ -100,7 +100,7 @@ const TRANSACTION_COUNT: u64 = 50;
 
 // type TransactionSpecification = u64;
 type MultiXfrValidator = (
-    PhaseLock<ValidatorNodeImpl<PLNetwork, PLStorage>, H_512>,
+    PhaseLock<ValidatorNodeImpl<PLNetwork, PLStorage>, H_256>,
     PubKey,
     u16,
     PLNetwork,
@@ -203,7 +203,7 @@ async fn start_consensus() -> (MultiXfrTestState, Vec<MultiXfrValidator>) {
 
 async fn propose_transaction(
     id: usize,
-    phaselock: &PhaseLock<ValidatorNodeImpl<PLNetwork, PLStorage>, H_512>,
+    phaselock: &PhaseLock<ValidatorNodeImpl<PLNetwork, PLStorage>, H_256>,
     transaction: ElaboratedTransaction,
 ) {
     info!("Proposing transacton {}", id);
@@ -242,8 +242,11 @@ async fn log_transaction(phaselocks: &[MultiXfrValidator]) {
     info!(
         "Current states:\n  {}",
         join_all(phaselocks.iter().map(|(h, _, _, _)| {
-            h.get_state()
-                .map(|x| TaggedBase64::new("LEDG", &x.commit()).unwrap().to_string())
+            h.get_state().map(|x| {
+                TaggedBase64::new("LEDG", x.commit().as_ref())
+                    .unwrap()
+                    .to_string()
+            })
         }))
         .await
         .join("\n  ")
@@ -260,8 +263,11 @@ async fn main() {
         info!(
             "Current states:\n  {}",
             join_all(phaselocks.iter().map(|(h, _, _, _)| {
-                h.get_state()
-                    .map(|x| TaggedBase64::new("LEDG", &x.commit()).unwrap().to_string())
+                h.get_state().map(|x| {
+                    TaggedBase64::new("LEDG", x.commit().as_ref())
+                        .unwrap()
+                        .to_string()
+                })
             }))
             .await
             .join("\n  ")
