@@ -2598,7 +2598,7 @@ pub mod test_helpers {
         assert_eq!(w1.auditor_key_pair.pub_key(), w2.auditor_key_pair.pub_key());
         assert_eq!(w1.auditable_assets, w2.auditable_assets);
         assert_eq!(w1.freezer_key_pair, w2.freezer_key_pair);
-        assert_eq!(w1.nullifiers, w2.nullifiers);
+        assert_eq!(w1.nullifiers.hash(), w2.nullifiers.hash());
         assert_eq!(w1.defined_assets, w2.defined_assets);
         assert_eq!(w1.transactions, w2.transactions);
     }
