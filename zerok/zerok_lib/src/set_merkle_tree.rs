@@ -250,7 +250,7 @@ impl SetMerkleTerminalNode {
 )]
 pub struct SetMerkleProof {
     terminal_node: SetMerkleTerminalNode,
-    path: Vec<set_hash::Hash>,
+    pub path: Vec<set_hash::Hash>,
 }
 
 impl SetMerkleProof {
