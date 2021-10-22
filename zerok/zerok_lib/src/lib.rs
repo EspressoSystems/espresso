@@ -33,6 +33,7 @@ use jf_txn::{
     utils::compute_universal_param_size,
     AccMemberWitness, MerkleTree, NodeValue, Signature, TransactionNote, TransactionVerifyingKey,
 };
+use jf_utils::tagged_blob;
 use lazy_static::lazy_static;
 pub use lw_persistence::LWPersistence;
 use phaselock::{traits::state::State, BlockContents, H_512};
@@ -44,6 +45,7 @@ use serde_with::serde_as;
 pub use set_merkle_tree::*;
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::convert::TryFrom;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::Read;
@@ -77,6 +79,41 @@ pub struct Transaction(pub TransactionNote);
 pub struct ElaboratedTransaction {
     pub txn: TransactionNote,
     pub proofs: Vec<SetMerkleProof>,
+}
+
+impl ElaboratedTransaction {
+    fn hash(&self) -> ElaboratedTransactionHash {
+        ElaboratedTransactionHash(ElaboratedBlock::hash_transaction(self))
+    }
+}
+
+#[tagged_blob("TXN")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ElaboratedTransactionHash(phaselock::BlockHash<64>);
+
+impl CanonicalSerialize for ElaboratedTransactionHash {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), ark_serialize::SerializationError> {
+        writer
+            .write_all(self.0.as_ref())
+            .map_err(ark_serialize::SerializationError::from)
+    }
+
+    fn serialized_size(&self) -> usize {
+        64
+    }
+}
+
+impl CanonicalDeserialize for ElaboratedTransactionHash {
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, ark_serialize::SerializationError> {
+        use std::convert::TryInto;
+        let mut buf = vec![0; 64];
+        reader
+            .read_exact(&mut buf)
+            .map_err(ark_serialize::SerializationError::from)?;
+        Ok(ElaboratedTransactionHash(phaselock::BlockHash::from_array(
+            buf.as_slice().try_into().unwrap(),
+        )))
+    }
 }
 
 #[derive(
@@ -176,8 +213,7 @@ impl BlockContents<H_512> for ElaboratedBlock {
     fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<64> {
         use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
-        let mut hasher =
-            blake2::Blake2b::with_params(&[], &[], "ElaboratedTransaction Hash".as_bytes());
+        let mut hasher = blake2::Blake2b::with_params(&[], &[], "ElaboratedTxn".as_bytes());
         hasher.update("Txn contents".as_bytes());
         hasher.update(&txn_comm::txn_commit(&txn.txn));
         hasher.update("Txn proofs".as_bytes());
@@ -260,7 +296,7 @@ pub mod key_set {
         fn sort_key(num_inputs: usize, num_outputs: usize) -> Self::SortKey;
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     pub struct OrderByInputs;
     impl KeyOrder for OrderByInputs {
         type SortKey = (usize, usize);
@@ -269,7 +305,7 @@ pub mod key_set {
         }
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     pub struct OrderByOutputs;
     impl KeyOrder for OrderByOutputs {
         type SortKey = (usize, usize);
@@ -279,7 +315,9 @@ pub mod key_set {
     }
 
     #[serde_as]
-    #[derive(Debug, Clone, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize)]
+    #[derive(
+        Debug, Clone, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize, PartialEq,
+    )]
     #[serde(bound = "K: Serialize + for<'a> Deserialize<'a>")]
     pub struct KeySet<K: SizedKey, Order: KeyOrder = OrderByInputs> {
         // serde_json does not support maps where the keys are not Strings (or easily convertible
@@ -353,7 +391,9 @@ pub mod key_set {
 }
 use key_set::KeySet;
 
-#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize, PartialEq,
+)]
 pub struct ProverKeySet<'a, Order: key_set::KeyOrder = key_set::OrderByInputs> {
     pub mint: MintProvingKey<'a>,
     pub xfr: KeySet<TransferProvingKey<'a>, Order>,
