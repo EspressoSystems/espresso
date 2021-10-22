@@ -2,7 +2,7 @@ use crate::key_set::OrderByOutputs;
 use crate::set_merkle_tree::SetMerkleTree;
 use crate::wallet::*;
 use crate::{ProverKeySet, ValidatorState};
-use async_std::sync::{Arc, Mutex};
+use async_std::sync::Arc;
 use atomic_store::{
     load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, RollingLog,
 };
@@ -54,35 +54,26 @@ impl<'a> From<&WalletState<'a>> for WalletSnapshot {
     }
 }
 
-type AppendLogHandle<T> = Arc<Mutex<AppendLog<BincodeLoadStore<T>>>>;
-type RollingLogHandle<T> = Arc<Mutex<RollingLog<BincodeLoadStore<T>>>>;
-
 pub struct AtomicWalletStorage {
     static_path: PathBuf,
     store: AtomicStore,
-    dynamic_state: RollingLogHandle<WalletSnapshot>,
+    dynamic_state: RollingLog<BincodeLoadStore<WalletSnapshot>>,
     dynamic_state_dirty: bool,
-    auditable_assets: AppendLogHandle<AssetDefinition>,
+    auditable_assets: AppendLog<BincodeLoadStore<AssetDefinition>>,
     auditable_assets_dirty: bool,
-    defined_assets: AppendLogHandle<(AssetDefinition, AssetCodeSeed, Vec<u8>)>,
+    defined_assets: AppendLog<BincodeLoadStore<(AssetDefinition, AssetCodeSeed, Vec<u8>)>>,
     defined_assets_dirty: bool,
 }
 
 impl AtomicWalletStorage {
     pub fn new(directory: &Path) -> Result<Self, WalletError> {
         let mut loader = AtomicStoreLoader::load(directory, "wallet").context(PersistenceError)?;
-        let dynamic_state = Arc::new(Mutex::new(
-            RollingLog::load(&mut loader, Default::default(), "wallet_dyn", 1024)
-                .context(PersistenceError)?,
-        ));
-        let auditable_assets = Arc::new(Mutex::new(
-            AppendLog::load(&mut loader, Default::default(), "wallet_aud", 1024)
-                .context(PersistenceError)?,
-        ));
-        let defined_assets = Arc::new(Mutex::new(
-            AppendLog::load(&mut loader, Default::default(), "wallet_def", 1024)
-                .context(PersistenceError)?,
-        ));
+        let dynamic_state = RollingLog::load(&mut loader, Default::default(), "wallet_dyn", 1024)
+            .context(PersistenceError)?;
+        let auditable_assets = AppendLog::load(&mut loader, Default::default(), "wallet_aud", 1024)
+            .context(PersistenceError)?;
+        let defined_assets = AppendLog::load(&mut loader, Default::default(), "wallet_def", 1024)
+            .context(PersistenceError)?;
         let store = AtomicStore::open(loader).context(PersistenceError)?;
         let mut static_path = PathBuf::from(directory);
         static_path.push("wallet_static");
@@ -133,13 +124,7 @@ impl<'a> WalletStorage<'a> for AtomicWalletStorage {
             auditor_key_pair,
             freezer_key_pair,
         } = bincode::deserialize(&static_bytes).context(BincodeError)?;
-
-        let dynamic_state = self
-            .dynamic_state
-            .lock()
-            .await
-            .load_latest()
-            .context(PersistenceError)?;
+        let dynamic_state = self.dynamic_state.load_latest().context(PersistenceError)?;
 
         Ok(WalletState {
             // Static state
@@ -157,15 +142,11 @@ impl<'a> WalletStorage<'a> for AtomicWalletStorage {
             // Monotonic state
             auditable_assets: self
                 .auditable_assets
-                .lock()
-                .await
                 .iter()
                 .filter_map(|res| res.map(|def| (def.code, def)).ok())
                 .collect(),
             defined_assets: self
                 .defined_assets
-                .lock()
-                .await
                 .iter()
                 .filter_map(|res| {
                     res.map(|(def, seed, desc)| (def.code, (def, seed, desc)))
@@ -180,8 +161,7 @@ impl<'a> WalletStorage<'a> for AtomicWalletStorage {
         _key: &UserKeyPair,
         w: &WalletState<'a>,
     ) -> Result<(), WalletError> {
-        let mut dynamic_state = self.dynamic_state.lock().await;
-        dynamic_state
+        self.dynamic_state
             .store_resource(&WalletSnapshot::from(w))
             .context(PersistenceError)?;
         self.dynamic_state_dirty = true;
@@ -193,8 +173,7 @@ impl<'a> WalletStorage<'a> for AtomicWalletStorage {
         _key: &UserKeyPair,
         asset: &AssetDefinition,
     ) -> Result<(), WalletError> {
-        let mut auditable_assets = self.auditable_assets.lock().await;
-        auditable_assets
+        self.auditable_assets
             .store_resource(asset)
             .context(PersistenceError)?;
         self.auditable_assets_dirty = true;
@@ -208,8 +187,7 @@ impl<'a> WalletStorage<'a> for AtomicWalletStorage {
         seed: AssetCodeSeed,
         desc: &[u8],
     ) -> Result<(), WalletError> {
-        let mut defined_assets = self.defined_assets.lock().await;
-        defined_assets
+        self.defined_assets
             .store_resource(&(asset.clone(), seed, desc.to_vec()))
             .context(PersistenceError)?;
         self.defined_assets_dirty = true;
@@ -218,26 +196,22 @@ impl<'a> WalletStorage<'a> for AtomicWalletStorage {
 
     async fn commit(&mut self, _key_pair: &UserKeyPair) {
         {
-            let mut dynamic_state = self.dynamic_state.lock().await;
-            let mut auditable_assets = self.auditable_assets.lock().await;
-            let mut defined_assets = self.defined_assets.lock().await;
-
             if self.dynamic_state_dirty {
-                dynamic_state.commit_version().unwrap();
+                self.dynamic_state.commit_version().unwrap();
             } else {
-                dynamic_state.skip_version().unwrap();
+                self.dynamic_state.skip_version().unwrap();
             }
 
             if self.auditable_assets_dirty {
-                auditable_assets.commit_version().unwrap();
+                self.auditable_assets.commit_version().unwrap();
             } else {
-                auditable_assets.skip_version().unwrap();
+                self.auditable_assets.skip_version().unwrap();
             }
 
             if self.defined_assets_dirty {
-                defined_assets.commit_version().unwrap();
+                self.defined_assets.commit_version().unwrap();
             } else {
-                defined_assets.skip_version().unwrap();
+                self.defined_assets.skip_version().unwrap();
             }
         }
 
@@ -249,9 +223,9 @@ impl<'a> WalletStorage<'a> for AtomicWalletStorage {
     }
 
     async fn revert(&mut self, _key_pair: &UserKeyPair) {
-        self.dynamic_state.lock().await.revert_version().unwrap();
-        self.auditable_assets.lock().await.revert_version().unwrap();
-        self.defined_assets.lock().await.revert_version().unwrap();
+        self.dynamic_state.revert_version().unwrap();
+        self.auditable_assets.revert_version().unwrap();
+        self.defined_assets.revert_version().unwrap();
     }
 }
 
