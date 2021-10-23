@@ -27,6 +27,7 @@ pub fn cli_test(test: impl Fn(&mut TestState) -> Result<(), String>) {
 }
 
 pub struct TestState {
+    _validators: Vec<Validator>,
     wallets: Vec<Wallet>,
     variables: HashMap<String, String>,
     prev_output: Vec<String>,
@@ -59,12 +60,11 @@ impl TestState {
             *p = (get_port(), get_port());
         }
 
-        Self::start_validators(tmp_dir.path(), &key_path, &ports);
-
         let mut state = Self {
             wallets: Default::default(),
             variables: Default::default(),
             prev_output: Default::default(),
+            _validators: Self::start_validators(tmp_dir.path(), &key_path, &ports),
             server_port: ports[0].1,
             _tmp_dir: tmp_dir,
         };

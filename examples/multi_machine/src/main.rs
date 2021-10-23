@@ -879,11 +879,8 @@ async fn main() -> Result<(), std::io::Error> {
                             break;
                         }
                     }
-                    // A timed out node doesn't indicate a failed consensus. The consensus
-                    // succeeds as long as the number of nodes that reach to the same decision
-                    // >= threshold.
-                    EventType::ViewTimeout { view_number } => {
-                        println!("  - Timed out at view : {}", view_number);
+                    EventType::Error { error } => {
+                        println!("  - Error: {}", error);
                         break;
                     }
                     _ => {
@@ -935,6 +932,9 @@ async fn main() -> Result<(), std::io::Error> {
         }
 
         println!("All rounds completed");
+
+        // Wait for other nodes to complete. Otherwise, the wallet CLI tests may fail.
+        async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
     }
 
     Ok(())
