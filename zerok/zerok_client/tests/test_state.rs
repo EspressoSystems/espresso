@@ -27,7 +27,7 @@ pub fn cli_test(test: impl Fn(&mut TestState) -> Result<(), String>) {
 }
 
 pub struct TestState {
-    validators: Vec<Validator>,
+    _validators: Vec<Validator>,
     wallets: Vec<Wallet>,
     variables: HashMap<String, String>,
     prev_output: Vec<String>,
@@ -64,7 +64,7 @@ impl TestState {
             wallets: Default::default(),
             variables: Default::default(),
             prev_output: Default::default(),
-            validators: Self::start_validators(tmp_dir.path(), &key_path, &ports),
+            _validators: Self::start_validators(tmp_dir.path(), &key_path, &ports),
             server_port: ports[0].1,
             _tmp_dir: tmp_dir,
         };
@@ -124,13 +124,6 @@ impl TestState {
             regex,
             self.prev_output.join("\n")
         ));
-    }
-
-    pub fn start_consensus(&mut self) -> Result<&mut Self, String> {
-        for validator in &mut self.validators {
-            validator.start_consensus()?;
-        }
-        Ok(self)
     }
 
     pub fn var(&self, var: impl AsRef<str>) -> Result<String, String> {
@@ -303,7 +296,6 @@ impl Drop for Wallet {
 }
 
 struct Validator {
-    stdin: ChildStdin,
     process: Child,
 }
 
@@ -332,23 +324,16 @@ impl Validator {
             let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
             while let Some(line) = lines.next() {
                 let line = line.unwrap();
-                if line.trim() == "Hit the return key when ready to start the consensus..." {
+                if line.trim() == "- Starting consensus" {
                     // Spawn a detached task to consume the validator's stdout. If we don't do this,
                     // the validator will eventually fill up its output pipe and block.
                     async_std::task::spawn(async move { while lines.next().is_some() {} });
-                    return Validator {
-                        stdin: child.stdin.take().unwrap(),
-                        process: child,
-                    };
+                    return Validator { process: child };
                 }
             }
             panic!("validator {} exited", id);
         })
         .await
-    }
-
-    fn start_consensus(&mut self) -> Result<(), String> {
-        writeln!(self.stdin).map_err(err)
     }
 }
 
