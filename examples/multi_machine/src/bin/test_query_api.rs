@@ -27,13 +27,16 @@ use phaselock::BlockContents;
 use serde::Deserialize;
 use snafu::ResultExt;
 use std::fmt::Display;
+use std::path::PathBuf;
 use std::time::Duration;
 use structopt::StructOpt;
 use tempdir::TempDir;
 use tracing::{event, Level};
 use wallet::{
+    encryption,
     network::{NetworkBackend, Url},
-    Wallet,
+    persistence::WalletLoader,
+    EncryptionError, Wallet, WalletError,
 };
 use zerok_lib::api::*;
 use zerok_lib::node::{LedgerEvent, LedgerSummary, QueryServiceError};
@@ -165,6 +168,27 @@ async fn validate_committed_block(
     }
 }
 
+struct UnencryptedWalletLoader {
+    dir: TempDir,
+}
+
+impl WalletLoader for UnencryptedWalletLoader {
+    type Meta = ();
+
+    fn location(&self) -> PathBuf {
+        self.dir.path().into()
+    }
+
+    fn create(&mut self) -> Result<(Self::Meta, encryption::Key), WalletError> {
+        let key = encryption::Key::from_password_and_salt(&[], &[]).context(EncryptionError)?;
+        Ok(((), key))
+    }
+
+    fn load(&mut self, _meta: &Self::Meta) -> Result<encryption::Key, WalletError> {
+        encryption::Key::from_password_and_salt(&[], &[]).context(EncryptionError)
+    }
+}
+
 #[async_std::main]
 async fn main() {
     tracing_subscriber::fmt().init();
@@ -227,15 +251,16 @@ async fn main() {
 
     // Check that we can create a wallet using this server as a backend.
     let url = url("/");
-    let storage = TempDir::new("test_query_api").unwrap();
+    let mut loader = UnencryptedWalletLoader {
+        dir: TempDir::new("test_query_api").unwrap(),
+    };
     let _wallet = Wallet::new(
-        wallet::new_key_pair(),
         NetworkBackend::new(
             &*UNIVERSAL_PARAM,
             url.clone(),
             url.clone(),
             url,
-            storage.path(),
+            &mut loader,
         )
         .unwrap(),
     );

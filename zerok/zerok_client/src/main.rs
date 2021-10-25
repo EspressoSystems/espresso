@@ -9,12 +9,20 @@ use api::UserAddress;
 use async_std::sync::{Arc, Mutex};
 use async_std::task::block_on;
 use async_trait::async_trait;
+use encryption::{Cipher, CipherText};
 use fmt::{Display, Formatter};
 use futures::future::BoxFuture;
-use jf_txn::keys::{AuditorPubKey, FreezerPubKey};
+use jf_txn::keys::{AuditorPubKey, FreezerPubKey, UserKeyPair};
 use jf_txn::structs::{AssetCode, AssetDefinition, AssetPolicy};
 use lazy_static::lazy_static;
+use rand_chacha::{
+    rand_core::{RngCore, SeedableRng},
+    ChaChaRng,
+};
+use rpassword::prompt_password_stdout;
+use serde::{Deserialize, Serialize};
 use shutdown_hooks::add_shutdown_hook;
+use snafu::ResultExt;
 use std::any::type_name;
 use std::collections::HashMap;
 use std::fmt;
@@ -27,10 +35,13 @@ use std::str::FromStr;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use tempdir::TempDir;
-use wallet::{network::*, AssetInfo, MintInfo, TransactionReceipt, TransactionState};
+use wallet::{
+    encryption, network::*, persistence::WalletLoader, AssetInfo, EncryptionError, MintInfo,
+    TransactionReceipt, TransactionState, WalletError,
+};
 use zerok_lib::{api, wallet, UNIVERSAL_PARAM};
 
-type Wallet = wallet::Wallet<'static, NetworkBackend<'static>>;
+type Wallet = wallet::Wallet<'static, NetworkBackend<'static, WalletMetadata>>;
 
 #[derive(StructOpt)]
 struct Args {
@@ -52,6 +63,16 @@ struct Args {
     /// exists there, it will be loaded. Otherwise, a new wallet will be created.
     #[structopt(short, long)]
     storage: Option<PathBuf>,
+
+    /// Store the contents of the wallet in plaintext.
+    ///
+    /// You will not require a password to access your wallet, and your wallet will not be protected
+    /// from malicious software that gains access to a device where you loaded your wallet.
+    ///
+    /// This option is only available when creating a new wallet. When loading an existing wallet, a
+    /// password will always be required if the wallet was created without the --unencrypted flag.
+    #[structopt(long)]
+    unencrypted: bool,
 
     /// Create a new wallet and store it an a temporary location which will be deleted on exit.
     ///
@@ -546,57 +567,6 @@ extern "C" fn close_storage() {
     block_on(STORAGE.1.lock()).take();
 }
 
-async fn init_repl() -> Wallet {
-    let args = Args::from_args();
-    let server = args.server.unwrap_or_else(|| {
-        println!("server is required");
-        exit(1);
-    });
-
-    println!(
-        "Welcome to the AAP wallet, version {}",
-        env!("CARGO_PKG_VERSION")
-    );
-    println!("(c) 2021 Translucence Research, Inc.");
-    println!("connecting...");
-
-    let key_pair = if let Some(path) = args.key_path {
-        let mut file = File::open(path).unwrap_or_else(|err| {
-            println!("cannot open private key file: {}", err);
-            exit(1);
-        });
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).unwrap_or_else(|err| {
-            println!("error reading private key file: {}", err);
-            exit(1);
-        });
-        bincode::deserialize(&bytes).unwrap_or_else(|err| {
-            println!("invalid private key file: {}", err);
-            exit(1);
-        })
-    } else {
-        wallet::new_key_pair()
-    };
-
-    let backend = NetworkBackend::new(
-        &*UNIVERSAL_PARAM,
-        server.clone(),
-        server.clone(),
-        server.clone(),
-        *STORAGE_PATH,
-    )
-    .unwrap_or_else(|err| {
-        println!("Failed to connect to backend: {}", err);
-        exit(1);
-    });
-    let wallet = Wallet::new(key_pair, backend).await.unwrap_or_else(|err| {
-        println!("Error loading wallet: {}", err);
-        exit(1);
-    });
-
-    println!("Type 'help' for a list of commands.");
-    wallet
-}
 
 enum Reader {
     Interactive(rustyline::Editor<()>),
@@ -612,6 +582,24 @@ impl Reader {
         }
     }
 
+    fn read_password(&self, prompt: &str) -> Result<String, WalletError> {
+        match self {
+            Self::Interactive(_) => {
+                prompt_password_stdout(prompt).map_err(|err| WalletError::Failed {
+                    msg: err.to_string(),
+                })
+            }
+            Self::Automated => {
+                println!("{}", prompt);
+                let mut password = String::new();
+                match std::io::stdin().read_line(&mut password) {
+                    Ok(_) => Ok(password),
+                    Err(err) => Err(WalletError::Failed { msg: err.to_string() }),
+                }
+            }
+        }
+    }
+
     fn read_line(&mut self) -> Option<String> {
         let prompt = "> ";
         match self {
@@ -623,6 +611,176 @@ impl Reader {
             }
         }
     }
+}
+
+// Metadata about a wallet which is always stored unencrypted, so we can report some basic
+// information about the wallet without decrypting. This also aids in the key derivation process.
+//
+// DO NOT put secrets in here.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct WalletMetadata {
+    encrypted: bool,
+    salt: encryption::Salt,
+    // Encrypted random bytes. This will only decrypt successfully if we have the correct password,
+    // so we can use it as a quick check that the user entered the right password.
+    password_check: CipherText,
+}
+
+struct PasswordLoader {
+    encrypted: bool,
+    dir: PathBuf,
+    rng: ChaChaRng,
+    key_pair: Option<UserKeyPair>,
+    reader: Reader,
+}
+
+impl WalletLoader for PasswordLoader {
+    type Meta = WalletMetadata;
+
+    fn location(&self) -> PathBuf {
+        self.dir.clone()
+    }
+
+    fn create(&mut self) -> Result<(WalletMetadata, encryption::Key), WalletError> {
+        let password = if self.encrypted {
+            loop {
+                let password = self.reader.read_password("Create password: ")?;
+                let confirm = self.reader.read_password("Retype password: ")?;
+                if password == confirm {
+                    break password;
+                } else {
+                    println!("Passwords do not match.");
+                }
+            }
+        } else {
+            String::new()
+        };
+
+        let (key, salt) = encryption::Key::from_password(&mut self.rng, password.as_bytes())
+            .context(EncryptionError)?;
+
+        // Encrypt some random data, which we can decrypt on load to check the user's password.
+        let mut password_check = [0; 32];
+        self.rng.fill_bytes(&mut password_check);
+        let password_check = Cipher::new(&key, ChaChaRng::from_rng(&mut self.rng).unwrap())
+            .encrypt(&password_check)
+            .context(EncryptionError)?;
+
+        let meta = WalletMetadata {
+            encrypted: self.encrypted,
+            salt,
+            password_check,
+        };
+        Ok((meta, key))
+    }
+
+    fn load(&mut self, meta: &Self::Meta) -> Result<encryption::Key, WalletError> {
+        if !self.encrypted {
+            return Err(WalletError::Failed {
+                msg: String::from(
+                    "option --unencrypted is not allowed when loading an existing wallet",
+                ),
+            });
+        }
+
+        let key = loop {
+            let password = if meta.encrypted {
+                self.reader.read_password("Enter password: ")?
+            } else {
+                String::new()
+            };
+
+            // Generate the key and check that we can use it to decrypt the `password_check` data.
+            // If we can't, the password is wrong.
+            let key = encryption::Key::from_password_and_salt(password.as_bytes(), &meta.salt)
+                .context(EncryptionError)?;
+            if Cipher::new(&key, ChaChaRng::from_rng(&mut self.rng).unwrap())
+                .decrypt(&meta.password_check)
+                .is_ok()
+            {
+                break key;
+            } else if !meta.encrypted {
+                // If the default password doesn't work, then the password_check data must be
+                // corrupted or encrypted with a non-default password. If the metadata claims it is
+                // unencrypted, than the metadata is corrupt (either in the `encrypted` field, the
+                // `password_check` field, or both).
+                return Err(WalletError::Failed {
+                    msg: String::from("wallet metadata is corrupt"),
+                });
+            } else {
+                println!("Sorry, that's incorrect.");
+            }
+        };
+
+        Ok(key)
+    }
+
+    fn key_pair(&self) -> Option<UserKeyPair> {
+        self.key_pair.clone()
+    }
+}
+
+async fn init_repl() -> Wallet {
+    let args = Args::from_args();
+    let reader = Reader::new(&args);
+    let server = args.server.unwrap_or_else(|| {
+        println!("server is required");
+        exit(1);
+    });
+
+    println!(
+        "Welcome to the AAP wallet, version {}",
+        env!("CARGO_PKG_VERSION")
+    );
+    println!("(c) 2021 Translucence Research, Inc.");
+
+    let key_pair = if let Some(path) = args.key_path {
+        let mut file = File::open(path).unwrap_or_else(|err| {
+            println!("cannot open private key file: {}", err);
+            exit(1);
+        });
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).unwrap_or_else(|err| {
+            println!("error reading private key file: {}", err);
+            exit(1);
+        });
+        Some(bincode::deserialize(&bytes).unwrap_or_else(|err| {
+            println!("invalid private key file: {}", err);
+            exit(1);
+        }))
+    } else {
+        None
+    };
+
+    let mut loader = PasswordLoader {
+        dir: PathBuf::from(*STORAGE_PATH),
+        encrypted: !args.unencrypted,
+        rng: ChaChaRng::from_entropy(),
+        key_pair,
+        reader,
+    };
+    let backend = NetworkBackend::new(
+        &*UNIVERSAL_PARAM,
+        server.clone(),
+        server.clone(),
+        server.clone(),
+        &mut loader,
+    )
+    .unwrap_or_else(|err| {
+        println!("Failed to connect to backend: {}", err);
+        exit(1);
+    });
+
+    // Loading the wallet takes a while. Let the user know that's expected.
+    //todo !jeb.bearer Make it faster
+    println!("connecting...");
+    let wallet = Wallet::new(backend).await.unwrap_or_else(|err| {
+        println!("Error loading wallet: {}", err);
+        exit(1);
+    });
+
+    println!("Type 'help' for a list of commands.");
+    wallet
 }
 
 #[async_std::main]
