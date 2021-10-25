@@ -27,16 +27,11 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
         * `config` is the path to the node config file.
             * Skip this option if using the default file, `examples/multi_machine/src/node-config.toml`.
         * `id` is the ID of the current node, starting from `0` to `6`.
-            * The last node, `node 6`, is going to propose all transactions, but not necessarily the leader in each round.
-            * Note: Make sure to start `node 6` last, so that it will complete network connections faster than other nodes and starts to propose the first transaction. 
-        * Add `--auto` to automatically start each round of the consensus.
-            * Note: This is useful for automated testing, but the recommended and default way is to start the consensus by user input.
+            * `Node 0` is going to propose all transactions, but not necessarily the leader in each round.
         * Add `--full` to run a full node. 
-* For each round:
-    * Wait until all windows display `Hit the enter key when ready to start the consensus...`, then hit the enter key in every window.
-        * Skip this step if running with `--auto`.
-    * Check that the `Current commitment`s in all windows are the same.
-* Nodes that have completed all (i.e., 3) rounds will terminate their processes, which may lead to connection errors displayed in other windows. It is okay to ignore these errors as long as the commitments of each round are consistent in all windows.
+* After all processes are done:
+    * Check that at least 5 windows display `Round 3 completed` and have the same commitment.
+    * Nodes that have completed all (i.e., 3) rounds or timed out will terminate their processes, which may lead to connection errors displayed in other windows. It is okay to ignore these errors as long as there are 5 identical commitments after the final round.
 
 ### Initialize web server
 * Port
