@@ -1,38 +1,43 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
-use crate::config::executable_name;
-use crate::routes::{dispatch_url, RouteBinding, UrlSegmentType, UrlSegmentValue};
+use crate::routes::{
+    dispatch_url, dispatch_web_socket, RouteBinding, UrlSegmentType, UrlSegmentValue,
+};
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
+use async_trait::async_trait;
 use futures_util::StreamExt;
+use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
+use jf_txn::{MerkleTree, TransactionVerifyingKey};
 use phaselock::{
-    event::EventType, message::Message, networking::w_network::WNetwork,
-    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey,
+    error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
+    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_512,
 };
-use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
+use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::json;
-use std::collections::hash_map::{Entry, HashMap};
+use server::request_body;
+use std::collections::hash_map::HashMap;
+use std::convert::TryInto;
 use std::fs::File;
 use std::io::{prelude::*, Read};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use threshold_crypto as tc;
-use tide_websockets::{
-    async_tungstenite::tungstenite::protocol::frame::coding::CloseCode, Message::Close, WebSocket,
-    WebSocketConnection,
-};
+use tide::StatusCode;
+use tide_websockets::{WebSocket, WebSocketConnection};
 use toml::Value;
 use tracing::debug;
-use tracing::{event, Level};
 use zerok_lib::{
-    node::*, ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState,
+    api::*,
+    key_set::KeySet,
+    node,
+    node::{EventStream, PhaseLockEvent, QueryService, Validator},
+    ElaboratedBlock, ElaboratedTransaction, LWPersistence, MultiXfrRecordSpec, MultiXfrTestState,
+    ValidatorState, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
 };
 
-mod config;
 mod disco;
 mod ip;
 mod routes;
@@ -56,12 +61,22 @@ struct NodeOpt {
 
     /// Whether to generate and store public keys for all nodes.
     ///
-    /// Public keys will be stored under `examples/multi_machine/src`, file names starting
-    /// with `pk_`.
+    /// Public keys will be stored under the directory specified by `pk_path`.
     ///
     /// Skip this option if public key files already exist.
-    #[structopt(long = "generate_keys", short = "g")]
-    generate_keys: bool,
+    #[structopt(long = "gen_pk", short = "g")]
+    gen_pk: bool,
+
+    /// Path to public keys.
+    ///
+    /// Public keys will be stored under the specified directory, file names starting
+    /// with `pk_`.
+    #[structopt(
+        long = "pk_path", 
+        short = "p", 
+        default_value = ""      // See fn default_pk_path().
+    )]
+    pk_path: String,
 
     /// Id of the current node.
     ///
@@ -88,11 +103,20 @@ struct NodeOpt {
         default_value = ""      // See fn default_api_path().
     )]
     api_path: String,
+
+    /// Use an external wallet to generate transactions.
+    ///
+    /// The argument is the path to the wallet's public key. If this option is given, the ledger
+    /// will be initialized with a single record of 2^32 native tokens, owned by the wallet's public
+    /// key. The demo will then wait for the wallet to generate some transactions and submit them to
+    /// the validators using the network API.
+    #[structopt(short, long = "wallet")]
+    wallet_pk_path: Option<PathBuf>,
 }
 
 /// Gets public key of a node from its public key file.
 fn get_public_key(node_id: u64) -> PubKey {
-    let path_str = format!("../../examples/multi_machine/src/pk_{}", node_id);
+    let path_str = format!("{}/pk_{}", get_pk_dir(), node_id);
     let path = Path::new(&path_str);
     let mut pk_file = File::open(&path)
         .unwrap_or_else(|_| panic!("Cannot find public key file: {}", path.display()));
@@ -103,34 +127,11 @@ fn get_public_key(node_id: u64) -> PubKey {
     serde_json::from_str(&pk_str).expect("Error while reading public key")
 }
 
-/// Returns the project directory assuming the executable is in a
-/// default build location.
-///
-/// For example, if the executable path is
-/// ```
-///    ~/tri/systems/system/target/release/multi_machine
-/// ```
-/// then the project path
-/// ```
-///    ~/tri/systems/system/examples/multi_machine/
-/// ```
-// Note: This function will need to be edited if copied to a project
-// that is not under examples/ or a sibling directory.
+/// Returns the project directory.
 fn project_path() -> PathBuf {
-    const EX_DIR: &str = "examples";
-    let mut project = PathBuf::from(
-        std::env::current_exe()
-            .expect("current_exe() returned an error")
-            .parent()
-            .expect("Unable to find parent directory (1)")
-            .parent()
-            .expect("Unable to find parent directory (2)")
-            .parent()
-            .expect("Unable to find parent directory (3)"),
-    );
-    project.push(EX_DIR);
-    project.push(&executable_name());
-    project
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    println!("path {}", path.display());
+    path
 }
 
 /// Returns "<repo>/public/" where <repo> is
@@ -159,6 +160,13 @@ fn default_config_path() -> PathBuf {
     [&dir, Path::new(CONFIG_FILE)].iter().collect()
 }
 
+/// Returns the default directory to store public key files.
+fn default_pk_path() -> PathBuf {
+    const PK_DIR: &str = "src";
+    let dir = project_path();
+    [&dir, Path::new(PK_DIR)].iter().collect()
+}
+
 /// Returns the default path to the API file.
 fn default_api_path() -> PathBuf {
     const API_FILE: &str = "api/api.toml";
@@ -185,6 +193,19 @@ fn get_node_config() -> Value {
         .read_to_string(&mut config_str)
         .unwrap_or_else(|err| panic!("Error while reading node config file: {}", err));
     toml::from_str(&config_str).expect("Error while reading node config file")
+}
+
+/// Gets the directory to public key files.
+fn get_pk_dir() -> String {
+    let pk_path = NodeOpt::from_args().pk_path;
+    if pk_path.is_empty() {
+        default_pk_path()
+            .into_os_string()
+            .into_string()
+            .expect("Error while converting public key path to a string")
+    } else {
+        pk_path
+    }
 }
 
 /// Gets IP address and port number of a node from node configuration file.
@@ -225,6 +246,42 @@ async fn get_networking<
     panic!("Failed to open a port");
 }
 
+type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_512>>;
+type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_512>;
+type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
+type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
+
+enum Node {
+    Light(LWNode),
+    Full(FullNode<'static>),
+}
+
+#[async_trait]
+impl Validator for Node {
+    type Event = PhaseLockEvent;
+
+    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
+        match self {
+            Node::Light(n) => <LWNode as Validator>::submit_transaction(n, tx).await,
+            Node::Full(n) => n.submit_transaction(tx).await,
+        }
+    }
+
+    async fn start_consensus(&self) {
+        match self {
+            Node::Light(n) => n.start_consensus().await,
+            Node::Full(n) => n.start_consensus().await,
+        }
+    }
+
+    fn subscribe(&self) -> EventStream<Self::Event> {
+        match self {
+            Node::Light(n) => n.subscribe(),
+            Node::Full(n) => <FullNode as Validator>::subscribe(n),
+        }
+    }
+}
+
 /// Creates the initial state and phaselock for simulation.
 async fn init_state_and_phaselock(
     public_keys: tc::PublicKeySet,
@@ -234,36 +291,98 @@ async fn init_state_and_phaselock(
     node_id: u64,
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
     full_node: bool,
-) -> (
-    MultiXfrTestState,
-    Box<dyn Validator<Event = PhaseLockEvent>>,
-) {
+) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state
-    let state = MultiXfrTestState::initialize(
-        STATE_SEED,
-        10,
-        10,
-        (
-            MultiXfrRecordSpec {
-                asset_def_ix: 0,
-                owner_key_ix: 0,
-                asset_amount: 100,
-            },
-            vec![
-                MultiXfrRecordSpec {
-                    asset_def_ix: 1,
-                    owner_key_ix: 0,
-                    asset_amount: 50,
-                },
-                MultiXfrRecordSpec {
-                    asset_def_ix: 0,
-                    owner_key_ix: 0,
-                    asset_amount: 70,
-                },
-            ],
-        ),
-    )
-    .unwrap();
+    let (state, validator, records, nullifiers, memos) =
+        if let Some(pk_path) = NodeOpt::from_args().wallet_pk_path {
+            let mut rng = zerok_lib::crypto_rng_from_seed([0x42u8; 32]);
+
+            // Read in the public key of the wallet which will get the initial grant of native coins.
+            let mut file = File::open(pk_path).unwrap();
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes).unwrap();
+            let pub_key = bincode::deserialize(&bytes).unwrap();
+
+            // Create the initial grant.
+            let ro = RecordOpening::new(
+                &mut rng,
+                1u64 << 32,
+                AssetDefinition::native(),
+                pub_key,
+                FreezeFlag::Unfrozen,
+            );
+            let mut records = MerkleTree::new(MERKLE_HEIGHT).unwrap();
+            records.push(RecordCommitment::from(&ro).to_field_element());
+            let memos = vec![(ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap(), 0)];
+
+            // Set up the validator.
+            let univ_setup = &*UNIVERSAL_PARAM;
+            let (_, xfr_verif_key_12, _) =
+                jf_txn::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
+            let (_, xfr_verif_key_23, _) =
+                jf_txn::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
+            let (_, mint_verif_key, _) =
+                jf_txn::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
+            let (_, freeze_verif_key, _) =
+                jf_txn::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
+            let verif_keys = VerifierKeySet {
+                mint: TransactionVerifyingKey::Mint(mint_verif_key),
+                xfr: KeySet::new(
+                    vec![
+                        TransactionVerifyingKey::Transfer(xfr_verif_key_12),
+                        TransactionVerifyingKey::Transfer(xfr_verif_key_23),
+                    ]
+                    .into_iter(),
+                )
+                .unwrap(),
+                freeze: KeySet::new(
+                    vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
+                )
+                .unwrap(),
+            };
+
+            let nullifiers = Default::default();
+            let validator = ValidatorState::new(verif_keys, records.clone());
+            (None, validator, records, nullifiers, memos)
+        } else {
+            let state = MultiXfrTestState::initialize(
+                STATE_SEED,
+                10,
+                10,
+                (
+                    MultiXfrRecordSpec {
+                        asset_def_ix: 0,
+                        owner_key_ix: 0,
+                        asset_amount: 100,
+                    },
+                    vec![
+                        MultiXfrRecordSpec {
+                            asset_def_ix: 1,
+                            owner_key_ix: 0,
+                            asset_amount: 50,
+                        },
+                        MultiXfrRecordSpec {
+                            asset_def_ix: 0,
+                            owner_key_ix: 0,
+                            asset_amount: 70,
+                        },
+                    ],
+                ),
+            )
+            .unwrap();
+
+            let validator = state.validator.clone();
+            let record_merkle_tree = state.record_merkle_tree.clone();
+            let nullifiers = state.nullifiers.clone();
+            let unspent_memos = state.unspent_memos();
+            (
+                Some(state),
+                validator,
+                record_merkle_tree,
+                nullifiers,
+                unspent_memos,
+            )
+        };
 
     // Create the initial phaselock
     let known_nodes: Vec<_> = (0..nodes).map(get_public_key).collect();
@@ -276,6 +395,7 @@ async fn init_state_and_phaselock(
         next_view_timeout: 10000,
         timeout_ratio: (11, 10),
         round_start_delay: 1,
+        start_delay: 1,
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
@@ -285,24 +405,26 @@ async fn init_state_and_phaselock(
         secret_key_share,
         node_id,
         config,
-        state.validator.clone(),
+        validator.clone(),
         networking,
         MemoryStorage::default(),
+        LWPersistence::new("multi_machine_demo"),
     )
     .await;
     debug!("phaselock launched");
 
     let validator = if full_node {
-        Box::new(FullNode::new(
+        let node = FullNode::new(
             phaselock,
-            state.univ_setup,
-            state.validator.clone(),
-            state.record_merkle_tree.clone(),
-            state.nullifiers.clone(),
-            state.unspent_memos(),
-        )) as Box<dyn Validator<Event = PhaseLockEvent>>
+            &*UNIVERSAL_PARAM,
+            validator.clone(),
+            records.clone(),
+            nullifiers.clone(),
+            memos,
+        );
+        Node::Full(node)
     } else {
-        Box::new(phaselock) as Box<dyn Validator<Event = PhaseLockEvent>>
+        Node::Light(phaselock)
     };
 
     (state, validator)
@@ -315,118 +437,76 @@ struct Connection {
 }
 
 #[derive(Clone)]
-struct WebState {
+pub struct WebState {
     connections: Arc<RwLock<HashMap<String, Connection>>>,
-    web_path: String,
+    web_path: PathBuf,
     api: toml::Value,
+    node: Arc<RwLock<FullNode<'static>>>,
 }
 
-impl WebState {
-    async fn add_connection(&self, id: &str, wsc: WebSocketConnection) -> tide::Result<()> {
-        event!(Level::DEBUG, "main.rs: Adding connection {}", &id);
-        let mut connections = self.connections.write().await;
-        let connection = Connection {
-            id: id.to_string(),
-            wsc,
-        };
-        connections.insert(id.to_string(), connection);
-        Ok(())
-    }
-
-    async fn remove_connection(&self, id: &str) -> tide::Result<()> {
-        event!(Level::DEBUG, "main.rs: Removing connection {}", id);
-        let mut connections = self.connections.write().await;
-        connections.remove(id);
-        Ok(())
-    }
-
-    async fn send_message(&self, id: &str, cmd: &str, message: &str) -> tide::Result<()> {
-        let mut connections = self.connections.write().await;
-        match connections.entry(id.to_string()) {
-            Entry::Vacant(_) => {
-                event!(
-                    Level::DEBUG,
-                    "main.rs:send_message: Vacant {}, {}",
-                    id,
-                    message
-                );
-            }
-            Entry::Occupied(mut id_connections) => {
-                id_connections
-                    .get_mut()
-                    .wsc
-                    .send_json(&json!({"clientId": id, "cmd": cmd, "msg": message }))
-                    .await?
-            }
-        }
-        Ok(())
-    }
-
-    /// Currently a demonstration of messages with delays to suggest processing time.
-    async fn report_transaction_status(&self, id: &str) -> tide::Result<()> {
-        task::sleep(Duration::from_secs(2)).await;
-        self.send_message(id, "FOO", "Here it is.").await?;
-        self.send_message(id, "INIT", "Something something").await?;
-        task::sleep(Duration::from_secs(2)).await;
-        self.send_message(id, "RECV", "Transaction received")
-            .await?;
-        task::sleep(Duration::from_secs(2)).await;
-        self.send_message(id, "RECV", "Transaction accepted")
-            .await?;
-        Ok(())
-    }
+async fn submit_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    let tx = request_body(&mut req).await?;
+    let validator = req.state().node.read().await;
+    validator
+        .submit_transaction(tx)
+        .await
+        .map_err(server_error)?;
+    Ok(tide::Response::new(StatusCode::Ok))
 }
 
-async fn landing_page(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
-    let mut index_html: PathBuf = PathBuf::from(req.state().web_path.clone());
+async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    let PostMemos { memos, signature } = request_body(&mut req).await?;
+    let mut bulletin = req.state().node.write().await;
+    let TransactionId(BlockId(block), tx) =
+        UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
+            .ok_or_else(|| {
+                server_error(Error::ParamError {
+                    param: String::from("txid"),
+                    msg: String::from(
+                        "Valid transaction ID required. Transaction IDs start with TX~.",
+                    ),
+                })
+            })?
+            .to()?;
+    bulletin
+        .post_memos(block as u64, tx as u64, memos, signature)
+        .await
+        .map_err(server_error)?;
+    Ok(tide::Response::new(StatusCode::Ok))
+}
+
+async fn users_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    let pub_key: UserPubKey = request_body(&mut req).await?;
+    let mut bulletin = req.state().node.write().await;
+    bulletin.introduce(&pub_key).await.map_err(server_error)?;
+    Ok(tide::Response::new(StatusCode::Ok))
+}
+
+async fn form_demonstration(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
+    let mut index_html: PathBuf = req.state().web_path.clone();
     index_html.push("index.html");
     Ok(tide::Body::from_file(index_html).await?)
 }
 
-fn can_parse_as(value: &str, ptype: &str) -> bool {
-    match ptype {
-        "Boolean" => value.parse::<bool>().is_ok(),
-        "Hexadecimal" => u128::from_str_radix(value, 16).is_ok(),
-        "Integer" => value.parse::<u128>().is_ok(),
-        "TaggedBase64" => TaggedBase64::parse(value).is_ok(),
-        _ => panic!("Type specified in api.toml isn't supported: {}", ptype),
-    }
-}
-
-/* TODO
-
-Collect error messages for parameters that fail to parse, but only
-when there are no literal mismatches
-
-Add comprehensive documentation at /
-
-Add an enum for each entry point so we know how to dispatch
-}
-
- */
-
-fn internal_error(msg: &'static str) -> tide::Error {
-    tide::Error::from_str(tide::StatusCode::InternalServerError, msg)
-}
-
-async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+// Get the route pattern that matches the URL of a request, and the bindings for parameters in the
+// pattern. If no route matches, the error is a documentation string explaining what went wrong.
+fn parse_route(
+    req: &tide::Request<WebState>,
+) -> Result<(String, HashMap<String, RouteBinding>), String> {
     let first_segment = &req
         .url()
         .path_segments()
-        .ok_or_else(|| internal_error("No path segments"))?
+        .ok_or_else(|| String::from("No path segments"))?
         .next()
-        .ok_or_else(|| internal_error("Empty path"))?;
+        .ok_or_else(|| String::from("Empty path"))?;
     let api = &req.state().api["route"][first_segment];
     let route_patterns = api["PATH"]
         .as_array()
-        .ok_or_else(|| internal_error("Invalid PATH type. Expecting array."))?;
-    let mut arg_doc: String = api["DOC"]
-        .as_str()
-        .ok_or_else(|| internal_error("Missing DOC"))?
-        .to_string();
+        .expect("Invalid PATH type. Expecting array.");
+    let mut arg_doc: String = api["DOC"].as_str().expect("Missing DOC").to_string();
     let mut matching_route_count = 0u64;
-    let mut matching_route = "";
-    let mut bindings = HashMap::new();
+    let mut matching_route = String::new();
+    let mut bindings: HashMap<String, HashMap<String, RouteBinding>> = HashMap::new();
     for route_pattern in route_patterns.iter() {
         let mut found_literal_mismatch = false;
         let mut argument_parse_failed = false;
@@ -454,17 +534,22 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
                     "  Argument: {} as type {} and value: {} ",
                     pat_segment, segment_type, req_segment
                 ));
-                if can_parse_as(req_segment, segment_type) {
+                if let Some(value) = UrlSegmentValue::parse(req_segment, segment_type) {
                     let rb = RouteBinding {
                         parameter: pat_segment.to_string(),
                         ptype: UrlSegmentType::from_str(segment_type).unwrap(),
-                        value: UrlSegmentValue::Unparsed(req_segment.to_string()),
+                        value,
                     };
-                    bindings.insert(route_pattern.as_str().unwrap(), rb);
+                    bindings
+                        .entry(String::from(route_pattern.as_str().unwrap()))
+                        .or_default()
+                        .insert(pat_segment.to_string(), rb);
                     arg_doc.push_str("(Parse succeeded)\n");
                 } else {
                     arg_doc.push_str("(Parse failed)\n");
                     argument_parse_failed = true;
+                    // TODO !corbett capture parse failures documentation
+                    // UrlSegmentValue::ParseFailed(segment_type, req_segment)
                 }
             } else {
                 // No type information. Assume pat_segment is a literal.
@@ -476,6 +561,8 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
                         req_segment, pat_segment
                     ));
                 }
+                // TODO !corbett else capture the matching literal in bindings
+                // TODO !corebtt if the edit distance is small, capture spelling suggestion
             }
         }
         if !found_literal_mismatch {
@@ -501,69 +588,56 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
             let route_pattern_str = route_pattern.as_str().unwrap();
             arg_doc.push_str(&format!("Route matches request: {}\n", &route_pattern_str));
             matching_route_count += 1;
-            matching_route = route_pattern_str;
+            matching_route = String::from(route_pattern_str);
         } else {
             arg_doc.push_str("Route does not match request.\n");
         }
     }
     match matching_route_count {
-        0 => arg_doc.push_str("\nNeed documentation"),
-        1 => arg_doc.push_str(&format!(
-            "\nCould dispatch: {}\n{:?}\nDispatch results:\n{:?}",
-            matching_route,
-            bindings.get(&matching_route),
-            dispatch_url(matching_route, bindings.get(&matching_route)).await?
-        )),
-        _ => arg_doc.push_str("\nAmbiguity in api.toml"),
+        0 => {
+            arg_doc.push_str("\nNeed documentation");
+            Err(arg_doc)
+        }
+        1 => {
+            let route_bindings = bindings.remove(&matching_route).unwrap_or_default();
+            Ok((matching_route, route_bindings))
+        }
+        _ => {
+            arg_doc.push_str("\nAmbiguity in api.toml");
+            Err(arg_doc)
+        }
     }
+}
 
-    // TODO !corbett set the mime type to text/html and convert the
-    // string from markdown to html
-    if matching_route_count == 1 {
-        Ok(dispatch_url(matching_route, bindings.get(&matching_route)).await?)
-    } else {
-        Ok(tide::Response::builder(200).body(arg_doc).build())
+/// Handle API requests defined in api.toml.
+///
+/// This function duplicates the logic for deciding which route was requested. This
+/// is an unfortunate side-effect of defining the routes in an external file.
+// todo !corbett Convert the error feedback into HTML
+async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    match parse_route(&req) {
+        Ok((pattern, bindings)) => dispatch_url(req, pattern.as_str(), &bindings).await,
+        Err(arg_doc) => Ok(tide::Response::builder(200).body(arg_doc).build()),
     }
 }
 
 async fn handle_web_socket(
     req: tide::Request<WebState>,
-    mut wsc: WebSocketConnection,
+    wsc: WebSocketConnection,
 ) -> tide::Result<()> {
-    event!(Level::DEBUG, "main.rs: id: {}", &req.param("id")?);
-    let id = req.param("id").expect("Route must include :id parameter.");
-    let state = req.state().clone();
-    state.add_connection(id, wsc.clone()).await?;
-    state
-        .send_message(id, "RPT", "Server says, \"Hi!\"")
-        .await?;
-    let mut closed = false;
-    while let Some(result_message) = wsc.next().await {
-        match result_message {
-            Ok(message) => {
-                event!(Level::DEBUG, "main.rs:WebSocket message: {:?}", message);
-                if let Close(Some(cf)) = message {
-                    // See https://docs.rs/tungstenite/0.14.0/tungstenite/protocol/frame/coding/enum.CloseCode.html
-                    if cf.code == CloseCode::Away {
-                        event!(Level::DEBUG, "main.rs:cf Client said goodbye.");
-                        closed = true;
-                        break;
-                    }
-                    event!(Level::DEBUG, "main.rs:cf {:?}", &cf.code);
-                }
-                // Demonstration
-                state.report_transaction_status(id).await?;
-            }
-            Err(err) => {
-                event!(Level::ERROR, "WebSocket stream: {:?}", err)
-            }
-        }
+    match parse_route(&req) {
+        Ok((pattern, bindings)) => dispatch_web_socket(req, wsc, pattern.as_str(), &bindings).await,
+        Err(arg_doc) => Err(tide::Error::from_str(StatusCode::BadRequest, arg_doc)),
     }
-    if !closed {
-        event!(Level::ERROR, "main.rs: Client left without saying goodbye.");
-    }
-    state.remove_connection(id).await?;
-    Ok(())
+}
+
+// This route is a demonstration of a form with a WebSocket connection
+// for asynchronous updates. Once we have useful forms, this can go...
+fn add_form_demonstration(web_server: &mut tide::Server<WebState>) {
+    web_server
+        .at("/transfer/:id/:recipient/:amount")
+        .with(WebSocket::new(handle_web_socket))
+        .get(form_demonstration);
 }
 
 /// Initialize the web server.
@@ -575,60 +649,80 @@ async fn handle_web_socket(
 /// `own_id` is the identifier of this instance of the executable. The
 /// port the web server listens on is `own_id + 50000`, unless the
 /// PORT environment variable is set.
-///
-// TODO - take the port from the command line instead of the environment.
 fn init_web_server(
+    opt_api_path: &str,
     opt_web_path: &str,
     own_id: u64,
+    node: FullNode<'static>,
 ) -> Result<task::JoinHandle<Result<(), std::io::Error>>, tide::Error> {
     // Take the command line option for the web asset directory path
     // provided it is not empty. Otherwise, construct the default from
     // the executable path.
     let web_path = if opt_web_path.is_empty() {
         default_web_path()
-            .into_os_string()
-            .into_string()
-            .expect("Wut?! Asset path isn't UTF-8")
     } else {
-        opt_web_path.to_string()
+        PathBuf::from(opt_web_path)
     };
-    println!("Default API: {:?}", default_api_path());
-    let api = disco::load_messages(&default_api_path());
+    let api_path = if opt_api_path.is_empty() {
+        default_api_path()
+    } else {
+        PathBuf::from(opt_api_path)
+    };
+    println!("API path: {:?}", web_path);
+    let api = disco::load_messages(&api_path);
     let mut web_server = tide::with_state(WebState {
         connections: Default::default(),
         web_path: web_path.clone(),
         api: api.clone(),
+        node: Arc::new(RwLock::new(node)),
     });
+    web_server.with(server::trace).with(server::add_error_body);
 
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;
-    web_server.at("/").get(landing_page);
-    web_server
-        .at("/:id")
-        .with(WebSocket::new(handle_web_socket))
-        .get(landing_page);
-    web_server
-        .at("/transfer/:id/:recipient/:amount")
-        .with(WebSocket::new(handle_web_socket))
-        .get(landing_page);
+    web_server.at("/").get(disco::compose_help);
+
+    add_form_demonstration(&mut web_server);
+
+    // Define the routes handled by the validator and bulletin board. Eventually these should have
+    // their own services. For demo purposes, since they are not really part of the query service,
+    // we just handle them here in a pretty ad hoc fashion.
+    web_server.at("/submit").post(submit_endpoint);
+    web_server.at("/memos/:txid").post(memos_endpoint);
+    web_server.at("/users").post(users_endpoint);
 
     // Add routes from a configuration file.
-    println!("Format version: {}", &api["meta"]["FORMAT_VERSION"]);
     if let Some(api_map) = api["route"].as_table() {
-        api_map.values().for_each(|v| match &v["PATH"] {
-            toml::Value::String(s) => {
-                web_server.at(s).get(entry_page);
-            }
-            toml::Value::Array(a) => {
-                for v in a {
-                    if let Some(s) = v.as_str() {
-                        web_server.at(s).get(entry_page);
-                    } else {
-                        println!("Oops! Array element: {:?}", v);
-                    }
+        api_map.values().for_each(|v| {
+            let web_socket = v
+                .get("WEB_SOCKET")
+                .map(|v| v.as_bool().expect("expected boolean value for WEB_SOCKET"))
+                .unwrap_or(false);
+            let routes = match &v["PATH"] {
+                toml::Value::String(s) => {
+                    vec![s.clone()]
+                }
+                toml::Value::Array(a) => a
+                    .iter()
+                    .filter_map(|v| {
+                        if let Some(s) = v.as_str() {
+                            Some(String::from(s))
+                        } else {
+                            println!("Oops! Array element: {:?}", v);
+                            None
+                        }
+                    })
+                    .collect(),
+                _ => panic!("Expecting a toml::String or toml::Array, but got: {:?}", &v),
+            };
+            for path in routes {
+                let mut route = web_server.at(&path);
+                if web_socket {
+                    route.get(WebSocket::new(handle_web_socket));
+                } else {
+                    route.get(entry_page);
                 }
             }
-            _ => println!("Expecting a toml::String or toml::Array, but got: {:?}", &v),
         });
     }
 
@@ -646,9 +740,14 @@ async fn main() -> Result<(), std::io::Error> {
     let node_config = get_node_config();
 
     // Get secret key set
-    let seed: u64 = node_config["seed"]
-        .as_integer()
-        .expect("Missing seed value") as u64;
+    let seed: [u8; 32] = node_config["seed"]
+        .as_array()
+        .expect("Missing seed value")
+        .iter()
+        .map(|i| i.as_integer().expect("Invalid seed value") as u8)
+        .collect::<Vec<u8>>()
+        .try_into()
+        .expect("Error while converting the seed into an array");
     let nodes = node_config["nodes"]
         .as_table()
         .expect("Missing nodes info")
@@ -656,21 +755,19 @@ async fn main() -> Result<(), std::io::Error> {
     let threshold = ((nodes * 2) / 3) + 1;
 
     // Generate key sets
-    let mut rng = Xoshiro256StarStar::seed_from_u64(seed);
-    let secret_keys = tc::SecretKeySet::random(threshold as usize - 1, &mut rng);
+    let secret_keys =
+        tc::SecretKeySet::random(threshold as usize - 1, &mut ChaChaRng::from_seed(seed));
     let public_keys = secret_keys.public_keys();
 
     // Generate public key for each node
-    if NodeOpt::from_args().generate_keys {
+    let pk_dir = get_pk_dir();
+    if NodeOpt::from_args().gen_pk {
         for node_id in 0..nodes {
             let pub_key = PubKey::from_secret_key_set_escape_hatch(&secret_keys, node_id);
             let pub_key_str = serde_json::to_string(&pub_key)
                 .unwrap_or_else(|err| panic!("Error while serializing the public key: {}", err));
-            let mut pk_file =
-                File::create(format!("../../examples/multi_machine/src/pk_{}", node_id))
-                    .unwrap_or_else(|err| {
-                        panic!("Error while creating a public key file: {}", err)
-                    });
+            let mut pk_file = File::create(format!("{}/pk_{}", pk_dir, node_id))
+                .unwrap_or_else(|err| panic!("Error while creating a public key file: {}", err));
             pk_file
                 .write_all(pub_key_str.as_bytes())
                 .unwrap_or_else(|err| {
@@ -683,10 +780,6 @@ async fn main() -> Result<(), std::io::Error> {
     if let Some(own_id) = NodeOpt::from_args().id {
         println!("Current node: {}", own_id);
         let secret_key_share = secret_keys.secret_key_share(own_id);
-
-        // Initialize web server
-        let join_handle = init_web_server(&NodeOpt::from_args().web_path, own_id)
-            .expect("Failed to initialize web server");
 
         // Get networking information
         let (own_network, _) =
@@ -722,7 +815,7 @@ async fn main() -> Result<(), std::io::Error> {
         println!("All nodes connected to network");
 
         // Initialize the state and phaselock
-        let (mut state, phaselock) = init_state_and_phaselock(
+        let (mut state, mut phaselock) = init_state_and_phaselock(
             public_keys,
             secret_key_share,
             nodes,
@@ -734,54 +827,81 @@ async fn main() -> Result<(), std::io::Error> {
         .await;
         let mut events = phaselock.subscribe();
 
+        // If we are running a full node, also host a query API to inspect the accumulated state.
+        if let Node::Full(node) = &phaselock {
+            init_web_server(
+                &NodeOpt::from_args().api_path,
+                &NodeOpt::from_args().web_path,
+                own_id,
+                node.clone(),
+            )
+            .expect("Failed to initialize web server");
+        }
+
         // Start consensus for each transaction
-        for round in 0..TRANSACTION_COUNT {
+        let mut round = 0;
+        while round < TRANSACTION_COUNT {
             println!("Starting round {}", round + 1);
 
-            // Generate a transaction if the node ID is 0
+            // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
             let mut txn = None;
             if own_id == 0 {
-                println!("  - Proposing a transaction");
-                let mut transactions = state
-                    .generate_transactions(
-                        round as usize,
-                        vec![(true, 0, 0, 0, 0, -2)],
-                        TRANSACTION_COUNT as usize,
-                    )
-                    .unwrap();
-                txn = Some(transactions.remove(0));
-                phaselock
-                    .submit_transaction(txn.clone().unwrap().3)
-                    .await
-                    .unwrap();
+                if let Some(state) = &mut state {
+                    println!("  - Proposing a transaction");
+                    let mut transactions = state
+                        .generate_transactions(
+                            round as usize,
+                            vec![(true, 0, 0, 0, 0, -2)],
+                            TRANSACTION_COUNT as usize,
+                        )
+                        .unwrap();
+                    txn = Some(transactions.remove(0));
+                    phaselock
+                        .submit_transaction(txn.clone().unwrap().3)
+                        .await
+                        .unwrap();
+                }
             }
 
-            // Start consensus
-            // Note: wait until the transaction is proposed before starting consensus. Otherwise,
-            // the node will never reaches decision.
-            // Issue: https://gitlab.com/translucence/systems/system/-/issues/15.
-            let mut line = String::new();
-            println!("Hit the return key when ready to start the consensus...");
-            std::io::stdin().read_line(&mut line).unwrap();
-            phaselock.start_consensus().await;
+            // If the output below is changed, update the message for line.trim() in Validator::new as well
             println!("  - Starting consensus");
+            phaselock.start_consensus().await;
             loop {
                 println!("Waiting for PhaseLock event");
                 let event = events.next().await.expect("PhaseLock unexpectedly closed");
 
-                if let EventType::Decide { block: _, state } = event.event {
-                    let commitment = TaggedBase64::new("LEDG", &state.commit())
-                        .unwrap()
-                        .to_string();
-                    println!("  - Current commitment: {}", commitment);
-                    break;
-                } else {
-                    println!("EVENT: {:?}", event);
+                match event.event {
+                    EventType::Decide { block: _, state } => {
+                        if !state.is_empty() {
+                            let commitment = TaggedBase64::new("LEDG", &state[0].commit())
+                                .unwrap()
+                                .to_string();
+                            println!(
+                                "  - Round {} completed. Commitment: {}",
+                                round + 1,
+                                commitment
+                            );
+                            break;
+                        }
+                    }
+                    EventType::ViewTimeout { view_number: _ } => {
+                        println!("  - Round {} timed out.", round + 1);
+                        break;
+                    }
+                    EventType::Error { error } => {
+                        println!("  - Round {} error: {}", round + 1, error);
+                        break;
+                    }
+                    _ => {
+                        println!("EVENT: {:?}", event);
+                    }
                 }
             }
 
-            // Add the transaction if the node ID is 0
-            if let Some((ix, keys_and_memos, _, t)) = txn {
+            // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
+            // current node), and there is no attached wallet.
+            if let Some((ix, keys_and_memos, sig, t)) = txn {
+                let state = state.as_mut().unwrap();
                 println!("  - Adding the transaction");
                 let mut blk = ElaboratedBlock::default();
                 let (owner_memos, kixs) = {
@@ -794,6 +914,13 @@ async fn main() -> Result<(), std::io::Error> {
                     }
                     (owner_memos, kixs)
                 };
+
+                // If we're running a full node, publish the receiver memos.
+                if let Node::Full(node) = &mut phaselock {
+                    node.post_memos(round, ix as u64, owner_memos.clone(), sig)
+                        .await
+                        .unwrap();
+                }
 
                 state
                     .try_add_transaction(
@@ -810,11 +937,16 @@ async fn main() -> Result<(), std::io::Error> {
                     .validate_and_apply(blk, round as usize, TRANSACTION_COUNT as usize, 0.0)
                     .unwrap();
             }
-            println!("  - Round {} completed.", round + 1);
+
+            // When there isn't a wallet attached, run `TRANSACTION_COUNT` rounds.
+            // Otherwise, keeping running till the process is killed.
+            if NodeOpt::from_args().wallet_pk_path.is_none() {
+                round += 1;
+            }
         }
-        join_handle.await?;
+
+        println!("All rounds completed");
     }
-    println!("All rounds completed.");
 
     Ok(())
 }

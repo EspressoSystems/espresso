@@ -1,9 +1,7 @@
+pub use crate::state_comm::LedgerStateCommitment;
 use crate::{
-    key_set::SizedKey,
-    set_merkle_tree::*,
-    wallet::{LedgerEvent, WalletBackend, WalletError, WalletState},
-    ElaboratedBlock, ElaboratedTransaction, ProverKeySet, ValidationError, ValidatorState,
-    MERKLE_HEIGHT,
+    set_merkle_tree::*, validator_node::*, ElaboratedBlock, ElaboratedTransaction, ValidationError,
+    ValidatorState,
 };
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
@@ -14,16 +12,19 @@ pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::task::SpawnExt;
 use itertools::izip;
-use jf_primitives::{jubjub_dsa::Signature, merkle_tree::MerkleTree};
-use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey};
-use jf_txn::structs::{Nullifier, ReceiverMemo, RecordCommitment};
+use jf_txn::{
+    keys::{UserAddress, UserPubKey},
+    structs::{Nullifier, ReceiverMemo, RecordCommitment},
+    MerklePath, MerkleTree, Signature,
+};
 use phaselock::{
     error::PhaseLockError,
     event::EventType,
     handle::{HandleError, PhaseLockHandle},
+    BlockContents, H_512,
 };
-use rand_chacha::rand_core::SeedableRng;
-use rand_chacha::ChaChaRng;
+use serde::{Deserialize, Serialize};
+use snafu::Snafu;
 use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 
@@ -49,11 +50,10 @@ pub trait Validator {
     fn subscribe(&self) -> EventStream<Self::Event>;
 }
 
-/// A lightweight node handles consensus, and nothing more.
-pub type LightWeightNode = PhaseLockHandle<ElaboratedBlock, 64>;
+pub type LightWeightNode<NET, STORE> = PhaseLockHandle<ValidatorNodeImpl<NET, STORE>, H_512>;
 
 #[async_trait]
-impl Validator for LightWeightNode {
+impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
     type Event = PhaseLockEvent;
 
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
@@ -80,9 +80,6 @@ impl Validator for LightWeightNode {
             match handle.next_event().await {
                 Ok(event) => Some((event, handle)),
                 Err(HandleError::ShutDown) => None,
-                Err(HandleError::Skipped { ammount }) => {
-                    unimplemented!("handling for {:?} skipped events", ammount)
-                }
                 Err(err) => panic!(
                     "unexpected error from PhaseLockHandle::next_event: {:?}",
                     err
@@ -92,31 +89,91 @@ impl Validator for LightWeightNode {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct LedgerSummary {
+    pub num_blocks: usize,
+    pub num_records: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LedgerSnapshot {
-    state: ValidatorState,
-    nullifiers: SetMerkleTree,
+    pub state: ValidatorState,
+    pub nullifiers: SetMerkleTree,
 }
 
 #[derive(Clone, Debug)]
 pub struct LedgerTransition {
-    from_state: LedgerSnapshot,
-    block: ElaboratedBlock,
+    pub from_state: LedgerSnapshot,
+    pub block: ElaboratedBlock,
     // Receiver memos come in asynchronously after a block is committed, on a transaction-by-
     // transaction basis. The list of memos corresponding to each transaction in a block will be
     // None until valid memos for that block are received by the sender. Note that this may never
     // happen if the sender chooses to send the memos directly to the receiver without posting them
     // publicly.
-    memos: Vec<Option<(Vec<ReceiverMemo>, Signature)>>,
-    uids: Vec<Vec<u64>>,
+    pub memos: Vec<Option<(Vec<ReceiverMemo>, Signature)>>,
+    pub uids: Vec<Vec<u64>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, strum_macros::AsStaticStr)]
+pub enum LedgerEvent {
+    /// A new block was added to the ledger.
+    ///
+    /// Includes the block contents, the unique identifier for the block, and the new state
+    /// commitment.
+    Commit {
+        block: ElaboratedBlock,
+        block_id: u64,
+        state_comm: LedgerStateCommitment,
+    },
+
+    /// A proposed block was rejected.
+    ///
+    /// Includes the block contents and the reason for rejection.
+    Reject {
+        block: ElaboratedBlock,
+        error: ValidationError,
+    },
+
+    /// Receiver memos were posted for one or more previously accepted transactions.
+    ///
+    /// For each UTXO corresponding to the posted memos, includes the memo, the record commitment,
+    /// the unique identifier for the record, and a proof that the record commitment exists in the
+    /// current UTXO set.
+    Memos {
+        outputs: Vec<(ReceiverMemo, RecordCommitment, u64, MerklePath)>,
+    },
 }
 
 /// A QueryService accumulates the full state of the ledger, making it available for consumption by
 /// network APIs and such.
 #[async_trait]
 pub trait QueryService {
+    async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError>;
+
+    async fn num_blocks(&self) -> Result<usize, QueryServiceError> {
+        Ok(self.get_summary().await?.num_blocks)
+    }
+
+    /// Get a snapshot of the designated ledger state.
+    ///
+    /// State 0 is the initial state. Each subsequent snapshot is the state immediately after
+    /// applying a block, so `get_snapshot(1)` returns the snapshot after the 0th block is applied,
+    /// `get_snapshot(i + 1)` returns the snapshot after the `i`th block is applied, and so on until
+    /// `get_snapshot(num_blocks())` returns the current state.
     async fn get_snapshot(&self, index: usize) -> Result<LedgerSnapshot, QueryServiceError>;
+
+    /// Get information about the `i`th block and the state transition it caused.
+    ///
+    /// The `i`th block is the block which was applied to the `i`th state (see `get_snapshot()`)
+    /// resulting in the `i + 1`th state.
+    ///
+    /// The result includes the `i`th block as well as the `i`th state, from which the resulting
+    /// state can be derived by applying the block to the input state. Of course, the resulting
+    /// state can also be queried directly by calling `get_snapshot(i + 1)`.
     async fn get_block(&self, index: usize) -> Result<LedgerTransition, QueryServiceError>;
+
+    async fn get_block_id_by_hash(&self, hash: &[u8]) -> Result<usize, QueryServiceError>;
 
     /// Query whether a nullifier is in a nullifier set with a given root hash, and retrieve a proof
     /// of inclusion or exclusion. The root hash must be the root of a past version of the
@@ -172,10 +229,11 @@ pub trait QueryService {
     async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError>;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Snafu, Serialize, Deserialize)]
 pub enum QueryServiceError {
     InvalidNullifierRoot {},
     InvalidBlockId {},
+    InvalidBlockHash {},
     InvalidTxnId {},
     MemosAlreadyPosted {},
     InvalidSignature {},
@@ -193,6 +251,8 @@ struct FullState {
     past_nullifiers: HashMap<set_hash::Hash, usize>,
     // All past states and state transitions of the ledger.
     history: Vec<LedgerTransition>,
+    // Block IDs indexed by block hash.
+    block_hashes: HashMap<Vec<u8>, usize>,
     // The last block which was proposed. This is currently used to correllate BadBlock and
     // InconsistentBlock errors from PhaseLock with the block that caused the error. In the future,
     // PhaseLock errors will contain the bad block (or some kind of reference to it, perhaps through
@@ -235,7 +295,10 @@ impl FullState {
                             ValidationError::Failed {}
                         }
                     };
-                    self.send_event(LedgerEvent::Reject(self.proposed.clone(), err));
+                    self.send_event(LedgerEvent::Reject {
+                        block: self.proposed.clone(),
+                        error: err,
+                    });
                 }
 
                 // PhaseLock errors that don't relate to blocks being rejected (view timeouts,
@@ -247,60 +310,69 @@ impl FullState {
             }
 
             Decide { block, state } => {
-                let prev_state = self.validator.clone();
+                for (block, state) in block.iter().zip(state.iter()).rev() {
+                    let prev_state = self.validator.clone();
 
-                // A block has been committed. Update our mirror of the ValidatorState by applying
-                // the new block, and generate a Commit event.
-                match self.validator.validate_and_apply(
-                    self.validator.prev_commit_time + 1,
-                    block.block.clone(),
-                    block.proofs.clone(),
-                    true,
-                ) {
-                    // We update our ValidatorState for each block committed by the PhaseLock event
-                    // source, so we shouldn't ever get out of sync.
-                    Err(_) => panic!("state is out of sync with validator"),
-                    Ok(_) if self.validator.commit() != state.commit() => {
-                        panic!("state is out of sync with validator")
-                    }
+                    // A block has been committed. Update our mirror of the ValidatorState by applying
+                    // the new block, and generate a Commit event.
 
-                    Ok(mut uids) => {
-                        // Archive the old state.
-                        let index = self.history.len();
-                        self.past_nullifiers.insert(self.nullifiers.hash(), index);
-                        let block_uids = block
-                            .block
-                            .0
-                            .iter()
-                            .map(|txn| {
-                                // Split the uids corresponding to this transaction off the front of
-                                // the list of uids for the whole block.
-                                let mut this_txn_uids = uids.split_off(txn.output_len());
-                                std::mem::swap(&mut this_txn_uids, &mut uids);
-                                assert_eq!(this_txn_uids.len(), txn.output_len());
-                                this_txn_uids
-                            })
-                            .collect();
-                        self.history.push(LedgerTransition {
-                            from_state: LedgerSnapshot {
-                                state: prev_state,
-                                nullifiers: self.nullifiers.clone(),
-                            },
-                            block: (*block).clone(),
-                            memos: vec![None; block.block.0.len()],
-                            uids: block_uids,
-                        });
-
-                        // Add the results of this block to our current state.
-                        for txn in block.block.0.iter() {
-                            for n in txn.nullifiers() {
-                                self.nullifiers.insert(n);
-                            }
+                    match self.validator.validate_and_apply(
+                        self.validator.prev_commit_time + 1,
+                        block.block.clone(),
+                        block.proofs.clone(),
+                        true,
+                    ) {
+                        // We update our ValidatorState for each block committed by the PhaseLock event
+                        // source, so we shouldn't ever get out of sync.
+                        Err(_) => panic!("state is out of sync with validator"),
+                        Ok(_) if self.validator.commit() != state.commit() => {
+                            panic!("state is out of sync with validator")
                         }
-                        assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
 
-                        // Notify subscribers of the new block.
-                        self.send_event(LedgerEvent::Commit((*block).clone(), index as u64));
+                        Ok(mut uids) => {
+                            // Archive the old state.
+                            let index = self.history.len();
+                            self.past_nullifiers.insert(self.nullifiers.hash(), index);
+                            self.block_hashes
+                                .insert(Vec::from(block.hash().as_ref()), index);
+                            let block_uids = block
+                                .block
+                                .0
+                                .iter()
+                                .map(|txn| {
+                                    // Split the uids corresponding to this transaction off the front of
+                                    // the list of uids for the whole block.
+                                    let mut this_txn_uids = uids.split_off(txn.output_len());
+                                    std::mem::swap(&mut this_txn_uids, &mut uids);
+                                    assert_eq!(this_txn_uids.len(), txn.output_len());
+                                    this_txn_uids
+                                })
+                                .collect();
+                            self.history.push(LedgerTransition {
+                                from_state: LedgerSnapshot {
+                                    state: prev_state,
+                                    nullifiers: self.nullifiers.clone(),
+                                },
+                                block: (*block).clone(),
+                                memos: vec![None; block.block.0.len()],
+                                uids: block_uids,
+                            });
+
+                            // Add the results of this block to our current state.
+                            for txn in block.block.0.iter() {
+                                for n in txn.nullifiers() {
+                                    self.nullifiers.insert(n);
+                                }
+                            }
+                            assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
+
+                            // Notify subscribers of the new block.
+                            self.send_event(LedgerEvent::Commit {
+                                block: (*block).clone(),
+                                block_id: index as u64,
+                                state_comm: self.validator.commit(),
+                            });
+                        }
                     }
                 }
             }
@@ -402,15 +474,15 @@ impl FullState {
         let merkle_paths = uids
             .iter()
             .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1);
-        let event = LedgerEvent::Memos(
-            izip!(
+        let event = LedgerEvent::Memos {
+            outputs: izip!(
                 new_memos,
                 txn.output_commitments(),
                 uids.iter().cloned(),
                 merkle_paths
             )
             .collect(),
-        );
+        };
         self.send_event(event);
 
         Ok(())
@@ -429,12 +501,13 @@ impl FullState {
 }
 
 /// A QueryService that aggregates the full ledger state by observing consensus.
+#[derive(Clone)]
 pub struct PhaseLockQueryService<'a> {
     univ_param: &'a jf_txn::proof::UniversalParam,
     state: Arc<RwLock<FullState>>,
     // When dropped, this handle will cancel and join the event handling task. It is not used
     // explicitly; it is merely stored with the rest of the struct for the auto-generated drop glue.
-    _event_task: RemoteHandle<()>,
+    _event_task: Arc<RemoteHandle<()>>,
 }
 
 impl<'a> PhaseLockQueryService<'a> {
@@ -446,7 +519,7 @@ impl<'a> PhaseLockQueryService<'a> {
         // a fresh network.
         univ_param: &'a jf_txn::proof::UniversalParam,
         mut validator: ValidatorState,
-        record_merkle_tree: MerkleTree<RecordCommitment>,
+        record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
     ) -> Self {
@@ -455,6 +528,7 @@ impl<'a> PhaseLockQueryService<'a> {
         //  let state = other_node.full_state(validator.commit());
         // For now, just assume we are starting at the beginning:
         let history = Vec::new();
+        let block_hashes = HashMap::new();
         let events = Vec::new();
         // Use the unpruned record Merkle tree.
         assert_eq!(
@@ -469,6 +543,7 @@ impl<'a> PhaseLockQueryService<'a> {
             known_nodes: Default::default(),
             past_nullifiers: HashMap::new(),
             history,
+            block_hashes,
             proposed: ElaboratedBlock::default(),
             events,
             subscribers: Default::default(),
@@ -497,9 +572,13 @@ impl<'a> PhaseLockQueryService<'a> {
                                     .unwrap()
                             })
                             .unzip();
-                        state.send_event(LedgerEvent::Memos(
-                            izip!(memos, comms, uids, merkle_paths).collect(),
-                        ));
+                        let comms = comms
+                            .into_iter()
+                            .map(RecordCommitment::from_field_element)
+                            .collect::<Vec<_>>();
+                        state.send_event(LedgerEvent::Memos {
+                            outputs: izip!(memos, comms, uids, merkle_paths).collect(),
+                        });
                     }
 
                     // Handle events as they come in from the network.
@@ -513,13 +592,21 @@ impl<'a> PhaseLockQueryService<'a> {
         Self {
             univ_param,
             state,
-            _event_task: task,
+            _event_task: Arc::new(task),
         }
     }
 }
 
 #[async_trait]
 impl<'a> QueryService for PhaseLockQueryService<'a> {
+    async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError> {
+        let state = self.state.read().await;
+        Ok(LedgerSummary {
+            num_blocks: state.history.len(),
+            num_records: state.validator.record_merkle_frontier.num_leaves() as usize,
+        })
+    }
+
     async fn get_snapshot(&self, index: usize) -> Result<LedgerSnapshot, QueryServiceError> {
         use std::cmp::Ordering::*;
         let state = self.state.read().await;
@@ -540,6 +627,15 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
             .get(index)
             .cloned()
             .ok_or(QueryServiceError::InvalidBlockId {})
+    }
+
+    async fn get_block_id_by_hash(&self, hash: &[u8]) -> Result<usize, QueryServiceError> {
+        let state = self.state.read().await;
+        state
+            .block_hashes
+            .get(hash)
+            .cloned()
+            .ok_or(QueryServiceError::InvalidBlockHash {})
     }
 
     async fn nullifier_proof(
@@ -588,21 +684,22 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
 }
 
 /// A full node is a QueryService running alongside a lightweight validator.
-pub struct FullNode<'a> {
-    validator: LightWeightNode,
+#[derive(Clone)]
+pub struct FullNode<'a, NET: PLNet, STORE: PLStore> {
+    validator: LightWeightNode<NET, STORE>,
     query_service: PhaseLockQueryService<'a>,
 }
 
-impl<'a> FullNode<'a> {
+impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
     pub fn new(
-        validator: LightWeightNode,
+        validator: LightWeightNode<NET, STORE>,
 
         // The current state of the network.
         //todo !jeb.bearer Query these parameters from another full node if we are not starting off
         // a fresh network.
         univ_param: &'a jf_txn::proof::UniversalParam,
         state: ValidatorState,
-        record_merkle_tree: MerkleTree<RecordCommitment>,
+        record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
     ) -> Self {
@@ -620,7 +717,9 @@ impl<'a> FullNode<'a> {
         }
     }
 
-    fn as_validator(&self) -> &impl Validator<Event = <FullNode<'a> as Validator>::Event> {
+    fn as_validator(
+        &self,
+    ) -> &impl Validator<Event = <FullNode<'a, NET, STORE> as Validator>::Event> {
         &self.validator
     }
 
@@ -634,8 +733,8 @@ impl<'a> FullNode<'a> {
 }
 
 #[async_trait]
-impl<'a> Validator for FullNode<'a> {
-    type Event = <LightWeightNode as Validator>::Event;
+impl<'a, NET: PLNet, STORE: PLStore> Validator for FullNode<'a, NET, STORE> {
+    type Event = <LightWeightNode<NET, STORE> as Validator>::Event;
 
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
         self.as_validator().submit_transaction(tx).await
@@ -651,13 +750,21 @@ impl<'a> Validator for FullNode<'a> {
 }
 
 #[async_trait]
-impl<'a> QueryService for FullNode<'a> {
+impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
+    async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError> {
+        self.as_query_service().get_summary().await
+    }
+
     async fn get_snapshot(&self, index: usize) -> Result<LedgerSnapshot, QueryServiceError> {
         self.as_query_service().get_snapshot(index).await
     }
 
     async fn get_block(&self, index: usize) -> Result<LedgerTransition, QueryServiceError> {
         self.as_query_service().get_block(index).await
+    }
+
+    async fn get_block_id_by_hash(&self, hash: &[u8]) -> Result<usize, QueryServiceError> {
+        self.as_query_service().get_block_id_by_hash(hash).await
     }
 
     async fn nullifier_proof(
@@ -693,154 +800,15 @@ impl<'a> QueryService for FullNode<'a> {
     }
 }
 
-#[async_trait]
-impl<'a> WalletBackend<'a> for FullNode<'a> {
-    type EventStream = EventStream<LedgerEvent>;
-
-    async fn load(&self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
-        // There is no storage backend implemented yet, so load() always returns a fresh wallet from
-        // the start of the history of the ledger.
-        let mut rng = ChaChaRng::from_entropy();
-        let snapshot = self.as_query_service().get_snapshot(0).await.unwrap();
-        let validator = snapshot.state;
-
-        // Construct proving keys of the same arities as the verifier keys from the validator.
-        let univ_param = self.query_service.univ_param;
-        let proving_keys =
-            ProverKeySet {
-                mint: jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
-                    .map_err(|err| WalletError::CryptoError { err })?
-                    .0,
-                freeze: validator
-                    .verif_crs
-                    .freeze
-                    .iter()
-                    .map(|k| {
-                        Ok(jf_txn::proof::freeze::preprocess(
-                            univ_param,
-                            k.num_inputs(),
-                            MERKLE_HEIGHT,
-                        )
-                        .map_err(|err| WalletError::CryptoError { err })?
-                        .0)
-                    })
-                    .collect::<Result<_, _>>()?,
-                xfr: validator
-                    .verif_crs
-                    .xfr
-                    .iter()
-                    .map(|k| {
-                        Ok(jf_txn::proof::transfer::preprocess(
-                            univ_param,
-                            k.num_inputs(),
-                            k.num_outputs(),
-                            MERKLE_HEIGHT,
-                        )
-                        .map_err(|err| WalletError::CryptoError { err })?
-                        .0)
-                    })
-                    .collect::<Result<_, _>>()?,
-            };
-
-        // Publish the address of the new wallet.
-        self.query_service
-            .state
-            .write()
-            .await
-            .introduce(&key_pair.pub_key());
-
-        Ok(WalletState {
-            validator,
-            proving_keys,
-            nullifiers: snapshot.nullifiers,
-            now: 0,
-            records: Default::default(),
-            defined_assets: Default::default(),
-            pending_txns: Default::default(),
-            expiring_txns: Default::default(),
-            auditable_assets: Default::default(),
-            auditor_key_pair: AuditorKeyPair::generate(&mut rng),
-            freezer_key_pair: FreezerKeyPair::generate(&mut rng),
-            rng,
-        })
-    }
-
-    async fn store(
-        &mut self,
-        _key_pair: &UserKeyPair,
-        _state: &WalletState,
-    ) -> Result<(), WalletError> {
-        Ok(())
-    }
-
-    async fn subscribe(&self, starting_at: u64) -> Self::EventStream {
-        self.as_query_service().subscribe(starting_at).await
-    }
-
-    async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
-        self.as_query_service()
-            .get_user(address)
-            .await
-            .map_err(|err| match err {
-                QueryServiceError::InvalidAddress {} => WalletError::InvalidAddress {
-                    address: address.clone(),
-                },
-                _ => WalletError::QueryServiceError { err },
-            })
-    }
-
-    async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {
-        self.as_validator()
-            .submit_transaction(txn)
-            .await
-            .map_err(|err| match err {
-                PhaseLockError::NetworkFault { source } => {
-                    WalletError::NetworkError { err: source }
-                }
-                _ => {
-                    // PhaseLock is not supposed to return errors besides NetworkFault
-                    println!(
-                        "unexpected error from Validator::submit_transaction: {:?}",
-                        err
-                    );
-                    WalletError::Failed {}
-                }
-            })
-    }
-
-    async fn post_memos(
-        &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), WalletError> {
-        self.as_query_service_mut()
-            .post_memos(block_id, txn_id, memos, sig)
-            .await
-            .map_err(|err| WalletError::QueryServiceError { err })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{wallet::Wallet, MultiXfrRecordSpec, MultiXfrTestState, UNIVERSAL_PARAM};
+    use crate::{MultiXfrRecordSpec, MultiXfrTestState, UNIVERSAL_PARAM};
     use async_std::task::block_on;
     use jf_primitives::jubjub_dsa::KeyPair;
-    use jf_primitives::merkle_tree::MerkleTree;
-    use jf_txn::{sign_receiver_memos, structs::AssetCode};
-    use phaselock::{
-        tc::SecretKeySet,
-        traits::storage::memory_storage::MemoryStorage,
-        {PhaseLock, PhaseLockConfig},
-    };
+    use jf_txn::{sign_receiver_memos, MerkleTree};
     use quickcheck::QuickCheck;
-    use rand_chacha::{
-        rand_core::{RngCore, SeedableRng},
-        ChaChaRng,
-    };
-    use rand_xoshiro::Xoshiro256StarStar;
+    use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 
     #[derive(Debug)]
     struct MockConsensusEvent {
@@ -863,7 +831,7 @@ mod tests {
     ) -> (
         (
             ValidatorState,
-            MerkleTree<RecordCommitment>,
+            MerkleTree,
             SetMerkleTree,
             Vec<(ReceiverMemo, u64)>,
         ),
@@ -986,8 +954,8 @@ mod tests {
             let events = Box::pin(stream::iter(history.clone().into_iter().map(
                 |(_, block, _, state)| MockConsensusEvent {
                     event: EventType::Decide {
-                        block: Arc::new(block),
-                        state: Arc::new(state),
+                        block: Arc::new(vec![block]),
+                        state: Arc::new(vec![state]),
                     },
                 },
             )));
@@ -1005,7 +973,7 @@ mod tests {
             let mut events = qs.subscribe(1).await;
             for (_, hist_block, _, hist_state) in history.iter() {
                 match events.next().await.unwrap() {
-                    LedgerEvent::Commit(block, ..) => {
+                    LedgerEvent::Commit { block, .. } => {
                         assert_eq!(block, *hist_block);
 
                         // We should be able to get inclusion proofs for all the nullifiers in the
@@ -1053,10 +1021,11 @@ mod tests {
                         .await
                         .unwrap();
                     match events.next().await.unwrap() {
-                        LedgerEvent::Memos(info) => {
+                        LedgerEvent::Memos { outputs } => {
                             // After successfully posting memos, we should get a Memos event.
                             for ((memo, comm, uid, merkle_path), (expected_memo, expected_comm)) in
-                                info.into_iter()
+                                outputs
+                                    .into_iter()
                                     .zip(memos.iter().zip(txn.output_commitments()))
                             {
                                 // The contents of the event should match the memos we just posted.
@@ -1071,7 +1040,7 @@ mod tests {
                                 MerkleTree::check_proof(
                                     state.record_merkle_frontier.get_root_value(),
                                     uid,
-                                    comm,
+                                    comm.to_field_element(),
                                     &merkle_path,
                                 )
                                 .unwrap();
@@ -1175,106 +1144,5 @@ mod tests {
         QuickCheck::new()
             .tests(1)
             .quickcheck(test_query_service as fn(Vec<_>, u8, u8, _, Vec<_>) -> ())
-    }
-
-    #[test]
-    fn test_full_node_wallet_backend_load() {
-        block_on(async {
-            // Initialize ledger state
-            let records = (
-                MultiXfrRecordSpec {
-                    asset_def_ix: 1,
-                    owner_key_ix: 0,
-                    asset_amount: 2,
-                },
-                vec![],
-            );
-            let mut state = MultiXfrTestState::initialize([0x42u8; 32], 2, 2, records).unwrap();
-
-            // Set up a validator.
-            let id = 0;
-            let secret_keys = SecretKeySet::random(
-                0,
-                &mut <Xoshiro256StarStar as phaselock::rand::SeedableRng>::seed_from_u64(
-                    state.prng.next_u64(),
-                ),
-            );
-            let secret_key_share = secret_keys.secret_key_share(id);
-            let public_keys = secret_keys.public_keys();
-            let pub_key = phaselock::PubKey::from_secret_key_set_escape_hatch(&secret_keys, id);
-            let port = 10010;
-            let network =
-                phaselock::networking::w_network::WNetwork::new(pub_key.clone(), port, None)
-                    .await
-                    .unwrap();
-            let (c, sync) = futures::channel::oneshot::channel();
-            for task in network.generate_task(c).unwrap() {
-                async_std::task::spawn(task);
-            }
-            sync.await.unwrap();
-            let config = PhaseLockConfig {
-                total_nodes: 1,
-                threshold: 1,
-                max_transactions: 100,
-                known_nodes: vec![pub_key],
-                next_view_timeout: 10000,
-                timeout_ratio: (11, 10),
-                round_start_delay: 1,
-            };
-            let (_, phaselock) = PhaseLock::init(
-                ElaboratedBlock::default(),
-                public_keys,
-                secret_key_share,
-                id,
-                config,
-                state.validator.clone(),
-                network,
-                MemoryStorage::default(),
-            )
-            .await;
-
-            // Set up a full node
-            let unspent_memos = state.unspent_memos();
-            let mut node = FullNode::new(
-                phaselock,
-                state.univ_setup,
-                state.validator,
-                state.record_merkle_tree,
-                state.nullifiers,
-                unspent_memos,
-            );
-
-            // Introduce another user whom we will transfer some assets to.
-            let mut pub_keys = state.keys;
-            let me = pub_keys.remove(0);
-            let other = pub_keys.remove(1);
-            node.introduce(&other.pub_key()).await.unwrap();
-
-            // Set up a wallet
-            node.start_consensus().await;
-            let mut wallet = Wallet::new(me, node).await.unwrap();
-
-            // Wait for the wallet to process the initial receiver memos and check that it correctly
-            // discovers its initial balance.
-            wallet.sync(1).await.unwrap();
-            // MultiXfrTestState doubles all the initial records for some reason, so we expect to
-            // have 4 coins, not 2.
-            assert_eq!(wallet.balance(&state.asset_defs[1].code).await, 4);
-            // We start with 2^32 native tokens, but spend 2 minting our two non-native records.
-            assert_eq!(wallet.balance(&AssetCode::native()).await, (1u64 << 32) - 2);
-
-            // Transfer 3 of our 4 coins away to another user. We should end up with only 1 coin,
-            // which can only happen if
-            //  1. our initial 4 coins are put on hold (the transaction is initiated)
-            //  2. we receive our 1-coin change record (the transaction is completed)
-            wallet
-                .transfer(&state.asset_defs[1], &[(other.address(), 3)], 1)
-                .await
-                .unwrap();
-            // Wait for 2 more events: the Commit event and the following Memos event.
-            wallet.sync(3).await.unwrap();
-            assert_eq!(wallet.balance(&state.asset_defs[1].code).await, 1);
-            assert_eq!(wallet.balance(&AssetCode::native()).await, (1u64 << 32) - 3);
-        });
     }
 }

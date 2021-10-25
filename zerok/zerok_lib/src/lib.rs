@@ -4,15 +4,19 @@
 #[macro_use]
 extern crate proptest;
 
+pub mod api;
+pub mod lw_persistence;
 pub mod node;
 mod set_merkle_tree;
 mod util;
+pub mod validator_node;
 pub mod wallet;
 
+use ark_serialize::*;
+use canonical::deserialize_canonical_bytes;
+use canonical::CanonicalBytes;
 use core::fmt::Debug;
 use core::iter::once;
-use jf_primitives::jubjub_dsa::Signature;
-use jf_primitives::merkle_tree;
 use jf_txn::{
     errors::TxnApiError,
     keys::UserKeyPair,
@@ -26,25 +30,30 @@ use jf_txn::{
     transfer::{TransferNote, TransferNoteInput},
     txn_batch_verify,
     utils::compute_universal_param_size,
-    TransactionNote, TransactionVerifyingKey,
+    AccMemberWitness, MerkleTree, NodeValue, Signature, TransactionNote, TransactionVerifyingKey,
 };
-use jf_utils::serialize::CanonicalBytes;
+use jf_utils::tagged_blob;
 use lazy_static::lazy_static;
-use merkle_tree::{AccMemberWitness, MerkleTree};
-use phaselock::BlockContents;
+pub use lw_persistence::LWPersistence;
+use phaselock::{traits::state::State, BlockContents, H_512};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 pub use set_merkle_tree::*;
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::convert::TryFrom;
 use std::fs::File;
-use std::io::{prelude::*, Read};
+use std::hash::{Hash, Hasher};
+use std::io::Read;
 use std::iter::FromIterator;
 use std::ops::Bound::*;
 use std::path::Path;
+use std::path::PathBuf;
 use std::time::Instant;
+pub use util::canonical;
 
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
@@ -52,39 +61,100 @@ pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 pub struct LedgerRecordCommitment(pub RecordCommitment);
 
 // TODO
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq, Hash)]
 pub struct Transaction(pub TransactionNote);
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+)]
 pub struct ElaboratedTransaction {
     pub txn: TransactionNote,
     pub proofs: Vec<SetMerkleProof>,
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+impl ElaboratedTransaction {
+    fn hash(&self) -> ElaboratedTransactionHash {
+        ElaboratedTransactionHash(ElaboratedBlock::hash_transaction(self))
+    }
+}
+
+#[tagged_blob("TXN")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ElaboratedTransactionHash(phaselock::BlockHash<64>);
+
+impl CanonicalSerialize for ElaboratedTransactionHash {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), ark_serialize::SerializationError> {
+        writer
+            .write_all(self.0.as_ref())
+            .map_err(ark_serialize::SerializationError::from)
+    }
+
+    fn serialized_size(&self) -> usize {
+        64
+    }
+}
+
+impl CanonicalDeserialize for ElaboratedTransactionHash {
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, ark_serialize::SerializationError> {
+        use std::convert::TryInto;
+        let mut buf = vec![0; 64];
+        reader
+            .read_exact(&mut buf)
+            .map_err(ark_serialize::SerializationError::from)?;
+        Ok(ElaboratedTransactionHash(phaselock::BlockHash::from_array(
+            buf.as_slice().try_into().unwrap(),
+        )))
+    }
+}
+
+#[derive(
+    Default,
+    Debug,
+    Clone,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+)]
 pub struct Block(pub Vec<TransactionNote>);
 
 // A block with nullifier set non-membership proofs
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(
+    Default,
+    Debug,
+    Clone,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+)]
+#[serde(into = "CanonicalBytes", from = "CanonicalBytes")]
 pub struct ElaboratedBlock {
     pub block: Block,
     pub proofs: Vec<Vec<SetMerkleProof>>,
 }
 
-impl BlockContents<64> for ElaboratedBlock {
-    type State = ValidatorState;
+deserialize_canonical_bytes!(ElaboratedBlock);
+
+impl BlockContents<H_512> for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
 
-    fn next_block(_: &Self::State) -> Self {
-        Default::default()
-    }
-
-    fn add_transaction(
-        &self,
-        _state: &ValidatorState,
-        txn: &ElaboratedTransaction,
-    ) -> Result<Self, ValidationError> {
+    fn add_transaction_raw(&self, txn: &ElaboratedTransaction) -> Result<Self, ValidationError> {
         let mut ret = self.clone();
 
         let mut nulls = self
@@ -104,26 +174,6 @@ impl BlockContents<64> for ElaboratedBlock {
         ret.proofs.push(txn.proofs.clone());
 
         Ok(ret)
-    }
-
-    fn validate_block(&self, state: &ValidatorState) -> bool {
-        state
-            .validate_block(
-                state.prev_commit_time + 1,
-                self.block.clone(),
-                self.proofs.clone(),
-            )
-            .is_ok()
-    }
-    fn append_to(&self, state: &ValidatorState) -> Result<ValidatorState, ValidationError> {
-        let mut state = state.clone();
-        state.validate_and_apply(
-            state.prev_commit_time + 1,
-            self.block.clone(),
-            self.proofs.clone(),
-            false,
-        )?;
-        Ok(state)
     }
 
     fn hash(&self) -> phaselock::BlockHash<64> {
@@ -162,8 +212,7 @@ impl BlockContents<64> for ElaboratedBlock {
     fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<64> {
         use blake2::crypto_mac::Mac;
         use std::convert::TryInto;
-        let mut hasher =
-            blake2::Blake2b::with_params(&[], &[], "ElaboratedTransaction Hash".as_bytes());
+        let mut hasher = blake2::Blake2b::with_params(&[], &[], "ElaboratedTxn".as_bytes());
         hasher.update("Txn contents".as_bytes());
         hasher.update(&txn_comm::txn_commit(&txn.txn));
         hasher.update("Txn proofs".as_bytes());
@@ -179,7 +228,7 @@ impl BlockContents<64> for ElaboratedBlock {
     }
 }
 
-mod key_set {
+pub mod key_set {
     use super::*;
 
     #[derive(Debug, Snafu)]
@@ -192,7 +241,7 @@ mod key_set {
         NoKeys,
     }
 
-    pub trait SizedKey {
+    pub trait SizedKey: CanonicalSerialize + CanonicalDeserialize {
         fn num_inputs(&self) -> usize;
         fn num_outputs(&self) -> usize;
     }
@@ -236,11 +285,17 @@ mod key_set {
     }
 
     pub trait KeyOrder {
-        type SortKey: Ord + Debug + Clone + Serialize + for<'a> Deserialize<'a>;
+        type SortKey: Ord
+            + Debug
+            + Clone
+            + Serialize
+            + for<'a> Deserialize<'a>
+            + CanonicalSerialize
+            + CanonicalDeserialize;
         fn sort_key(num_inputs: usize, num_outputs: usize) -> Self::SortKey;
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     pub struct OrderByInputs;
     impl KeyOrder for OrderByInputs {
         type SortKey = (usize, usize);
@@ -249,7 +304,7 @@ mod key_set {
         }
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     pub struct OrderByOutputs;
     impl KeyOrder for OrderByOutputs {
         type SortKey = (usize, usize);
@@ -258,8 +313,15 @@ mod key_set {
         }
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde_as]
+    #[derive(
+        Debug, Clone, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize, PartialEq,
+    )]
+    #[serde(bound = "K: Serialize + for<'a> Deserialize<'a>")]
     pub struct KeySet<K: SizedKey, Order: KeyOrder = OrderByInputs> {
+        // serde_json does not support maps where the keys are not Strings (or easily convertible
+        // to/from Strings) so we serialize this map as a sequence of key-value pairs.
+        #[serde_as(as = "Vec<(_, _)>")]
         keys: BTreeMap<Order::SortKey, K>,
     }
 
@@ -328,14 +390,16 @@ mod key_set {
 }
 use key_set::KeySet;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize, PartialEq,
+)]
 pub struct ProverKeySet<'a, Order: key_set::KeyOrder = key_set::OrderByInputs> {
     pub mint: MintProvingKey<'a>,
     pub xfr: KeySet<TransferProvingKey<'a>, Order>,
     pub freeze: KeySet<FreezeProvingKey<'a>, Order>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize)]
 pub struct VerifierKeySet<Order: key_set::KeyOrder = key_set::OrderByInputs> {
     // TODO: is there a way to keep these types distinct?
     pub mint: TransactionVerifyingKey,
@@ -344,7 +408,7 @@ pub struct VerifierKeySet<Order: key_set::KeyOrder = key_set::OrderByInputs> {
 }
 
 // TODO
-#[derive(Debug, Snafu)]
+#[derive(Debug, Snafu, Serialize, Deserialize)]
 #[snafu(visibility = "pub(crate)")]
 pub enum ValidationError {
     NullifierAlreadyExists {
@@ -359,7 +423,13 @@ pub enum ValidationError {
     BadMerkleRoot {},
     BadMerklePath {},
     CryptoError {
-        err: TxnApiError,
+        // TxnApiError cannot be serialized, and, since it depends on many foreign error types which
+        // are not Serialize, it is infeasible to make it serializable. Instead, if we have to
+        // serialize this variant, we will serialize Ok(err) to Err(format(err)), and when we
+        // deserialize we will at least preserve the variant CryptoError and a String representation
+        // of the underlying error.
+        #[serde(with = "ser_display")]
+        err: Result<TxnApiError, String>,
     },
     UnsupportedTransferSize {
         num_inputs: usize,
@@ -368,6 +438,48 @@ pub enum ValidationError {
     UnsupportedFreezeSize {
         num_inputs: usize,
     },
+}
+
+mod ser_display {
+    use serde::de::{Deserialize, Deserializer};
+    use serde::ser::{Serialize, Serializer};
+    use std::fmt::Display;
+
+    pub fn serialize<S: Serializer, T: Display>(
+        v: &Result<T, String>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let string = match v {
+            Ok(v) => format!("{}", v),
+            Err(string) => string.clone(),
+        };
+        Serialize::serialize(&string, s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T>(d: D) -> Result<Result<T, String>, D::Error> {
+        Ok(Err(Deserialize::deserialize(d)?))
+    }
+}
+
+mod ser_debug {
+    use serde::de::{Deserialize, Deserializer};
+    use serde::ser::{Serialize, Serializer};
+    use std::fmt::Debug;
+
+    pub fn serialize<S: Serializer, T: Debug>(
+        v: &Result<T, String>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let string = match v {
+            Ok(v) => format!("{:?}", v),
+            Err(string) => string.clone(),
+        };
+        Serialize::serialize(&string, s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T>(d: D) -> Result<Result<T, String>, D::Error> {
+        Ok(Err(Deserialize::deserialize(d)?))
+    }
 }
 
 // TxnApiError doesn't implement Clone :/
@@ -409,7 +521,7 @@ mod verif_crs_comm {
 
     pub fn verif_crs_commit(p: &VerifierKeySet) -> VerifCRSCommitment {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "VerifCRS Comm".as_bytes());
-        hasher.update(&bincode::serialize(&p).unwrap());
+        hasher.update(&canonical::serialize(p).unwrap());
         hasher.finalize().into_bytes()
     }
 }
@@ -422,7 +534,7 @@ mod txn_comm {
 
     pub fn txn_commit(p: &TransactionNote) -> TxnCommitment {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "Txn Comm".as_bytes());
-        let byte_stream = bincode::serialize(&p).unwrap_or_else(|_| [].to_vec());
+        let byte_stream = canonical::serialize(p).unwrap();
         hasher.update(&byte_stream);
         hasher.finalize().into_bytes()
     }
@@ -450,13 +562,11 @@ mod record_merkle_hist_comm {
     use generic_array::GenericArray;
     pub type RecordMerkleHistCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
 
-    pub fn record_merkle_hist_commit(
-        p: &VecDeque<merkle_tree::NodeValue>,
-    ) -> RecordMerkleHistCommitment {
+    pub fn record_merkle_hist_commit(p: &VecDeque<NodeValue>) -> RecordMerkleHistCommitment {
         let mut hasher = blake2::Blake2b::with_params(&[], &[], "Hist Comm".as_bytes());
         hasher.update(&p.len().to_le_bytes());
         for hash in p {
-            hasher.update(&CanonicalBytes::from(*hash).0);
+            hasher.update(&canonical::serialize(hash).unwrap());
         }
         hasher.finalize().into_bytes()
     }
@@ -476,7 +586,7 @@ pub mod state_comm {
         pub prev_commit_time: u64,
         pub prev_state: state_comm::LedgerStateCommitment,
         pub verif_crs: verif_crs_comm::VerifCRSCommitment,
-        pub record_merkle_root: merkle_tree::NodeValue,
+        pub record_merkle_root: NodeValue,
         pub past_record_merkle_roots: record_merkle_hist_comm::RecordMerkleHistCommitment,
         pub nullifiers: set_hash::Hash,
         pub next_uid: u64,
@@ -493,7 +603,7 @@ pub mod state_comm {
             hasher.update("verif_crs".as_bytes());
             hasher.update(&self.verif_crs);
             hasher.update("record_merkle_root".as_bytes());
-            hasher.update(&CanonicalBytes::from(self.record_merkle_root).0);
+            hasher.update(&canonical::serialize(&self.record_merkle_root).unwrap());
             hasher.update("past_record_merkle_roots".as_bytes());
             hasher.update(&self.past_record_merkle_roots);
             hasher.update("nullifiers".as_bytes());
@@ -508,16 +618,16 @@ pub mod state_comm {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: state_comm::LedgerStateCommitment,
     pub verif_crs: VerifierKeySet,
     // The current record Merkle root hash
-    pub record_merkle_root: merkle_tree::NodeValue,
+    pub record_merkle_root: NodeValue,
     // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
-    pub past_record_merkle_roots: VecDeque<merkle_tree::NodeValue>,
-    pub record_merkle_frontier: merkle_tree::MerkleTree<RecordCommitment>,
+    pub past_record_merkle_roots: VecDeque<NodeValue>,
+    pub record_merkle_frontier: MerkleTree,
     pub nullifiers_root: set_hash::Hash,
     pub next_uid: u64,
     pub prev_block: Block,
@@ -531,10 +641,7 @@ impl ValidatorState {
     // the current one.
     const RECORD_ROOT_HISTORY_SIZE: usize = 10;
 
-    pub fn new(
-        verif_crs: VerifierKeySet,
-        record_merkle_frontier: MerkleTree<RecordCommitment>,
-    ) -> Self {
+    pub fn new(verif_crs: VerifierKeySet, record_merkle_frontier: MerkleTree) -> Self {
         let nullifiers: SetMerkleTree = Default::default();
         let next_uid = record_merkle_frontier.num_leaves();
 
@@ -584,7 +691,7 @@ impl ValidatorState {
         inputs.commit()
     }
 
-    pub fn validate_block(
+    pub fn validate_block_check(
         &self,
         now: u64,
         txns: Block,
@@ -656,12 +763,16 @@ impl ValidatorState {
                 now,
                 &verif_keys,
             )
-            .map_err(|err| CryptoError { err })?;
+            .map_err(|err| CryptoError { err: Ok(err) })?;
         }
 
         Ok((txns, null_pfs))
     }
 
+    /// Performs validation for a block, updating the ValidatorState.
+    ///
+    /// For a given instance of ValidatorState, all calls to validate_and_apply must pass the
+    /// same remember_commitments value. This identity holds for clones of the original as well.
     pub fn validate_and_apply(
         &mut self,
         now: u64,
@@ -669,7 +780,11 @@ impl ValidatorState {
         null_pfs: Vec<Vec<SetMerkleProof>>,
         remember_commitments: bool,
     ) -> Result<Vec<u64> /* new uids */, ValidationError> {
-        let (txns, _null_pfs) = self.validate_block(now, txns, null_pfs.clone())?;
+        // If the block successfully validates, and the nullifier proofs apply correctly,
+        // the remaining (mutating) operations cannot fail, as this would result in an
+        // inconsistent state. Currenlty, no operations after the first assignement to a member
+        // of self have a possible error; this must remain true if code changes.
+        let (txns, _null_pfs) = self.validate_block_check(now, txns, null_pfs.clone())?;
         let comm = self.commit();
         self.prev_commit_time = now;
         self.prev_block = txns.clone();
@@ -692,9 +807,15 @@ impl ValidatorState {
             .flat_map(|x| x.output_commitments().into_iter())
         {
             let uid = self.next_uid;
-            self.record_merkle_frontier.push(o);
+            self.record_merkle_frontier.push(o.to_field_element());
             if !remember_commitments {
-                self.record_merkle_frontier.forget(uid).expect_ok().unwrap();
+                // Always keep the latest leaf, but forget the prior leafs
+                if uid > 0 {
+                    self.record_merkle_frontier
+                        .forget(uid - 1)
+                        .expect_ok()
+                        .unwrap();
+                }
             }
             ret.push(uid);
             self.next_uid += 1;
@@ -710,6 +831,52 @@ impl ValidatorState {
         self.prev_state = comm;
         Ok(ret)
     }
+}
+
+impl PartialEq for ValidatorState {
+    fn eq(&self, other: &ValidatorState) -> bool {
+        self.commit() == other.commit()
+    }
+}
+
+impl Eq for ValidatorState {}
+
+impl Hash for ValidatorState {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.commit().hash(state);
+    }
+}
+
+impl State<H_512> for ValidatorState {
+    type Error = ValidationError;
+
+    type Block = ElaboratedBlock;
+
+    fn next_block(&self) -> Self::Block {
+        Self::Block::default()
+    }
+
+    fn validate_block(&self, block: &Self::Block) -> bool {
+        self.validate_block_check(
+            self.prev_commit_time + 1,
+            block.block.clone(),
+            block.proofs.clone(),
+        )
+        .is_ok()
+    }
+
+    fn append(&self, block: &Self::Block) -> Result<Self, Self::Error> {
+        let mut state = self.clone();
+        state.validate_and_apply(
+            state.prev_commit_time + 1,
+            block.block.clone(),
+            block.proofs.clone(),
+            false,
+        )?;
+        Ok(state)
+    }
+
+    fn on_commit(&self) {}
 }
 
 pub struct MultiXfrTestState {
@@ -730,12 +897,19 @@ pub struct MultiXfrTestState {
     pub owners: Vec<usize>,    // for each record
     pub memos: Vec<ReceiverMemo>,
     pub nullifiers: SetMerkleTree,
-    pub record_merkle_tree: merkle_tree::MerkleTree<RecordCommitment>,
+    pub record_merkle_tree: MerkleTree,
     // pub asset_defs: Vec<AssetDefinition>,
     pub validator: ValidatorState,
 
     pub outer_timer: Instant,
     pub inner_timer: Instant,
+}
+
+/// Returns the path to the universal parameter file.
+fn universal_param_path() -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    const FILE: &str = "src/universal_param";
+    [&dir, Path::new(FILE)].iter().collect()
 }
 
 /// Generates universal parameter and store it to file.
@@ -773,10 +947,14 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
         prng,
     )
     .unwrap_or_else(|err| panic!("Error while setting up the universal parameter: {}", err));
-    let param_bytes = bincode::serialize(&universal_param)
+    let param_bytes = canonical::serialize(&universal_param)
         .unwrap_or_else(|err| panic!("Error while serializing the universal parameter: {}", err));
-    // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
-    let mut file = File::create("../../zerok/zerok_lib/src/universal_param".to_string())
+    let path = universal_param_path()
+        .into_os_string()
+        .into_string()
+        .expect("Error while converting universal parameter path to a string");
+    println!("path {}", path);
+    let mut file = File::create(path)
         .unwrap_or_else(|err| panic!("Error while creating a universal parameter file: {}", err));
     file.write_all(&param_bytes).unwrap_or_else(|err| {
         panic!(
@@ -789,9 +967,7 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
 /// Reads universal parameter from file if it exists. If not, generates the universal parameter, stores
 /// it to file, and returns it.
 pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalParam {
-    // TODO: Remove literal relative paths (https://gitlab.com/translucence/systems/system/-/issues/17)
-    let path_str = "../../zerok/zerok_lib/src/universal_param".to_string();
-    let path = Path::new(&path_str);
+    let path = universal_param_path();
 
     // create a new seeded PRNG from the master PRNG when getting the UniversalParam. This ensures a
     // deterministic RNG result after the call, either the UniversalParam is newly generated or loaded
@@ -813,12 +989,12 @@ pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalPara
     let mut param_bytes = Vec::new();
     file.read_to_end(&mut param_bytes)
         .unwrap_or_else(|err| panic!("Error while reading the universal parameter file: {}", err));
-    bincode::deserialize(&param_bytes[..])
+    canonical::deserialize(&param_bytes[..])
         .unwrap_or_else(|err| panic!("Error while deserializing the universal parameter: {}", err))
 }
 
 lazy_static! {
-    static ref UNIVERSAL_PARAM: jf_txn::proof::UniversalParam =
+    pub static ref UNIVERSAL_PARAM: jf_txn::proof::UniversalParam =
         get_universal_param(&mut ChaChaRng::from_seed([0x8au8; 32]));
 }
 
@@ -910,7 +1086,7 @@ impl MultiXfrTestState {
                 FreezeFlag::Unfrozen,
             );
 
-            t.push(RecordCommitment::from(&rec));
+            t.push(RecordCommitment::from(&rec).to_field_element());
 
             memos.push(ReceiverMemo::from_ro(&mut prng, &rec, &[])?);
         }
@@ -958,7 +1134,7 @@ impl MultiXfrTestState {
             inner_timer: Instant::now(),
         };
 
-        let mut setup_block = ElaboratedBlock::next_block(&ret.validator);
+        let mut setup_block = ret.validator.next_block();
 
         let mut keys_in_block = HashSet::<usize>::new();
 
@@ -1026,12 +1202,13 @@ impl MultiXfrTestState {
 
                     let fee_ix = ret.fee_records[kix];
                     let fee_rec = {
-                        let comm = ret
-                            .record_merkle_tree
-                            .get_leaf(fee_ix as u64)
-                            .expect_ok()
-                            .unwrap()
-                            .0;
+                        let comm = RecordCommitment::from_field_element(
+                            ret.record_merkle_tree
+                                .get_leaf(fee_ix as u64)
+                                .expect_ok()
+                                .unwrap()
+                                .0,
+                        );
                         let memo = ret.memos[fee_ix as usize].clone();
                         let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
                         let nullifier = key.nullify(
@@ -1107,7 +1284,7 @@ impl MultiXfrTestState {
             ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
                 .unwrap();
 
-            setup_block = ElaboratedBlock::next_block(&ret.validator);
+            setup_block = ret.validator.next_block();
         }
 
         ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
@@ -1176,12 +1353,13 @@ impl MultiXfrTestState {
 
                         let key = &self.keys[kix];
 
-                        let comm = self
-                            .record_merkle_tree
-                            .get_leaf(i as u64)
-                            .expect_ok()
-                            .unwrap()
-                            .0;
+                        let comm = RecordCommitment::from_field_element(
+                            self.record_merkle_tree
+                                .get_leaf(i as u64)
+                                .expect_ok()
+                                .unwrap()
+                                .0,
+                        );
 
                         let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
 
@@ -1195,12 +1373,13 @@ impl MultiXfrTestState {
                             rec1 = Some((open_rec, kix));
                             let fee_ix = self.fee_records[kix];
                             fee_rec = Some((fee_ix, {
-                                let comm = self
-                                    .record_merkle_tree
-                                    .get_leaf(fee_ix as u64)
-                                    .expect_ok()
-                                    .unwrap()
-                                    .0;
+                                let comm = RecordCommitment::from_field_element(
+                                    self.record_merkle_tree
+                                        .get_leaf(fee_ix as u64)
+                                        .expect_ok()
+                                        .unwrap()
+                                        .0,
+                                );
                                 let memo = self.memos[fee_ix as usize].clone();
                                 let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
                                 let nullifier = key.nullify(
@@ -1246,12 +1425,13 @@ impl MultiXfrTestState {
                             continue;
                         }
 
-                        let comm = self
-                            .record_merkle_tree
-                            .get_leaf(i as u64)
-                            .expect_ok()
-                            .unwrap()
-                            .0;
+                        let comm = RecordCommitment::from_field_element(
+                            self.record_merkle_tree
+                                .get_leaf(i as u64)
+                                .expect_ok()
+                                .unwrap()
+                                .0,
+                        );
 
                         let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
 
@@ -1272,12 +1452,13 @@ impl MultiXfrTestState {
                             if fee_rec.is_none() {
                                 let fee_ix = self.fee_records[kix];
                                 fee_rec = Some((fee_ix, {
-                                    let comm = self
-                                        .record_merkle_tree
-                                        .get_leaf(fee_ix as u64)
-                                        .expect_ok()
-                                        .unwrap()
-                                        .0;
+                                    let comm = RecordCommitment::from_field_element(
+                                        self.record_merkle_tree
+                                            .get_leaf(fee_ix as u64)
+                                            .expect_ok()
+                                            .unwrap()
+                                            .0,
+                                    );
                                     let memo = self.memos[fee_ix as usize].clone();
                                     let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
                                     let nullifier = key.nullify(
@@ -1693,7 +1874,7 @@ impl MultiXfrTestState {
                 .iter()
                 .map(|x| x.output_commitments().len() as u64)
                 .sum::<u64>();
-        let newblk = blk.add_transaction(&self.validator, &txn)?;
+        let newblk = blk.add_transaction_raw(&txn)?;
         println!("Block {}/{} adding {}", round + 1, num_txs, ix);
         self.memos.extend(owner_memos);
         self.fee_records[kixs[0]] = base_ix;
@@ -1716,15 +1897,12 @@ impl MultiXfrTestState {
     ) -> Result<(), ValidationError> {
         Self::update_timer(&mut self.inner_timer, |_| ());
 
-        if !blk.validate_block(&self.validator) {
-            self.validator.validate_block(
-                self.validator.prev_commit_time + 1,
-                blk.block.clone(),
-                blk.proofs,
-            )?;
-            return Err(ValidationError::Failed {});
-        }
-        let new_state = blk.append_to(&self.validator).unwrap();
+        self.validator.validate_block_check(
+            self.validator.prev_commit_time + 1,
+            blk.block.clone(),
+            blk.proofs.clone(),
+        )?;
+        let new_state = self.validator.append(&blk).unwrap();
 
         for n in blk.block.0.iter().flat_map(|x| x.nullifiers().into_iter()) {
             assert!(!self.nullifiers.contains(n).unwrap().0);
@@ -1736,7 +1914,7 @@ impl MultiXfrTestState {
             .iter()
             .flat_map(|x| x.output_commitments().into_iter())
         {
-            self.record_merkle_tree.push(comm);
+            self.record_merkle_tree.push(comm.to_field_element());
         }
 
         self.validator = new_state;
@@ -1769,12 +1947,13 @@ impl MultiXfrTestState {
             .filter_map(|(uid, memo)| {
                 let owner = self.owners[uid];
                 let key = &self.keys[owner];
-                let comm = self
-                    .record_merkle_tree
-                    .get_leaf(uid as u64)
-                    .expect_ok()
-                    .unwrap()
-                    .0;
+                let comm = RecordCommitment::from_field_element(
+                    self.record_merkle_tree
+                        .get_leaf(uid as u64)
+                        .expect_ok()
+                        .unwrap()
+                        .0,
+                );
                 let ro = memo.decrypt(key, &comm, &[]).unwrap();
                 let nullifier = key.nullify(
                     ro.asset_def.policy_ref().freezer_pub_key(),
@@ -1792,11 +1971,20 @@ impl MultiXfrTestState {
     }
 }
 
+pub fn crypto_rng() -> ChaChaRng {
+    ChaChaRng::from_entropy()
+}
+
+pub fn crypto_rng_from_seed(seed: [u8; 32]) -> ChaChaRng {
+    ChaChaRng::from_seed(seed)
+}
+
 // TODO(joe): proper Err returns
 #[cfg(test)]
 mod tests {
     use super::*;
-    use merkle_tree::LookupResult;
+    use jf_primitives::merkle_tree::LookupResult;
+    use jf_txn::BaseField;
     use quickcheck::QuickCheck;
 
     /*
@@ -2008,13 +2196,11 @@ mod tests {
         let mut v2 = v1.clone();
 
         // Test validators with different history lengths.
-        v1.past_record_merkle_roots
-            .push_front(merkle_tree::NodeValue::from(0));
+        v1.past_record_merkle_roots.push_front(NodeValue::from(0));
         assert_ne!(v1.commit(), v2.commit());
 
         // Test validators with the same length, but different histories.
-        v2.past_record_merkle_roots
-            .push_front(merkle_tree::NodeValue::from(1));
+        v2.past_record_merkle_roots.push_front(NodeValue::from(1));
         assert_ne!(v1.commit(), v2.commit());
     }
 
@@ -2081,9 +2267,7 @@ mod tests {
         let mut t = MerkleTree::new(MERKLE_HEIGHT).unwrap();
         assert_eq!(
             t.get_root_value(),
-            MerkleTree::<RecordCommitment>::new(MERKLE_HEIGHT)
-                .unwrap()
-                .get_root_value()
+            MerkleTree::new(MERKLE_HEIGHT).unwrap().get_root_value()
         );
         let alice_rec_elem = RecordCommitment::from(&alice_rec1);
         // dbg!(&RecordCommitment::from(&alice_rec1));
@@ -2091,7 +2275,7 @@ mod tests {
             RecordCommitment::from(&alice_rec1),
             RecordCommitment::from(&alice_rec1)
         );
-        t.push(RecordCommitment::from(&alice_rec1));
+        t.push(RecordCommitment::from(&alice_rec1).to_field_element());
         let alice_rec_path = t.get_leaf(0).expect_ok().unwrap().1;
         assert_eq!(alice_rec_path.nodes.len(), MERKLE_HEIGHT as usize);
 
@@ -2136,7 +2320,7 @@ mod tests {
         MerkleTree::check_proof(
             validator.record_merkle_root,
             0,
-            alice_rec_elem,
+            alice_rec_elem.to_field_element(),
             &alice_rec_path,
         )
         .unwrap();
@@ -2168,7 +2352,7 @@ mod tests {
         println!("Transfer has {} outputs", txn1.output_commitments.len());
         println!(
             "Transfer is {} bytes long",
-            serde_cbor::ser::to_vec_packed(&txn1).unwrap().len()
+            canonical::serialize(&txn1).unwrap().len()
         );
 
         println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
@@ -2208,7 +2392,7 @@ mod tests {
 
         assert_eq!(&new_uids[1..], &[2]);
         for r in new_recs {
-            wallet_merkle_tree.push(r);
+            wallet_merkle_tree.push(r.to_field_element());
         }
 
         let bob_rec = TransferNoteInput {
@@ -2251,8 +2435,8 @@ mod tests {
     fn test_merkle_tree(updates: Vec<Result<u64, usize>>) {
         println!("Iter: {} updates", updates.len());
         let (mut t1, mut t2) = (
-            MerkleTree::<u64>::new(MERKLE_HEIGHT).unwrap(),
-            MerkleTree::<u64>::new(MERKLE_HEIGHT).unwrap(),
+            MerkleTree::new(MERKLE_HEIGHT).unwrap(),
+            MerkleTree::new(MERKLE_HEIGHT).unwrap(),
         );
         for t in [&mut t1, &mut t2].iter_mut() {
             let mut map = Vec::new();
@@ -2261,7 +2445,7 @@ mod tests {
                     Ok(val) => {
                         map.push(val);
 
-                        t.push(pow3(*val));
+                        t.push(BaseField::from(pow3(*val)));
 
                         // check_path(t.hasher.as_ref(), &path.unwrap(), &leaf_val,
                         //         &leaf_hash, MERKLE_HEIGHT, &t.root_hash)
@@ -2271,7 +2455,7 @@ mod tests {
                     }
                     Err(i) => {
                         match (
-                            map.get(*i).cloned().map(|x| pow3(*x as u64)),
+                            map.get(*i).cloned().map(|x| BaseField::from(pow3(*x))),
                             t.get_leaf(*i as u64),
                         ) {
                             (None, LookupResult::EmptyLeaf) => {}

@@ -14,14 +14,19 @@ use tracing::{debug, error, info};
 use phaselock::message::Message;
 use phaselock::networking::w_network::WNetwork;
 use phaselock::traits::storage::memory_storage::MemoryStorage;
+use phaselock::H_512;
 use phaselock::{PhaseLock, PhaseLockConfig, PubKey};
 use rand::Rng;
 use serde::{de::DeserializeOwned, Serialize};
 use tagged_base64::TaggedBase64;
 use threshold_crypto as tc;
 use zerok_lib::{
-    ElaboratedBlock, ElaboratedTransaction, MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
+    validator_node::ValidatorNodeImpl, ElaboratedBlock, ElaboratedTransaction, LWPersistence,
+    MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
 };
+
+type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_512>>;
+type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_512>;
 
 /// Generates the `SecretKeySet` for this BFT instance
 pub fn gen_keys(threshold: usize) -> tc::SecretKeySet {
@@ -52,10 +57,10 @@ pub async fn try_phaselock(
     node_number: usize,
     initial_state: ValidatorState,
 ) -> (
-    PhaseLock<ElaboratedBlock, 64>,
+    PhaseLock<ValidatorNodeImpl<PLNetwork, PLStorage>, H_512>,
     PubKey,
     u16,
-    WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
+    PLNetwork,
 ) {
     let genesis = ElaboratedBlock::default();
     let pub_key_set = keys.public_keys();
@@ -71,6 +76,7 @@ pub async fn try_phaselock(
         next_view_timeout: 40_000,
         timeout_ratio: (2, 1),
         round_start_delay: 1,
+        start_delay: 1,
     };
     let (networking, port) = try_network(pub_key.clone()).await;
     let phaselock = PhaseLock::new(
@@ -82,6 +88,7 @@ pub async fn try_phaselock(
         initial_state,
         networking.clone(),
         MemoryStorage::default(),
+        LWPersistence::new("demo1"),
     )
     .await;
     (phaselock, pub_key, port, networking)
@@ -93,10 +100,10 @@ const TRANSACTION_COUNT: u64 = 50;
 
 // type TransactionSpecification = u64;
 type MultiXfrValidator = (
-    PhaseLock<ElaboratedBlock, 64>,
+    PhaseLock<ValidatorNodeImpl<PLNetwork, PLStorage>, H_512>,
     PubKey,
     u16,
-    WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
+    PLNetwork,
 );
 
 fn load_ignition_keys() {
@@ -196,7 +203,7 @@ async fn start_consensus() -> (MultiXfrTestState, Vec<MultiXfrValidator>) {
 
 async fn propose_transaction(
     id: usize,
-    phaselock: &PhaseLock<ElaboratedBlock, 64>,
+    phaselock: &PhaseLock<ValidatorNodeImpl<PLNetwork, PLStorage>, H_512>,
     transaction: ElaboratedTransaction,
 ) {
     info!("Proposing transacton {}", id);

@@ -4,21 +4,34 @@ version = "0.1.0"
 authors = ["Keyao Shen <keyao@translucence.net>", "corbett@pictographer.com"]
 edition = "2018"
 license = "Copyright © 2021 Translucence Research, Inc. All rights reserved."
+default-run = "multi_machine"
 
 [dependencies]
 async-std = { version = "1.9.0", features = ["unstable", "attributes"] }
+async-trait = "0.1.51"
+async-tungstenite = { version = "0.15.0", features = ["async-std-runtime"] }
+bincode = "1.3.3"
 futures = "0.3.0"
 futures-util = "0.3.8"
-phaselock = { version = "0.0.1", registry = "translucence" }
-rand_xoshiro = "0.4.0"
+itertools = "0.10.1"
+jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5b500854579d58f2988ba0249b97203351a49290"}
+jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5b500854579d58f2988ba0249b97203351a49290"}
+jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5b500854579d58f2988ba0249b97203351a49290"}
+jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5b500854579d58f2988ba0249b97203351a49290"}
+markdown = "0.3"
+phaselock = { version = "0.0.2", registry = "translucence"}
+rand_chacha = "0.2.2"
 serde = { version = "1.0.123", features = ["derive", "rc"] }
 serde_derive = "1.0.118"
 serde_json = "1.0.61"
 shellexpand = "2.0"
+snafu = { version = "0.6.10", features = ["backtraces"] }
 structopt = { version = "0.3", features = ["paw"] }
 strum = "0.20"
 strum_macros = "0.20.1"
+surf = "2.3.1"
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
+tempdir = "0.3.7"
 threshold_crypto = "0.4.0"
 tide = "0.16.0"
 tide-websockets = "0.4.0"

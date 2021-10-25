@@ -1,3 +1,13 @@
+variables:
+  FF_USE_FASTZIP: 1
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
 image: registry.gitlab.com/asuran-rs/containers/rust-sccache-docker:1.54
 
 stages:
@@ -22,11 +32,6 @@ lint:fmt:
     - docker
   script:
     - cargo fmt -- --check
-  cache:
-    key: fmt-cache
-    paths:
-      - .cargo/
-      - target/
 
 lint:clippy:
   stage: lint
@@ -45,36 +50,25 @@ lint:audit:
   tags:
     - docker
   script:
-    - cargo audit
+    - cargo audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071
   cache:
     key: audit-cache
     paths:
       - .cargo/
       - target/
 
-check:
-  stage: check
-  tags:
-    - docker
-  script:
-    - cargo check
-  cache:
-    key: check-cache
-    paths:
-      - .cargo/
-      - target/
-
-build:
-  stage: build
-  tags:
-    - docker
-  script:
-    - cargo build --workspace --release
-  cache:
-    key: build-cache
-    paths:
-      - .cargo/
-      - target/
+## Unneeded until we are exporting artifacts for other uses
+#build:
+#  stage: build
+#  tags:
+#    - docker
+#  script:
+#    - cargo build --workspace --release
+#  cache:
+#    key: build-cache
+#    paths:
+#      - .cargo/
+#      - target/
 
 test:
   stage: test
