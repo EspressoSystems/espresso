@@ -32,7 +32,7 @@ pub type Salt = [u8; 32];
 
 type InnerKey = aes_gcm_siv::Key<<Aes as NewBlockCipher>::KeySize>;
 
-// A !Unpin wrapper around a secret S. 
+// A !Unpin wrapper around a secret S.
 //
 // This type, when wrapped in a Pin<>, can be used to prevent a secret from being moved. Ensuring
 // that a secret only has one location in memory for the duration of its life can reduce the risk of
@@ -122,7 +122,7 @@ impl Key {
     }
 
     fn inner(&self) -> &InnerKey {
-        &self.0.0
+        &self.0 .0
     }
 }
 

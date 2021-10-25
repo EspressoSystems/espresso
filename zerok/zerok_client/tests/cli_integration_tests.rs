@@ -164,7 +164,7 @@ fn cli_login(t: &mut TestState) -> Result<(), String> {
         .output("Sorry, that's incorrect")?
         .command(0, "test_password")?
         .output("connecting...")?;
-    
+
     // Check that the wallet is functional.
     cli_basic_info(t)
 }

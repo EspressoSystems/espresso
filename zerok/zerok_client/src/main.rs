@@ -567,7 +567,6 @@ extern "C" fn close_storage() {
     block_on(STORAGE.1.lock()).take();
 }
 
-
 enum Reader {
     Interactive(rustyline::Editor<()>),
     Automated,
@@ -594,7 +593,9 @@ impl Reader {
                 let mut password = String::new();
                 match std::io::stdin().read_line(&mut password) {
                     Ok(_) => Ok(password),
-                    Err(err) => Err(WalletError::Failed { msg: err.to_string() }),
+                    Err(err) => Err(WalletError::Failed {
+                        msg: err.to_string(),
+                    }),
                 }
             }
         }

@@ -86,13 +86,12 @@ impl TestState {
     /// [TestState] always starts off with one wallet, index 0, which gets an initial grant of 2^32
     /// native tokens. So `command(0, "command")` will not load a new wallet. But the first time
     /// `command(1, "command")` is called, it will block until wallet 1 is created.
-    pub fn command(
-        &mut self,
-        id: usize,
-        command: impl AsRef<str>,
-    ) -> Result<&mut Self, String> {
+    pub fn command(&mut self, id: usize, command: impl AsRef<str>) -> Result<&mut Self, String> {
         let command = self.substitute(command)?;
-        let wallet = self.wallets.get_mut(id).ok_or_else(|| format!("wallet {} is not open", id))?;
+        let wallet = self
+            .wallets
+            .get_mut(id)
+            .ok_or_else(|| format!("wallet {} is not open", id))?;
         println!("{}> {}", id, command);
         self.prev_output = wallet.command(&command)?;
         Ok(self)
@@ -278,12 +277,21 @@ impl Wallet {
             return Err(String::from("wallet is already open"));
         }
         let mut child = cargo_run("zerok_client")?
-            .args(["-k", self.key_path.as_os_str().to_str().ok_or_else(|| {
-                format!("failed to convert key_path {:?} to string", self.key_path)
-            })?])
-            .args(["--storage", self.storage.path().as_os_str().to_str().ok_or_else(|| {
-                format!("failed to convert storage path {:?} to string", self.storage.path())
-            })?])
+            .args([
+                "-k",
+                self.key_path.as_os_str().to_str().ok_or_else(|| {
+                    format!("failed to convert key_path {:?} to string", self.key_path)
+                })?,
+            ])
+            .args([
+                "--storage",
+                self.storage.path().as_os_str().to_str().ok_or_else(|| {
+                    format!(
+                        "failed to convert storage path {:?} to string",
+                        self.storage.path()
+                    )
+                })?,
+            ])
             .arg("--non-interactive")
             .arg(&self.server)
             .stdin(Stdio::piped())
