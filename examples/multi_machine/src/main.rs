@@ -839,7 +839,8 @@ async fn main() -> Result<(), std::io::Error> {
         }
 
         // Start consensus for each transaction
-        for round in 0..TRANSACTION_COUNT {
+        let mut round = 0;
+        while round < TRANSACTION_COUNT {
             println!("Starting round {}", round + 1);
 
             // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
@@ -875,12 +876,20 @@ async fn main() -> Result<(), std::io::Error> {
                             let commitment = TaggedBase64::new("LEDG", &state[0].commit())
                                 .unwrap()
                                 .to_string();
-                            println!("  - Current commitment: {}", commitment);
+                            println!(
+                                "  - Round {} completed. Commitment: {}",
+                                round + 1,
+                                commitment
+                            );
                             break;
                         }
                     }
+                    EventType::ViewTimeout { view_number: _ } => {
+                        println!("  - Round {} timed out.", round + 1);
+                        break;
+                    }
                     EventType::Error { error } => {
-                        println!("  - Error: {}", error);
+                        println!("  - Round {} error: {}", round + 1, error);
                         break;
                     }
                     _ => {
@@ -928,13 +937,15 @@ async fn main() -> Result<(), std::io::Error> {
                     .validate_and_apply(blk, round as usize, TRANSACTION_COUNT as usize, 0.0)
                     .unwrap();
             }
-            println!("  - Round {} completed.", round + 1);
+
+            // When there isn't a wallet attached, run `TRANSACTION_COUNT` rounds.
+            // Otherwise, keeping running till the process is killed.
+            if NodeOpt::from_args().wallet_pk_path.is_none() {
+                round += 1;
+            }
         }
 
         println!("All rounds completed");
-
-        // Wait for other nodes to complete. Otherwise, the wallet CLI tests may fail.
-        async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
     }
 
     Ok(())
