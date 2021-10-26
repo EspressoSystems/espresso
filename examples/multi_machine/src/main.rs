@@ -167,7 +167,7 @@ fn default_pk_path() -> PathBuf {
     [&dir, Path::new(PK_DIR)].iter().collect()
 }
 
-/// Returns the default path to the node configuration file.
+/// Returns the default path to the API file.
 fn default_api_path() -> PathBuf {
     const API_FILE: &str = "api/api.toml";
     let dir = project_path();
