@@ -164,26 +164,26 @@ impl BlockContents<H_256> for ElaboratedBlock {
         Ok(ret)
     }
 
-    fn hash(&self) -> phaselock::BlockHash<32> {
+    fn hash(&self) -> phaselock::BlockHash<H_256> {
         use std::convert::TryInto;
 
-        phaselock::BlockHash::<32>::from_array(self.commit().try_into().unwrap())
+        phaselock::BlockHash::<H_256>::from_array(self.commit().try_into().unwrap())
     }
 
-    fn hash_bytes(bytes: &[u8]) -> phaselock::BlockHash<32> {
+    fn hash_bytes(bytes: &[u8]) -> phaselock::BlockHash<H_256> {
         use std::convert::TryInto;
         // TODO: fix this hack, it is specifically working around the
         // misuse-preventing `T: Committable` on `RawCommitmentBuilder`
         let ret = commit::RawCommitmentBuilder::<Block>::new("PhaseLock bytes")
             .var_size_bytes(bytes)
             .finalize();
-        phaselock::BlockHash::<32>::from_array(ret.try_into().unwrap())
+        phaselock::BlockHash::<H_256>::from_array(ret.try_into().unwrap())
     }
 
-    fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<32> {
+    fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<H_256> {
         use std::convert::TryInto;
 
-        phaselock::BlockHash::<32>::from_array(txn.commit().try_into().unwrap())
+        phaselock::BlockHash::<H_256>::from_array(txn.commit().try_into().unwrap())
     }
 }
 

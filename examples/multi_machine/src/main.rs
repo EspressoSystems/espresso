@@ -289,7 +289,7 @@ async fn init_state_and_phaselock(
     nodes: u64,
     threshold: u64,
     node_id: u64,
-    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 32>>,
+    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>,
     full_node: bool,
 ) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state

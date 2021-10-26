@@ -30,7 +30,9 @@ pub mod commit {
     use bitvec::vec::BitVec;
     use core::marker::PhantomData;
     use generic_array::{ArrayLength, GenericArray};
-    use tiny_keccak::{Hasher, Keccak};
+    use sha3::digest::Digest;
+    use sha3::Sha3_256;
+    use std::convert::TryInto;
 
     type Array = [u8; 32];
 
@@ -140,21 +142,21 @@ pub mod commit {
     }
 
     pub struct RawCommitmentBuilder<T: Committable> {
-        hasher: Keccak,
+        hasher: Sha3_256,
         _marker: PhantomData<T>,
     }
 
     impl<T: Committable> RawCommitmentBuilder<T> {
         pub fn new(tag: &str) -> Self {
             Self {
-                hasher: Keccak::v256(),
+                hasher: Default::default(),
                 _marker: Default::default(),
             }
             .constant_str(tag)
         }
 
         pub fn constant_str(mut self, s: &str) -> Self {
-            self.hasher.update(s.as_ref());
+            self.hasher.update(s.as_bytes());
             self.fixed_size_bytes(&INVALID_UTF8)
         }
 
@@ -205,9 +207,8 @@ pub mod commit {
         }
 
         pub fn finalize(self) -> Commitment<T> {
-            let mut ret = [0u8; 32];
-            self.hasher.finalize(&mut ret);
-            Commitment(ret, Default::default())
+            let ret = self.hasher.finalize();
+            Commitment(ret.try_into().unwrap(), Default::default())
         }
     }
 }
