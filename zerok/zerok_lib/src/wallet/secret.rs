@@ -45,10 +45,55 @@ impl<S> DerefMut for Pinned<S> {
     }
 }
 
+/// Provide a default value for use when constructing secrets.
+/// 
+/// Constructing a secret requires a default value, because we initialize the memory location where
+/// the secret will go before constructing the secret, to avoid constructing a secret value and then
+/// moving it around memory.
+/// 
+/// Some types that we want to use as secrets do not have a Default implementation (e.g. [T; 64]) so
+/// we use this trait instead in order to add our own implementations without running into the
+/// orphan rule.
+pub trait SecretDefault {
+    fn secret_default() -> Self;
+}
+
+macro_rules! secret_default_from_default {
+    ($($t:ty),*) => {
+        $(
+            impl SecretDefault for $t {
+                fn secret_default() -> Self {
+                    Self::default()
+                }
+            }
+        )*
+    };
+}
+
+secret_default_from_default!(u8, u16, u32, u64, i8, i16, i32, i64);
+
+macro_rules! secret_default_arrays {
+    ($($n:expr),*) => {
+        $(
+            impl<S: Copy + SecretDefault> SecretDefault for [S; $n] {
+                fn secret_default() -> Self {
+                    [S::secret_default(); $n]
+                }
+            }
+        )*
+    }
+}
+
+secret_default_arrays!(
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+    27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+    51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64
+);
+
 #[derive(Clone, Debug)]
 pub struct Secret<S: Zeroize>(Pin<Box<Pinned<Zeroizing<S>>>>);
 
-impl<S: Zeroize + Default> Secret<S> {
+impl<S: Zeroize + SecretDefault> Secret<S> {
     /// Construct a pinned, zeroizing secret from a secret value.
     ///
     /// The value `val` is zeroed after it is used to initialize the new secret.
@@ -69,7 +114,7 @@ impl<S: Zeroize + Default> Secret<S> {
     /// The caller should take care not to copy or move out of the value after it has been
     /// initialized with secret data but before it has been pinned.
     pub fn build() -> SecretBuilder<S> {
-        SecretBuilder(Box::new(Pinned::new(Zeroizing::new(S::default()))))
+        SecretBuilder(Box::new(Pinned::new(Zeroizing::new(S::secret_default()))))
     }
 }
 

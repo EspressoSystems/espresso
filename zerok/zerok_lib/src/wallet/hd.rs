@@ -30,7 +30,7 @@
 
 use super::secret::Secret;
 use rand_chacha::rand_core::{CryptoRng, RngCore};
-use sha3::{Digest, Keccak256};
+use sha3::{Digest, Keccak256, Keccak512};
 use std::convert::TryInto;
 use zeroize::Zeroize;
 
@@ -38,11 +38,20 @@ use zeroize::Zeroize;
 pub type Salt = [u8; 32];
 
 #[derive(Clone, Debug)]
-pub struct KeyTree(Secret<[u8; 32]>);
+pub struct KeyTree(
+    // Sub-trees are 64 bytes, twice as large as the actual keys, to make it much harder to break
+    // security upwards through the tree. This is probably not strictly necessary (32 bytes is
+    // already quite large) but it is an extra layer of security for sub-tree separation, which is
+    // the most important security property of this system.
+    //
+    // BIP32 uses a similar idea by extending their keys with an extra 32 bytes of entropy (the 
+    // chain code).
+    Secret<[u8; 64]>
+);
 
 impl KeyTree {
     pub fn random(rng: &mut (impl CryptoRng + RngCore)) -> Self {
-        let mut key = Secret::<[u8; 32]>::build();
+        let mut key = Secret::<[u8; 64]>::build();
         rng.fill_bytes(key.as_mut());
         Self(key.finalize())
     }
@@ -58,7 +67,7 @@ impl KeyTree {
     }
 
     pub fn from_password_and_salt(password: &[u8], salt: &[u8]) -> Result<Self, argon2::Error> {
-        let mut key = Secret::<[u8; 32]>::build();
+        let mut key = Secret::<[u8; 64]>::build();
         let config = argon2::Config {
             hash_length: key.len() as u32,
             ..Default::default()
@@ -70,24 +79,24 @@ impl KeyTree {
     }
 
     pub fn derive_sub_tree(&self, id: &[u8]) -> KeyTree {
-        let mut digest = Keccak256::new()
-            // All derived sub-trees include the tag "sub_tree" in the digest, as a commitment to
-            // their role as a tree of keys (not an individual Key) and as a domain separator from
-            // derived Keys (which use a different tag).
-            .chain("sub_tree".as_bytes())
+        // Note that the hash for deriving a new sub-tree does not need to include a commitment to
+        // the role of the key (sub-tree vs key) because sub-trees and keys are different sizes and
+        // thus cannot suffer from domain confusion.
+        let mut digest = Keccak512::new()
             // Commit to the parent key.
             .chain(&*self.0)
             .chain(id)
             .finalize();
-        Self(Secret::new(digest.as_mut()))
+        // The try_into will always succeed, because the hash output size is a slice of 64 bytes.
+        // There just isn't an `as_mut() -> &[u8; 64]` method for GenericArrays as large as 64.
+        Self(Secret::new(digest.as_mut().try_into().unwrap()))
     }
 
     pub fn derive_key(&self, id: &[u8]) -> Key {
+        // Note that the hash for deriving a new key does not need to include a commitment to the
+        // role of the key (key vs sub-tree) because keys and sub-trees are different sizes and thus
+        // cannot suffer from domain confusion.
         let mut digest = Keccak256::new()
-            // All derived keys include the tag "key" in the digest as a commitment to their role as
-            // an individual Key (not a sub-tree of keys) and as a domain separator from derived
-            // sub-trees (which use a different tag).
-            .chain("key".as_bytes())
             // Commit to the parent key.
             .chain(&*self.0)
             .chain(id)
