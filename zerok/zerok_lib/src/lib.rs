@@ -88,38 +88,13 @@ pub struct ElaboratedTransaction {
 
 impl ElaboratedTransaction {
     fn hash(&self) -> ElaboratedTransactionHash {
-        ElaboratedTransactionHash(ElaboratedBlock::hash_transaction(self))
+        ElaboratedTransactionHash(self.commit())
     }
 }
 
 #[tagged_blob("TXN")]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ElaboratedTransactionHash(phaselock::BlockHash<H_256>);
-
-impl CanonicalSerialize for ElaboratedTransactionHash {
-    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), ark_serialize::SerializationError> {
-        writer
-            .write_all(self.0.as_ref())
-            .map_err(ark_serialize::SerializationError::from)
-    }
-
-    fn serialized_size(&self) -> usize {
-        64
-    }
-}
-
-impl CanonicalDeserialize for ElaboratedTransactionHash {
-    fn deserialize<R: Read>(mut reader: R) -> Result<Self, ark_serialize::SerializationError> {
-        use std::convert::TryInto;
-        let mut buf = vec![0; 64];
-        reader
-            .read_exact(&mut buf)
-            .map_err(ark_serialize::SerializationError::from)?;
-        Ok(ElaboratedTransactionHash(phaselock::BlockHash::from_array(
-            buf.as_slice().try_into().unwrap(),
-        )))
-    }
-}
+#[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+pub struct ElaboratedTransactionHash(Commitment<ElaboratedTransaction>);
 
 #[derive(
     Default,
