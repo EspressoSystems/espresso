@@ -1,7 +1,7 @@
 use crate::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
 
 use phaselock::{
-    message::Message, networking::NetworkingImplementation, NodeImplementation, Storage, H_512,
+    message::Message, networking::NetworkingImplementation, NodeImplementation, Storage, H_256,
 };
 
 use core::fmt::Debug;
@@ -10,7 +10,7 @@ use core::marker::PhantomData;
 /// A lightweight node that handles validation for consensus, and nothing more.
 /// TODO: replace with persisting version of ValidatorNodeImpl, complete with handler for decide callback;
 pub trait PLNet:
-    NetworkingImplementation<Message<ElaboratedBlock, ElaboratedTransaction, H_512>>
+    NetworkingImplementation<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>
     + Clone
     + Debug
     + 'static
@@ -18,7 +18,7 @@ pub trait PLNet:
 }
 
 impl<
-        T: NetworkingImplementation<Message<ElaboratedBlock, ElaboratedTransaction, H_512>>
+        T: NetworkingImplementation<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>
             + Clone
             + Debug
             + 'static,
@@ -27,11 +27,11 @@ impl<
 }
 
 pub trait PLStore:
-    Storage<ElaboratedBlock, ValidatorState, H_512> + Clone + Send + Sync + 'static
+    Storage<ElaboratedBlock, ValidatorState, H_256> + Clone + Send + Sync + 'static
 {
 }
 
-impl<T: Storage<ElaboratedBlock, ValidatorState, H_512> + Clone + Send + Sync + 'static> PLStore
+impl<T: Storage<ElaboratedBlock, ValidatorState, H_256> + Clone + Send + Sync + 'static> PLStore
     for T
 {
 }
@@ -48,7 +48,7 @@ impl<NET: PLNet, STORE: PLStore> Debug for ValidatorNodeImpl<NET, STORE> {
     }
 }
 
-impl<NET: PLNet, STORE: PLStore> NodeImplementation<H_512> for ValidatorNodeImpl<NET, STORE> {
+impl<NET: PLNet, STORE: PLStore> NodeImplementation<H_256> for ValidatorNodeImpl<NET, STORE> {
     type Block = ElaboratedBlock;
 
     type State = ValidatorState;

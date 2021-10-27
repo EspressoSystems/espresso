@@ -11,7 +11,7 @@ use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitmen
 use jf_txn::{MerkleTree, TransactionVerifyingKey};
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
-    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_512,
+    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Serialize};
@@ -246,8 +246,8 @@ async fn get_networking<
     panic!("Failed to open a port");
 }
 
-type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_512>>;
-type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_512>;
+type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>;
+type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
 
@@ -289,7 +289,7 @@ async fn init_state_and_phaselock(
     nodes: u64,
     threshold: u64,
     node_id: u64,
-    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
+    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>,
     full_node: bool,
 ) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state
@@ -873,7 +873,7 @@ async fn main() -> Result<(), std::io::Error> {
                 match event.event {
                     EventType::Decide { block: _, state } => {
                         if !state.is_empty() {
-                            let commitment = TaggedBase64::new("LEDG", &state[0].commit())
+                            let commitment = TaggedBase64::new("LEDG", state[0].commit().as_ref())
                                 .unwrap()
                                 .to_string();
                             println!(
