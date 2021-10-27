@@ -845,15 +845,11 @@ async fn main() -> Result<(), std::io::Error> {
 
         // Start consensus for each transaction
         let mut round = 0;
-        loop {
-            // When `num_txn` is set, run `num_txn` rounds.
-            // Otherwise, keeping running till the process is killed.
-            if let Some(num_txn) = NodeOpt::from_args().num_txn {
-                if round >= num_txn {
-                    println!("All rounds completed");
-                    break;
-                }
-            }
+        let num_txn = NodeOpt::from_args().num_txn;
+
+        // When `num_txn` is set, run `num_txn` rounds.
+        // Otherwise, keeping running till the process is killed.
+        while num_txn.map(|count| round < count).unwrap_or(true) {
             println!("Starting round {}", round + 1);
 
             // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
@@ -941,6 +937,8 @@ async fn main() -> Result<(), std::io::Error> {
 
             round += 1;
         }
+
+        println!("All rounds completed");
     }
 
     Ok(())
