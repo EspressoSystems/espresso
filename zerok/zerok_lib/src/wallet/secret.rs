@@ -10,7 +10,7 @@ use std::convert::{AsMut, AsRef};
 use std::marker::PhantomPinned;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 // A !Unpin wrapper around a secret S.
 //
@@ -23,6 +23,12 @@ use zeroize::Zeroize;
 struct Pinned<S> {
     secret: S,
     _pin: PhantomPinned,
+}
+
+impl<S> Pinned<S> {
+    fn new(secret: S) -> Self {
+        Self { secret, _pin: PhantomPinned::default() }
+    }
 }
 
 impl<S> Deref for Pinned<S> {
@@ -40,7 +46,7 @@ impl<S> DerefMut for Pinned<S> {
 }
 
 #[derive(Clone, Debug)]
-pub struct Secret<S: Zeroize>(Pin<Box<Pinned<S>>>);
+pub struct Secret<S: Zeroize>(Pin<Box<Pinned<Zeroizing<S>>>>);
 
 impl<S: Zeroize + Default> Secret<S> {
     /// Construct a pinned, zeroizing secret from a secret value.
@@ -63,7 +69,7 @@ impl<S: Zeroize + Default> Secret<S> {
     /// The caller should take care not to copy or move out of the value after it has been
     /// initialized with secret data but before it has been pinned.
     pub fn build() -> SecretBuilder<S> {
-        SecretBuilder(Box::new(Pinned::default()))
+        SecretBuilder(Box::new(Pinned::new(Zeroizing::new(S::default()))))
     }
 }
 
@@ -75,8 +81,7 @@ impl<S: Zeroize> Deref for Secret<S> {
     }
 }
 
-#[derive(Default)]
-pub struct SecretBuilder<S>(Box<Pinned<S>>);
+pub struct SecretBuilder<S: Zeroize>(Box<Pinned<Zeroizing<S>>>);
 
 impl<S: Zeroize> SecretBuilder<S> {
     pub fn finalize(self) -> Secret<S> {
@@ -84,26 +89,26 @@ impl<S: Zeroize> SecretBuilder<S> {
     }
 }
 
-impl<S> Deref for SecretBuilder<S> {
+impl<S: Zeroize> Deref for SecretBuilder<S> {
     type Target = S;
     fn deref(&self) -> &S {
         &*self.0
     }
 }
 
-impl<S> DerefMut for SecretBuilder<S> {
+impl<S: Zeroize> DerefMut for SecretBuilder<S> {
     fn deref_mut(&mut self) -> &mut S {
         &mut *self.0
     }
 }
 
-impl<S> AsRef<S> for SecretBuilder<S> {
+impl<S: Zeroize> AsRef<S> for SecretBuilder<S> {
     fn as_ref(&self) -> &S {
         &*self
     }
 }
 
-impl<S> AsMut<S> for SecretBuilder<S> {
+impl<S: Zeroize> AsMut<S> for SecretBuilder<S> {
     fn as_mut(&mut self) -> &mut S {
         &mut *self
     }
