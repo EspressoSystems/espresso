@@ -1,0 +1,19 @@
+[package]
+name = "zerok-macros"
+version = "0.1.0"
+authors = ["Translucence Research <engineering@translucence.net>"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = "1.0"
+
+[dev-dependencies]
+arbitrary = { version="1.0", features=["derive"] }
+ark-serialize = { version = "0.3.0", features = ["derive"] }
+rand_chacha = { version = "0.3.1", features = ["serde1"] }
+serde = { version = "1.0", features = ["derive"] }

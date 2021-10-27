@@ -125,6 +125,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61604a8f862e1d5c3229fdd78f8b02c68dcf73a4c4b05fd636d12240aaa242c1"
 
 [[package]]
+name = "arbitrary"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "577b08a4acd7b99869f863c50011b01eb73424ccc798ecd996f2e24817adfca7"
+dependencies = [
+ "derive_arbitrary",
+]
+
+[[package]]
 name = "ark-bls12-377"
 version = "0.3.0"
 source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_et_param#8990c1c9c55094ce0968d6897c351aa442adf1ba"
@@ -1372,6 +1381,17 @@ name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "derive_arbitrary"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b24629208e87a2d8b396ff43b15c4afb0a69cea3fbbaa9ed9b92b7c02f0aed73"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5131,6 +5151,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zerok-macros"
+version = "0.1.0"
+dependencies = [
+ "arbitrary",
+ "ark-serialize",
+ "proc-macro2",
+ "quote",
+ "rand_chacha 0.3.1",
+ "serde",
+ "syn",
+]
+
+[[package]]
 name = "zerok_client"
 version = "0.1.0"
 dependencies = [
@@ -5158,6 +5191,7 @@ dependencies = [
 name = "zerok_lib"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "ark-ff",
  "ark-serialize",
  "ark-std",
@@ -5198,6 +5232,7 @@ dependencies = [
  "tempdir",
  "tide",
  "tracing",
+ "zerok-macros",
 ]
 
 [[package]]

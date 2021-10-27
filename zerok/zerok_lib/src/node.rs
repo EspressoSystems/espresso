@@ -1,8 +1,9 @@
 pub use crate::state_comm::LedgerStateCommitment;
 use crate::{
-    set_merkle_tree::*, validator_node::*, ElaboratedBlock, ElaboratedTransaction, ValidationError,
-    ValidatorState,
+    ser_test, set_merkle_tree::*, validator_node::*, ElaboratedBlock, ElaboratedTransaction,
+    ValidationError, ValidatorState,
 };
+use arbitrary::Arbitrary;
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
 use async_trait::async_trait;
@@ -89,14 +90,16 @@ impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[ser_test(arbitrary, ark(false))]
+#[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[non_exhaustive]
 pub struct LedgerSummary {
     pub num_blocks: usize,
     pub num_records: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[ser_test(arbitrary, ark(false))]
+#[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LedgerSnapshot {
     pub state: ValidatorState,
     pub nullifiers: SetMerkleTree,
