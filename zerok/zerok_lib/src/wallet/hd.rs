@@ -44,9 +44,9 @@ pub struct KeyTree(
     // already quite large) but it is an extra layer of security for sub-tree separation, which is
     // the most important security property of this system.
     //
-    // BIP32 uses a similar idea by extending their keys with an extra 32 bytes of entropy (the 
+    // BIP32 uses a similar idea by extending their keys with an extra 32 bytes of entropy (the
     // chain code).
-    Secret<[u8; 64]>
+    Secret<[u8; 64]>,
 );
 
 impl KeyTree {
@@ -105,6 +105,7 @@ impl KeyTree {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Key(Secret<[u8; 32]>);
 
 impl Key {

@@ -27,7 +27,10 @@ struct Pinned<S> {
 
 impl<S> Pinned<S> {
     fn new(secret: S) -> Self {
-        Self { secret, _pin: PhantomPinned::default() }
+        Self {
+            secret,
+            _pin: PhantomPinned::default(),
+        }
     }
 }
 
@@ -46,11 +49,11 @@ impl<S> DerefMut for Pinned<S> {
 }
 
 /// Provide a default value for use when constructing secrets.
-/// 
+///
 /// Constructing a secret requires a default value, because we initialize the memory location where
 /// the secret will go before constructing the secret, to avoid constructing a secret value and then
 /// moving it around memory.
-/// 
+///
 /// Some types that we want to use as secrets do not have a Default implementation (e.g. [T; 64]) so
 /// we use this trait instead in order to add our own implementations without running into the
 /// orphan rule.
