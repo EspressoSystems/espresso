@@ -86,6 +86,41 @@ pub struct ElaboratedTransaction {
     pub proofs: Vec<SetMerkleProof>,
 }
 
+impl ElaboratedTransaction {
+    fn hash(&self) -> ElaboratedTransactionHash {
+        ElaboratedTransactionHash(ElaboratedBlock::hash_transaction(self))
+    }
+}
+
+#[tagged_blob("TXN")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ElaboratedTransactionHash(phaselock::BlockHash<H_256>);
+
+impl CanonicalSerialize for ElaboratedTransactionHash {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), ark_serialize::SerializationError> {
+        writer
+            .write_all(self.0.as_ref())
+            .map_err(ark_serialize::SerializationError::from)
+    }
+
+    fn serialized_size(&self) -> usize {
+        64
+    }
+}
+
+impl CanonicalDeserialize for ElaboratedTransactionHash {
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, ark_serialize::SerializationError> {
+        use std::convert::TryInto;
+        let mut buf = vec![0; 64];
+        reader
+            .read_exact(&mut buf)
+            .map_err(ark_serialize::SerializationError::from)?;
+        Ok(ElaboratedTransactionHash(phaselock::BlockHash::from_array(
+            buf.as_slice().try_into().unwrap(),
+        )))
+    }
+}
+
 #[derive(
     Default,
     Debug,
@@ -254,7 +289,7 @@ pub mod key_set {
         fn sort_key(num_inputs: usize, num_outputs: usize) -> Self::SortKey;
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     pub struct OrderByInputs;
     impl KeyOrder for OrderByInputs {
         type SortKey = (usize, usize);
@@ -263,7 +298,7 @@ pub mod key_set {
         }
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     pub struct OrderByOutputs;
     impl KeyOrder for OrderByOutputs {
         type SortKey = (usize, usize);
@@ -273,7 +308,9 @@ pub mod key_set {
     }
 
     #[serde_as]
-    #[derive(Debug, Clone, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize)]
+    #[derive(
+        Debug, Clone, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize, PartialEq,
+    )]
     #[serde(bound = "K: Serialize + for<'a> Deserialize<'a>")]
     pub struct KeySet<K: SizedKey, Order: KeyOrder = OrderByInputs> {
         // serde_json does not support maps where the keys are not Strings (or easily convertible
@@ -347,7 +384,9 @@ pub mod key_set {
 }
 use key_set::KeySet;
 
-#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize, PartialEq,
+)]
 pub struct ProverKeySet<'a, Order: key_set::KeyOrder = key_set::OrderByInputs> {
     pub mint: MintProvingKey<'a>,
     pub xfr: KeySet<TransferProvingKey<'a>, Order>,

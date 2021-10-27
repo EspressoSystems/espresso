@@ -14,35 +14,59 @@ use futures::future::BoxFuture;
 use jf_txn::keys::{AuditorPubKey, FreezerPubKey};
 use jf_txn::structs::{AssetCode, AssetDefinition, AssetPolicy};
 use lazy_static::lazy_static;
+use shutdown_hooks::add_shutdown_hook;
 use std::any::type_name;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::iter::once;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::str::FromStr;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
-use wallet::{network::*, AssetInfo, MintInfo};
+use tempdir::TempDir;
+use wallet::{network::*, AssetInfo, MintInfo, TransactionReceipt, TransactionState};
 use zerok_lib::{api, wallet, UNIVERSAL_PARAM};
 
 type Wallet = wallet::Wallet<'static, NetworkBackend<'static>>;
 
 #[derive(StructOpt)]
 struct Args {
-    #[structopt(short = "g", long)]
     /// Generate keys for a wallet, do not run the REPL.
     ///
     /// The keys are stored in FILE and FILE.pub.
+    #[structopt(short = "g", long)]
     key_gen: Option<PathBuf>,
 
-    #[structopt(short, long)]
     /// Path to a private key file to use for the wallet.
     ///
     /// If not given, new keys are generated randomly.
+    #[structopt(short, long)]
     key_path: Option<PathBuf>,
+
+    /// Path to a saved wallet, or a new directory where this wallet will be saved.
+    ///
+    /// If not given, the wallet will be stored in ~/.translucence/wallet. If a wallet already
+    /// exists there, it will be loaded. Otherwise, a new wallet will be created.
+    #[structopt(short, long)]
+    storage: Option<PathBuf>,
+
+    /// Create a new wallet and store it an a temporary location which will be deleted on exit.
+    ///
+    /// This option is mutually exclusive with --storage.
+    #[structopt(long)]
+    #[structopt(conflicts_with("storage"))]
+    #[structopt(hidden(true))]
+    tmp_storage: bool,
+
+    #[structopt(long)]
+    /// Run in a mode which is friendlier to automated scripting.
+    ///
+    /// Instead of prompting the user for input with a line editor, the prompt will be printed,
+    /// followed by a newline, and the input will be read without an editor.
+    non_interactive: bool,
 
     /// URL of a server for interacting with the ledger
     server: Option<Url>,
@@ -295,13 +319,20 @@ lazy_static! {
             "print information about an asset",
             |wallet, asset: ListItem<AssetCode>| {
                 let assets = wallet.assets().await;
-                let info = match assets.get(&asset.item) {
-                    Some(info) => info,
-                    None => {
-                        println!("No such asset {}", asset.item);
-                        return;
-                    }
-                };
+                let info =
+                    if asset.item == AssetCode::native() {
+                        // We always recognize the native asset type in the CLI, even if it's not
+                        // included in the wallet's assets yet.
+                        AssetInfo::from(AssetDefinition::native())
+                    } else {
+                        match assets.get(&asset.item) {
+                            Some(info) => info.clone(),
+                            None => {
+                                println!("No such asset {}", asset.item);
+                                return;
+                            }
+                        }
+                    };
 
                 // Try to format the asset description as human-readable as possible.
                 let desc = if let Some(MintInfo { desc, .. }) = &info.mint_info {
@@ -363,12 +394,29 @@ lazy_static! {
         command!(
             transfer,
             "transfer some owned assets to another user",
-            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64| {
-                if let Err(err) = wallet
+            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64; wait: Option<bool>| {
+                match wallet
                     .transfer(&asset.item, &[(address.0, amount)], fee)
                     .await
                 {
-                    println!("{}\nAssets were not transferred.", err);
+                    Ok(receipt) => {
+                        if wait == Some(true) {
+                            match wallet.await_transaction(&receipt).await {
+                                Err(err) => {
+                                    println!("Error waiting for transaction to complete: {}", err);
+                                }
+                                Ok(TransactionState::Retired) => {},
+                                _ => {
+                                    println!("Transaction failed");
+                                }
+                            }
+                        } else {
+                            println!("Transaction {}", receipt);
+                        }
+                    }
+                    Err(err) => {
+                        println!("{}\nAssets were not transferred.", err);
+                    }
                 }
             }
         ),
@@ -396,9 +444,49 @@ lazy_static! {
         command!(
             mint,
             "mint an asset",
-            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64| {
-                if let Err(err) = wallet.mint(fee, &asset.item, amount, address.0).await {
-                    println!("{}\nAssets were not minted.", err);
+            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64; wait: Option<bool>| {
+                match wallet
+                    .mint(fee, &asset.item, amount, address.0)
+                    .await
+                {
+                    Ok(receipt) => {
+                        if wait == Some(true) {
+                            match wallet.await_transaction(&receipt).await {
+                                Err(err) => {
+                                    println!("Error waiting for transaction to complete: {}", err);
+                                }
+                                Ok(TransactionState::Retired) => {},
+                                _ => {
+                                    println!("Transaction failed");
+                                }
+                            }
+                        } else {
+                            println!("Transaction {}", receipt);
+                        }
+                    }
+                    Err(err) => {
+                        println!("{}\nAssets were not minted.", err);
+                    }
+                }
+            }
+        ),
+        command!(
+            transaction,
+            "print the status of a transaction",
+            |wallet, receipt: TransactionReceipt| {
+                match wallet.transaction_status(&receipt).await {
+                    Ok(status) => println!("{}", status),
+                    Err(err) => println!("Error getting transaction status: {}", err),
+                }
+            }
+        ),
+        command!(
+            wait,
+            "wait for a transaction to complete",
+            |wallet, receipt: TransactionReceipt| {
+                match wallet.await_transaction(&receipt).await {
+                    Ok(status) => println!("{}", status),
+                    Err(err) => println!("Error waiting for transaction: {}", err),
                 }
             }
         ),
@@ -406,7 +494,7 @@ lazy_static! {
             info,
             "print general information about this wallet",
             |wallet| {
-                println!("Address: {}", wallet.address());
+                println!("Address: {}", api::UserAddress(wallet.address()));
                 println!("Public key: {}", wallet.pub_key());
                 println!("Audit key: {}", wallet.auditor_pub_key());
                 println!("Freeze key: {}", wallet.freezer_pub_key());
@@ -421,7 +509,41 @@ lazy_static! {
 }
 
 lazy_static! {
+    static ref STORAGE: (PathBuf, Arc<Mutex<Option<TempDir>>>) = {
+        let args = Args::from_args();
+        match args.storage {
+            Some(storage) => (storage, Arc::new(Mutex::new(None))),
+            None if !args.tmp_storage => {
+                let home = std::env::var("HOME").unwrap_or_else(|_| {
+                    println!(
+                        "HOME directory is not set. Please set your HOME directory, or specify a \
+                        different storage location using --storage."
+                    );
+                    exit(1);
+                });
+                let mut dir = PathBuf::from(home);
+                dir.push(".translucence/wallet");
+                (dir, Arc::new(Mutex::new(None)))
+            }
+            None => {
+                let tmp_dir = TempDir::new("wallet").unwrap_or_else(|err| {
+                    println!("error creating temporary directory: {}", err);
+                    exit(1);
+                });
+                add_shutdown_hook(close_storage);
+                (
+                    PathBuf::from(tmp_dir.path()),
+                    Arc::new(Mutex::new(Some(tmp_dir))),
+                )
+            }
+        }
+    };
+    static ref STORAGE_PATH: &'static Path = &STORAGE.0;
     static ref WALLET: Arc<Mutex<Wallet>> = Arc::new(Mutex::new(block_on(init_repl())));
+}
+
+extern "C" fn close_storage() {
+    block_on(STORAGE.1.lock()).take();
 }
 
 async fn init_repl() -> Wallet {
@@ -461,6 +583,7 @@ async fn init_repl() -> Wallet {
         server.clone(),
         server.clone(),
         server.clone(),
+        *STORAGE_PATH,
     )
     .unwrap_or_else(|err| {
         println!("Failed to connect to backend: {}", err);
@@ -473,6 +596,33 @@ async fn init_repl() -> Wallet {
 
     println!("Type 'help' for a list of commands.");
     wallet
+}
+
+enum Reader {
+    Interactive(rustyline::Editor<()>),
+    Automated,
+}
+
+impl Reader {
+    fn new(args: &Args) -> Self {
+        if args.non_interactive {
+            Self::Automated
+        } else {
+            Self::Interactive(rustyline::Editor::<()>::new())
+        }
+    }
+
+    fn read_line(&mut self) -> Option<String> {
+        let prompt = "> ";
+        match self {
+            Self::Interactive(editor) => editor.readline(prompt).ok(),
+            Self::Automated => {
+                println!("{}", prompt);
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line).ok().map(|_| line)
+            }
+        }
+    }
 }
 
 #[async_std::main]
@@ -516,8 +666,8 @@ async fn main() {
     // after the user has started using the wallet.
     let _ = &*WALLET;
 
-    let mut input = rustyline::Editor::<()>::new();
-    'repl: while let Ok(line) = input.readline("> ") {
+    let mut input = Reader::new(&args);
+    'repl: while let Some(line) = input.read_line() {
         let tokens = line.split_whitespace().collect::<Vec<_>>();
         if tokens.is_empty() {
             continue;

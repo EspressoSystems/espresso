@@ -29,6 +29,7 @@ use snafu::ResultExt;
 use std::fmt::Display;
 use std::time::Duration;
 use structopt::StructOpt;
+use tempdir::TempDir;
 use tracing::{event, Level};
 use wallet::{
     network::{NetworkBackend, Url},
@@ -226,8 +227,16 @@ async fn main() {
 
     // Check that we can create a wallet using this server as a backend.
     let url = url("/");
+    let storage = TempDir::new("test_query_api").unwrap();
     let _wallet = Wallet::new(
         wallet::new_key_pair(),
-        NetworkBackend::new(&*UNIVERSAL_PARAM, url.clone(), url.clone(), url).unwrap(),
+        NetworkBackend::new(
+            &*UNIVERSAL_PARAM,
+            url.clone(),
+            url.clone(),
+            url,
+            storage.path(),
+        )
+        .unwrap(),
     );
 }
