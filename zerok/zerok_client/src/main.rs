@@ -608,7 +608,14 @@ impl Reader {
             Self::Automated => {
                 println!("{}", prompt);
                 let mut line = String::new();
-                std::io::stdin().read_line(&mut line).ok().map(|_| line)
+                match std::io::stdin().read_line(&mut line) {
+                    Ok(0) => {
+                        // EOF
+                        None
+                    }
+                    Err(_) => None,
+                    Ok(_) => Some(line),
+                }
             }
         }
     }

@@ -316,7 +316,7 @@ impl Wallet {
 
     fn close(&mut self) {
         if let Some(mut child) = self.process.take() {
-            child.process.kill().ok();
+            drop(child.stdin);
             child.process.wait().ok();
         }
     }
