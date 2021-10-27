@@ -43,7 +43,6 @@ mod ip;
 mod routes;
 
 const STATE_SEED: [u8; 32] = [0x7au8; 32];
-const TRANSACTION_COUNT: u64 = 3;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -112,6 +111,12 @@ struct NodeOpt {
     /// the validators using the network API.
     #[structopt(short, long = "wallet")]
     wallet_pk_path: Option<PathBuf>,
+
+    /// Number of transactions to generate.
+    ///
+    /// Skip this option if want to keep generating transactions till the process is killed.
+    #[structopt(long = "num_txn", short = "n")]
+    num_txn: Option<u64>,
 }
 
 /// Gets public key of a node from its public key file.
@@ -840,7 +845,15 @@ async fn main() -> Result<(), std::io::Error> {
 
         // Start consensus for each transaction
         let mut round = 0;
-        while round < TRANSACTION_COUNT {
+        loop {
+            // When `num_txn` is set, run `num_txn` rounds.
+            // Otherwise, keeping running till the process is killed.
+            if let Some(num_txn) = NodeOpt::from_args().num_txn {
+                if round >= num_txn {
+                    println!("All rounds completed");
+                    break;
+                }
+            }
             println!("Starting round {}", round + 1);
 
             // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
@@ -849,11 +862,7 @@ async fn main() -> Result<(), std::io::Error> {
                 if let Some(state) = &mut state {
                     println!("  - Proposing a transaction");
                     let mut transactions = state
-                        .generate_transactions(
-                            round as usize,
-                            vec![(true, 0, 0, 0, 0, -2)],
-                            TRANSACTION_COUNT as usize,
-                        )
+                        .generate_transactions(round as usize, vec![(true, 0, 0, 0, 0, -2)], 1)
                         .unwrap();
                     txn = Some(transactions.remove(0));
                     phaselock
@@ -923,29 +932,15 @@ async fn main() -> Result<(), std::io::Error> {
                 }
 
                 state
-                    .try_add_transaction(
-                        &mut blk,
-                        t,
-                        round as usize,
-                        ix,
-                        TRANSACTION_COUNT as usize,
-                        owner_memos,
-                        kixs,
-                    )
+                    .try_add_transaction(&mut blk, t, round as usize, ix, 1, owner_memos, kixs)
                     .unwrap();
                 state
-                    .validate_and_apply(blk, round as usize, TRANSACTION_COUNT as usize, 0.0)
+                    .validate_and_apply(blk, round as usize, 1, 0.0)
                     .unwrap();
             }
 
-            // When there isn't a wallet attached, run `TRANSACTION_COUNT` rounds.
-            // Otherwise, keeping running till the process is killed.
-            if NodeOpt::from_args().wallet_pk_path.is_none() {
-                round += 1;
-            }
+            round += 1;
         }
-
-        println!("All rounds completed");
     }
 
     Ok(())
