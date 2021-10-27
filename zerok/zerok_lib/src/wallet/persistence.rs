@@ -8,7 +8,8 @@ use atomic_store::{
     load_store::{BincodeLoadStore, LoadStore},
     AppendLog, AtomicStore, AtomicStoreLoader, RollingLog,
 };
-use encryption::{Cipher, Key};
+use encryption::Cipher;
+use hd::KeyTree;
 use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserKeyPair};
 use jf_txn::structs::AssetDefinition;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
@@ -19,8 +20,8 @@ use std::path::PathBuf;
 pub trait WalletLoader {
     type Meta; // Metadata stored in plaintext and used by the loader to access the wallet.
     fn location(&self) -> PathBuf;
-    fn create(&mut self) -> Result<(Self::Meta, Key), WalletError>;
-    fn load(&mut self, meta: &Self::Meta) -> Result<Key, WalletError>;
+    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError>;
+    fn load(&mut self, meta: &Self::Meta) -> Result<KeyTree, WalletError>;
 
     /// This function can be overridden to create wallets with a particular public key.
     ///
@@ -78,7 +79,7 @@ struct EncryptingResourceAdapter<T> {
 }
 
 impl<T> EncryptingResourceAdapter<T> {
-    fn new(key: &Key) -> Self {
+    fn new(key: KeyTree) -> Self {
         Self {
             cipher: Cipher::new(key, ChaChaRng::from_entropy()),
             _phantom: Default::default(),
@@ -170,7 +171,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStorage<'a, Meta
             }
         };
 
-        let adaptor = EncryptingResourceAdapter::<()>::new(&key);
+        let adaptor = EncryptingResourceAdapter::<()>::new(key);
         let static_data =
             RollingLog::load(&mut atomic_loader, adaptor.cast(), "wallet_static", 1024)
                 .context(PersistenceError)?;
@@ -371,7 +372,7 @@ mod tests {
 
     struct MockWalletLoader {
         dir: TempDir,
-        key: Key,
+        key: KeyTree,
     }
 
     impl WalletLoader for MockWalletLoader {
@@ -381,11 +382,11 @@ mod tests {
             self.dir.path().into()
         }
 
-        fn create(&mut self) -> Result<(Self::Meta, Key), WalletError> {
+        fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError> {
             Ok(((), self.key.clone()))
         }
 
-        fn load(&mut self, _meta: &Self::Meta) -> Result<Key, WalletError> {
+        fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
             Ok(self.key.clone())
         }
     }
@@ -480,7 +481,7 @@ mod tests {
 
         let mut loader = MockWalletLoader {
             dir: TempDir::new(name).unwrap(),
-            key: Key::random(&mut rng),
+            key: KeyTree::random(&mut rng),
         };
         {
             let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();

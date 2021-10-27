@@ -1,172 +1,117 @@
-use aead::{Aead, NewAead};
-use aes::{Aes256, NewBlockCipher};
-use aes_gcm_siv::{aead, Nonce};
+use super::hd;
+use chacha20::{cipher, ChaCha20};
+use cipher::{NewCipher, StreamCipher};
+pub use hd::Salt;
+use hmac::{crypto_mac::MacError, Hmac, Mac, NewMac};
 use rand_chacha::rand_core::{CryptoRng, RngCore};
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
+use sha3::Keccak256;
 use snafu::Snafu;
-use std::marker::PhantomPinned;
-use std::ops::{Deref, DerefMut};
-use std::pin::Pin;
-use std::sync::Arc;
-use zeroize::Zeroize;
-
-type Aes = Aes256;
-type AesGcmSiv = aes_gcm_siv::AesGcmSiv<Aes>;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    AesError {
+    DataTooLong {
         #[snafu(source(false))]
-        source: aead::Error,
+        source: cipher::errors::LoopError,
     },
     ArgonError {
         #[snafu(source(false))]
         source: argon2::Error,
     },
+    InvalidHmac {
+        #[snafu(source(false))]
+        source: MacError,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub type Salt = [u8; 32];
+pub type Nonce = [u8; 32];
 
-type InnerKey = aes_gcm_siv::Key<<Aes as NewBlockCipher>::KeySize>;
-
-// A !Unpin wrapper around a secret S.
-//
-// This type, when wrapped in a Pin<>, can be used to prevent a secret from being moved. Ensuring
-// that a secret only has one location in memory for the duration of its life can reduce the risk of
-// the compiler leaving unreachable, implicit copies of the secret scattered around memory.
-//
-// This is especially useful when S is zeroizing on drop.
-#[derive(Clone, Default)]
-struct Pinned<S> {
-    secret: S,
-    _pin: PhantomPinned,
-}
-
-impl<S> Pinned<S> {
-    fn new(secret: S) -> Self {
-        Self {
-            secret,
-            _pin: PhantomPinned::default(),
-        }
-    }
-}
-
-impl<S> Deref for Pinned<S> {
-    type Target = S;
-
-    fn deref(&self) -> &S {
-        &self.secret
-    }
-}
-
-impl<S> DerefMut for Pinned<S> {
-    fn deref_mut(&mut self) -> &mut S {
-        &mut self.secret
-    }
-}
-
-// A secret key that zeroes its memory when dropped.
-#[derive(Clone, Default, Zeroize)]
-#[zeroize(drop)]
-struct ZeroizingKey(InnerKey);
-
-// A wrapper around a pinned, zeroizing secret key.
-#[derive(Clone)]
-pub struct Key(Pin<Box<Pinned<ZeroizingKey>>>);
-
-impl Key {
-    pub fn from_password(
-        rng: &mut (impl RngCore + CryptoRng),
-        password: &[u8],
-    ) -> Result<(Self, Salt)> {
-        let mut salt = Salt::default();
-        rng.fill_bytes(&mut salt);
-        let key = Self::from_password_and_salt(password, &salt)?;
-        Ok((key, salt))
-    }
-
-    pub fn from_password_and_salt(password: &[u8], salt: &[u8]) -> Result<Self> {
-        let config = argon2::Config {
-            hash_length: Self::size() as u32,
-            ..Default::default()
-        };
-        let mut hash = argon2::hash_raw(password, salt, &config)
-            .map_err(|source| Error::ArgonError { source })?;
-
-        // Construct the key in an unpinned Box first, so we can write to the underlying memory
-        // safely. We will pin it once we have written the key, and we're not going to move out in
-        // the meantime.
-        let mut key = Box::new(Pinned::<ZeroizingKey>::default());
-        for (src, dst) in hash.iter().zip(&mut key.0) {
-            *dst = *src;
-        }
-        // We just copied the hash into the secret key, so the data in the hash is now a secret. We
-        // need to zero it. If only argon2 had an in-place mode, this wouldn't be necessary.
-        hash.zeroize();
-
-        // Convert the Boxed key into a Pin<Box<_>>
-        Ok(Self(key.into()))
-    }
-
-    pub fn random(rng: &mut (impl RngCore + CryptoRng)) -> Self {
-        let mut key = Box::new(Pinned::<ZeroizingKey>::default());
-        rng.fill_bytes(&mut key.0);
-        Self(key.into())
-    }
-
-    fn size() -> usize {
-        InnerKey::default().len()
-    }
-
-    fn inner(&self) -> &InnerKey {
-        &self.0 .0
-    }
-}
-
+/// An authenticating stream cipher.
+///
+/// This implementation uses the encrypt-then-MAC strategy, with ChaCha20 as the stream cipher and
+/// Keccak-256 as an HMAC.
+///
+/// It requires an entire sub-tree of the HD key structure, as it generates separate keys for
+/// encryption and authentication for each message it encrypts.
 #[derive(Clone)]
 pub struct Cipher<Rng: CryptoRng = ChaChaRng> {
-    // AesGcmSiv implements Clone itself, but using Arc prevents the clone impl for Cipher from
-    // making in-memory copies of the underlying cipher, which is important for security because the
-    // cipher contains data derived from the secret key. We pin the target of the pointer for the
-    // same reason: to try to prevent the compiler from making temporary copies in memory.
-    //
-    // Note that this effort at security is not complete. We should also:
-    //  * zero out the one in-memory copy we do have when all clones of a cipher are dropped.
-    //    However, AesGcmSiv does not yet implement Zeroize. See https://github.com/RustCrypto/AEADs/issues/65.
-    //  * pin the page where the AesGcmSiv is stored in memory to prevent the OS from making copies
-    //    in swap space
-    aes: Pin<Arc<Pinned<AesGcmSiv>>>,
+    keys: hd::KeyTree,
     rng: Rng,
 }
 
 impl<Rng: RngCore + CryptoRng> Cipher<Rng> {
-    pub fn new(key: &Key, rng: Rng) -> Self {
-        Self {
-            aes: Arc::pin(Pinned::new(AesGcmSiv::new(key.inner()))),
-            rng,
-        }
+    pub fn new(keys: hd::KeyTree, rng: Rng) -> Self {
+        Self { keys, rng }
     }
 
     pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<CipherText> {
+        // Generate a random nonce unique to this message and use it to derive encryption and
+        // authentication keys, also unique to this message.
         let mut nonce = Nonce::default();
         self.rng.fill_bytes(&mut nonce);
+        let (cipher_key, hmac_key) = self.gen_keys(&nonce);
 
-        Ok(CipherText {
-            bytes: self
-                .aes
-                .encrypt(&nonce, plaintext)
-                .map_err(|source| Error::AesError { source })?,
-            nonce,
-        })
+        // Encrypt the plaintext by applying the keystream.
+        let mut bytes = plaintext.to_vec();
+        self.apply(&cipher_key, &mut bytes)?;
+
+        // Add the authentication tag.
+        let hmac = self
+            .hmac(&hmac_key, &nonce, &bytes)
+            .finalize()
+            .into_bytes()
+            .to_vec();
+        Ok(CipherText { bytes, nonce, hmac })
     }
 
     pub fn decrypt(&self, ciphertext: &CipherText) -> Result<Vec<u8>> {
-        self.aes
-            .decrypt(&ciphertext.nonce, ciphertext.bytes.as_slice())
-            .map_err(|source| Error::AesError { source })
+        // Re-generate the keys which were used to encrypt and authenticate this message, based on
+        // the associated nonce.
+        let (cipher_key, hmac_key) = self.gen_keys(&ciphertext.nonce);
+
+        // Verify the HMAC _before_ decrypting.
+        self.hmac(&hmac_key, &ciphertext.nonce, &ciphertext.bytes)
+            .verify(&ciphertext.hmac)
+            .map_err(|source| Error::InvalidHmac { source })?;
+
+        // If authentication succeeded, decrypt the ciphertext.
+        let mut bytes = ciphertext.bytes.clone();
+        self.apply(&cipher_key, &mut bytes)?;
+        Ok(bytes)
+    }
+
+    fn apply(&self, key: &hd::Key, data: &mut [u8]) -> Result<()> {
+        // We don't need a random nonce for the stream cipher, since we are initializing it with a
+        // new key for each message.
+        let mut cipher = ChaCha20::new(key.as_bytes().into(), &chacha20::Nonce::default());
+        cipher
+            .try_apply_keystream(data)
+            .map_err(|source| Error::DataTooLong { source })?;
+        Ok(())
+    }
+
+    fn hmac(&self, key: &hd::Key, nonce: &[u8], ciphertext: &[u8]) -> Hmac<Keccak256> {
+        let mut hmac = Hmac::<Keccak256>::new_from_slice(key.as_bytes()).unwrap();
+        hmac.update(key.as_bytes());
+        hmac.update(nonce);
+        // Note: the ciphertext must be the last field, since it is variable sized and we do not
+        // explicitly commit to its length. If we included another variably sized field after the
+        // ciphertext, an attacker could alter the field boundaries to create a semantically
+        // different message with the same MAC.
+        hmac.update(ciphertext);
+        hmac
+    }
+
+    fn gen_keys(&self, nonce: &[u8]) -> (hd::Key, hd::Key) {
+        // Derive keys (from their own sub-tree) for the cipher and the HMAC.
+        let keys = self.keys.derive_sub_tree(nonce);
+        (
+            keys.derive_key("cipher".as_bytes()),
+            keys.derive_key("hmac".as_bytes()),
+        )
     }
 }
 
@@ -174,4 +119,5 @@ impl<Rng: RngCore + CryptoRng> Cipher<Rng> {
 pub struct CipherText {
     bytes: Vec<u8>,
     nonce: Nonce,
+    hmac: Vec<u8>,
 }

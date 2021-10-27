@@ -47,44 +47,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "aes"
-version = "0.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e8b47f52ea9bae42228d07ec09eb676433d7c4ed1ebdf0f1d1c29ed446f1ab8"
-dependencies = [
- "cfg-if 1.0.0",
- "cipher 0.3.0",
- "cpufeatures",
- "opaque-debug",
-]
-
-[[package]]
 name = "aes-gcm"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5278b5fabbb9bd46e24aa69b2fdea62c99088e0a950a9be40e3e0101298f88da"
 dependencies = [
  "aead 0.3.2",
- "aes 0.6.0",
+ "aes",
  "cipher 0.2.5",
- "ctr 0.6.0",
+ "ctr",
  "ghash",
  "subtle",
-]
-
-[[package]]
-name = "aes-gcm-siv"
-version = "0.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "589c637f0e68c877bbd59a4599bbe849cac8e5f3e4b5a3ebae8f528cd218dcdc"
-dependencies = [
- "aead 0.4.3",
- "aes 0.7.5",
- "cipher 0.3.0",
- "ctr 0.8.0",
- "polyval 0.5.3",
- "subtle",
- "zeroize",
 ]
 
 [[package]]
@@ -889,8 +862,15 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4152116fd6e9dadb291ae18fc1ec3575ed6d84c29642d97890f4b4a3417297e4"
 dependencies = [
+ "block-padding",
  "generic-array",
 ]
+
+[[package]]
+name = "block-padding"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d696c370c750c948ada61c69a0ee2cbbb9c50b1019ddb86d9317157a99c2cae"
 
 [[package]]
 name = "blocking"
@@ -989,13 +969,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "chacha20"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01b72a433d0cf2aef113ba70f62634c56fddb0f244e6377185c56a7cadbd8f91"
+dependencies = [
+ "cfg-if 1.0.0",
+ "cipher 0.3.0",
+ "cpufeatures",
+]
+
+[[package]]
 name = "chacha20poly1305"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6547abe025f4027edacd9edaa357aded014eecec42a5070d9b885c3c334aba2"
 dependencies = [
  "aead 0.4.3",
- "chacha20",
+ "chacha20 0.7.3",
  "cipher 0.3.0",
  "poly1305",
  "zeroize",
@@ -1232,12 +1223,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "crypto-mac"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1d1a86f49236c215f271d40892d5fc950490551400b02ef360692c29815c714"
+dependencies = [
+ "generic-array",
+ "subtle",
+]
+
+[[package]]
 name = "crypto_box"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a41c3b5488899ea68ee2dd99e089b95629c6407150bda8e56f2602d78fec8e4"
 dependencies = [
- "chacha20",
+ "chacha20 0.7.3",
  "chacha20poly1305",
  "rand_core 0.6.3",
  "salsa20",
@@ -1285,15 +1286,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb4a30d54f7443bf3d6191dcd486aca19e67cb3c49fa7a06a319966346707e7f"
 dependencies = [
  "cipher 0.2.5",
-]
-
-[[package]]
-name = "ctr"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "049bb91fb4aaf0e3c7efa6cd5ef877dbbbd15b39dad06d9948de4ec8a75761ea"
-dependencies = [
- "cipher 0.3.0",
 ]
 
 [[package]]
@@ -1899,7 +1891,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97304e4cd182c3846f7575ced3890c53012ce534ad9114046b0a9e00bb30a375"
 dependencies = [
  "opaque-debug",
- "polyval 0.4.5",
+ "polyval",
 ]
 
 [[package]]
@@ -2023,6 +2015,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1441c6b1e930e2817404b5046f1f989899143a12bf92de603b69f4e0aee1e15"
 dependencies = [
  "crypto-mac 0.10.1",
+ "digest",
+]
+
+[[package]]
+name = "hmac"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a2a2320eb7ec0ebe8da8f744d7812d9fc4cb4d09344ac01898dbcb6a20ae69b"
+dependencies = [
+ "crypto-mac 0.11.1",
  "digest",
 ]
 
@@ -3128,18 +3130,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "polyval"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8419d2b623c7c0896ff2d5d96e2cb4ede590fed28fcc34934f4c33c036e620a1"
-dependencies = [
- "cfg-if 1.0.0",
- "cpufeatures",
- "opaque-debug",
- "universal-hash",
-]
-
-[[package]]
 name = "ppv-lite86"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3968,6 +3958,18 @@ dependencies = [
  "cfg-if 1.0.0",
  "cpufeatures",
  "digest",
+ "opaque-debug",
+]
+
+[[package]]
+name = "sha3"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f81199417d4e5de3f04b1e871023acea7389672c4135918f05aa9cbf2f2fa809"
+dependencies = [
+ "block-buffer",
+ "digest",
+ "keccak",
  "opaque-debug",
 ]
 
@@ -5244,8 +5246,6 @@ dependencies = [
 name = "zerok_lib"
 version = "0.1.0"
 dependencies = [
- "aes 0.7.5",
- "aes-gcm-siv",
  "ark-ff",
  "ark-serialize",
  "ark-std",
@@ -5258,8 +5258,10 @@ dependencies = [
  "bincode",
  "bitvec",
  "blake2",
+ "chacha20 0.8.1",
  "futures",
  "generic-array",
+ "hmac 0.11.0",
  "itertools 0.10.1",
  "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
@@ -5279,6 +5281,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_with",
+ "sha3",
  "snafu",
  "strum",
  "strum_macros",

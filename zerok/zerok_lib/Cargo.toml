@@ -7,9 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-aes = "0.7.5"
-aes-gcm-siv = "0.10.3"
 atomic_store = { version="0.0.2", registry="translucence" }
+chacha20 = "0.8.1"
 itertools = "0.10.1"
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
@@ -21,6 +20,7 @@ phaselock = { version = "0.0.2", registry = "translucence"}
 ark-std = { version = "0.3.0", default-features = false }
 ark-ff = { version = "0.3.0", default-features = false }
 ark-serialize = { version = "0.3.0", features = ["derive"] }
+hmac = "0.11.0"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 rust-argon2 = "0.8.3"
 serde = { version = "1.0", features = ["derive"] }
@@ -42,6 +42,7 @@ async-trait = "0.1.51"
 async-tungstenite = { version = "0.15.0", features = ["async-std-runtime"] }
 async_executors = { version = "0.4.2", features = ["async_std"] }
 futures = "0.3.16"
+sha3 = "0.9.1"
 strum = "0.20"
 strum_macros = "0.20.1"
 surf = "2.3.1"

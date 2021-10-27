@@ -36,8 +36,8 @@ use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use tempdir::TempDir;
 use wallet::{
-    encryption, network::*, persistence::WalletLoader, AssetInfo, EncryptionError, MintInfo,
-    TransactionReceipt, TransactionState, WalletError,
+    encryption, hd::KeyTree, network::*, persistence::WalletLoader, AssetInfo, EncryptionError,
+    KeyError, MintInfo, TransactionReceipt, TransactionState, WalletError,
 };
 use zerok_lib::{api, wallet, UNIVERSAL_PARAM};
 
@@ -642,7 +642,7 @@ impl WalletLoader for PasswordLoader {
         self.dir.clone()
     }
 
-    fn create(&mut self) -> Result<(WalletMetadata, encryption::Key), WalletError> {
+    fn create(&mut self) -> Result<(WalletMetadata, KeyTree), WalletError> {
         let password = if self.encrypted {
             loop {
                 let password = self.reader.read_password("Create password: ")?;
@@ -657,13 +657,13 @@ impl WalletLoader for PasswordLoader {
             String::new()
         };
 
-        let (key, salt) = encryption::Key::from_password(&mut self.rng, password.as_bytes())
-            .context(EncryptionError)?;
+        let (key, salt) =
+            KeyTree::from_password(&mut self.rng, password.as_bytes()).context(KeyError)?;
 
         // Encrypt some random data, which we can decrypt on load to check the user's password.
         let mut password_check = [0; 32];
         self.rng.fill_bytes(&mut password_check);
-        let password_check = Cipher::new(&key, ChaChaRng::from_rng(&mut self.rng).unwrap())
+        let password_check = Cipher::new(key.clone(), ChaChaRng::from_rng(&mut self.rng).unwrap())
             .encrypt(&password_check)
             .context(EncryptionError)?;
 
@@ -675,7 +675,7 @@ impl WalletLoader for PasswordLoader {
         Ok((meta, key))
     }
 
-    fn load(&mut self, meta: &Self::Meta) -> Result<encryption::Key, WalletError> {
+    fn load(&mut self, meta: &Self::Meta) -> Result<KeyTree, WalletError> {
         if !self.encrypted {
             return Err(WalletError::Failed {
                 msg: String::from(
@@ -693,9 +693,9 @@ impl WalletLoader for PasswordLoader {
 
             // Generate the key and check that we can use it to decrypt the `password_check` data.
             // If we can't, the password is wrong.
-            let key = encryption::Key::from_password_and_salt(password.as_bytes(), &meta.salt)
-                .context(EncryptionError)?;
-            if Cipher::new(&key, ChaChaRng::from_rng(&mut self.rng).unwrap())
+            let key = KeyTree::from_password_and_salt(password.as_bytes(), &meta.salt)
+                .context(KeyError)?;
+            if Cipher::new(key.clone(), ChaChaRng::from_rng(&mut self.rng).unwrap())
                 .decrypt(&meta.password_check)
                 .is_ok()
             {

@@ -1,6 +1,8 @@
 pub mod encryption;
+pub mod hd;
 pub mod network;
 pub mod persistence;
+mod secret;
 
 use crate::api;
 use crate::key_set;
@@ -118,6 +120,9 @@ pub enum WalletError {
     },
     EncryptionError {
         source: encryption::Error,
+    },
+    KeyError {
+        source: argon2::Error,
     },
     #[snafu(display("{}", msg))]
     Failed {

@@ -33,10 +33,10 @@ use structopt::StructOpt;
 use tempdir::TempDir;
 use tracing::{event, Level};
 use wallet::{
-    encryption,
+    hd::KeyTree,
     network::{NetworkBackend, Url},
     persistence::WalletLoader,
-    EncryptionError, Wallet, WalletError,
+    KeyError, Wallet, WalletError,
 };
 use zerok_lib::api::*;
 use zerok_lib::node::{LedgerEvent, LedgerSummary, QueryServiceError};
@@ -179,13 +179,13 @@ impl WalletLoader for UnencryptedWalletLoader {
         self.dir.path().into()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, encryption::Key), WalletError> {
-        let key = encryption::Key::from_password_and_salt(&[], &[]).context(EncryptionError)?;
+    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError> {
+        let key = KeyTree::from_password_and_salt(&[], &[]).context(KeyError)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &Self::Meta) -> Result<encryption::Key, WalletError> {
-        encryption::Key::from_password_and_salt(&[], &[]).context(EncryptionError)
+    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
+        KeyTree::from_password_and_salt(&[], &[]).context(KeyError)
     }
 }
 
