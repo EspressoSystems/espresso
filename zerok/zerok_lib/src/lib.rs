@@ -4,6 +4,10 @@
 #[macro_use]
 extern crate proptest;
 
+#[cfg(test)]
+#[macro_use]
+extern crate quickcheck_macros;
+
 pub mod api;
 pub mod committee;
 pub mod lw_persistence;
@@ -12,10 +16,13 @@ mod set_merkle_tree;
 mod util;
 pub mod validator_node;
 pub mod wallet;
+use commit::{Commitment, Committable};
+use util::commit;
 
 use ark_serialize::*;
 use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
+use core::convert::TryFrom;
 use core::fmt::Debug;
 use core::iter::once;
 use jf_txn::{
@@ -36,7 +43,7 @@ use jf_txn::{
 use jf_utils::tagged_blob;
 use lazy_static::lazy_static;
 pub use lw_persistence::LWPersistence;
-use phaselock::{traits::state::State, BlockContents, H_512};
+use phaselock::{traits::state::State, BlockContents, H_256};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
@@ -45,7 +52,6 @@ use serde_with::serde_as;
 pub use set_merkle_tree::*;
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::convert::TryFrom;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::Read;
@@ -83,38 +89,13 @@ pub struct ElaboratedTransaction {
 
 impl ElaboratedTransaction {
     fn hash(&self) -> ElaboratedTransactionHash {
-        ElaboratedTransactionHash(ElaboratedBlock::hash_transaction(self))
+        ElaboratedTransactionHash(self.commit())
     }
 }
 
 #[tagged_blob("TXN")]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ElaboratedTransactionHash(phaselock::BlockHash<64>);
-
-impl CanonicalSerialize for ElaboratedTransactionHash {
-    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), ark_serialize::SerializationError> {
-        writer
-            .write_all(self.0.as_ref())
-            .map_err(ark_serialize::SerializationError::from)
-    }
-
-    fn serialized_size(&self) -> usize {
-        64
-    }
-}
-
-impl CanonicalDeserialize for ElaboratedTransactionHash {
-    fn deserialize<R: Read>(mut reader: R) -> Result<Self, ark_serialize::SerializationError> {
-        use std::convert::TryInto;
-        let mut buf = vec![0; 64];
-        reader
-            .read_exact(&mut buf)
-            .map_err(ark_serialize::SerializationError::from)?;
-        Ok(ElaboratedTransactionHash(phaselock::BlockHash::from_array(
-            buf.as_slice().try_into().unwrap(),
-        )))
-    }
-}
+#[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+pub struct ElaboratedTransactionHash(Commitment<ElaboratedTransaction>);
 
 #[derive(
     Default,
@@ -148,10 +129,27 @@ pub struct ElaboratedBlock {
     pub block: Block,
     pub proofs: Vec<Vec<SetMerkleProof>>,
 }
-
 deserialize_canonical_bytes!(ElaboratedBlock);
 
-impl BlockContents<H_512> for ElaboratedBlock {
+impl Committable for ElaboratedBlock {
+    fn commit(&self) -> Commitment<Self> {
+        commit::RawCommitmentBuilder::new("ElaboratedBlock")
+            .field("Block contents", self.block.commit())
+            .var_size_field("Block proofs", &canonical::serialize(&self.proofs).unwrap())
+            .finalize()
+    }
+}
+
+impl Committable for ElaboratedTransaction {
+    fn commit(&self) -> Commitment<Self> {
+        commit::RawCommitmentBuilder::new("ElaboratedTransaction")
+            .field("Txn contents", self.txn.commit())
+            .var_size_field("Txn proofs", &canonical::serialize(&self.proofs).unwrap())
+            .finalize()
+    }
+}
+
+impl BlockContents<H_256> for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
 
@@ -177,55 +175,26 @@ impl BlockContents<H_512> for ElaboratedBlock {
         Ok(ret)
     }
 
-    fn hash(&self) -> phaselock::BlockHash<64> {
-        use blake2::crypto_mac::Mac;
+    fn hash(&self) -> phaselock::BlockHash<H_256> {
         use std::convert::TryInto;
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "ElaboratedBlock".as_bytes());
-        hasher.update("Block contents".as_bytes());
-        hasher.update(&block_comm::block_commit(&self.block));
-        hasher.update("Block proofs".as_bytes());
-        hasher.update(&bincode::serialize(&self.proofs).unwrap());
-        phaselock::BlockHash::<64>::from_array(
-            hasher
-                .finalize()
-                .into_bytes()
-                .as_slice()
-                .try_into()
-                .unwrap(),
-        )
+
+        phaselock::BlockHash::<H_256>::from_array(self.commit().try_into().unwrap())
     }
 
-    fn hash_bytes(bytes: &[u8]) -> phaselock::BlockHash<64> {
-        use blake2::crypto_mac::Mac;
+    fn hash_bytes(bytes: &[u8]) -> phaselock::BlockHash<H_256> {
         use std::convert::TryInto;
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "PhaseLock bytes".as_bytes());
-        hasher.update(bytes);
-        phaselock::BlockHash::<64>::from_array(
-            hasher
-                .finalize()
-                .into_bytes()
-                .as_slice()
-                .try_into()
-                .unwrap(),
-        )
+        // TODO: fix this hack, it is specifically working around the
+        // misuse-preventing `T: Committable` on `RawCommitmentBuilder`
+        let ret = commit::RawCommitmentBuilder::<Block>::new("PhaseLock bytes")
+            .var_size_bytes(bytes)
+            .finalize();
+        phaselock::BlockHash::<H_256>::from_array(ret.try_into().unwrap())
     }
 
-    fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<64> {
-        use blake2::crypto_mac::Mac;
+    fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<H_256> {
         use std::convert::TryInto;
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "ElaboratedTxn".as_bytes());
-        hasher.update("Txn contents".as_bytes());
-        hasher.update(&txn_comm::txn_commit(&txn.txn));
-        hasher.update("Txn proofs".as_bytes());
-        hasher.update(&bincode::serialize(&txn.proofs).unwrap());
-        phaselock::BlockHash::<64>::from_array(
-            hasher
-                .finalize()
-                .into_bytes()
-                .as_slice()
-                .try_into()
-                .unwrap(),
-        )
+
+        phaselock::BlockHash::<H_256>::from_array(txn.commit().try_into().unwrap())
     }
 }
 
@@ -514,107 +483,115 @@ impl Clone for ValidationError {
     }
 }
 
-mod verif_crs_comm {
-    use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
-    pub type VerifCRSCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
-
-    pub fn verif_crs_commit(p: &VerifierKeySet) -> VerifCRSCommitment {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "VerifCRS Comm".as_bytes());
-        hasher.update(&canonical::serialize(p).unwrap());
-        hasher.finalize().into_bytes()
+impl Committable for VerifierKeySet {
+    fn commit(&self) -> Commitment<Self> {
+        commit::RawCommitmentBuilder::new("VerifCRS Comm")
+            .var_size_bytes(&canonical::serialize(self).unwrap())
+            .finalize()
     }
 }
 
-mod txn_comm {
-    use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
-    pub type TxnCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
-
-    pub fn txn_commit(p: &TransactionNote) -> TxnCommitment {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "Txn Comm".as_bytes());
-        let byte_stream = canonical::serialize(p).unwrap();
-        hasher.update(&byte_stream);
-        hasher.finalize().into_bytes()
+impl Committable for TransactionNote {
+    fn commit(&self) -> Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Txn Comm")
+            .var_size_bytes(&canonical::serialize(self).unwrap())
+            .finalize()
     }
 }
 
-mod block_comm {
-    use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
-    pub type BlockCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
+#[tagged_blob("BLOCK")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+pub struct BlockCommitment(pub commit::Commitment<Block>);
 
-    pub fn block_commit(p: &Block) -> BlockCommitment {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "Block Comm".as_bytes());
-        hasher.update(&p.0.len().to_le_bytes());
-        for t in p.0.iter() {
-            hasher.update(&txn_comm::txn_commit(t));
+deserialize_canonical_bytes!(BlockCommitment);
+
+impl Committable for Block {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Block Comm")
+            .array_field(
+                "txns",
+                &self.0.iter().map(|x| x.commit()).collect::<Vec<_>>(),
+            )
+            .finalize()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecordMerkleHistory(pub VecDeque<NodeValue>);
+
+impl Committable for RecordMerkleHistory {
+    fn commit(&self) -> commit::Commitment<Self> {
+        let mut ret = commit::RawCommitmentBuilder::new("Hist Comm")
+            .constant_str("roots")
+            .u64(self.0.len() as u64);
+        for n in self.0.iter() {
+            ret = ret.var_size_bytes(&canonical::serialize(n).unwrap())
         }
-        hasher.finalize().into_bytes()
-    }
-}
-
-mod record_merkle_hist_comm {
-    use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
-    pub type RecordMerkleHistCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
-
-    pub fn record_merkle_hist_commit(p: &VecDeque<NodeValue>) -> RecordMerkleHistCommitment {
-        let mut hasher = blake2::Blake2b::with_params(&[], &[], "Hist Comm".as_bytes());
-        hasher.update(&p.len().to_le_bytes());
-        for hash in p {
-            hasher.update(&canonical::serialize(hash).unwrap());
-        }
-        hasher.finalize().into_bytes()
+        ret.finalize()
     }
 }
 
 pub mod state_comm {
     use super::*;
-    use blake2::crypto_mac::Mac;
-    use generic_array::GenericArray;
-    pub type LedgerStateCommitment = GenericArray<u8, <blake2::Blake2b as Mac>::OutputSize>;
-    lazy_static::lazy_static! {
-        pub static ref INITIAL_PREV_COMM: LedgerStateCommitment = GenericArray::<_,_>::default();
+    use jf_utils::tagged_blob;
+
+    #[tagged_blob("STATE")]
+    #[derive(Debug, Clone, Copy, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq, Hash)]
+    pub struct LedgerStateCommitment(pub Commitment<LedgerCommitmentOpening>);
+
+    impl From<Commitment<LedgerCommitmentOpening>> for LedgerStateCommitment {
+        fn from(x: Commitment<LedgerCommitmentOpening>) -> Self {
+            Self(x)
+        }
+    }
+
+    impl From<LedgerStateCommitment> for Commitment<LedgerCommitmentOpening> {
+        fn from(x: LedgerStateCommitment) -> Self {
+            x.0
+        }
+    }
+
+    impl AsRef<[u8]> for LedgerStateCommitment {
+        fn as_ref(&self) -> &[u8] {
+            self.0.as_ref()
+        }
     }
 
     #[derive(Debug)]
-    pub struct LedgerCommInputs {
+    pub struct LedgerCommitmentOpening {
         pub prev_commit_time: u64,
-        pub prev_state: state_comm::LedgerStateCommitment,
-        pub verif_crs: verif_crs_comm::VerifCRSCommitment,
+        pub prev_state: Option<state_comm::LedgerStateCommitment>,
+        pub verif_crs: Commitment<VerifierKeySet>,
         pub record_merkle_root: NodeValue,
-        pub past_record_merkle_roots: record_merkle_hist_comm::RecordMerkleHistCommitment,
+        pub past_record_merkle_roots: Commitment<RecordMerkleHistory>,
         pub nullifiers: set_hash::Hash,
         pub next_uid: u64,
-        pub prev_block: block_comm::BlockCommitment,
+        pub prev_block: Commitment<Block>,
     }
 
-    impl LedgerCommInputs {
-        pub fn commit(&self) -> LedgerStateCommitment {
-            let mut hasher = blake2::Blake2b::with_params(&[], &[], "Ledger Comm".as_bytes());
-            hasher.update("prev_commit_time".as_bytes());
-            hasher.update(&self.prev_commit_time.to_le_bytes());
-            hasher.update("prev_state".as_bytes());
-            hasher.update(&self.prev_state);
-            hasher.update("verif_crs".as_bytes());
-            hasher.update(&self.verif_crs);
-            hasher.update("record_merkle_root".as_bytes());
-            hasher.update(&canonical::serialize(&self.record_merkle_root).unwrap());
-            hasher.update("past_record_merkle_roots".as_bytes());
-            hasher.update(&self.past_record_merkle_roots);
-            hasher.update("nullifiers".as_bytes());
-            hasher.update(&self.nullifiers);
-            hasher.update("next_uid".as_bytes());
-            hasher.update(&self.next_uid.to_le_bytes());
-            hasher.update("prev_block".as_bytes());
-            hasher.update(&self.prev_block);
-
-            hasher.finalize().into_bytes()
+    impl Committable for LedgerCommitmentOpening {
+        fn commit(&self) -> Commitment<Self> {
+            commit::RawCommitmentBuilder::new("Ledger Comm")
+                .u64_field("prev_commit_time", self.prev_commit_time)
+                .array_field(
+                    "prev_state",
+                    &self
+                        .prev_state
+                        .iter()
+                        .cloned()
+                        .map(Commitment::<Self>::from)
+                        .collect::<Vec<_>>(),
+                )
+                .field("verif_crs", self.verif_crs)
+                .var_size_field(
+                    "record_merkle_root",
+                    &canonical::serialize(&self.record_merkle_root).unwrap(),
+                )
+                .field("past_record_merkle_roots", self.past_record_merkle_roots)
+                .field("nullifiers", self.nullifiers.into())
+                .u64_field("next_uid", self.next_uid)
+                .field("prev_block", self.prev_block)
+                .finalize()
         }
     }
 }
@@ -622,12 +599,12 @@ pub mod state_comm {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidatorState {
     pub prev_commit_time: u64,
-    pub prev_state: state_comm::LedgerStateCommitment,
+    pub prev_state: Option<state_comm::LedgerStateCommitment>,
     pub verif_crs: VerifierKeySet,
     // The current record Merkle root hash
     pub record_merkle_root: NodeValue,
     // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
-    pub past_record_merkle_roots: VecDeque<NodeValue>,
+    pub past_record_merkle_roots: RecordMerkleHistory,
     pub record_merkle_frontier: MerkleTree,
     pub nullifiers_root: set_hash::Hash,
     pub next_uid: u64,
@@ -648,10 +625,12 @@ impl ValidatorState {
 
         Self {
             prev_commit_time: 0u64,
-            prev_state: *state_comm::INITIAL_PREV_COMM,
+            prev_state: None,
             verif_crs,
             record_merkle_root: record_merkle_frontier.get_root_value(),
-            past_record_merkle_roots: VecDeque::with_capacity(Self::RECORD_ROOT_HISTORY_SIZE),
+            past_record_merkle_roots: RecordMerkleHistory(VecDeque::with_capacity(
+                Self::RECORD_ROOT_HISTORY_SIZE,
+            )),
             record_merkle_frontier,
             nullifiers_root: nullifiers.hash(),
             next_uid,
@@ -660,10 +639,10 @@ impl ValidatorState {
     }
 
     pub fn commit(&self) -> state_comm::LedgerStateCommitment {
-        let inputs = state_comm::LedgerCommInputs {
+        let inputs = state_comm::LedgerCommitmentOpening {
             prev_commit_time: self.prev_commit_time,
             prev_state: self.prev_state,
-            verif_crs: verif_crs_comm::verif_crs_commit(&self.verif_crs),
+            verif_crs: self.verif_crs.commit(),
             record_merkle_root: self.record_merkle_root,
             // We need to include all the cached past record Merkle roots in the state commitment,
             // even though they are not part of the current ledger state, because they affect
@@ -681,15 +660,14 @@ impl ValidatorState {
             // could also store a sparse history, and when they encounter a root hash that they do
             // not have cached, they could ask a full validator for a proof that that hash was once
             // the root of the record Merkle tree.
-            past_record_merkle_roots: record_merkle_hist_comm::record_merkle_hist_commit(
-                &self.past_record_merkle_roots,
-            ),
+            past_record_merkle_roots: self.past_record_merkle_roots.commit(),
+
             nullifiers: self.nullifiers_root,
             next_uid: self.next_uid,
-            prev_block: block_comm::block_commit(&self.prev_block),
+            prev_block: self.prev_block.commit(),
         };
         // dbg!(&inputs);
-        inputs.commit()
+        inputs.commit().into()
     }
 
     pub fn validate_block_check(
@@ -753,7 +731,10 @@ impl ValidatorState {
                         // Only validate transactions if we can confirm that the record Merkle root
                         // they were generated with is a valid previous or current ledger state.
                         if self.record_merkle_root == note.merkle_root()
-                            || self.past_record_merkle_roots.contains(&note.merkle_root())
+                            || self
+                                .past_record_merkle_roots
+                                .0
+                                .contains(&note.merkle_root())
                         {
                             Ok(note.merkle_root())
                         } else {
@@ -823,13 +804,14 @@ impl ValidatorState {
             assert_eq!(self.next_uid, self.record_merkle_frontier.num_leaves());
         }
 
-        if self.past_record_merkle_roots.len() >= Self::RECORD_ROOT_HISTORY_SIZE {
-            self.past_record_merkle_roots.pop_back();
+        if self.past_record_merkle_roots.0.len() >= Self::RECORD_ROOT_HISTORY_SIZE {
+            self.past_record_merkle_roots.0.pop_back();
         }
         self.past_record_merkle_roots
+            .0
             .push_front(self.record_merkle_root);
         self.record_merkle_root = self.record_merkle_frontier.get_root_value();
-        self.prev_state = comm;
+        self.prev_state = Some(comm);
         Ok(ret)
     }
 }
@@ -844,11 +826,11 @@ impl Eq for ValidatorState {}
 
 impl Hash for ValidatorState {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.commit().hash(state);
+        <Commitment<_> as Hash>::hash(&self.commit().0, state);
     }
 }
 
-impl State<H_512> for ValidatorState {
+impl State<H_256> for ValidatorState {
     type Error = ValidationError;
 
     type Block = ElaboratedBlock;
@@ -2197,11 +2179,11 @@ mod tests {
         let mut v2 = v1.clone();
 
         // Test validators with different history lengths.
-        v1.past_record_merkle_roots.push_front(NodeValue::from(0));
+        v1.past_record_merkle_roots.0.push_front(NodeValue::from(0));
         assert_ne!(v1.commit(), v2.commit());
 
         // Test validators with the same length, but different histories.
-        v2.past_record_merkle_roots.push_front(NodeValue::from(1));
+        v2.past_record_merkle_roots.0.push_front(NodeValue::from(1));
         assert_ne!(v1.commit(), v2.commit());
     }
 
