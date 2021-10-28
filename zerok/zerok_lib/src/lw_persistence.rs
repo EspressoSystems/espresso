@@ -1,5 +1,5 @@
 use crate::{ElaboratedBlock, ValidatorState};
-use phaselock::{traits::StatefulHandler, H_512};
+use phaselock::{traits::StatefulHandler, H_256};
 
 use core::fmt::Debug;
 
@@ -19,7 +19,7 @@ impl Debug for LWPersistence {
     }
 }
 
-impl StatefulHandler<H_512> for LWPersistence {
+impl StatefulHandler<H_256> for LWPersistence {
     type Block = ElaboratedBlock;
     type State = ValidatorState;
 

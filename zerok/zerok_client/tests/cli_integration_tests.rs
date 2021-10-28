@@ -68,7 +68,6 @@ fn cli_transfer_native(t: &mut TestState) -> Result<(), String> {
         // Transfer some native coins from the primary wallet to the secondary.
         .command(0, "transfer 0 $addr1 500 1")?
         .output("Transaction (?P<txn>TXN~.*)")?
-        .start_consensus()?
         // Wait for the transaction to complete in both wallets (just because one wallet has
         // received and processed the completed transaction doesn't mean the other has).
         .command(0, "wait $txn")?
@@ -109,7 +108,6 @@ fn cli_mint_and_transfer(t: &mut TestState) -> Result<(), String> {
         .output("Minter: me")?
         .command(0, "mint 1 $addr1 100 1")?
         .output("Transaction (?P<txn>TXN~.*)")?
-        .start_consensus()?
         .command(0, "wait $txn")?
         .output("accepted")?
         .command(1, "wait $txn")?

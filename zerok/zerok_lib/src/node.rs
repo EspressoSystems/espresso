@@ -21,7 +21,7 @@ use phaselock::{
     error::PhaseLockError,
     event::EventType,
     handle::{HandleError, PhaseLockHandle},
-    BlockContents, H_512,
+    BlockContents, H_256,
 };
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -50,7 +50,7 @@ pub trait Validator {
     fn subscribe(&self) -> EventStream<Self::Event>;
 }
 
-pub type LightWeightNode<NET, STORE> = PhaseLockHandle<ValidatorNodeImpl<NET, STORE>, H_512>;
+pub type LightWeightNode<NET, STORE> = PhaseLockHandle<ValidatorNodeImpl<NET, STORE>, H_256>;
 
 #[async_trait]
 impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {

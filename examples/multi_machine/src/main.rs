@@ -11,7 +11,7 @@ use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitmen
 use jf_txn::{MerkleTree, TransactionVerifyingKey};
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
-    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_512,
+    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Serialize};
@@ -167,7 +167,7 @@ fn default_pk_path() -> PathBuf {
     [&dir, Path::new(PK_DIR)].iter().collect()
 }
 
-/// Returns the default path to the node configuration file.
+/// Returns the default path to the API file.
 fn default_api_path() -> PathBuf {
     const API_FILE: &str = "api/api.toml";
     let dir = project_path();
@@ -246,8 +246,8 @@ async fn get_networking<
     panic!("Failed to open a port");
 }
 
-type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_512>>;
-type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_512>;
+type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>;
+type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
 
@@ -289,7 +289,7 @@ async fn init_state_and_phaselock(
     nodes: u64,
     threshold: u64,
     node_id: u64,
-    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
+    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>,
     full_node: bool,
 ) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state
@@ -839,7 +839,8 @@ async fn main() -> Result<(), std::io::Error> {
         }
 
         // Start consensus for each transaction
-        for round in 0..TRANSACTION_COUNT {
+        let mut round = 0;
+        while round < TRANSACTION_COUNT {
             println!("Starting round {}", round + 1);
 
             // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
@@ -862,33 +863,43 @@ async fn main() -> Result<(), std::io::Error> {
                 }
             }
 
-            // Start consensus
-            // Note: wait until the transaction is proposed before starting consensus. Otherwise,
-            // the node will never reaches decision.
-            // Issue: https://gitlab.com/translucence/systems/system/-/issues/15.
-            let mut line = String::new();
-            println!("Hit the return key when ready to start the consensus...");
-            std::io::stdin().read_line(&mut line).unwrap();
-            phaselock.start_consensus().await;
+            // If the output below is changed, update the message for line.trim() in Validator::new as well
             println!("  - Starting consensus");
+            phaselock.start_consensus().await;
             loop {
                 println!("Waiting for PhaseLock event");
                 let event = events.next().await.expect("PhaseLock unexpectedly closed");
 
-                if let EventType::Decide { block: _, state } = event.event {
-                    if !state.is_empty() {
-                        let commitment = TaggedBase64::new("LEDG", &state[0].commit())
-                            .unwrap()
-                            .to_string();
-                        println!("  - Current commitment: {}", commitment);
+                match event.event {
+                    EventType::Decide { block: _, state } => {
+                        if !state.is_empty() {
+                            let commitment = TaggedBase64::new("LEDG", state[0].commit().as_ref())
+                                .unwrap()
+                                .to_string();
+                            println!(
+                                "  - Round {} completed. Commitment: {}",
+                                round + 1,
+                                commitment
+                            );
+                            break;
+                        }
+                    }
+                    EventType::ViewTimeout { view_number: _ } => {
+                        println!("  - Round {} timed out.", round + 1);
                         break;
                     }
-                } else {
-                    println!("EVENT: {:?}", event);
+                    EventType::Error { error } => {
+                        println!("  - Round {} error: {}", round + 1, error);
+                        break;
+                    }
+                    _ => {
+                        println!("EVENT: {:?}", event);
+                    }
                 }
             }
 
-            // Add the transaction if the node ID is 0 and there is no attached wallet.
+            // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
+            // current node), and there is no attached wallet.
             if let Some((ix, keys_and_memos, sig, t)) = txn {
                 let state = state.as_mut().unwrap();
                 println!("  - Adding the transaction");
@@ -926,7 +937,12 @@ async fn main() -> Result<(), std::io::Error> {
                     .validate_and_apply(blk, round as usize, TRANSACTION_COUNT as usize, 0.0)
                     .unwrap();
             }
-            println!("  - Round {} completed.", round + 1);
+
+            // When there isn't a wallet attached, run `TRANSACTION_COUNT` rounds.
+            // Otherwise, keeping running till the process is killed.
+            if NodeOpt::from_args().wallet_pk_path.is_none() {
+                round += 1;
+            }
         }
 
         println!("All rounds completed");
