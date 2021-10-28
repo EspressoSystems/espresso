@@ -30,7 +30,7 @@
 
 use super::secret::Secret;
 use rand_chacha::rand_core::{CryptoRng, RngCore};
-use sha3::{Digest, Keccak256, Keccak512};
+use sha3::{Digest, Sha3_256, Sha3_512};
 use std::convert::TryInto;
 use zeroize::Zeroize;
 
@@ -82,7 +82,7 @@ impl KeyTree {
         // Note that the hash for deriving a new sub-tree does not need to include a commitment to
         // the role of the key (sub-tree vs key) because sub-trees and keys are different sizes and
         // thus cannot suffer from domain confusion.
-        let mut digest = Keccak512::new()
+        let mut digest = Sha3_512::new()
             // Commit to the parent key.
             .chain(&*self.0)
             .chain(id)
@@ -96,7 +96,7 @@ impl KeyTree {
         // Note that the hash for deriving a new key does not need to include a commitment to the
         // role of the key (key vs sub-tree) because keys and sub-trees are different sizes and thus
         // cannot suffer from domain confusion.
-        let mut digest = Keccak256::new()
+        let mut digest = Sha3_256::new()
             // Commit to the parent key.
             .chain(&*self.0)
             .chain(id)

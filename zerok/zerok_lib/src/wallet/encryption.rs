@@ -8,7 +8,7 @@ use hmac::{crypto_mac::MacError, Hmac, Mac, NewMac};
 use rand_chacha::rand_core::{CryptoRng, RngCore};
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
-use sha3::Keccak256;
+use sha3::Sha3_256;
 use snafu::Snafu;
 
 #[derive(Debug, Snafu)]
@@ -34,7 +34,7 @@ pub type Nonce = [u8; 32];
 /// An authenticating stream cipher.
 ///
 /// This implementation uses the encrypt-then-MAC strategy, with ChaCha20 as the stream cipher and
-/// Keccak-256 as an HMAC.
+/// SHA3-256 as an HMAC.
 ///
 /// It requires an entire sub-tree of the HD key structure, as it generates separate keys for
 /// encryption and authentication for each message it encrypts.
@@ -98,8 +98,8 @@ impl<Rng: RngCore + CryptoRng> Cipher<Rng> {
         Ok(())
     }
 
-    fn hmac(&self, key: &hd::Key, nonce: &[u8], ciphertext: &[u8]) -> Hmac<Keccak256> {
-        let mut hmac = Hmac::<Keccak256>::new_from_slice(key.as_bytes()).unwrap();
+    fn hmac(&self, key: &hd::Key, nonce: &[u8], ciphertext: &[u8]) -> Hmac<Sha3_256> {
+        let mut hmac = Hmac::<Sha3_256>::new_from_slice(key.as_bytes()).unwrap();
         hmac.update(key.as_bytes());
         hmac.update(nonce);
         // Note: the ciphertext must be the last field, since it is variable sized and we do not
