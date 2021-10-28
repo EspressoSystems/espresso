@@ -31,7 +31,7 @@ impl<S, const N: usize> Election<N> for Committee<S, N> {
     /// A table mapping public keys with their associated stake.
     type StakeTable = HashMap<PubKey, u64>;
 
-    /// Constructed by `p * pow(2, 256)`, where `p` is the predetermined probablistic of a stake
+    /// Constructed by `p * pow(2, 256)`, where `p` is the predetermined probability of a stake
     /// being selected. A stake will be selected iff `H(vrf_output | stake)` is smaller than the
     /// selection threshold.
     type SelectionThreshold = [u8; H_256];
