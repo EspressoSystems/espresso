@@ -30,7 +30,7 @@ use jf_txn::{
     transfer::{TransferNote, TransferNoteInput},
     txn_batch_verify,
     utils::compute_universal_param_size,
-    AccMemberWitness, MerkleTree, NodeValue, Signature, TransactionNote, TransactionVerifyingKey,
+    AccMemberWitness, MerkleCommitment, MerkleLeafProof, MerkleTree, NodeValue, Signature, TransactionNote, TransactionVerifyingKey,
 };
 use jf_utils::tagged_blob;
 use lazy_static::lazy_static;
@@ -39,8 +39,8 @@ use phaselock::{traits::state::State, BlockContents, H_512};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
+use serde::{Deserialize, Serialize, ser::Serializer};
+use serde_with::{serde_as, SerializeAs};
 pub use set_merkle_tree::*;
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashSet, VecDeque};
@@ -52,6 +52,7 @@ use std::iter::FromIterator;
 use std::ops::Bound::*;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 pub use util::canonical;
 
@@ -582,10 +583,8 @@ pub mod state_comm {
         pub prev_commit_time: u64,
         pub prev_state: state_comm::LedgerStateCommitment,
         pub verif_crs: verif_crs_comm::VerifCRSCommitment,
-        pub record_merkle_root: NodeValue,
         pub past_record_merkle_roots: record_merkle_hist_comm::RecordMerkleHistCommitment,
         pub nullifiers: set_hash::Hash,
-        pub next_uid: u64,
         pub prev_block: block_comm::BlockCommitment,
     }
 
@@ -598,14 +597,10 @@ pub mod state_comm {
             hasher.update(&self.prev_state);
             hasher.update("verif_crs".as_bytes());
             hasher.update(&self.verif_crs);
-            hasher.update("record_merkle_root".as_bytes());
-            hasher.update(&canonical::serialize(&self.record_merkle_root).unwrap());
             hasher.update("past_record_merkle_roots".as_bytes());
             hasher.update(&self.past_record_merkle_roots);
             hasher.update("nullifiers".as_bytes());
             hasher.update(&self.nullifiers);
-            hasher.update("next_uid".as_bytes());
-            hasher.update(&self.next_uid.to_le_bytes());
             hasher.update("prev_block".as_bytes());
             hasher.update(&self.prev_block);
 
@@ -619,13 +614,12 @@ pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: state_comm::LedgerStateCommitment,
     pub verif_crs: VerifierKeySet,
-    // The current record Merkle root hash
-    pub record_merkle_root: NodeValue,
-    // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
+    // elements that commit to the current record Merkle state
+    pub record_merkle_commitment: MerkleCommitment,
+    pub record_merkle_frontier_proof: MerkleLeafProof,
+    // A list of recent record Merkle root hashes for validating slightly-out-of date transactions.
     pub past_record_merkle_roots: VecDeque<NodeValue>,
-    pub record_merkle_frontier: MerkleTree,
     pub nullifiers_root: set_hash::Hash,
-    pub next_uid: u64,
     pub prev_block: Block,
 }
 
@@ -637,19 +631,23 @@ impl ValidatorState {
     // the current one.
     const RECORD_ROOT_HISTORY_SIZE: usize = 10;
 
-    pub fn new(verif_crs: VerifierKeySet, record_merkle_frontier: MerkleTree) -> Self {
+    pub fn new(verif_crs: Arc<VerifierKeySet>, record_merkle_frontier: MerkleTree) -> Self {
         let nullifiers: SetMerkleTree = Default::default();
-        let next_uid = record_merkle_frontier.num_leaves();
+        let record_merkle_height = record_merkle_frontier.height();
+        let record_merkle_frontier_proof = if record_merkle_frontier.num_leaves() > 0 {
+            record_merkle_frontier.get_leaf(record_merkle_frontier.num_leaves() - 1)
+        } else {
+            MerkleLeafProof::Empty
+        }
 
         Self {
             prev_commit_time: 0u64,
             prev_state: *state_comm::INITIAL_PREV_COMM,
             verif_crs,
-            record_merkle_root: record_merkle_frontier.get_root_value(),
+            record_merkle_commitment: record_merkle_frontier.commitment(),
+            record_merkle_frontier_proof: record_merkle_frontier.get_leaf(next_uid - 1),
             past_record_merkle_roots: VecDeque::with_capacity(Self::RECORD_ROOT_HISTORY_SIZE),
-            record_merkle_frontier,
             nullifiers_root: nullifiers.hash(),
-            next_uid,
             prev_block: Default::default(),
         }
     }
@@ -659,7 +657,7 @@ impl ValidatorState {
             prev_commit_time: self.prev_commit_time,
             prev_state: self.prev_state,
             verif_crs: verif_crs_comm::verif_crs_commit(&self.verif_crs),
-            record_merkle_root: self.record_merkle_root,
+            record_merkle_commitment: self.record_merkle_commitment,
             // We need to include all the cached past record Merkle roots in the state commitment,
             // even though they are not part of the current ledger state, because they affect
             // validation: two validators with different caches will be able to validate different
@@ -785,6 +783,8 @@ impl ValidatorState {
         self.prev_commit_time = now;
         self.prev_block = txns.clone();
 
+        let record_merkle_frontier = MerkleTree::restore_from_frontier(self.record_merkle_commitment, &self.record_merkle_frontier_proof).ok_or(ValidationError::Failed {})?;
+
         let nullifiers = txns
             .0
             .iter()
@@ -795,35 +795,34 @@ impl ValidatorState {
         self.nullifiers_root = set_merkle_lw_multi_insert(nullifiers, self.nullifiers_root)
             .map_err(|_| ValidationError::BadNullifierProof {})?
             .0;
-
+            
         let mut ret = vec![];
+        let mut uid = self.commitment.num_leaves;
         for o in txns
             .0
             .iter()
             .flat_map(|x| x.output_commitments().into_iter())
         {
-            let uid = self.next_uid;
-            self.record_merkle_frontier.push(o.to_field_element());
-            if !remember_commitments {
-                // Always keep the latest leaf, but forget the prior leafs
-                if uid > 0 {
-                    self.record_merkle_frontier
-                        .forget(uid - 1)
-                        .expect_ok()
-                        .unwrap();
-                }
+            record_merkle_frontier.push(o.to_field_element());
+            // Always keep the latest leaf, but forget the prior leafs
+            if uid > 0 {
+                record_merkle_frontier
+                    .forget(uid - 1)
+                    .expect_ok()
+                    .unwrap();
             }
             ret.push(uid);
-            self.next_uid += 1;
-            assert_eq!(self.next_uid, self.record_merkle_frontier.num_leaves());
+            uid += 1;
+            assert_eq!(self.commitment.num_leaves, record_merkle_frontier.num_leaves());
         }
 
         if self.past_record_merkle_roots.len() >= Self::RECORD_ROOT_HISTORY_SIZE {
             self.past_record_merkle_roots.pop_back();
         }
         self.past_record_merkle_roots
-            .push_front(self.record_merkle_root);
-        self.record_merkle_root = self.record_merkle_frontier.get_root_value();
+            .push_front(self.record_merkle_commitment.root_value);
+        self.record_merkle_commitment = record_merkle_frontier.commitment();
+        self.record_merkle_frontier_proof = record_merkle_frontier.frontier();
         self.prev_state = comm;
         Ok(ret)
     }

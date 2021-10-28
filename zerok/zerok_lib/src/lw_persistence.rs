@@ -1,9 +1,24 @@
-use crate::{ElaboratedBlock, ValidatorState};
+use crate::{ElaboratedBlock, ValidatorState, ValidatorStatePersisted, VerifierKeySet, verif_crs_comm::VerifCRSCommitment};
+use atomic_store::{
+    AtomicStore,
+    load_store::BincodeLoadStore,
+    RollingLog
+};
+use jf_txn::MerkleLeafProof;
 use phaselock::{traits::StatefulHandler, H_512};
 
 use core::fmt::Debug;
+use std::path::PathBuf;
 
-pub struct LWPersistence {}
+pub struct LWPersistence {
+    lw_store_path: PathBuf,
+    key_tag: String,
+    atomic_store: AtomicStore,
+    state_snapshot: RollingLog<BincodeLoadStore<ValidatorStatePersisted>>,
+    record_frontier_snapshot: RollingLog<BincodeLoadStore<MerkleLeafProof>>,
+    verifier_key_set_latest: RollingLog<BincodeLoadStore<VerifierKeySet>>,
+    verif_crs_commit: VerifCRSCommitment,
+}
 
 impl LWPersistence {
     pub fn new(_key_tag: &str) -> LWPersistence {

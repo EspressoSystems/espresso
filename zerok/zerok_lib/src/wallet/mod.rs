@@ -33,7 +33,7 @@ use jf_txn::{
         Nullifier, ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness, MerkleTree, Signature, TransactionNote,
+    AccMemberWitness, MerkleTree, MerkleLeafProof, Signature, TransactionNote,
 };
 use jf_utils::tagged_blob;
 use key_set::KeySet;
@@ -679,7 +679,7 @@ impl<'a> WalletState<'a> {
                             self.records.insert(record_opening, uid, &session.key_pair);
                             if self
                                 .record_merkle_tree_mut()
-                                .remember(uid, comm.to_field_element(), &proof)
+                                .remember(uid, &MerkleLeafProof::new(comm.to_field_element(), proof))
                                 .is_err()
                             {
                                 println!(
