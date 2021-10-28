@@ -11,7 +11,7 @@ use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitmen
 use jf_txn::{MerkleTree, TransactionVerifyingKey};
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
-    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_512,
+    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Serialize};
@@ -43,7 +43,6 @@ mod ip;
 mod routes;
 
 const STATE_SEED: [u8; 32] = [0x7au8; 32];
-const TRANSACTION_COUNT: u64 = 3;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -112,6 +111,12 @@ struct NodeOpt {
     /// the validators using the network API.
     #[structopt(short, long = "wallet")]
     wallet_pk_path: Option<PathBuf>,
+
+    /// Number of transactions to generate.
+    ///
+    /// Skip this option if want to keep generating transactions till the process is killed.
+    #[structopt(long = "num_txn", short = "n")]
+    num_txn: Option<u64>,
 }
 
 /// Gets public key of a node from its public key file.
@@ -246,8 +251,8 @@ async fn get_networking<
     panic!("Failed to open a port");
 }
 
-type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_512>>;
-type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_512>;
+type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>;
+type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
 
@@ -289,7 +294,7 @@ async fn init_state_and_phaselock(
     nodes: u64,
     threshold: u64,
     node_id: u64,
-    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, 64>>,
+    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>,
     full_node: bool,
 ) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state
@@ -840,7 +845,11 @@ async fn main() -> Result<(), std::io::Error> {
 
         // Start consensus for each transaction
         let mut round = 0;
-        while round < TRANSACTION_COUNT {
+        let num_txn = NodeOpt::from_args().num_txn;
+
+        // When `num_txn` is set, run `num_txn` rounds.
+        // Otherwise, keeping running till the process is killed.
+        while num_txn.map(|count| round < count).unwrap_or(true) {
             println!("Starting round {}", round + 1);
 
             // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
@@ -849,11 +858,7 @@ async fn main() -> Result<(), std::io::Error> {
                 if let Some(state) = &mut state {
                     println!("  - Proposing a transaction");
                     let mut transactions = state
-                        .generate_transactions(
-                            round as usize,
-                            vec![(true, 0, 0, 0, 0, -2)],
-                            TRANSACTION_COUNT as usize,
-                        )
+                        .generate_transactions(round as usize, vec![(true, 0, 0, 0, 0, -2)], 1)
                         .unwrap();
                     txn = Some(transactions.remove(0));
                     phaselock
@@ -873,7 +878,7 @@ async fn main() -> Result<(), std::io::Error> {
                 match event.event {
                     EventType::Decide { block: _, state } => {
                         if !state.is_empty() {
-                            let commitment = TaggedBase64::new("LEDG", &state[0].commit())
+                            let commitment = TaggedBase64::new("LEDG", state[0].commit().as_ref())
                                 .unwrap()
                                 .to_string();
                             println!(
@@ -923,26 +928,14 @@ async fn main() -> Result<(), std::io::Error> {
                 }
 
                 state
-                    .try_add_transaction(
-                        &mut blk,
-                        t,
-                        round as usize,
-                        ix,
-                        TRANSACTION_COUNT as usize,
-                        owner_memos,
-                        kixs,
-                    )
+                    .try_add_transaction(&mut blk, t, round as usize, ix, 1, owner_memos, kixs)
                     .unwrap();
                 state
-                    .validate_and_apply(blk, round as usize, TRANSACTION_COUNT as usize, 0.0)
+                    .validate_and_apply(blk, round as usize, 1, 0.0)
                     .unwrap();
             }
 
-            // When there isn't a wallet attached, run `TRANSACTION_COUNT` rounds.
-            // Otherwise, keeping running till the process is killed.
-            if NodeOpt::from_args().wallet_pk_path.is_none() {
-                round += 1;
-            }
+            round += 1;
         }
 
         println!("All rounds completed");

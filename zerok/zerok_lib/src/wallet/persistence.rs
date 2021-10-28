@@ -236,6 +236,7 @@ mod tests {
     use super::*;
     use crate::{VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM};
     use jf_txn::{KeyPair, TransactionVerifyingKey};
+    use phaselock::H_256;
     use rand_chacha::{
         rand_core::{RngCore, SeedableRng},
         ChaChaRng,
@@ -271,9 +272,13 @@ mod tests {
     }
 
     fn random_txn_hash(rng: &mut ChaChaRng) -> ElaboratedTransactionHash {
-        let mut hash = [0; 64];
+        let mut hash = [0; H_256];
         rng.fill_bytes(&mut hash);
-        ElaboratedTransactionHash(phaselock::BlockHash::from(hash))
+        let ret =
+            crate::commit::RawCommitmentBuilder::<ElaboratedTransaction>::new("random_txn_hash")
+                .fixed_size_bytes(&hash)
+                .finalize();
+        ElaboratedTransactionHash(ret)
     }
 
     async fn get_test_state(name: &str) -> (UserKeyPair, WalletState<'static>, ChaChaRng, TempDir) {
@@ -364,6 +369,7 @@ mod tests {
         stored
             .validator
             .past_record_merkle_roots
+            .0
             .push_back(stored.validator.record_merkle_root);
         stored.validator.record_merkle_root =
             stored.validator.record_merkle_frontier.get_root_value();

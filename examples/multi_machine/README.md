@@ -23,15 +23,17 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
 * Open 7 terminal windows (or split a window into 7 sessions using tmux). Let them be `window 0, 1, ..., 6`, each representing a node.
 * In each window:
     * Cd to `target/release/`.
-    * Run `multi_machine --config {config} --id {id}`.
+    * Run `multi_machine --config {config} --id {id} --num_txn {num_txn}`.
         * `config` is the path to the node config file.
             * Skip this option if using the default file, `examples/multi_machine/src/node-config.toml`.
         * `id` is the ID of the current node, starting from `0` to `6`.
             * `Node 0` is going to propose all transactions, but not necessarily the leader in each round.
+        * `num_txn` is the number of transactions to generate.
+            * If skipped, the consensus will keep running till the process is killed. For easier manual testing, do not skip it.
         * Add `--full` to run a full node. 
 * After all processes are done:
-    * Check that at least 5 windows display `Round 3 completed` and have the same commitment.
-    * Nodes that have completed all (i.e., 3) rounds or timed out will terminate their processes, which may lead to connection errors displayed in other windows. It is okay to ignore these errors as long as there are 5 identical commitments after the final round.
+    * Check that at least 5 windows display `Round {num_txn} completed` where `num_txn` is the number of transactions, and have the same commitment.
+    * Note: Nodes that have completed all (i.e., 3) rounds or timed out will terminate their processes, which may lead to connection errors displayed in other windows. It is okay to ignore these errors as long as there are 5 identical commitments after the final round.
 
 ### Initialize web server
 * Port
