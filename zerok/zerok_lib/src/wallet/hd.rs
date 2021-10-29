@@ -38,7 +38,7 @@ use zeroize::Zeroize;
 pub type Salt = [u8; 32];
 
 #[derive(Clone, Debug)]
-pub struct KeyTree(
+pub struct KeyTree {
     // Sub-trees are 64 bytes, twice as large as the actual keys, to make it much harder to break
     // security upwards through the tree. This is probably not strictly necessary (32 bytes is
     // already quite large) but it is an extra layer of security for sub-tree separation, which is
@@ -46,14 +46,22 @@ pub struct KeyTree(
     //
     // BIP32 uses a similar idea by extending their keys with an extra 32 bytes of entropy (the
     // chain code).
-    Secret<[u8; 64]>,
-);
+    state: Secret<[u8; 64]>,
+    // We track the depth in the tree of each sub-tree, so that we can mix it into the hash function
+    // at each level as a deterministic salt. This effectively changes the hash function used at
+    // each level of the tree, making us less vulnerable to precomputation attacks even in the
+    // presence of sub-tree ID reuse.
+    depth: usize,
+}
 
 impl KeyTree {
     pub fn random(rng: &mut (impl CryptoRng + RngCore)) -> Self {
         let mut key = Secret::<[u8; 64]>::build();
         rng.fill_bytes(key.as_mut());
-        Self(key.finalize())
+        Self {
+            state: key.finalize(),
+            depth: 0,
+        }
     }
 
     pub fn from_password(
@@ -75,7 +83,10 @@ impl KeyTree {
         let mut hash = argon2::hash_raw(password, salt, &config)?;
         *key = hash.clone().try_into().unwrap();
         hash.zeroize();
-        Ok(Self(key.finalize()))
+        Ok(Self {
+            state: key.finalize(),
+            depth: 0,
+        })
     }
 
     pub fn derive_sub_tree(&self, id: &[u8]) -> KeyTree {
@@ -84,12 +95,17 @@ impl KeyTree {
         // thus cannot suffer from domain confusion.
         let mut digest = Sha3_512::new()
             // Commit to the parent key.
-            .chain(self.0.open_secret())
+            .chain(self.state.open_secret())
+            // Mix in the depth of the tree as a salt.
+            .chain(&self.depth.to_le_bytes())
             .chain(id)
             .finalize();
         // The try_into will always succeed, because the hash output size is a slice of 64 bytes.
         // There just isn't an `as_mut() -> &[u8; 64]` method for GenericArrays as large as 64.
-        Self(Secret::new(digest.as_mut().try_into().unwrap()))
+        Self {
+            state: Secret::new(digest.as_mut().try_into().unwrap()),
+            depth: self.depth + 1,
+        }
     }
 
     pub fn derive_key(&self, id: &[u8]) -> Key {
@@ -98,7 +114,9 @@ impl KeyTree {
         // cannot suffer from domain confusion.
         let mut digest = Sha3_256::new()
             // Commit to the parent key.
-            .chain(self.0.open_secret())
+            .chain(self.state.open_secret())
+            // Mix in the depth of the tree as a salt.
+            .chain(&self.depth.to_le_bytes())
             .chain(id)
             .finalize();
         Key(Secret::new(digest.as_mut()))
