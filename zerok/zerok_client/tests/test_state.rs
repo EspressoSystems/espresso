@@ -41,18 +41,7 @@ impl TestState {
         let tmp_dir = TempDir::new("test_wallet_cli").map_err(err)?;
         let mut key_path = PathBuf::from(tmp_dir.path());
         key_path.push("primary_key");
-        cargo_run("zerok_client")?
-            .args([
-                "-g",
-                key_path
-                    .as_os_str()
-                    .to_str()
-                    .ok_or("failed to convert key path to string")?,
-            ])
-            .spawn()
-            .map_err(err)?
-            .wait()
-            .map_err(err)?;
+        Wallet::key_gen(&key_path)?;
 
         // Each validator gets two ports: one for its PhaseLock node and one for the web sever.
         let mut ports = [(0, 0); 6];
@@ -72,6 +61,21 @@ impl TestState {
         Ok(state)
     }
 
+    pub fn open(&mut self, wallet: usize) -> Result<&mut Self, String> {
+        while wallet >= self.wallets.len() {
+            self.load(None)?;
+        }
+        self.prev_output = self.wallets[wallet].open()?;
+        Ok(self)
+    }
+
+    pub fn close(&mut self, wallet: usize) -> Result<&mut Self, String> {
+        if let Some(wallet) = self.wallets.get_mut(wallet) {
+            wallet.close();
+        }
+        Ok(self)
+    }
+
     /// Issue a command to the wallet identified by `wallet`.
     ///
     /// The command string will be preprocessed by replacing each occurrence of `$var` in the
@@ -82,17 +86,14 @@ impl TestState {
     /// [TestState] always starts off with one wallet, index 0, which gets an initial grant of 2^32
     /// native tokens. So `command(0, "command")` will not load a new wallet. But the first time
     /// `command(1, "command")` is called, it will block until wallet 1 is created.
-    pub fn command(
-        &mut self,
-        wallet: usize,
-        command: impl AsRef<str>,
-    ) -> Result<&mut Self, String> {
-        while wallet >= self.wallets.len() {
-            self.load(None)?;
-        }
+    pub fn command(&mut self, id: usize, command: impl AsRef<str>) -> Result<&mut Self, String> {
         let command = self.substitute(command)?;
-        println!("{}> {}", wallet, command);
-        self.prev_output = self.wallets[wallet].command(&command)?;
+        let wallet = self
+            .wallets
+            .get_mut(id)
+            .ok_or_else(|| format!("wallet {} is not open", id))?;
+        println!("{}> {}", id, command);
+        self.prev_output = wallet.command(&command)?;
         Ok(self)
     }
 
@@ -215,31 +216,77 @@ impl TestState {
     }
 }
 
-struct Wallet {
+struct OpenWallet {
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     process: Child,
 }
 
+struct Wallet {
+    process: Option<OpenWallet>,
+    key_path: PathBuf,
+    storage: TempDir,
+    server: String,
+}
+
 impl Wallet {
-    fn new(server: String, key_path: Option<PathBuf>) -> Result<Self, String> {
-        let mut child = cargo_run("zerok_client")?
-            .args(
+    fn key_gen(key_path: &Path) -> Result<(), String> {
+        cargo_run("zerok_client")?
+            .args([
+                "-g",
                 key_path
-                    .map(|k| {
-                        Result::<_, String>::Ok([
-                            String::from("-k"),
-                            String::from(k.as_os_str().to_str().ok_or_else(|| {
-                                format!("failed to convert key_path {:?} to string", k)
-                            })?),
-                        ])
-                    })
-                    .transpose()?
-                    .iter()
-                    .flatten(),
-            )
-            .args(&["--non-interactive", "--tmp-storage"])
-            .arg(server)
+                    .as_os_str()
+                    .to_str()
+                    .ok_or("failed to convert key path to string")?,
+            ])
+            .spawn()
+            .map_err(err)?
+            .wait()
+            .map_err(err)?;
+        Ok(())
+    }
+
+    fn new(server: String, key_path: Option<PathBuf>) -> Result<Self, String> {
+        let storage = TempDir::new("test_wallet").map_err(err)?;
+        let key_path = match key_path {
+            Some(path) => path,
+            None => {
+                let mut path = PathBuf::from(storage.path());
+                path.push("key");
+                Self::key_gen(&path)?;
+                path
+            }
+        };
+        Ok(Self {
+            process: None,
+            key_path,
+            storage,
+            server,
+        })
+    }
+
+    fn open(&mut self) -> Result<Vec<String>, String> {
+        if self.process.is_some() {
+            return Err(String::from("wallet is already open"));
+        }
+        let mut child = cargo_run("zerok_client")?
+            .args([
+                "-k",
+                self.key_path.as_os_str().to_str().ok_or_else(|| {
+                    format!("failed to convert key_path {:?} to string", self.key_path)
+                })?,
+            ])
+            .args([
+                "--storage",
+                self.storage.path().as_os_str().to_str().ok_or_else(|| {
+                    format!(
+                        "failed to convert storage path {:?} to string",
+                        self.storage.path()
+                    )
+                })?,
+            ])
+            .arg("--non-interactive")
+            .arg(&self.server)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -252,46 +299,62 @@ impl Wallet {
             .stdout
             .take()
             .ok_or("failed to open stdout for wallet")?;
-        let mut wallet = Self {
+        self.process = Some(OpenWallet {
+            process: child,
             stdin,
             stdout: BufReader::new(stdout),
-            process: child,
-        };
-        wallet.read_until_prompt()?;
-        Ok(wallet)
-    }
-
-    fn command(&mut self, command: &str) -> Result<Vec<String>, String> {
-        writeln!(self.stdin, "{}", command).map_err(err)?;
+        });
         self.read_until_prompt()
     }
 
-    fn read_until_prompt(&mut self) -> Result<Vec<String>, String> {
-        let mut lines = Vec::new();
-        let mut line = String::new();
-        loop {
-            self.stdout.read_line(&mut line).map_err(err)?;
-            let line = std::mem::take(&mut line);
-            let line = line.trim();
-            if line == ">" {
-                break;
-            }
-            if line.starts_with("Error loading wallet") {
-                return Err(String::from(line));
-            }
-            if !line.is_empty() {
-                println!("< {}", line);
-                lines.push(String::from(line));
-            }
+    fn close(&mut self) {
+        if let Some(mut child) = self.process.take() {
+            drop(child.stdin);
+            child.process.wait().ok();
         }
-        Ok(lines)
+    }
+
+    fn command(&mut self, command: &str) -> Result<Vec<String>, String> {
+        if let Some(child) = &mut self.process {
+            writeln!(child.stdin, "{}", command).map_err(err)?;
+            self.read_until_prompt()
+        } else {
+            Err(String::from("wallet is not open"))
+        }
+    }
+
+    fn read_until_prompt(&mut self) -> Result<Vec<String>, String> {
+        if let Some(child) = &mut self.process {
+            let mut lines = Vec::new();
+            let mut line = String::new();
+            loop {
+                child.stdout.read_line(&mut line).map_err(err)?;
+                let line = std::mem::take(&mut line);
+                let line = line.trim();
+                if line.starts_with("Error loading wallet") {
+                    return Err(String::from(line));
+                }
+                if !line.is_empty() {
+                    println!("< {}", line);
+                    lines.push(String::from(line));
+                }
+                match line {
+                    ">" | "Enter password:" | "Create password:" | "Retype password:" => {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            Ok(lines)
+        } else {
+            Err(String::from("wallet is not open"))
+        }
     }
 }
 
 impl Drop for Wallet {
     fn drop(&mut self) {
-        self.process.kill().ok();
-        self.process.wait().ok();
+        self.close();
     }
 }
 

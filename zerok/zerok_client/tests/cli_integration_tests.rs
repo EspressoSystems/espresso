@@ -1,6 +1,21 @@
 mod test_state;
 use test_state::{cli_test, TestState};
 
+fn create_wallet(t: &mut TestState, wallet: usize) -> Result<&mut TestState, String> {
+    t.open(wallet)?
+        .output("Create password:")?
+        .command(wallet, "test_password")?
+        .output("Retype password:")?
+        // Try typing the incorrect password, to check the error handling
+        .command(wallet, "wrong_password")?
+        .output("Passwords do not match.")?
+        .output("Create password:")?
+        .command(wallet, "test_password")?
+        .output("Retype password:")?
+        .command(wallet, "test_password")?
+        .output("connecting...")
+}
+
 fn wait_for_starting_balance(t: &mut TestState) -> Result<usize, String> {
     loop {
         t.command(0, "balance 0")?.output("(?P<balance>\\d+)")?;
@@ -138,12 +153,31 @@ fn cli_mint_and_transfer(t: &mut TestState) -> Result<(), String> {
     Ok(())
 }
 
+fn cli_login(t: &mut TestState) -> Result<(), String> {
+    t.close(0)?
+        .open(0)?
+        .output("Enter password:")?
+        // Enter the wrong password to check error handling
+        .command(0, "wrong_password")?
+        .output("Sorry, that's incorrect")?
+        .command(0, "test_password")?
+        .output("connecting...")?;
+
+    // Check that the wallet is functional.
+    cli_basic_info(t)
+}
+
 #[test]
 fn cli_integration_tests() {
     cli_test(|t| {
+        create_wallet(t, 0)?;
+        create_wallet(t, 1)?;
+
         cli_basic_info(t)?;
         cli_transfer_native(t)?;
         cli_mint_and_transfer(t)?;
+        cli_login(t)?;
+
         Ok(())
     });
 }
