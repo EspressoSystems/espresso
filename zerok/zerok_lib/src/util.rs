@@ -22,8 +22,121 @@ pub mod canonical {
     }
 }
 
+pub mod arbitrary_wrappers {
+    use arbitrary::{Arbitrary, Unstructured};
+    use jf_txn::keys::{UserAddress, UserKeyPair};
+    use jf_txn::structs::{FreezeFlag, Nullifier, ReceiverMemo, RecordOpening};
+    use jf_txn::KeyPair;
+    use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+
+    pub struct ArbitraryNullifier(Nullifier);
+
+    impl From<ArbitraryNullifier> for Nullifier {
+        fn from(n: ArbitraryNullifier) -> Self {
+            n.0
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for ArbitraryNullifier {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let mut rng = ChaChaRng::from_seed(u.arbitrary()?);
+            Ok(Self(Nullifier::random_for_test(&mut rng)))
+        }
+    }
+
+    pub struct ArbitraryRecordOpening(RecordOpening);
+
+    impl From<ArbitraryRecordOpening> for RecordOpening {
+        fn from(ro: ArbitraryRecordOpening) -> Self {
+            ro.0
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for ArbitraryRecordOpening {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let mut rng = ChaChaRng::from_seed(u.arbitrary()?);
+            Ok(Self(
+                RecordOpening::dummy(
+                    &mut rng,
+                    *u.choose(&[FreezeFlag::Frozen, FreezeFlag::Unfrozen])?,
+                )
+                .0,
+            ))
+        }
+    }
+
+    pub struct ArbitraryReceiverMemo(ReceiverMemo);
+
+    impl From<ArbitraryReceiverMemo> for ReceiverMemo {
+        fn from(m: ArbitraryReceiverMemo) -> Self {
+            m.0
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for ArbitraryReceiverMemo {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let mut rng = ChaChaRng::from_seed(u.arbitrary()?);
+            Ok(Self(
+                ReceiverMemo::from_ro(
+                    &mut rng,
+                    &u.arbitrary::<ArbitraryRecordOpening>()?.into(),
+                    &[],
+                )
+                .unwrap(),
+            ))
+        }
+    }
+
+    pub struct ArbitraryUserKeyPair(UserKeyPair);
+
+    impl From<ArbitraryUserKeyPair> for UserKeyPair {
+        fn from(k: ArbitraryUserKeyPair) -> Self {
+            k.0
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for ArbitraryUserKeyPair {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let mut rng = ChaChaRng::from_seed(u.arbitrary()?);
+            Ok(Self(UserKeyPair::generate(&mut rng)))
+        }
+    }
+
+    pub struct ArbitraryUserAddress(UserAddress);
+
+    impl From<ArbitraryUserAddress> for UserAddress {
+        fn from(a: ArbitraryUserAddress) -> Self {
+            a.0
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for ArbitraryUserAddress {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            Ok(Self(
+                UserKeyPair::from(u.arbitrary::<ArbitraryUserKeyPair>()?).address(),
+            ))
+        }
+    }
+
+    pub struct ArbitraryKeyPair(KeyPair);
+
+    impl From<ArbitraryKeyPair> for KeyPair {
+        fn from(k: ArbitraryKeyPair) -> Self {
+            k.0
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for ArbitraryKeyPair {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let mut rng = ChaChaRng::from_seed(u.arbitrary()?);
+            Ok(Self(KeyPair::generate(&mut rng)))
+        }
+    }
+}
+
 pub mod commit {
     use super::byte_array_to_bits;
+    use arbitrary::{Arbitrary, Unstructured};
     use ark_serialize::{
         CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write,
     };
@@ -31,7 +144,7 @@ pub mod commit {
     use core::marker::PhantomData;
     use generic_array::{ArrayLength, GenericArray};
     use sha3::digest::Digest;
-    use sha3::Sha3_256;
+    use sha3::Keccak256;
     use std::convert::TryInto;
 
     type Array = [u8; 32];
@@ -141,8 +254,14 @@ pub mod commit {
         }
     }
 
+    impl<'a, T: ?Sized + Committable> Arbitrary<'a> for Commitment<T> {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            Ok(Self(u.arbitrary()?, PhantomData::default()))
+        }
+    }
+
     pub struct RawCommitmentBuilder<T: Committable> {
-        hasher: Sha3_256,
+        hasher: Keccak256,
         _marker: PhantomData<T>,
     }
 

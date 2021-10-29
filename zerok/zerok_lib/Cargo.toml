@@ -7,6 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+arbitrary = { version="1.0", features=["derive"] }
 atomic_store = { version="0.0.2", registry="translucence" }
 chacha20 = "0.8.1"
 itertools = "0.10.1"
@@ -30,7 +31,8 @@ serde_cbor = "*"
 serde_with = "1.10.0"
 snafu = { version = "0.6.10", features = ["backtraces"] }
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
-bitvec = "0.21.1"
+sha3     = { version = "0.9.1" }
+bitvec = "0.20.4"
 rayon = "*"
 generic-array = { version = "0.14.4", features = ["serde"] }
 lazy_static = "1.4.0"
@@ -41,13 +43,13 @@ async-trait = "0.1.51"
 async-tungstenite = { version = "0.15.0", features = ["async-std-runtime"] }
 async_executors = { version = "0.4.2", features = ["async_std"] }
 futures = "0.3.16"
-sha3 = "0.9.1"
 strum = "0.20"
 strum_macros = "0.20.1"
 surf = "2.3.1"
 tide = "0.16.0"
 tracing = "0.1.26"
 zeroize = "1.3"
+zerok-macros = { path = "../zerok_macros" }
 hex = "0.4.3"
 
 [dev-dependencies]

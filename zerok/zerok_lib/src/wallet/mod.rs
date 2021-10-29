@@ -8,10 +8,12 @@ use crate::api;
 use crate::key_set;
 use crate::node::LedgerEvent;
 use crate::set_merkle_tree::*;
+use crate::util::arbitrary_wrappers::*;
 use crate::{
-    ElaboratedTransaction, ElaboratedTransactionHash, ProverKeySet, ValidationError,
+    ser_test, ElaboratedTransaction, ElaboratedTransactionHash, ProverKeySet, ValidationError,
     ValidatorState, MERKLE_HEIGHT,
 };
+use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use async_scoped::AsyncScope;
 use async_std::sync::{Mutex, MutexGuard};
@@ -425,6 +427,7 @@ pub struct WalletSession<'a, Backend: WalletBackend<'a>> {
     _marker: std::marker::PhantomData<&'a ()>,
 }
 
+#[ser_test(arbitrary, ark(false))]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct RecordInfo {
     ro: RecordOpening,
@@ -449,6 +452,18 @@ impl RecordInfo {
     }
 }
 
+impl<'a> Arbitrary<'a> for RecordInfo {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            ro: u.arbitrary::<ArbitraryRecordOpening>()?.into(),
+            uid: u.arbitrary()?,
+            nullifier: u.arbitrary::<ArbitraryNullifier>()?.into(),
+            hold_until: u.arbitrary()?,
+        })
+    }
+}
+
+#[ser_test(ark(false))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(from = "Vec<RecordInfo>", into = "Vec<RecordInfo>")]
 pub struct RecordDatabase {
@@ -620,14 +635,22 @@ impl From<RecordDatabase> for Vec<RecordInfo> {
     }
 }
 
+impl<'a> Arbitrary<'a> for RecordDatabase {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self::from(u.arbitrary::<Vec<RecordInfo>>()?))
+    }
+}
+
 // Serialization intermediate for TransactionDatabase, which eliminates the redundancy of the
 // in-memory indices in TransactionDatabase.
-#[derive(Serialize, Deserialize)]
+#[ser_test(arbitrary, ark(false))]
+#[derive(Arbitrary, Debug, Default, Serialize, Deserialize, PartialEq)]
 struct TransactionStorage {
     pending_txns: Vec<PendingTransaction>,
     txns_awaiting_memos: Vec<TransactionAwaitingMemos>,
 }
 
+#[ser_test(arbitrary, ark(false))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(from = "TransactionStorage", into = "TransactionStorage")]
 pub(crate) struct TransactionDatabase {
@@ -753,18 +776,39 @@ impl From<TransactionDatabase> for TransactionStorage {
     }
 }
 
+impl<'a> Arbitrary<'a> for TransactionDatabase {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self::from(u.arbitrary::<TransactionStorage>()?))
+    }
+}
+
+#[ser_test(arbitrary)]
 #[tagged_blob("TXUID")]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(
+    Arbitrary, Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize,
+)]
 pub struct TransactionUID(ElaboratedTransactionHash);
 
+#[ser_test(arbitrary)]
 #[tagged_blob("TXN")]
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq)]
 pub struct TransactionReceipt {
     uid: TransactionUID,
     fee_nullifier: Nullifier,
     submitter: UserAddress,
 }
 
+impl<'a> Arbitrary<'a> for TransactionReceipt {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            uid: u.arbitrary()?,
+            fee_nullifier: u.arbitrary::<ArbitraryNullifier>()?.into(),
+            submitter: u.arbitrary::<ArbitraryUserAddress>()?.into(),
+        })
+    }
+}
+
+#[ser_test(arbitrary, ark(false))]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) struct PendingTransaction {
     receiver_memos: Vec<ReceiverMemo>,
@@ -775,7 +819,30 @@ pub(crate) struct PendingTransaction {
     hash: ElaboratedTransactionHash,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+impl<'a> Arbitrary<'a> for PendingTransaction {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let memos = std::iter::once(u.arbitrary())
+            .chain(u.arbitrary_iter::<ArbitraryReceiverMemo>()?)
+            .map(|a| Ok(a?.into()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let key = u.arbitrary::<ArbitraryKeyPair>()?.into();
+        let signature = sign_receiver_memos(&key, &memos).unwrap();
+        Ok(Self {
+            receiver_memos: memos,
+            signature,
+            freeze_outputs: u
+                .arbitrary_iter::<ArbitraryRecordOpening>()?
+                .map(|a| Ok(a?.into()))
+                .collect::<Result<_, _>>()?,
+            timeout: u.arbitrary()?,
+            uid: u.arbitrary()?,
+            hash: u.arbitrary()?,
+        })
+    }
+}
+
+#[ser_test(arbitrary, ark(false))]
+#[derive(Arbitrary, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct TransactionAwaitingMemos {
     // The uid of this transaction.
     uid: TransactionUID,

@@ -1,7 +1,7 @@
 #![deny(warnings)]
 #![allow(dead_code)]
 
-use crate::util::{canonical, commit};
+use crate::util::{arbitrary_wrappers::*, canonical, commit};
 use ark_serialize::*;
 use bitvec::vec::BitVec;
 use core::mem;
@@ -82,6 +82,10 @@ pub mod set_hash {
     }
 }
 
+/// Note: this type implements PartialEq so that containing types can derive PartialEq, mostly for
+/// testing purposes. The implementation tests for logical equality of the represented set, ignoring
+/// sparseness. That is, any two sets with the same root hash will compare equal, even if the
+/// elements retained in memory are different between the two sets.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SetMerkleTree {
     EmptySubtree,
@@ -99,6 +103,22 @@ pub enum SetMerkleTree {
         l: Box<SetMerkleTree>,
         r: Box<SetMerkleTree>,
     },
+}
+
+impl PartialEq<Self> for SetMerkleTree {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash() == other.hash()
+    }
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for SetMerkleTree {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut s = Self::default();
+        for n in u.arbitrary_iter::<ArbitraryNullifier>()? {
+            s.insert(n?.into());
+        }
+        Ok(s)
+    }
 }
 
 impl SetMerkleTree {
