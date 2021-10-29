@@ -3,6 +3,7 @@ use crate::util::canonical::{deserialize_canonical_bytes, CanonicalBytes};
 use ark_serialize::*;
 use chacha20::{cipher, ChaCha20};
 use cipher::{NewCipher, StreamCipher};
+use generic_array::GenericArray;
 pub use hd::Salt;
 use hmac::{crypto_mac::MacError, Hmac, Mac, NewMac};
 use rand_chacha::rand_core::{CryptoRng, RngCore};
@@ -91,16 +92,16 @@ impl<Rng: RngCore + CryptoRng> Cipher<Rng> {
     fn apply(&self, key: &hd::Key, data: &mut [u8]) -> Result<()> {
         // We don't need a random nonce for the stream cipher, since we are initializing it with a
         // new key for each message.
-        let mut cipher = ChaCha20::new(key.as_bytes().into(), &chacha20::Nonce::default());
+        let key = <&GenericArray<u8, _>>::from(key.as_bytes().open_secret());
+        let mut cipher = ChaCha20::new(key, &chacha20::Nonce::default());
         cipher
             .try_apply_keystream(data)
             .map_err(|source| Error::DataTooLong { source })?;
         Ok(())
     }
 
-    fn hmac(&self, key: &hd::Key, nonce: &[u8], ciphertext: &[u8]) -> Hmac<Sha3_256> {
-        let mut hmac = Hmac::<Sha3_256>::new_from_slice(key.as_bytes()).unwrap();
-        hmac.update(key.as_bytes());
+    fn hmac(&self, hmac_key: &hd::Key, nonce: &[u8], ciphertext: &[u8]) -> Hmac<Sha3_256> {
+        let mut hmac = Hmac::<Sha3_256>::new_from_slice(hmac_key.as_bytes().open_secret()).unwrap();
         hmac.update(nonce);
         // Note: the ciphertext must be the last field, since it is variable sized and we do not
         // explicitly commit to its length. If we included another variably sized field after the

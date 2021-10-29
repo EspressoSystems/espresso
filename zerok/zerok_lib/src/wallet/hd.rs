@@ -84,7 +84,7 @@ impl KeyTree {
         // thus cannot suffer from domain confusion.
         let mut digest = Sha3_512::new()
             // Commit to the parent key.
-            .chain(&*self.0)
+            .chain(self.0.open_secret())
             .chain(id)
             .finalize();
         // The try_into will always succeed, because the hash output size is a slice of 64 bytes.
@@ -98,7 +98,7 @@ impl KeyTree {
         // cannot suffer from domain confusion.
         let mut digest = Sha3_256::new()
             // Commit to the parent key.
-            .chain(&*self.0)
+            .chain(self.0.open_secret())
             .chain(id)
             .finalize();
         Key(Secret::new(digest.as_mut()))
@@ -109,7 +109,7 @@ impl KeyTree {
 pub struct Key(Secret<[u8; 32]>);
 
 impl Key {
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &*self.0
+    pub fn as_bytes(&self) -> &Secret<[u8; 32]> {
+        &self.0
     }
 }

@@ -119,12 +119,15 @@ impl<S: Zeroize + SecretDefault> Secret<S> {
     pub fn build() -> SecretBuilder<S> {
         SecretBuilder(Box::new(Pinned::new(Zeroizing::new(S::secret_default()))))
     }
-}
 
-impl<S: Zeroize> Deref for Secret<S> {
-    type Target = S;
-
-    fn deref(&self) -> &S {
+    /// Access the secret data directly.
+    ///
+    /// Be very careful when using this method. Copying out of the returned reference can cause
+    /// copies of secret data to be left un-zeroed in memory. This should only be used when passing
+    /// a secret to an API which knows that it references secret data and which which ostensibly has
+    /// its own scheme for dealing with in-memory secrets. For example, this can be used when
+    /// passing as secret key to a MAC function or a cipher.
+    pub fn open_secret(&self) -> &S {
         &*self.0
     }
 }
