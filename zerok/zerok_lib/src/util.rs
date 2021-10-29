@@ -144,7 +144,7 @@ pub mod commit {
     use core::marker::PhantomData;
     use generic_array::{ArrayLength, GenericArray};
     use sha3::digest::Digest;
-    use sha3::Sha3_256;
+    use sha3::Keccak256;
     use std::convert::TryInto;
 
     type Array = [u8; 32];
@@ -261,7 +261,7 @@ pub mod commit {
     }
 
     pub struct RawCommitmentBuilder<T: Committable> {
-        hasher: Sha3_256,
+        hasher: Keccak256,
         _marker: PhantomData<T>,
     }
 
