@@ -2,6 +2,7 @@ use crate::key_set::OrderByOutputs;
 use crate::set_merkle_tree::SetMerkleTree;
 use crate::wallet::*;
 use crate::{ProverKeySet, ValidatorState};
+use arbitrary::Arbitrary;
 use async_std::sync::Arc;
 use atomic_store::{
     load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, RollingLog,
@@ -33,7 +34,8 @@ impl<'a> From<&WalletState<'a>> for WalletStaticState<'a> {
 }
 
 // Serialization intermediate for the dynamic part of a WalletState.
-#[derive(Deserialize, Serialize)]
+#[ser_test(arbitrary, ark(false))]
+#[derive(Arbitrary, Debug, Deserialize, Serialize, PartialEq)]
 struct WalletSnapshot {
     now: u64,
     validator: ValidatorState,

@@ -4,6 +4,9 @@
 #[macro_use]
 extern crate proptest;
 
+extern crate zerok_macros;
+use zerok_macros::*;
+
 #[cfg(test)]
 #[macro_use]
 extern crate quickcheck_macros;
@@ -18,6 +21,7 @@ pub mod wallet;
 use commit::{Commitment, Committable};
 use util::commit;
 
+use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
@@ -92,10 +96,14 @@ impl ElaboratedTransaction {
     }
 }
 
+#[ser_test(arbitrary)]
 #[tagged_blob("TXN")]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(
+    Arbitrary, Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize,
+)]
 pub struct ElaboratedTransactionHash(Commitment<ElaboratedTransaction>);
 
+#[ser_test]
 #[derive(
     Default,
     Debug,
@@ -111,6 +119,7 @@ pub struct ElaboratedTransactionHash(Commitment<ElaboratedTransaction>);
 pub struct Block(pub Vec<TransactionNote>);
 
 // A block with nullifier set non-membership proofs
+#[ser_test]
 #[derive(
     Default,
     Debug,
@@ -284,7 +293,14 @@ pub mod key_set {
 
     #[serde_as]
     #[derive(
-        Debug, Clone, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize, PartialEq,
+        Debug,
+        Default,
+        Clone,
+        Serialize,
+        Deserialize,
+        CanonicalSerialize,
+        CanonicalDeserialize,
+        PartialEq,
     )]
     #[serde(bound = "K: Serialize + for<'a> Deserialize<'a>")]
     pub struct KeySet<K: SizedKey, Order: KeyOrder = OrderByInputs> {
@@ -498,8 +514,11 @@ impl Committable for TransactionNote {
     }
 }
 
+#[ser_test(arbitrary)]
 #[tagged_blob("BLOCK")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(
+    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize,
+)]
 pub struct BlockCommitment(pub commit::Commitment<Block>);
 
 deserialize_canonical_bytes!(BlockCommitment);
@@ -534,8 +553,11 @@ pub mod state_comm {
     use super::*;
     use jf_utils::tagged_blob;
 
+    #[ser_test(arbitrary)]
     #[tagged_blob("STATE")]
-    #[derive(Debug, Clone, Copy, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq, Hash)]
+    #[derive(
+        Arbitrary, Debug, Clone, Copy, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq, Hash,
+    )]
     pub struct LedgerStateCommitment(pub Commitment<LedgerCommitmentOpening>);
 
     impl From<Commitment<LedgerCommitmentOpening>> for LedgerStateCommitment {
@@ -595,6 +617,7 @@ pub mod state_comm {
     }
 }
 
+#[ser_test(arbitrary, ark(false))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidatorState {
     pub prev_commit_time: u64,
@@ -815,6 +838,19 @@ impl ValidatorState {
     }
 }
 
+impl<'a> Arbitrary<'a> for ValidatorState {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(MultiXfrTestState::initialize(
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            (u.arbitrary()?, u.arbitrary()?),
+        )
+        .unwrap()
+        .validator)
+    }
+}
+
 impl PartialEq for ValidatorState {
     fn eq(&self, other: &ValidatorState) -> bool {
         self.commit() == other.commit()
@@ -980,7 +1016,7 @@ lazy_static! {
         get_universal_param(&mut ChaChaRng::from_seed([0x8au8; 32]));
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Arbitrary, Debug, Clone, Copy)]
 pub struct MultiXfrRecordSpec {
     pub asset_def_ix: u8,
     pub owner_key_ix: u8,
