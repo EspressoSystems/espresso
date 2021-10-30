@@ -228,11 +228,12 @@ async fn get_networking<
     T: Clone + Serialize + DeserializeOwned + Send + Sync + std::fmt::Debug + 'static,
 >(
     node_id: u64,
+    listen_addr: &str,
     port: u16,
 ) -> (WNetwork<T>, PubKey) {
     let pub_key = get_public_key(node_id);
     debug!(?pub_key);
-    let network = WNetwork::new(pub_key.clone(), port, None).await;
+    let network = WNetwork::new(pub_key.clone(), listen_addr, port, None).await;
     if let Ok(n) = network {
         let (c, sync) = futures::channel::oneshot::channel();
         match n.generate_task(c) {
@@ -251,7 +252,7 @@ async fn get_networking<
     panic!("Failed to open a port");
 }
 
-type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>;
+type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>;
 type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
@@ -279,6 +280,13 @@ impl Validator for Node {
         }
     }
 
+    async fn current_state(&self) -> Arc<ValidatorState> {
+        match self {
+            Node::Light(n) => n.current_state().await,
+            Node::Full(n) => n.current_state().await,
+        }
+    }
+
     fn subscribe(&self) -> EventStream<Self::Event> {
         match self {
             Node::Light(n) => n.subscribe(),
@@ -294,7 +302,7 @@ async fn init_state_and_phaselock(
     nodes: u64,
     threshold: u64,
     node_id: u64,
-    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>,
+    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
     full_node: bool,
 ) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state
@@ -739,7 +747,7 @@ fn init_web_server(
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
-    tracing_subscriber::fmt().init();
+    tracing_subscriber::fmt().pretty().init();
 
     // Get configuration
     let node_config = get_node_config();
@@ -788,7 +796,7 @@ async fn main() -> Result<(), std::io::Error> {
 
         // Get networking information
         let (own_network, _) =
-            get_networking(own_id, get_host(node_config.clone(), own_id).1).await;
+            get_networking(own_id, "0.0.0.0", get_host(node_config.clone(), own_id).1).await;
         #[allow(clippy::type_complexity)]
         let mut other_nodes: Vec<(u64, PubKey, String, u16)> = Vec::new();
         for id in 0..nodes {
@@ -851,6 +859,11 @@ async fn main() -> Result<(), std::io::Error> {
         // Otherwise, keeping running till the process is killed.
         while num_txn.map(|count| round < count).unwrap_or(true) {
             println!("Starting round {}", round + 1);
+            let commitment =
+                TaggedBase64::new("LEDG", phaselock.current_state().await.commit().as_ref())
+                    .unwrap()
+                    .to_string();
+            println!("Commitment: {}", commitment);
 
             // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
             let mut txn = None;

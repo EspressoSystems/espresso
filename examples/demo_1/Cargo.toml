@@ -12,7 +12,8 @@ async-lock = "2.4.0"
 async-std = { version = "1.9.0", features = ["unstable", "attributes"] }
 async-tls = "0.11.0"
 futures = "0.3.0"
-phaselock = { version = "0.0.2", registry = "translucence" }
+# phaselock = { version = "0.0.2", registry = "translucence" }
+phaselock = { path = "/home/joe/translucence/phaselock" }
 rand = "0.7.3"
 serde = { version = "1.0.123", features = ["derive", "rc"] }
 structopt = "0.3"

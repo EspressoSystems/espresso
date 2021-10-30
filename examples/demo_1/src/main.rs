@@ -25,7 +25,7 @@ use zerok_lib::{
     MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
 };
 
-type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>;
+type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>;
 type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_256>;
 
 /// Generates the `SecretKeySet` for this BFT instance
@@ -42,7 +42,7 @@ pub async fn try_network<
     // TODO: Actually attempt to open the port and find a new one if it doens't work
     let port = rand::thread_rng().gen_range(2000, 5000);
     (
-        WNetwork::new(key, port, None)
+        WNetwork::new(key, "localhost", port, None)
             .await
             .expect("Failed to create network"),
         port,
