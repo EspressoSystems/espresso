@@ -136,7 +136,7 @@ dependencies = [
 [[package]]
 name = "ark-bls12-377"
 version = "0.3.0"
-source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_et_param#8990c1c9c55094ce0968d6897c351aa442adf1ba"
+source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_twisted_edwards_param#8990c1c9c55094ce0968d6897c351aa442adf1ba"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -168,7 +168,7 @@ dependencies = [
 [[package]]
 name = "ark-bw6-761"
 version = "0.3.0"
-source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_et_param#8990c1c9c55094ce0968d6897c351aa442adf1ba"
+source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_twisted_edwards_param#8990c1c9c55094ce0968d6897c351aa442adf1ba"
 dependencies = [
  "ark-bls12-377",
  "ark-ec",
@@ -194,7 +194,7 @@ dependencies = [
 [[package]]
 name = "ark-ed-on-bls12-377"
 version = "0.3.0"
-source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_et_param#8990c1c9c55094ce0968d6897c351aa442adf1ba"
+source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_twisted_edwards_param#8990c1c9c55094ce0968d6897c351aa442adf1ba"
 dependencies = [
  "ark-bls12-377",
  "ark-ec",
@@ -2204,30 +2204,7 @@ checksum = "b71991ff56294aa922b450139ee08b3bfc70982c6b2c7562771375cf73542dd4"
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f#5333c1868c7b7f9d8931a7888ddd54eed295309f"
-dependencies = [
- "ark-bls12-381",
- "ark-ec",
- "ark-ed-on-bls12-381",
- "ark-ff",
- "ark-poly",
- "ark-poly-commit",
- "ark-serialize",
- "ark-std",
- "displaydoc",
- "downcast-rs",
- "itertools 0.10.1",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
- "merlin",
- "rayon",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "jf-plonk"
-version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4a05ee742fabf9c316e4f80d2a97d968b302528a#4a05ee742fabf9c316e4f80d2a97d968b302528a"
 dependencies = [
  "ark-bls12-377",
  "ark-ec",
@@ -2241,9 +2218,10 @@ dependencies = [
  "downcast-rs",
  "itertools 0.10.1",
  "jf-rescue",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-utils",
  "merlin",
  "num-bigint 0.4.2",
+ "rand_chacha 0.3.1",
  "rayon",
  "serde",
  "thiserror",
@@ -2252,30 +2230,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f#5333c1868c7b7f9d8931a7888ddd54eed295309f"
-dependencies = [
- "ark-bls12-381",
- "ark-ec",
- "ark-ed-on-bls12-381",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "crypto_box",
- "displaydoc",
- "generic-array",
- "itertools 0.10.1",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
- "rayon",
- "serde",
- "thiserror",
- "zeroize",
-]
-
-[[package]]
-name = "jf-primitives"
-version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4a05ee742fabf9c316e4f80d2a97d968b302528a#4a05ee742fabf9c316e4f80d2a97d968b302528a"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2293,9 +2248,9 @@ dependencies = [
  "displaydoc",
  "generic-array",
  "itertools 0.10.1",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-plonk",
  "jf-rescue",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-utils",
  "rayon",
  "serde",
  "thiserror",
@@ -2305,7 +2260,7 @@ dependencies = [
 [[package]]
 name = "jf-rescue"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4a05ee742fabf9c316e4f80d2a97d968b302528a#4a05ee742fabf9c316e4f80d2a97d968b302528a"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2323,7 +2278,7 @@ dependencies = [
  "displaydoc",
  "generic-array",
  "itertools 0.10.1",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-utils",
  "rayon",
  "serde",
  "thiserror",
@@ -2333,38 +2288,7 @@ dependencies = [
 [[package]]
 name = "jf-txn"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f#5333c1868c7b7f9d8931a7888ddd54eed295309f"
-dependencies = [
- "anyhow",
- "ark-bls12-381",
- "ark-ec",
- "ark-ed-on-bls12-381",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "bincode",
- "csv",
- "displaydoc",
- "itertools 0.10.1",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
- "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
- "num_cpus",
- "percentage",
- "rand 0.8.4",
- "rayon",
- "rustc-serialize",
- "serde",
- "serde_derive",
- "sha2",
- "structopt",
- "thiserror",
-]
-
-[[package]]
-name = "jf-txn"
-version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4a05ee742fabf9c316e4f80d2a97d968b302528a#4a05ee742fabf9c316e4f80d2a97d968b302528a"
 dependencies = [
  "anyhow",
  "ark-bls12-377",
@@ -2382,10 +2306,10 @@ dependencies = [
  "derivative",
  "displaydoc",
  "itertools 0.10.1",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
- "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-plonk",
+ "jf-primitives",
  "jf-rescue",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-utils",
  "num_cpus",
  "percentage",
  "rand 0.8.4",
@@ -2402,17 +2326,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f#5333c1868c7b7f9d8931a7888ddd54eed295309f"
-dependencies = [
- "ark-serialize",
- "ark-std",
- "serde",
-]
-
-[[package]]
-name = "jf-utils"
-version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4a05ee742fabf9c316e4f80d2a97d968b302528a#4a05ee742fabf9c316e4f80d2a97d968b302528a"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -2427,7 +2341,7 @@ dependencies = [
 [[package]]
 name = "jf-utils-derive"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290#5b500854579d58f2988ba0249b97203351a49290"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4a05ee742fabf9c316e4f80d2a97d968b302528a#4a05ee742fabf9c316e4f80d2a97d968b302528a"
 dependencies = [
  "ark-serialize",
  "ark-std",
@@ -2659,10 +2573,10 @@ dependencies = [
  "futures",
  "futures-util",
  "itertools 0.10.1",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
- "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
- "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-txn",
+ "jf-utils",
  "markdown",
  "phaselock",
  "rand_chacha 0.2.2",
@@ -4262,10 +4176,10 @@ version = "0.1.0"
 dependencies = [
  "bitvec",
  "itertools 0.10.1",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
- "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
- "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5333c1868c7b7f9d8931a7888ddd54eed295309f)",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-txn",
+ "jf-utils",
  "log",
  "phaselock",
  "quickcheck 0.9.2",
@@ -5186,10 +5100,10 @@ dependencies = [
  "bincode",
  "escargot",
  "futures",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
- "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
- "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-txn",
+ "jf-utils",
  "lazy_static",
  "regex",
  "rustyline",
@@ -5221,10 +5135,10 @@ dependencies = [
  "generic-array",
  "hex",
  "itertools 0.10.1",
- "jf-plonk 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
- "jf-primitives 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
- "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
- "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-txn",
+ "jf-utils",
  "lazy_static",
  "phaselock",
  "proptest",

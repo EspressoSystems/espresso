@@ -1,4 +1,5 @@
 use crate::key_set::OrderByOutputs;
+use crate::node::ArbitrableMerkleTree;
 use crate::set_merkle_tree::SetMerkleTree;
 use crate::wallet::*;
 use crate::{ProverKeySet, ValidatorState};
@@ -41,6 +42,7 @@ struct WalletSnapshot {
     validator: ValidatorState,
     records: RecordDatabase,
     nullifiers: SetMerkleTree,
+    record_mt: ArbitrableMerkleTree,
     transactions: TransactionDatabase,
 }
 
@@ -51,6 +53,7 @@ impl<'a> From<&WalletState<'a>> for WalletSnapshot {
             validator: w.validator.clone(),
             records: w.records.clone(),
             nullifiers: w.nullifiers.clone(),
+            record_mt: ArbitrableMerkleTree(w.record_mt.clone()),
             transactions: w.transactions.clone(),
         }
     }
@@ -139,6 +142,7 @@ impl<'a> WalletStorage<'a> for AtomicWalletStorage {
             now: dynamic_state.now,
             records: dynamic_state.records,
             nullifiers: dynamic_state.nullifiers,
+            record_mt: dynamic_state.record_mt.0,
             transactions: dynamic_state.transactions,
 
             // Monotonic state
@@ -315,7 +319,7 @@ mod tests {
                 )
                 .unwrap(),
             },
-            record_merkle_tree,
+            record_merkle_tree.clone(),
         );
 
         let key_pair = UserKeyPair::generate(&mut rng);
@@ -333,6 +337,7 @@ mod tests {
             records: Default::default(),
             auditable_assets: Default::default(),
             nullifiers: Default::default(),
+            record_mt: record_merkle_tree,
             defined_assets: Default::default(),
             transactions: Default::default(),
         };
@@ -362,17 +367,14 @@ mod tests {
         // Modify some dynamic state and load the wallet again.
         let ro = random_ro(&mut rng, &key_pair);
         let comm = RecordCommitment::from(&ro);
-        stored
-            .validator
-            .record_merkle_frontier
-            .push(comm.to_field_element());
+        stored.record_mt.push(comm.to_field_element());
         stored
             .validator
             .past_record_merkle_roots
             .0
-            .push_back(stored.validator.record_merkle_root);
-        stored.validator.record_merkle_root =
-            stored.validator.record_merkle_frontier.get_root_value();
+            .push_back(stored.validator.record_merkle_commitment.root_value);
+        stored.validator.record_merkle_commitment = stored.record_mt.commitment();
+        stored.validator.record_merkle_frontier_x_remove = stored.record_mt.frontier();
         let mut nullifiers = SetMerkleTree::default();
         nullifiers.insert(Nullifier::random_for_test(&mut rng));
         stored.validator.nullifiers_root = nullifiers.hash();
@@ -380,7 +382,7 @@ mod tests {
         stored.now += 1;
         stored.records.insert(
             ro,
-            stored.validator.record_merkle_frontier.num_leaves(),
+            stored.validator.record_merkle_commitment.num_leaves,
             &key_pair,
         );
         let (receiver_memos, signature) = random_memos(&mut rng, &key_pair);

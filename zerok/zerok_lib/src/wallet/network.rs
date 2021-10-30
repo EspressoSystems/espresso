@@ -111,6 +111,7 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
         let LedgerSnapshot {
             state: validator,
             nullifiers,
+            records,
         } = self.get("getsnapshot/0/true").await?;
 
         // Construct proving keys of the same arities as the verifier keys from the validator.
@@ -158,6 +159,7 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
             validator,
             proving_keys,
             nullifiers,
+            record_mt: records.0,
             now: 0,
             records: Default::default(),
             defined_assets: Default::default(),
