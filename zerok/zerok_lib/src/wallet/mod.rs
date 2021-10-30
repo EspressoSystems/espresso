@@ -1057,7 +1057,7 @@ impl<'a> WalletState<'a> {
                             // just log the problem.
                             println!("received valid block with invalid state commitment");
                         }
-
+                        
                         // Get a list of new uids and whether we want to remember them in our record
                         // Merkle tree. Initially, set `remember` to false for all uids, to maximize
                         // sparseness. If any of the consumers of this block (for example, the
@@ -1076,6 +1076,9 @@ impl<'a> WalletState<'a> {
                 for ((txn_id, txn), proofs) in
                     block.block.0.into_iter().enumerate().zip(block.proofs)
                 {
+                    for o in txn.output_commitments() {
+                        self.record_merkle_tree_mut().push(o.to_field_element());
+                    }
                     // Split the uids corresponding to this transaction off the front of `uids`.
                     let mut this_txn_uids = uids;
                     uids = this_txn_uids.split_off(txn.output_len());
