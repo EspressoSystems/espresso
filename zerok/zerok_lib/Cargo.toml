@@ -12,10 +12,10 @@ atomic_store = { version="0.0.2", registry="translucence" }
 itertools = "0.10.1"
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
-jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "4a05ee742fabf9c316e4f80d2a97d968b302528a"}
-jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "4a05ee742fabf9c316e4f80d2a97d968b302528a"}
-jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "4a05ee742fabf9c316e4f80d2a97d968b302528a"}
-jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "4a05ee742fabf9c316e4f80d2a97d968b302528a"}
+jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
+jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
+jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
+jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
 phaselock = { version = "0.0.2", registry = "translucence"}
 ark-std = { version = "0.3.0", default-features = false }
 ark-ff = { version = "0.3.0", default-features = false }
