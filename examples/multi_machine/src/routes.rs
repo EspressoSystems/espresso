@@ -3,6 +3,7 @@
 use crate::WebState;
 use futures::prelude::*;
 use itertools::izip;
+use jf_txn::MerkleTree;
 use phaselock::BlockContents;
 use server::{best_response_type, response};
 use std::collections::HashMap;
@@ -18,7 +19,6 @@ use tracing::{event, Level};
 use zerok_lib::api::*;
 use zerok_lib::node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
 use zerok_lib::SetMerkleTree;
-use jf_txn::MerkleTree;
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -393,10 +393,12 @@ async fn get_snapshot(
             snapshot.state.record_merkle_commitment,
             &snapshot.state.record_merkle_frontier,
         )
-        .ok_or(tide::Error::from_str(
-            tide::StatusCode::InternalServerError,
-            "Could not restore records MerkleTree",
-        ))?
+        .ok_or_else(|| {
+            tide::Error::from_str(
+                tide::StatusCode::InternalServerError,
+                "Could not restore records MerkleTree",
+            )
+        })?
     }
     Ok(snapshot)
 }
