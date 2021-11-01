@@ -924,13 +924,6 @@ pub struct MultiXfrTestState {
     pub inner_timer: Instant,
 }
 
-/// Returns the path to the universal parameter file.
-fn universal_param_path() -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    const FILE: &str = "src/universal_param";
-    [&dir, Path::new(FILE)].iter().collect()
-}
-
 /// Generates universal parameter and store it to file.
 pub fn set_universal_param(prng: &mut ChaChaRng) {
     let universal_param = jf_txn::proof::universal_setup(
@@ -968,7 +961,8 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
     .unwrap_or_else(|err| panic!("Error while setting up the universal parameter: {}", err));
     let param_bytes = canonical::serialize(&universal_param)
         .unwrap_or_else(|err| panic!("Error while serializing the universal parameter: {}", err));
-    let path = universal_param_path()
+    let path = UNIVERSAL_PARAM_PATH
+        .clone()
         .into_os_string()
         .into_string()
         .expect("Error while converting universal parameter path to a string");
@@ -986,21 +980,19 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
 /// Reads universal parameter from file if it exists. If not, generates the universal parameter, stores
 /// it to file, and returns it.
 pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalParam {
-    let path = universal_param_path();
-
     // create a new seeded PRNG from the master PRNG when getting the UniversalParam. This ensures a
     // deterministic RNG result after the call, either the UniversalParam is newly generated or loaded
     // from a file.
     let mut new_prng = ChaChaRng::from_rng(prng)
         .unwrap_or_else(|err| panic!("Error while creating a new PRNG: {}", err));
-    let mut file = match File::open(&path) {
+    let mut file = match File::open(&*UNIVERSAL_PARAM_PATH) {
         Ok(f) => f,
         Err(_) => {
             set_universal_param(&mut new_prng);
-            File::open(&path).unwrap_or_else(|_| {
+            File::open(&*UNIVERSAL_PARAM_PATH).unwrap_or_else(|_| {
                 panic!(
                     "Cannot find the universal parameter file after generation: {}",
-                    path.display()
+                    UNIVERSAL_PARAM_PATH.display()
                 )
             })
         }
@@ -1013,6 +1005,17 @@ pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalPara
 }
 
 lazy_static! {
+    // By default, set the path to the universal parameter file as `src/universal_param` under `CARGO_MANIFEST_DIR`.
+    // Override it with the environment variable, `UNIVERSAL_PARAM_PATH`.
+    static ref UNIVERSAL_PARAM_PATH: PathBuf = match std::env::var("UNIVERSAL_PARAM_PATH") {
+        Ok(path) => PathBuf::from(path),
+        _ => [
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            Path::new("src/universal_param")
+        ]
+        .iter()
+        .collect(),
+    };
     pub static ref UNIVERSAL_PARAM: jf_txn::proof::UniversalParam =
         get_universal_param(&mut ChaChaRng::from_seed([0x8au8; 32]));
 }

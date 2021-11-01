@@ -58,6 +58,10 @@ struct NodeOpt {
     )]
     config: String,
 
+    /// Path to the universal parameter file.
+    #[structopt(long = "universal_param_path", short = "u")]
+    universal_param_path: Option<String>,
+
     /// Whether to generate and store public keys for all nodes.
     ///
     /// Public keys will be stored under the directory specified by `pk_path`.
@@ -743,6 +747,11 @@ async fn main() -> Result<(), std::io::Error> {
 
     // Get configuration
     let node_config = get_node_config();
+
+    // Override the path to the universal parameter file if it's specified
+    if let Some(dir) = NodeOpt::from_args().universal_param_path {
+        std::env::set_var("UNIVERSAL_PARAM_PATH", dir);
+    }
 
     // Get secret key set
     let seed: [u8; 32] = node_config["seed"]
