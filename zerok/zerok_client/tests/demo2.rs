@@ -1,5 +1,5 @@
-mod test_state;
-use test_state::cli_test;
+extern crate zerok_client;
+use zerok_client::cli_client::cli_test;
 
 #[test]
 #[ignore]
@@ -19,7 +19,7 @@ fn demo2() {
             .command(1, "test_password2")?
             .output("Retype password:")?
             .command(1, "test_password2")?
-            .output("connecting..?.")?
+            .output("connecting...")?
             // Get the wallet addresses and check balances of the native assets
             .command(0, "address")?
             .output("(?P<addr0>ADDR~.*)")?

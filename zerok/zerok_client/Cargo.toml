@@ -24,13 +24,12 @@ rpassword = "5.0.1"
 rustyline = "9.0.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1.0"
+serde_json = "1.0.61"
 snafu = { version = "0.6.10", features = ["backtraces"] }
 shutdown_hooks = "0.1.0"
 structopt = { version = "0.3", features = ["paw"] }
+surf = "2.3.1"
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
 tempdir = "0.3.7"
-zerok_lib = { path = "../zerok_lib/" }
-
-[dev-dependencies]
-tempdir = "0.3.7"
 toml = "0.5"
+zerok_lib = { path = "../zerok_lib/" }

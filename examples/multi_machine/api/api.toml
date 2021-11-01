@@ -188,3 +188,11 @@ requested root hash. The root must be a historical root hash of the ledger's nul
 """
 ERROR_root = "A valid Merkle set root hash is required. Hashes begin with HASH~."
 ERROR_nullifier = "A valid nullifier is required. Nullifiers begin with NUL~."
+
+[route.getstatecomm]
+PATH = ["getstatecomm/:index", "getstatecomm/latest"]
+":index" = "Integer"
+DOC = """
+Gets the requested state commitment. Indexing is the same as for `getsnapshot`.
+"""
+ERROR_index = "The index must be a non-negative integer."
