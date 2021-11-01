@@ -1,5 +1,5 @@
 use crate::key_set::OrderByOutputs;
-use crate::node::ArbitrableMerkleTree;
+use crate::node::MerkleTreeWithArbitrary;
 use crate::set_merkle_tree::SetMerkleTree;
 use crate::wallet::*;
 use crate::{ProverKeySet, ValidatorState};
@@ -61,7 +61,7 @@ struct WalletSnapshot {
     validator: ValidatorState,
     records: RecordDatabase,
     nullifiers: SetMerkleTree,
-    record_mt: ArbitrableMerkleTree,
+    record_mt: MerkleTreeWithArbitrary,
     transactions: TransactionDatabase,
 }
 
@@ -72,7 +72,7 @@ impl<'a> From<&WalletState<'a>> for WalletSnapshot {
             validator: w.validator.clone(),
             records: w.records.clone(),
             nullifiers: w.nullifiers.clone(),
-            record_mt: ArbitrableMerkleTree(w.record_mt.clone()),
+            record_mt: MerkleTreeWithArbitrary(w.record_mt.clone()),
             transactions: w.transactions.clone(),
         }
     }
@@ -528,7 +528,7 @@ mod tests {
             .0
             .push_back(stored.validator.record_merkle_commitment.root_value);
         stored.validator.record_merkle_commitment = stored.record_mt.commitment();
-        stored.validator.record_merkle_frontier_x_remove = stored.record_mt.frontier();
+        stored.validator.record_merkle_frontier = stored.record_mt.frontier();
         let mut nullifiers = SetMerkleTree::default();
         nullifiers.insert(Nullifier::random_for_test(&mut rng));
         stored.validator.nullifiers_root = nullifiers.hash();

@@ -663,7 +663,7 @@ pub struct ValidatorState {
     // The current record Merkle commitment
     pub record_merkle_commitment: MerkleCommitment,
     // The current frontier of the record Merkle tree
-    pub record_merkle_frontier_x_remove: MerkleFrontier,
+    pub record_merkle_frontier: MerkleFrontier,
     // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
     pub past_record_merkle_roots: RecordMerkleHistory,
     pub nullifiers_root: set_hash::Hash,
@@ -686,7 +686,7 @@ impl ValidatorState {
             prev_state: None,
             verif_crs,
             record_merkle_commitment: record_merkle_frontier.commitment(),
-            record_merkle_frontier_x_remove: record_merkle_frontier.frontier(),
+            record_merkle_frontier: record_merkle_frontier.frontier(),
             past_record_merkle_roots: RecordMerkleHistory(VecDeque::with_capacity(
                 Self::RECORD_ROOT_HISTORY_SIZE,
             )),
@@ -702,10 +702,8 @@ impl ValidatorState {
             verif_crs: self.verif_crs.commit(),
             record_merkle_commitment: RecordMerkleCommitment(self.record_merkle_commitment)
                 .commit(),
-            record_merkle_frontier: RecordMerkleFrontier(
-                self.record_merkle_frontier_x_remove.clone(),
-            )
-            .commit(),
+            record_merkle_frontier: RecordMerkleFrontier(self.record_merkle_frontier.clone())
+                .commit(),
             // We need to include all the cached past record Merkle roots in the state commitment,
             // even though they are not part of the current ledger state, because they affect
             // validation: two validators with different caches will be able to validate different
@@ -844,7 +842,7 @@ impl ValidatorState {
 
         let mut record_merkle_frontier = MerkleTree::restore_from_frontier(
             self.record_merkle_commitment,
-            &self.record_merkle_frontier_x_remove,
+            &self.record_merkle_frontier,
         )
         .ok_or(ValidationError::BadMerklePath {})?;
         let mut ret = vec![];
@@ -870,7 +868,7 @@ impl ValidatorState {
             .0
             .push_front(self.record_merkle_commitment.root_value);
         self.record_merkle_commitment = record_merkle_frontier.commitment();
-        self.record_merkle_frontier_x_remove = record_merkle_frontier.frontier();
+        self.record_merkle_frontier = record_merkle_frontier.frontier();
         self.prev_state = Some(comm);
         Ok(ret)
     }

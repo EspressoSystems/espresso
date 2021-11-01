@@ -101,16 +101,16 @@ pub struct LedgerSummary {
 
 #[ser_test(arbitrary, ark(false))]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct ArbitrableMerkleTree(pub MerkleTree);
+pub struct MerkleTreeWithArbitrary(pub MerkleTree);
 
-impl<'a> Arbitrary<'a> for ArbitrableMerkleTree {
+impl<'a> Arbitrary<'a> for MerkleTreeWithArbitrary {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let mut mt = MerkleTree::new(3).unwrap();
         for _ in 0..15 {
             // todo: range restricted random depth and count
             mt.push(u.arbitrary::<ArbitraryBaseField>()?.into());
         }
-        Ok(ArbitrableMerkleTree(mt))
+        Ok(MerkleTreeWithArbitrary(mt))
     }
 }
 
@@ -119,7 +119,7 @@ impl<'a> Arbitrary<'a> for ArbitrableMerkleTree {
 pub struct LedgerSnapshot {
     pub state: ValidatorState,
     pub nullifiers: SetMerkleTree,
-    pub records: ArbitrableMerkleTree,
+    pub records: MerkleTreeWithArbitrary,
 }
 
 #[derive(Clone, Debug)]
@@ -372,7 +372,7 @@ impl FullState {
                                     state: prev_state,
                                     nullifiers: self.nullifiers.clone(),
                                     // starting from the last frontier MT and not pruning for the current block might actually be the right solution here. That would require constructing the sparse tree and swapping it here, rather than cloning...
-                                    records: ArbitrableMerkleTree(self.records.clone()),
+                                    records: MerkleTreeWithArbitrary(self.records.clone()),
                                 },
                                 block: (*block).clone(),
                                 memos: vec![None; block.block.0.len()],
@@ -564,7 +564,7 @@ impl<'a> PhaseLockQueryService<'a> {
             validator.record_merkle_commitment
         );
         validator.record_merkle_commitment = record_merkle_tree.commitment();
-        validator.record_merkle_frontier_x_remove = record_merkle_tree.frontier();
+        validator.record_merkle_frontier = record_merkle_tree.frontier();
 
         let state = Arc::new(RwLock::new(FullState {
             validator,
@@ -645,7 +645,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
             Equal => Ok(LedgerSnapshot {
                 state: state.validator.clone(),
                 nullifiers: state.nullifiers.clone(),
-                records: ArbitrableMerkleTree(state.records.clone()),
+                records: MerkleTreeWithArbitrary(state.records.clone()),
             }),
             Greater => Err(QueryServiceError::InvalidBlockId {}),
         }
