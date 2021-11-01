@@ -12,6 +12,7 @@ use zerok_macros::*;
 extern crate quickcheck_macros;
 
 pub mod api;
+pub mod committee;
 pub mod lw_persistence;
 pub mod node;
 mod set_merkle_tree;

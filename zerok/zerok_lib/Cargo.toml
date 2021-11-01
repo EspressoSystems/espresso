@@ -31,6 +31,7 @@ serde_cbor = "*"
 serde_with = "1.10.0"
 snafu = { version = "0.6.10", features = ["backtraces"] }
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
+threshold_crypto = "0.4.0"
 sha3     = { version = "0.9.1" }
 bitvec = "0.20.4"
 rayon = "*"

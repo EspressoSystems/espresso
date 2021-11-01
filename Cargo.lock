@@ -5317,6 +5317,7 @@ dependencies = [
  "surf",
  "tagged-base64",
  "tempdir",
+ "threshold_crypto",
  "tide",
  "tracing",
  "zeroize",
