@@ -28,9 +28,9 @@ impl LWPersistence {
     }
 
     pub fn store_latest_state(&mut self, _block: &ElaboratedBlock, state: &ValidatorState) {
-        let _store_result = self.state_snapshot.store_resource(state);
-        let _log_commit_result = self.state_snapshot.commit_version();
-        let _store_commit_result = self.atomic_store.commit_version();
+        self.state_snapshot.store_resource(state).unwrap();
+        self.state_snapshot.commit_version().unwrap();
+        self.atomic_store.commit_version().unwrap();
     }
 }
 
