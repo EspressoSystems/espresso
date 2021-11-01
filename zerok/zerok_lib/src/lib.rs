@@ -960,13 +960,13 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
     .unwrap_or_else(|err| panic!("Error while setting up the universal parameter: {}", err));
     let param_bytes = canonical::serialize(&universal_param)
         .unwrap_or_else(|err| panic!("Error while serializing the universal parameter: {}", err));
-    let path_str = UNIVERSAL_PARAM_PATH
+    let path = UNIVERSAL_PARAM_PATH
         .clone()
         .into_os_string()
         .into_string()
         .expect("Error while converting universal parameter path to a string");
-    println!("path {}", path_str);
-    let mut file = File::create(path_str)
+    println!("path {}", path);
+    let mut file = File::create(path)
         .unwrap_or_else(|err| panic!("Error while creating a universal parameter file: {}", err));
     file.write_all(&param_bytes).unwrap_or_else(|err| {
         panic!(
