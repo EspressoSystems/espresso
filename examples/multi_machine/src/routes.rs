@@ -18,6 +18,7 @@ use tracing::{event, Level};
 use zerok_lib::api::*;
 use zerok_lib::node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
 use zerok_lib::SetMerkleTree;
+use jf_txn::MerkleTree;
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -388,6 +389,14 @@ async fn get_snapshot(
         .map_err(server_error)?;
     if bindings[":sparse"].value.as_boolean()? {
         snapshot.nullifiers = SetMerkleTree::sparse(snapshot.nullifiers.hash());
+        snapshot.records.0 = MerkleTree::restore_from_frontier(
+            snapshot.state.record_merkle_commitment,
+            &snapshot.state.record_merkle_frontier,
+        )
+        .ok_or(tide::Error::from_str(
+            tide::StatusCode::InternalServerError,
+            "Could not restore records MerkleTree",
+        ))?
     }
     Ok(snapshot)
 }
