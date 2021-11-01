@@ -18,8 +18,13 @@ jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/cry
 jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
 jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
 lazy_static = "1.4.0"
+rand_chacha = { version = "0.3.1", features = ["serde1"] }
 regex = "1.5.4"
+rpassword = "5.0.1"
 rustyline = "9.0.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_derive = "1.0"
+snafu = { version = "0.6.10", features = ["backtraces"] }
 shutdown_hooks = "0.1.0"
 structopt = { version = "0.3", features = ["paw"] }
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
