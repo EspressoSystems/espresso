@@ -740,7 +740,7 @@ fn init_web_server(
     }
 
     let port = std::env::var("PORT").unwrap_or_else(|_| (50000 + &own_id).to_string());
-    let addr = format!("127.0.0.1:{}", port);
+    let addr = format!("0.0.0.0:{}", port);
     let join_handle = async_std::task::spawn(web_server.listen(addr));
     Ok(join_handle)
 }

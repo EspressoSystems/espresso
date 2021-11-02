@@ -357,6 +357,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
 
 [[package]]
+name = "arrayvec"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
+
+[[package]]
 name = "async-attributes"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -512,7 +518,7 @@ dependencies = [
  "async-trait",
  "base64 0.12.3",
  "bincode",
- "blake3",
+ "blake3 0.3.8",
  "chrono",
  "hmac 0.8.1",
  "kv-log-macro",
@@ -687,7 +693,7 @@ dependencies = [
  "tide-websockets",
  "tracing",
  "tracing-futures",
- "tracing-subscriber",
+ "tracing-subscriber 0.2.25",
 ]
 
 [[package]]
@@ -824,11 +830,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b64485778c4f16a6a5a9d335e80d449ac6c70cdd6a06d2af18a6f6f775a125b3"
 dependencies = [
  "arrayref",
- "arrayvec",
+ "arrayvec 0.5.2",
  "cc",
  "cfg-if 0.1.10",
  "constant_time_eq",
  "crypto-mac 0.8.0",
+ "digest",
+]
+
+[[package]]
+name = "blake3"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2607a74355ce2e252d0c483b2d8a348e1bba36036e786ccc2dcd777213c86ffd"
+dependencies = [
+ "arrayref",
+ "arrayvec 0.7.2",
+ "cc",
+ "cfg-if 1.0.0",
+ "constant_time_eq",
  "digest",
 ]
 
@@ -1357,7 +1377,7 @@ dependencies = [
  "async-std",
  "async-tls",
  "futures",
- "phaselock 0.0.4-dev",
+ "phaselock 0.0.5-dev",
  "rand 0.7.3",
  "serde",
  "structopt",
@@ -1365,9 +1385,9 @@ dependencies = [
  "threshold_crypto",
  "tokio 0.2.25",
  "tracing",
- "tracing-error",
+ "tracing-error 0.1.2",
  "tracing-futures",
- "tracing-subscriber",
+ "tracing-subscriber 0.2.25",
  "tracing-unwrap",
  "zerok_lib",
 ]
@@ -2524,7 +2544,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
- "tracing-subscriber",
+ "tracing-subscriber 0.2.25",
 ]
 
 [[package]]
@@ -2664,7 +2684,7 @@ dependencies = [
  "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "markdown",
- "phaselock 0.0.4-dev",
+ "phaselock 0.0.5-dev",
  "rand_chacha 0.2.2",
  "serde",
  "serde_derive",
@@ -2684,7 +2704,7 @@ dependencies = [
  "tracing",
  "tracing-distributed",
  "tracing-futures",
- "tracing-subscriber",
+ "tracing-subscriber 0.2.25",
  "zerok_lib",
 ]
 
@@ -3000,7 +3020,7 @@ dependencies = [
  "async-std",
  "async-tungstenite 0.14.0",
  "bincode",
- "blake3",
+ "blake3 0.3.8",
  "byteorder",
  "dashmap",
  "flume 0.10.9",
@@ -3012,21 +3032,21 @@ dependencies = [
  "snafu",
  "threshold_crypto",
  "tracing",
- "tracing-error",
+ "tracing-error 0.1.2",
  "tracing-futures",
  "tracing-unwrap",
 ]
 
 [[package]]
 name = "phaselock"
-version = "0.0.4-dev"
+version = "0.0.5-dev"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",
  "async-std",
- "async-tungstenite 0.14.0",
+ "async-tungstenite 0.15.0",
  "bincode",
- "blake3",
+ "blake3 1.1.0",
  "byteorder",
  "dashmap",
  "flume 0.10.9",
@@ -3038,7 +3058,7 @@ dependencies = [
  "snafu",
  "threshold_crypto",
  "tracing",
- "tracing-error",
+ "tracing-error 0.2.0",
  "tracing-futures",
  "tracing-unwrap",
 ]
@@ -4307,7 +4327,7 @@ dependencies = [
  "tagged-base64",
  "toml 0.4.10",
  "tracing",
- "tracing-subscriber",
+ "tracing-subscriber 0.2.25",
  "zerok_lib",
 ]
 
@@ -4480,7 +4500,7 @@ dependencies = [
  "tide-websockets",
  "tracing",
  "tracing-futures",
- "tracing-subscriber",
+ "tracing-subscriber 0.2.25",
 ]
 
 [[package]]
@@ -4688,7 +4708,7 @@ dependencies = [
  "itertools 0.9.0",
  "tracing",
  "tracing-core",
- "tracing-subscriber",
+ "tracing-subscriber 0.2.25",
 ]
 
 [[package]]
@@ -4698,7 +4718,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4d7c0b83d4a500748fa5879461652b361edf5c9d51ede2a2ac03875ca185e24"
 dependencies = [
  "tracing",
- "tracing-subscriber",
+ "tracing-subscriber 0.2.25",
+]
+
+[[package]]
+name = "tracing-error"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d686ec1c0f384b1277f097b2f279a2ecc11afe8c133c1aabf036a27cb4cd206e"
+dependencies = [
+ "tracing",
+ "tracing-subscriber 0.3.1",
 ]
 
 [[package]]
@@ -4752,6 +4782,17 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80a4ddde70311d8da398062ecf6fc2c309337de6b0f77d6c27aff8d53f6fca52"
+dependencies = [
+ "sharded-slab",
+ "thread_local",
+ "tracing-core",
 ]
 
 [[package]]
@@ -5252,7 +5293,7 @@ dependencies = [
  "jf-txn 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "jf-utils 0.0.1 (git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=5b500854579d58f2988ba0249b97203351a49290)",
  "lazy_static",
- "phaselock 0.0.4-dev",
+ "phaselock 0.0.5-dev",
  "proptest",
  "quickcheck 1.0.3",
  "quickcheck_macros 1.0.0",
