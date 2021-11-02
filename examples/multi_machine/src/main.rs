@@ -81,6 +81,16 @@ struct NodeOpt {
     )]
     pk_path: String,
 
+    /// Path to persistence files.
+    ///
+    /// Persistence files will be nested under the specified directory
+    #[structopt(
+        long = "store_path", 
+        short = "s", 
+        default_value = ""      // See fn default_store_path().
+    )]
+    store_path: String,
+
     /// Id of the current node.
     ///
     /// If the node ID is 0, it will propose and try to add transactions.
@@ -176,6 +186,13 @@ fn default_pk_path() -> PathBuf {
     [&dir, Path::new(PK_DIR)].iter().collect()
 }
 
+/// Returns the default directory to store persistence files.
+fn default_store_path() -> PathBuf {
+    const STORE_DIR: &str = "src/store";
+    let dir = project_path();
+    [&dir, Path::new(STORE_DIR)].iter().collect()
+}
+
 /// Returns the default path to the API file.
 fn default_api_path() -> PathBuf {
     const API_FILE: &str = "api/api.toml";
@@ -214,6 +231,19 @@ fn get_pk_dir() -> String {
             .expect("Error while converting public key path to a string")
     } else {
         pk_path
+    }
+}
+
+/// Gets the directory to public key files.
+fn get_store_dir() -> String {
+    let store_path = NodeOpt::from_args().store_path;
+    if store_path.is_empty() {
+        default_store_path()
+            .into_os_string()
+            .into_string()
+            .expect("Error while converting store path to a string")
+    } else {
+        store_path
     }
 }
 
@@ -417,7 +447,7 @@ async fn init_state_and_phaselock(
         validator.clone(),
         networking,
         MemoryStorage::default(),
-        LWPersistence::new("multi_machine_demo"),
+        LWPersistence::new(Path::new(&get_store_dir()), "multi_machine_demo").unwrap(),
     )
     .await;
     debug!("phaselock launched");

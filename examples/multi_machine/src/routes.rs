@@ -3,6 +3,7 @@
 use crate::WebState;
 use futures::prelude::*;
 use itertools::izip;
+use jf_txn::MerkleTree;
 use phaselock::BlockContents;
 use server::{best_response_type, response};
 use std::collections::HashMap;
@@ -388,11 +389,16 @@ async fn get_snapshot(
         .map_err(server_error)?;
     if bindings[":sparse"].value.as_boolean()? {
         snapshot.nullifiers = SetMerkleTree::sparse(snapshot.nullifiers.hash());
-
-        //todo! jeb.bearer There must be a way to quickly sparsify an entire Merkle tree.
-        for i in 0..snapshot.state.record_merkle_frontier.num_leaves() {
-            snapshot.state.record_merkle_frontier.forget(i);
-        }
+        snapshot.records.0 = MerkleTree::restore_from_frontier(
+            snapshot.state.record_merkle_commitment,
+            &snapshot.state.record_merkle_frontier,
+        )
+        .ok_or_else(|| {
+            tide::Error::from_str(
+                tide::StatusCode::InternalServerError,
+                "Could not restore records MerkleTree",
+            )
+        })?
     }
     Ok(snapshot)
 }

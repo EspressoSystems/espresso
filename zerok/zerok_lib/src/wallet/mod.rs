@@ -39,7 +39,7 @@ use jf_txn::{
         Nullifier, ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness, MerkleTree, Signature, TransactionNote,
+    AccMemberWitness, MerkleLeafProof, MerkleTree, Signature, TransactionNote,
 };
 use jf_utils::tagged_blob;
 use key_set::KeySet;
@@ -189,6 +189,8 @@ pub struct WalletState<'a> {
     pub(crate) records: RecordDatabase,
     // sparse nullifier set Merkle tree mirrored from validators
     pub(crate) nullifiers: SetMerkleTree,
+    // sparse record Merkle tree mirrored from validators
+    pub(crate) record_mt: MerkleTree,
     // set of pending transactions
     pub(crate) transactions: TransactionDatabase,
 
@@ -1033,7 +1035,6 @@ impl<'a> WalletState<'a> {
                     self.validator.prev_commit_time + 1,
                     block.block.clone(),
                     block.proofs.clone(),
-                    true, // remember all commitments; we will forget the ones we don't need later
                 ) {
                     Ok(uids) => {
                         if state_comm != self.validator.commit() {
@@ -1064,6 +1065,9 @@ impl<'a> WalletState<'a> {
                 for ((txn_id, txn), proofs) in
                     block.block.0.into_iter().enumerate().zip(block.proofs)
                 {
+                    for o in txn.output_commitments() {
+                        self.record_merkle_tree_mut().push(o.to_field_element());
+                    }
                     // Split the uids corresponding to this transaction off the front of `uids`.
                     let mut this_txn_uids = uids;
                     uids = this_txn_uids.split_off(txn.output_len());
@@ -1175,7 +1179,10 @@ impl<'a> WalletState<'a> {
                             self.records.insert(record_opening, uid, &self.key_pair);
                             if self
                                 .record_merkle_tree_mut()
-                                .remember(uid, comm.to_field_element(), &proof)
+                                .remember(
+                                    uid,
+                                    &MerkleLeafProof::new(comm.to_field_element(), proof),
+                                )
                                 .is_err()
                             {
                                 println!(
@@ -2281,11 +2288,11 @@ impl<'a> WalletState<'a> {
     }
 
     fn record_merkle_tree(&self) -> &MerkleTree {
-        &self.validator.record_merkle_frontier
+        &self.record_mt
     }
 
     fn record_merkle_tree_mut(&mut self) -> &mut MerkleTree {
-        &mut self.validator.record_merkle_frontier
+        &mut self.record_mt
     }
 
     async fn get_nullifier_proof(
@@ -2650,6 +2657,7 @@ pub mod test_helpers {
         assert_eq!(w1.auditable_assets, w2.auditable_assets);
         assert_eq!(w1.freezer_key_pair, w2.freezer_key_pair);
         assert_eq!(w1.nullifiers.hash(), w2.nullifiers.hash());
+        assert_eq!(w1.record_mt.commitment(), w2.record_mt.commitment());
         assert_eq!(w1.defined_assets, w2.defined_assets);
         assert_eq!(w1.transactions, w2.transactions);
     }
@@ -2676,6 +2684,7 @@ pub mod test_helpers {
                 working.validator = state.validator.clone();
                 working.records = state.records.clone();
                 working.nullifiers = state.nullifiers.clone();
+                working.record_mt = state.record_mt.clone();
                 working.transactions = state.transactions.clone();
             }
             Ok(())
@@ -2717,6 +2726,7 @@ pub mod test_helpers {
     pub struct MockLedger<'a> {
         pub validator: ValidatorState,
         nullifiers: SetMerkleTree,
+        records: MerkleTree,
         subscribers: Vec<channel::UnboundedSender<LedgerEvent>>,
         current_block: ElaboratedBlock,
         committed_blocks: Vec<(ElaboratedBlock, Vec<Vec<u64>>)>,
@@ -2747,13 +2757,15 @@ pub mod test_helpers {
                 self.validator.prev_commit_time + 1,
                 block.block.clone(),
                 block.proofs.clone(),
-                true,
             ) {
                 Ok(mut uids) => {
                     // Add nullifiers
                     for txn in &block.block.0 {
                         for nullifier in txn.nullifiers() {
                             self.nullifiers.insert(nullifier);
+                        }
+                        for record in txn.output_commitments() {
+                            self.records.push(record.to_field_element())
                         }
                     }
 
@@ -2837,10 +2849,10 @@ pub mod test_helpers {
             let merkle_paths = uids
                 .iter()
                 .map(|uid| {
-                    self.validator
-                        .record_merkle_frontier
+                    self.records
                         .get_leaf(*uid)
                         .expect_ok()
+                        .map(|(_, proof)| (proof.leaf.0, proof.path))
                         .unwrap()
                         .1
                 })
@@ -2920,6 +2932,7 @@ pub mod test_helpers {
                         db
                     },
                     nullifiers: ledger.nullifiers.clone(),
+                    record_mt: ledger.records.clone(),
                     defined_assets: HashMap::new(),
                     now: 0,
                     transactions: Default::default(),
@@ -3070,7 +3083,7 @@ pub mod test_helpers {
                 )
                 .unwrap(),
             },
-            record_merkle_tree,
+            record_merkle_tree.clone(),
         );
 
         let comm = validator.commit();
@@ -3088,6 +3101,7 @@ pub mod test_helpers {
         let ledger = Arc::new(SyncMutex::new(MockLedger {
             validator,
             nullifiers,
+            records: record_merkle_tree,
             subscribers: Vec::new(),
             current_block,
             committed_blocks: Vec::new(),
@@ -3742,8 +3756,8 @@ mod tests {
 
                 // Change the validator state, so that the wallet's transaction (built against the
                 // old validator state) will fail to validate.
-                let old_record_merkle_root = ledger.validator.record_merkle_root;
-                ledger.validator.record_merkle_root = NodeValue::from(0);
+                let old_record_merkle_commitment = ledger.validator.record_merkle_commitment;
+                ledger.validator.record_merkle_commitment.root_value = NodeValue::from(0);
 
                 println!(
                     "validating invalid transaction: {}s",
@@ -3754,7 +3768,7 @@ mod tests {
 
                 // The sender gets back in sync with the validator after their transaction is
                 // rejected.
-                ledger.validator.record_merkle_root = old_record_merkle_root;
+                ledger.validator.record_merkle_commitment = old_record_merkle_commitment;
             }
 
             sync(&ledger, &wallets).await;

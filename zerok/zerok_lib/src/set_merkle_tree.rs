@@ -7,7 +7,6 @@ use bitvec::vec::BitVec;
 use core::mem;
 use jf_txn::structs::Nullifier;
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
 
 pub mod set_hash {
     use super::*;
