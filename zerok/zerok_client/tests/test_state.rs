@@ -365,6 +365,13 @@ struct Validator {
 impl Validator {
     async fn new(cfg_path: &Path, key_path: &Path, id: usize, port: u64) -> Self {
         let cfg_path = PathBuf::from(cfg_path);
+        let mut store_path = cfg_path.clone();
+        store_path.pop(); // remove config toml file
+        store_path.push(format!("store_for_{}", id));
+        println!(
+            "Launching validator with store path {}",
+            store_path.as_os_str().to_str().unwrap()
+        );
         let mut key_path = PathBuf::from(key_path);
         key_path.set_extension("pub");
         spawn_blocking(move || {
@@ -373,6 +380,8 @@ impl Validator {
                 .args([
                     "--config",
                     cfg_path.as_os_str().to_str().unwrap(),
+                    "--store_path",
+                    store_path.as_os_str().to_str().unwrap(),
                     "--full",
                     "--id",
                     &id.to_string(),
@@ -390,7 +399,19 @@ impl Validator {
                 if line.trim() == "- Starting consensus" {
                     // Spawn a detached task to consume the validator's stdout. If we don't do this,
                     // the validator will eventually fill up its output pipe and block.
-                    async_std::task::spawn(async move { while lines.next().is_some() {} });
+                    if id == 0 {
+                        async_std::task::spawn(async move {
+                            while let Some(line) = lines.next() {
+                                if line.is_ok() {
+                                    println!("{}", line.unwrap());
+                                } else {
+                                    println!("{:?}", line.err())
+                                }
+                            }
+                        });
+                    } else {
+                        async_std::task::spawn(async move { while lines.next().is_some() {} });
+                    }
                     return Validator { process: child };
                 }
             }
