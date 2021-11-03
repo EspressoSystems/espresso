@@ -32,6 +32,10 @@ impl LWPersistence {
         self.state_snapshot.commit_version().unwrap();
         self.atomic_store.commit_version().unwrap();
     }
+
+    pub fn load_latest_state(&self) -> Result<ValidatorState, PersistenceError> {
+        self.state_snapshot.load_latest()
+    }
 }
 
 impl Debug for LWPersistence {

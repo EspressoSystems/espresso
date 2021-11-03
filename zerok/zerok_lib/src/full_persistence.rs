@@ -1,7 +1,7 @@
 use crate::{ElaboratedBlock, SetMerkleTree, ValidatorState};
 use atomic_store::{
-    load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
-    RollingLog,
+    append_log::Iter, load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader,
+    PersistenceError, RollingLog,
 };
 use core::fmt::Debug;
 use jf_txn::{
@@ -112,6 +112,36 @@ impl FullPersistence {
             self.known_nodes.skip_version().unwrap();
         }
         self.atomic_store.commit_version().unwrap();
+    }
+
+    pub fn state_iter(&self) -> Iter<BincodeLoadStore<ValidatorState>> {
+        self.state_history.iter()
+    }
+
+    pub fn block_iter(&self) -> Iter<BincodeLoadStore<ElaboratedBlock>> {
+        self.block_history.iter()
+    }
+
+    pub fn rmt_leaf_iter(&self) -> Iter<BincodeLoadStore<MerkleLeaf>> {
+        self.rmt_leaves_full.iter()
+    }
+
+    pub fn get_latest_nullifier_set(&self) -> Result<SetMerkleTree, PersistenceError> {
+        self.nullifier_snapshots.load_latest()
+    }
+
+    pub fn txn_uids_iter(&self) -> Iter<BincodeLoadStore<Vec<u64>>> {
+        self.txn_uids.iter()
+    }
+
+    pub fn memos_iter(&self) -> Iter<BincodeLoadStore<OptionalMemoMap>> {
+        self.memos.iter()
+    }
+
+    pub fn get_latest_known_nodes(
+        &self,
+    ) -> Result<HashMap<UserAddress, UserPubKey>, PersistenceError> {
+        self.known_nodes.load_latest()
     }
 }
 
