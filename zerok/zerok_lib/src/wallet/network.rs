@@ -1,4 +1,4 @@
-use super::persistence::AtomicWalletStorage;
+use super::persistence::{AtomicWalletStorage, WalletLoader};
 use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
 use crate::api;
 use crate::key_set::SizedKey;
@@ -18,36 +18,37 @@ use jf_txn::structs::{Nullifier, ReceiverMemo};
 use jf_txn::Signature;
 use node::{LedgerEvent, LedgerSnapshot};
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;
 use std::convert::TryInto;
-use std::path::Path;
 use surf::http::content::{Accept, MediaTypeProposal};
 use surf::http::{headers, mime};
 pub use surf::Url;
 
-pub struct NetworkBackend<'a> {
+pub struct NetworkBackend<'a, Meta: Serialize + DeserializeOwned> {
     univ_param: &'a UniversalParam,
     query_client: surf::Client,
     bulletin_client: surf::Client,
     validator_client: surf::Client,
-    storage: Arc<Mutex<AtomicWalletStorage>>,
+    storage: Arc<Mutex<AtomicWalletStorage<'a, Meta>>>,
+    key_pair: Option<UserKeyPair>,
 }
 
-impl<'a> NetworkBackend<'a> {
+impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
     pub fn new(
         univ_param: &'a UniversalParam,
         query_url: Url,
         bulletin_url: Url,
         validator_url: Url,
-        storage: &Path,
+        loader: &mut impl WalletLoader<Meta = Meta>,
     ) -> Result<Self, WalletError> {
         Ok(Self {
             query_client: Self::client(query_url)?,
             bulletin_client: Self::client(bulletin_url)?,
             validator_client: Self::client(validator_url)?,
             univ_param,
-            storage: Arc::new(Mutex::new(AtomicWalletStorage::new(storage)?)),
+            storage: Arc::new(Mutex::new(AtomicWalletStorage::new(loader)?)),
+            key_pair: loader.key_pair(),
         })
     }
 
@@ -102,15 +103,16 @@ impl<'a> NetworkBackend<'a> {
 }
 
 #[async_trait]
-impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
+impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a> for NetworkBackend<'a, Meta> {
     type EventStream = node::EventStream<LedgerEvent>;
-    type Storage = AtomicWalletStorage;
+    type Storage = AtomicWalletStorage<'a, Meta>;
 
-    async fn create(&mut self, key_pair: &UserKeyPair) -> Result<WalletState<'a>, WalletError> {
+    async fn create(&mut self) -> Result<WalletState<'a>, WalletError> {
         let mut rng = ChaChaRng::from_entropy();
         let LedgerSnapshot {
             state: validator,
             nullifiers,
+            records,
         } = self.get("getsnapshot/0/true").await?;
 
         // Construct proving keys of the same arities as the verifier keys from the validator.
@@ -151,22 +153,28 @@ impl<'a> WalletBackend<'a> for NetworkBackend<'a> {
                     .collect::<Result<_, _>>()?,
             });
 
-        // Publish the address of the new wallet.
-        Self::post(&self.bulletin_client, "/users", &key_pair.pub_key()).await?;
-
         let state = WalletState {
             validator,
             proving_keys,
             nullifiers,
+            record_mt: records.0,
             now: 0,
             records: Default::default(),
             defined_assets: Default::default(),
             auditable_assets: Default::default(),
             transactions: Default::default(),
+            key_pair: self
+                .key_pair
+                .clone()
+                .unwrap_or_else(|| UserKeyPair::generate(&mut rng)),
             auditor_key_pair: AuditorKeyPair::generate(&mut rng),
             freezer_key_pair: FreezerKeyPair::generate(&mut rng),
         };
-        self.storage().await.create(key_pair, &state).await?;
+        self.storage().await.create(&state).await?;
+
+        // Publish the address of the new wallet.
+        Self::post(&self.bulletin_client, "/users", &state.key_pair.pub_key()).await?;
+
         Ok(state)
     }
 

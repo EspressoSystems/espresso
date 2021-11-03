@@ -25,6 +25,7 @@ use zerok_lib::{
     MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
 };
 
+use std::path::Path;
 type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>;
 type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_256>;
 
@@ -79,6 +80,7 @@ pub async fn try_phaselock(
         start_delay: 1,
     };
     let (networking, port) = try_network(pub_key.clone()).await;
+    let temp_path = Path::new("./tmp");
     let phaselock = PhaseLock::new(
         genesis,
         pub_key_set,
@@ -88,7 +90,7 @@ pub async fn try_phaselock(
         initial_state,
         networking.clone(),
         MemoryStorage::default(),
-        LWPersistence::new("demo1"),
+        LWPersistence::new(temp_path, "demo1").unwrap(),
     )
     .await;
     (phaselock, pub_key, port, networking)

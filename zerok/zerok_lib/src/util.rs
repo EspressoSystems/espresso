@@ -24,9 +24,10 @@ pub mod canonical {
 
 pub mod arbitrary_wrappers {
     use arbitrary::{Arbitrary, Unstructured};
+    use ark_std::UniformRand;
     use jf_txn::keys::{UserAddress, UserKeyPair};
     use jf_txn::structs::{FreezeFlag, Nullifier, ReceiverMemo, RecordOpening};
-    use jf_txn::KeyPair;
+    use jf_txn::{BaseField, KeyPair};
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 
     pub struct ArbitraryNullifier(Nullifier);
@@ -41,6 +42,21 @@ pub mod arbitrary_wrappers {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let mut rng = ChaChaRng::from_seed(u.arbitrary()?);
             Ok(Self(Nullifier::random_for_test(&mut rng)))
+        }
+    }
+
+    pub struct ArbitraryBaseField(pub BaseField);
+
+    impl From<ArbitraryBaseField> for BaseField {
+        fn from(n: ArbitraryBaseField) -> Self {
+            n.0
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for ArbitraryBaseField {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let mut rng = ChaChaRng::from_seed(u.arbitrary()?);
+            Ok(Self(BaseField::rand(&mut rng)))
         }
     }
 

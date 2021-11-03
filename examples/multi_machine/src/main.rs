@@ -58,6 +58,10 @@ struct NodeOpt {
     )]
     config: String,
 
+    /// Path to the universal parameter file.
+    #[structopt(long = "universal_param_path", short = "u")]
+    universal_param_path: Option<String>,
+
     /// Whether to generate and store public keys for all nodes.
     ///
     /// Public keys will be stored under the directory specified by `pk_path`.
@@ -76,6 +80,16 @@ struct NodeOpt {
         default_value = ""      // See fn default_pk_path().
     )]
     pk_path: String,
+
+    /// Path to persistence files.
+    ///
+    /// Persistence files will be nested under the specified directory
+    #[structopt(
+        long = "store_path", 
+        short = "s", 
+        default_value = ""      // See fn default_store_path().
+    )]
+    store_path: String,
 
     /// Id of the current node.
     ///
@@ -172,6 +186,13 @@ fn default_pk_path() -> PathBuf {
     [&dir, Path::new(PK_DIR)].iter().collect()
 }
 
+/// Returns the default directory to store persistence files.
+fn default_store_path() -> PathBuf {
+    const STORE_DIR: &str = "src/store";
+    let dir = project_path();
+    [&dir, Path::new(STORE_DIR)].iter().collect()
+}
+
 /// Returns the default path to the API file.
 fn default_api_path() -> PathBuf {
     const API_FILE: &str = "api/api.toml";
@@ -210,6 +231,19 @@ fn get_pk_dir() -> String {
             .expect("Error while converting public key path to a string")
     } else {
         pk_path
+    }
+}
+
+/// Gets the directory to public key files.
+fn get_store_dir() -> String {
+    let store_path = NodeOpt::from_args().store_path;
+    if store_path.is_empty() {
+        default_store_path()
+            .into_os_string()
+            .into_string()
+            .expect("Error while converting store path to a string")
+    } else {
+        store_path
     }
 }
 
@@ -421,7 +455,7 @@ async fn init_state_and_phaselock(
         validator.clone(),
         networking,
         MemoryStorage::default(),
-        LWPersistence::new("multi_machine_demo"),
+        LWPersistence::new(Path::new(&get_store_dir()), "multi_machine_demo").unwrap(),
     )
     .await;
     debug!("phaselock launched");
@@ -751,6 +785,11 @@ async fn main() -> Result<(), std::io::Error> {
 
     // Get configuration
     let node_config = get_node_config();
+
+    // Override the path to the universal parameter file if it's specified
+    if let Some(dir) = NodeOpt::from_args().universal_param_path {
+        std::env::set_var("UNIVERSAL_PARAM_PATH", dir);
+    }
 
     // Get secret key set
     let seed: [u8; 32] = node_config["seed"]

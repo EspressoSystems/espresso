@@ -27,10 +27,10 @@ tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.
 
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
-jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
-jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
-jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
-jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "5333c1868c7b7f9d8931a7888ddd54eed295309f"}
+jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
+jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
+jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
+jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
 
 zerok_lib = { path = "../zerok_lib/" }
 

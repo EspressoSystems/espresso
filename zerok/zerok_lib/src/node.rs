@@ -1,4 +1,5 @@
 pub use crate::state_comm::LedgerStateCommitment;
+use crate::util::arbitrary_wrappers::*;
 use crate::{
     ser_test, set_merkle_tree::*, validator_node::*, ElaboratedBlock, ElaboratedTransaction,
     ValidationError, ValidatorState,
@@ -104,10 +105,26 @@ pub struct LedgerSummary {
 }
 
 #[ser_test(arbitrary, ark(false))]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MerkleTreeWithArbitrary(pub MerkleTree);
+
+impl<'a> Arbitrary<'a> for MerkleTreeWithArbitrary {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut mt = MerkleTree::new(3).unwrap();
+        for _ in 0..15 {
+            // todo: range restricted random depth and count
+            mt.push(u.arbitrary::<ArbitraryBaseField>()?.into());
+        }
+        Ok(MerkleTreeWithArbitrary(mt))
+    }
+}
+
+#[ser_test(arbitrary, ark(false))]
 #[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LedgerSnapshot {
     pub state: ValidatorState,
     pub nullifiers: SetMerkleTree,
+    pub records: MerkleTreeWithArbitrary,
 }
 
 #[derive(Clone, Debug)]
@@ -252,6 +269,7 @@ pub enum QueryServiceError {
 
 struct FullState {
     validator: ValidatorState,
+    records: MerkleTree,
     nullifiers: SetMerkleTree,
     known_nodes: HashMap<UserAddress, UserPubKey>,
     // Map from past nullifier set root hashes to the index of the state in which that root hash
@@ -293,7 +311,6 @@ impl FullState {
                         self.validator.prev_commit_time + 1,
                         self.proposed.block.clone(),
                         self.proposed.proofs.clone(),
-                        true,
                     ) {
                         Err(err) => err,
                         Ok(_) => {
@@ -328,7 +345,6 @@ impl FullState {
                         self.validator.prev_commit_time + 1,
                         block.block.clone(),
                         block.proofs.clone(),
-                        true,
                     ) {
                         // We update our ValidatorState for each block committed by the PhaseLock event
                         // source, so we shouldn't ever get out of sync.
@@ -360,6 +376,8 @@ impl FullState {
                                 from_state: LedgerSnapshot {
                                     state: prev_state,
                                     nullifiers: self.nullifiers.clone(),
+                                    // starting from the last frontier MT and not pruning for the current block might actually be the right solution here. That would require constructing the sparse tree and swapping it here, rather than cloning...
+                                    records: MerkleTreeWithArbitrary(self.records.clone()),
                                 },
                                 block: (*block).clone(),
                                 memos: vec![None; block.block.0.len()],
@@ -371,8 +389,15 @@ impl FullState {
                                 for n in txn.nullifiers() {
                                     self.nullifiers.insert(n);
                                 }
+                                for o in txn.output_commitments() {
+                                    self.records.push(o.to_field_element());
+                                }
                             }
                             assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
+                            assert_eq!(
+                                self.records.commitment(),
+                                self.validator.record_merkle_commitment
+                            );
 
                             // Notify subscribers of the new block.
                             self.send_event(LedgerEvent::Commit {
@@ -478,10 +503,10 @@ impl FullState {
 
         // Store and broadcast the new memos.
         *stored_memos = Some((new_memos.clone(), sig));
-        let merkle_tree = &self.validator.record_merkle_frontier;
+        let merkle_tree = &self.records;
         let merkle_paths = uids
             .iter()
-            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1);
+            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path);
         let event = LedgerEvent::Memos {
             outputs: izip!(
                 new_memos,
@@ -540,14 +565,16 @@ impl<'a> PhaseLockQueryService<'a> {
         let events = Vec::new();
         // Use the unpruned record Merkle tree.
         assert_eq!(
-            record_merkle_tree.get_root_value(),
-            validator.record_merkle_frontier.get_root_value()
+            record_merkle_tree.commitment(),
+            validator.record_merkle_commitment
         );
-        validator.record_merkle_frontier = record_merkle_tree;
+        validator.record_merkle_commitment = record_merkle_tree.commitment();
+        validator.record_merkle_frontier = record_merkle_tree.frontier();
 
         let state = Arc::new(RwLock::new(FullState {
             validator,
             nullifiers,
+            records: record_merkle_tree,
             known_nodes: Default::default(),
             past_nullifiers: HashMap::new(),
             history,
@@ -573,10 +600,10 @@ impl<'a> PhaseLockQueryService<'a> {
                             .iter()
                             .map(|uid| {
                                 state
-                                    .validator
-                                    .record_merkle_frontier
+                                    .records
                                     .get_leaf(*uid)
                                     .expect_ok()
+                                    .map(|(_, proof)| (proof.leaf.0, proof.path))
                                     .unwrap()
                             })
                             .unzip();
@@ -611,7 +638,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
         let state = self.state.read().await;
         Ok(LedgerSummary {
             num_blocks: state.history.len(),
-            num_records: state.validator.record_merkle_frontier.num_leaves() as usize,
+            num_records: state.validator.record_merkle_commitment.num_leaves as usize,
         })
     }
 
@@ -623,6 +650,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
             Equal => Ok(LedgerSnapshot {
                 state: state.validator.clone(),
                 nullifiers: state.nullifiers.clone(),
+                records: MerkleTreeWithArbitrary(state.records.clone()),
             }),
             Greater => Err(QueryServiceError::InvalidBlockId {}),
         }
@@ -818,7 +846,7 @@ mod tests {
     use crate::{MultiXfrRecordSpec, MultiXfrTestState, UNIVERSAL_PARAM};
     use async_std::task::block_on;
     use jf_primitives::jubjub_dsa::KeyPair;
-    use jf_txn::{sign_receiver_memos, MerkleTree};
+    use jf_txn::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 
@@ -961,7 +989,7 @@ mod tests {
         block_on(async {
             let (initial_state, history) =
                 generate_valid_history(txs, nkeys, ndefs, init_rec, init_recs);
-            let initial_uid = initial_state.0.record_merkle_frontier.num_leaves();
+            let initial_uid = initial_state.0.record_merkle_commitment.num_leaves;
             assert_eq!(initial_state.0.commit(), history[0].0.commit());
             let events = Box::pin(stream::iter(history.clone().into_iter().map(
                 |(_, block, _, state)| MockConsensusEvent {
@@ -1050,10 +1078,9 @@ mod tests {
                                 // latest validator state in the event stream.
                                 let state = &history[history.len() - 1].3;
                                 MerkleTree::check_proof(
-                                    state.record_merkle_frontier.get_root_value(),
+                                    state.record_merkle_commitment.root_value,
                                     uid,
-                                    comm.to_field_element(),
-                                    &merkle_path,
+                                    &MerkleLeafProof::new(comm.to_field_element(), merkle_path),
                                 )
                                 .unwrap();
 
