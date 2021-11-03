@@ -292,7 +292,7 @@ type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
 
 enum Node {
     Light(LWNode),
-    Full(FullNode<'static>),
+    Full(Arc<RwLock<FullNode<'static>>>),
 }
 
 #[async_trait]
@@ -302,21 +302,24 @@ impl Validator for Node {
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
         match self {
             Node::Light(n) => <LWNode as Validator>::submit_transaction(n, tx).await,
-            Node::Full(n) => n.submit_transaction(tx).await,
+            Node::Full(n) => n.read().await.submit_transaction(tx).await,
         }
     }
 
     async fn start_consensus(&self) {
         match self {
             Node::Light(n) => n.start_consensus().await,
-            Node::Full(n) => n.start_consensus().await,
+            Node::Full(n) => n.read().await.start_consensus().await,
         }
     }
 
     fn subscribe(&self) -> EventStream<Self::Event> {
         match self {
             Node::Light(n) => n.subscribe(),
-            Node::Full(n) => <FullNode as Validator>::subscribe(n),
+            Node::Full(n) => {
+                let node = &*task::block_on(n.read());
+                <FullNode as Validator>::subscribe(node)
+            }
         }
     }
 }
@@ -464,7 +467,7 @@ async fn init_state_and_phaselock(
             memos,
             full_persisted,
         );
-        Node::Full(node)
+        Node::Full(Arc::new(RwLock::new(node)))
     } else {
         Node::Light(phaselock)
     };
@@ -695,7 +698,7 @@ fn init_web_server(
     opt_api_path: &str,
     opt_web_path: &str,
     own_id: u64,
-    node: FullNode<'static>,
+    node: Arc<RwLock<FullNode<'static>>>,
 ) -> Result<task::JoinHandle<Result<(), std::io::Error>>, tide::Error> {
     // Take the command line option for the web asset directory path
     // provided it is not empty. Otherwise, construct the default from
@@ -716,7 +719,7 @@ fn init_web_server(
         connections: Default::default(),
         web_path: web_path.clone(),
         api: api.clone(),
-        node: Arc::new(RwLock::new(node)),
+        node,
     });
     web_server.with(server::trace).with(server::add_error_body);
 
@@ -965,7 +968,9 @@ async fn main() -> Result<(), std::io::Error> {
 
                 // If we're running a full node, publish the receiver memos.
                 if let Node::Full(node) = &mut phaselock {
-                    node.post_memos(round, ix as u64, owner_memos.clone(), sig)
+                    node.write()
+                        .await
+                        .post_memos(round, ix as u64, owner_memos.clone(), sig)
                         .await
                         .unwrap();
                 }

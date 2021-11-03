@@ -12,6 +12,8 @@ use jf_txn::{
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+type OptionalMemoMap = Option<(Vec<ReceiverMemo>, Signature)>;
+
 pub struct FullPersistence {
     atomic_store: AtomicStore,
     state_history: AppendLog<BincodeLoadStore<ValidatorState>>,
@@ -22,7 +24,7 @@ pub struct FullPersistence {
     // how long can memos remain unposted? We probably need a custom store for these after demo2
     // also, are txn_uids not a sequential series? Could this be stored as a start/len pair?
     txn_uids: AppendLog<BincodeLoadStore<Vec<u64>>>,
-    memos: AppendLog<BincodeLoadStore<Option<(Vec<ReceiverMemo>, Signature)>>>,
+    memos: AppendLog<BincodeLoadStore<OptionalMemoMap>>,
     known_nodes: RollingLog<BincodeLoadStore<HashMap<UserAddress, UserPubKey>>>,
 }
 

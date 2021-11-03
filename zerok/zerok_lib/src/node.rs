@@ -351,7 +351,7 @@ impl FullState {
                         }
 
                         Ok(mut uids) => {
-                            self.full_persisted.store_for_commit(&block, &state);
+                            self.full_persisted.store_for_commit(block, state);
                             // Archive the old state.
                             let index = self.history.len();
                             self.past_nullifiers.insert(self.nullifiers.hash(), index);
