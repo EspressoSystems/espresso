@@ -849,6 +849,7 @@ mod tests {
     use jf_txn::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+    use tempdir::TempDir;
 
     #[derive(Debug)]
     struct MockConsensusEvent {
@@ -1001,7 +1002,7 @@ mod tests {
                 },
             )));
             let full_persisted =
-                FullPersistence::new(PathBuf::from(temp_persisted_dir.path()), "full_store");
+                FullPersistence::new(temp_persisted_dir.path(), "full_store").unwrap();
             let mut qs = PhaseLockQueryService::new(
                 events,
                 &*UNIVERSAL_PARAM,

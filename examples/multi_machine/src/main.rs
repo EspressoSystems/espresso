@@ -440,8 +440,6 @@ async fn init_state_and_phaselock(
         start_delay: 1,
     };
     debug!(?config);
-    let full_persisted =
-        FullPersistence::new(Path::new(&get_store_dir()), "multi_machine_demo").unwrap();
     let genesis = ElaboratedBlock::default();
     let (_, phaselock) = PhaseLock::init(
         genesis,
@@ -458,6 +456,8 @@ async fn init_state_and_phaselock(
     debug!("phaselock launched");
 
     let validator = if full_node {
+        let full_persisted =
+            FullPersistence::new(Path::new(&get_store_dir()), "multi_machine_demo").unwrap();
         let node = FullNode::new(
             phaselock,
             &*UNIVERSAL_PARAM,
