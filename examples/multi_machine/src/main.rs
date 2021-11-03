@@ -34,8 +34,8 @@ use zerok_lib::{
     key_set::KeySet,
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
-    ElaboratedBlock, ElaboratedTransaction, LWPersistence, MultiXfrRecordSpec, MultiXfrTestState,
-    ValidatorState, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
+    ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, MultiXfrRecordSpec,
+    MultiXfrTestState, ValidatorState, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
 };
 
 mod disco;
@@ -437,6 +437,8 @@ async fn init_state_and_phaselock(
         start_delay: 1,
     };
     debug!(?config);
+    let full_persisted =
+        FullPersistence::new(Path::new(&get_store_dir()), "multi_machine_demo").unwrap();
     let genesis = ElaboratedBlock::default();
     let (_, phaselock) = PhaseLock::init(
         genesis,
@@ -460,6 +462,7 @@ async fn init_state_and_phaselock(
             records.clone(),
             nullifiers.clone(),
             memos,
+            full_persisted,
         );
         Node::Full(node)
     } else {
@@ -821,6 +824,7 @@ async fn main() -> Result<(), std::io::Error> {
         println!("Public key files created");
     }
 
+    // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
     if let Some(own_id) = NodeOpt::from_args().id {
         println!("Current node: {}", own_id);
         let secret_key_share = secret_keys.secret_key_share(own_id);

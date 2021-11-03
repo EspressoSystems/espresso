@@ -1,3 +1,4 @@
+use crate::full_persistence::FullPersistence;
 pub use crate::state_comm::LedgerStateCommitment;
 use crate::util::arbitrary_wrappers::*;
 use crate::{
@@ -266,6 +267,7 @@ struct FullState {
     validator: ValidatorState,
     records: MerkleTree,
     nullifiers: SetMerkleTree,
+    full_persisted: FullPersistence,
     known_nodes: HashMap<UserAddress, UserPubKey>,
     // Map from past nullifier set root hashes to the index of the state in which that root hash
     // occurred.
@@ -349,6 +351,7 @@ impl FullState {
                         }
 
                         Ok(mut uids) => {
+                            self.full_persisted.store_for_commit(&block, &state);
                             // Archive the old state.
                             let index = self.history.len();
                             self.past_nullifiers.insert(self.nullifiers.hash(), index);
@@ -362,6 +365,7 @@ impl FullState {
                                     // Split the uids corresponding to this transaction off the front of
                                     // the list of uids for the whole block.
                                     let mut this_txn_uids = uids.split_off(txn.output_len());
+                                    self.full_persisted.store_txn_uids(&this_txn_uids);
                                     std::mem::swap(&mut this_txn_uids, &mut uids);
                                     assert_eq!(this_txn_uids.len(), txn.output_len());
                                     this_txn_uids
@@ -388,11 +392,15 @@ impl FullState {
                                     self.records.push(o.to_field_element());
                                 }
                             }
+                            self.full_persisted.store_nullifier_set(&self.nullifiers);
                             assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
                             assert_eq!(
                                 self.records.commitment(),
                                 self.validator.record_merkle_commitment
                             );
+
+                            // TODO !nathan.yospe: hook up memos, track if new memos to commit
+                            self.full_persisted.commit_accepted(false, false);
 
                             // Notify subscribers of the new block.
                             self.send_event(LedgerEvent::Commit {
@@ -529,9 +537,8 @@ impl FullState {
 }
 
 /// A QueryService that aggregates the full ledger state by observing consensus.
-#[derive(Clone)]
 pub struct PhaseLockQueryService<'a> {
-    univ_param: &'a jf_txn::proof::UniversalParam,
+    _univ_param: &'a jf_txn::proof::UniversalParam,
     state: Arc<RwLock<FullState>>,
     // When dropped, this handle will cancel and join the event handling task. It is not used
     // explicitly; it is merely stored with the rest of the struct for the auto-generated drop glue.
@@ -550,6 +557,7 @@ impl<'a> PhaseLockQueryService<'a> {
         record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
+        full_persisted: FullPersistence,
     ) -> Self {
         //todo !jeb.bearer If we are not starting from the genesis of the ledger, query the full
         // state at this point from another full node, like
@@ -570,6 +578,7 @@ impl<'a> PhaseLockQueryService<'a> {
             validator,
             nullifiers,
             records: record_merkle_tree,
+            full_persisted,
             known_nodes: Default::default(),
             past_nullifiers: HashMap::new(),
             history,
@@ -618,9 +627,8 @@ impl<'a> PhaseLockQueryService<'a> {
                 })
                 .unwrap()
         };
-
         Self {
-            univ_param,
+            _univ_param: univ_param,
             state,
             _event_task: Arc::new(task),
         }
@@ -715,7 +723,6 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
 }
 
 /// A full node is a QueryService running alongside a lightweight validator.
-#[derive(Clone)]
 pub struct FullNode<'a, NET: PLNet, STORE: PLStore> {
     validator: LightWeightNode<NET, STORE>,
     query_service: PhaseLockQueryService<'a>,
@@ -733,6 +740,7 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
         record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
+        full_persisted: FullPersistence,
     ) -> Self {
         let query_service = PhaseLockQueryService::new(
             validator.subscribe(),
@@ -741,6 +749,7 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
             record_merkle_tree,
             nullifiers,
             unspent_memos,
+            full_persisted,
         );
         Self {
             validator,
@@ -976,6 +985,7 @@ mod tests {
 
         let mut rng = ChaChaRng::from_seed([0x42u8; 32]);
         let dummy_key_pair = KeyPair::generate(&mut rng);
+        let temp_persisted_dir = TempDir::new("test_query_service").unwrap();
 
         block_on(async {
             let (initial_state, history) =
@@ -990,6 +1000,8 @@ mod tests {
                     },
                 },
             )));
+            let full_persisted =
+                FullPersistence::new(PathBuf::from(temp_persisted_dir.path()), "full_store");
             let mut qs = PhaseLockQueryService::new(
                 events,
                 &*UNIVERSAL_PARAM,
@@ -997,6 +1009,7 @@ mod tests {
                 initial_state.1,
                 initial_state.2,
                 initial_state.3,
+                full_persisted,
             );
 
             // The first event gives receiver memos for the records in the initial state of the
