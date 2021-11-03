@@ -18,7 +18,7 @@ jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/cry
 jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
 jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
 # phaselock = { version = "0.0.2", registry = "translucence"}
-phaselock = { path = "/home/joe/translucence/phaselock" }
+phaselock = { git = "ssh://git@gitlab.com/translucence/systems/phaselock.git", rev = "a1f6f7001d8e4f478bfcbde5c8e5da251aca4a48" }
 ark-std = { version = "0.3.0", default-features = false }
 ark-ff = { version = "0.3.0", default-features = false }
 ark-serialize = { version = "0.3.0", features = ["derive"] }

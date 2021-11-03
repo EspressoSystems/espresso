@@ -639,20 +639,6 @@ dependencies = [
 
 [[package]]
 name = "async-tungstenite"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8645e929ec7964448a901db9da30cd2ae8c7fecf4d6176af427837531dbbb63b"
-dependencies = [
- "async-std",
- "futures-io",
- "futures-util",
- "log",
- "pin-project-lite 0.2.7",
- "tungstenite 0.13.0",
-]
-
-[[package]]
-name = "async-tungstenite"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "742cc7dcb20b2f84a42f4691aa999070ec7e78f8e7e7438bf14be7017b44907e"
@@ -1409,7 +1395,7 @@ dependencies = [
  "async-std",
  "async-tls",
  "futures",
- "phaselock 0.0.5-dev",
+ "phaselock",
  "rand 0.7.3",
  "serde",
  "structopt",
@@ -2643,7 +2629,7 @@ dependencies = [
  "jf-txn",
  "jf-utils",
  "markdown",
- "phaselock 0.0.5-dev",
+ "phaselock",
  "rand_chacha 0.2.2",
  "serde",
  "serde_derive",
@@ -2970,35 +2956,8 @@ dependencies = [
 
 [[package]]
 name = "phaselock"
-version = "0.0.2"
-source = "registry+https://dl.cloudsmith.io/basic/translucence/tl/cargo/index.git"
-checksum = "6b342bdceb285ab4527d7a398ab435f515d0dc9057bc5cc21bcc0325ffcf9c3a"
-dependencies = [
- "ark-ec",
- "ark-ed-on-bls12-381",
- "async-std",
- "async-tungstenite 0.14.0",
- "bincode",
- "blake3 0.3.8",
- "byteorder",
- "dashmap",
- "flume 0.10.9",
- "futures",
- "hex_fmt",
- "rand 0.7.3",
- "rand_chacha 0.2.2",
- "serde",
- "snafu",
- "threshold_crypto",
- "tracing",
- "tracing-error 0.1.2",
- "tracing-futures",
- "tracing-unwrap",
-]
-
-[[package]]
-name = "phaselock"
 version = "0.0.5-dev"
+source = "git+ssh://git@gitlab.com/translucence/systems/phaselock.git?rev=a1f6f7001d8e4f478bfcbde5c8e5da251aca4a48#a1f6f7001d8e4f478bfcbde5c8e5da251aca4a48"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",
@@ -4294,7 +4253,7 @@ dependencies = [
  "jf-txn",
  "jf-utils",
  "log",
- "phaselock 0.0.2",
+ "phaselock",
  "quickcheck 0.9.2",
  "quickcheck_macros 0.9.1",
  "rand_chacha 0.3.1",
@@ -5281,7 +5240,7 @@ dependencies = [
  "jf-txn",
  "jf-utils",
  "lazy_static",
- "phaselock 0.0.5-dev",
+ "phaselock",
  "proptest",
  "quickcheck 1.0.3",
  "quickcheck_macros 1.0.0",
