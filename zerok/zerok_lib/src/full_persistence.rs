@@ -1,4 +1,4 @@
-use crate::{ElaboratedBlock, SetMerkleTree, ValidatorState};
+use crate::{node::LedgerEvent, ElaboratedBlock, SetMerkleTree, ValidatorState};
 use atomic_store::{
     append_log::Iter, load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader,
     PersistenceError,
@@ -14,6 +14,18 @@ use std::path::{Path, PathBuf};
 
 type OptionalMemoMap = Option<(Vec<ReceiverMemo>, Signature)>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Resource {
+    StateHistory,
+    BlockHistory,
+    RmtLeavesFull,
+    NullifierSnapshots,
+    BlockUids,
+    Memos,
+    KnownNodes,
+    Events,
+}
+
 pub struct FullPersistence {
     atomic_store: AtomicStore,
     state_history: AppendLog<BincodeLoadStore<ValidatorState>>,
@@ -28,6 +40,7 @@ pub struct FullPersistence {
     // TODO: !jeb.bearer,nathan.yospe - turn this back into a RollingLog once we fix whatever is
     // wrong with RollingLog; we don't need to store old versions of the known_nodes map
     known_nodes: AppendLog<BincodeLoadStore<HashMap<UserAddress, UserPubKey>>>,
+    events: AppendLog<BincodeLoadStore<LedgerEvent>>,
 }
 
 impl FullPersistence {
@@ -42,6 +55,7 @@ impl FullPersistence {
         let txn_uids_tag = format!("{}_txn_uids", key_tag);
         let memos_tag = format!("{}_memos", key_tag);
         let known_nodes_tag = format!("{}_known_nodes", key_tag);
+        let events_tag = format!("{}_events", key_tag);
         let state_history = AppendLog::load(&mut loader, Default::default(), &state_tag, 1024)?;
         let block_history = AppendLog::load(&mut loader, Default::default(), &block_tag, 1024)?;
         let rmt_leaves_full =
@@ -50,8 +64,8 @@ impl FullPersistence {
             AppendLog::load(&mut loader, Default::default(), &nullifier_set_tag, 1024)?;
         let block_uids = AppendLog::load(&mut loader, Default::default(), &txn_uids_tag, 1024)?;
         let memos = AppendLog::load(&mut loader, Default::default(), &memos_tag, 1024)?;
-        let known_nodes =
-            AppendLog::load(&mut loader, Default::default(), &known_nodes_tag, 1024)?;
+        let known_nodes = AppendLog::load(&mut loader, Default::default(), &known_nodes_tag, 1024)?;
+        let events = AppendLog::load(&mut loader, Default::default(), &events_tag, 1024)?;
         let atomic_store = AtomicStore::open(loader)?;
         Ok(FullPersistence {
             atomic_store,
@@ -62,6 +76,7 @@ impl FullPersistence {
             block_uids,
             memos,
             known_nodes,
+            events,
         })
     }
 
@@ -71,6 +86,8 @@ impl FullPersistence {
         records: &MerkleTree,
         nullifiers: &SetMerkleTree,
     ) {
+        use Resource::*;
+
         self.state_history.store_resource(state).unwrap();
         self.nullifier_snapshots.store_resource(nullifiers).unwrap();
         for uid in 0..records.num_leaves() {
@@ -78,18 +95,11 @@ impl FullPersistence {
                 .store_resource(&records.get_leaf(uid).expect_ok().unwrap().1.leaf)
                 .unwrap();
         }
-        self.known_nodes.store_resource(&HashMap::default()).unwrap();
+        self.known_nodes
+            .store_resource(&HashMap::default())
+            .unwrap();
 
-        self.state_history.commit_version().unwrap();
-        self.nullifier_snapshots.commit_version().unwrap();
-        self.rmt_leaves_full.commit_version().unwrap();
-        self.known_nodes.commit_version().unwrap();
-
-        self.block_history.skip_version().unwrap();
-        self.block_uids.skip_version().unwrap();
-        self.memos.skip_version().unwrap();
-
-        self.atomic_store.commit_version().unwrap();
+        self.commit(&[StateHistory, NullifierSnapshots, RmtLeavesFull, KnownNodes]);
     }
 
     pub fn store_for_commit(&mut self, block: &ElaboratedBlock, state: &ValidatorState) {
@@ -127,24 +137,71 @@ impl FullPersistence {
     }
 
     pub fn commit_known_nodes(&mut self) {
-        self.known_nodes.commit_version().unwrap();
-        self.state_history.skip_version().unwrap();
-        self.block_history.skip_version().unwrap();
-        self.rmt_leaves_full.skip_version().unwrap();
-        self.block_uids.skip_version().unwrap();
-        self.nullifier_snapshots.skip_version().unwrap();
-        self.memos.skip_version().unwrap();
-        self.atomic_store.commit_version().unwrap();
+        self.commit(&[Resource::KnownNodes]);
     }
 
     pub fn commit_accepted(&mut self) {
-        self.state_history.commit_version().unwrap();
-        self.block_history.commit_version().unwrap();
-        self.rmt_leaves_full.commit_version().unwrap();
-        self.block_uids.commit_version().unwrap();
-        self.nullifier_snapshots.commit_version().unwrap();
-        self.memos.commit_version().unwrap();
-        self.known_nodes.skip_version().unwrap();
+        use Resource::*;
+        self.commit(&[
+            StateHistory,
+            BlockHistory,
+            RmtLeavesFull,
+            BlockUids,
+            NullifierSnapshots,
+            Memos,
+        ]);
+    }
+
+    pub fn store_event(&mut self, event: &LedgerEvent) {
+        self.events.store_resource(event).unwrap();
+    }
+
+    pub fn commit_events(&mut self) {
+        self.commit(&[Resource::Events]);
+    }
+
+    fn commit(&mut self, dirty: &[Resource]) {
+        use Resource::*;
+        if dirty.contains(&StateHistory) {
+            self.state_history.commit_version().unwrap();
+        } else {
+            self.state_history.skip_version().unwrap();
+        }
+        if dirty.contains(&BlockHistory) {
+            self.block_history.commit_version().unwrap();
+        } else {
+            self.block_history.skip_version().unwrap();
+        }
+        if dirty.contains(&RmtLeavesFull) {
+            self.rmt_leaves_full.commit_version().unwrap();
+        } else {
+            self.rmt_leaves_full.skip_version().unwrap();
+        }
+        if dirty.contains(&BlockUids) {
+            self.block_uids.commit_version().unwrap();
+        } else {
+            self.block_uids.skip_version().unwrap();
+        }
+        if dirty.contains(&NullifierSnapshots) {
+            self.nullifier_snapshots.commit_version().unwrap();
+        } else {
+            self.nullifier_snapshots.skip_version().unwrap();
+        }
+        if dirty.contains(&Memos) {
+            self.memos.commit_version().unwrap();
+        } else {
+            self.memos.skip_version().unwrap();
+        }
+        if dirty.contains(&KnownNodes) {
+            self.known_nodes.commit_version().unwrap();
+        } else {
+            self.known_nodes.skip_version().unwrap();
+        }
+        if dirty.contains(&Events) {
+            self.events.commit_version().unwrap();
+        } else {
+            self.events.skip_version().unwrap();
+        }
         self.atomic_store.commit_version().unwrap();
     }
 
@@ -174,6 +231,10 @@ impl FullPersistence {
 
     pub fn memos_iter(&self) -> Iter<BincodeLoadStore<Vec<OptionalMemoMap>>> {
         self.memos.iter()
+    }
+
+    pub fn events_iter(&self) -> Iter<BincodeLoadStore<LedgerEvent>> {
+        self.events.iter()
     }
 
     pub fn get_latest_known_nodes(

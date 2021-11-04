@@ -299,9 +299,6 @@ struct FullState {
     // PhaseLock errors will contain the bad block (or some kind of reference to it, perhaps through
     // persistent storage) and this will not be necessary.
     proposed: ElaboratedBlock,
-    // All past events, so that clients can subscribe to an event stream starting at a time in the
-    // past.
-    events: Vec<LedgerEvent>,
     // The send ends of all channels which are subscribed to events.
     subscribers: Vec<mpsc::UnboundedSender<LedgerEvent>>,
     // Clients which have subscribed to events starting at some time in the future, to be added to
@@ -430,7 +427,7 @@ impl FullState {
     fn send_event(&mut self, event: LedgerEvent) {
         // Subscribers who asked for a subscription starting from the current time can now be added
         // to the list of active subscribers.
-        let now = self.events.len() as u64;
+        let now = self.full_persisted.events_iter().len() as u64;
         if let Some(new_subscribers) = self.pending_subscribers.remove(&now) {
             self.subscribers.extend(new_subscribers);
         }
@@ -444,21 +441,22 @@ impl FullState {
 
         // Save the event so we can feed it to later subscribers who want to start from some time in
         // the past.
-        self.events.push(event);
+        self.full_persisted.store_event(&event);
+        self.full_persisted.commit_events();
     }
 
     fn subscribe(&mut self, t: u64) -> EventStream<LedgerEvent> {
         let (sender, receiver) = mpsc::unbounded();
-        if (t as usize) < self.events.len() {
+        if (t as usize) < self.full_persisted.events_iter().len() {
             // If the start time is in the past, send the subscriber all saved events since the
             // start time and make them an active subscriber starting now.
             self.subscribers.push(sender);
             let past_events = self
-                .events
-                .iter()
+                .full_persisted
+                .events_iter()
                 .skip(t as usize)
-                .cloned()
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
             Box::pin(stream::iter(past_events).chain(receiver))
         } else {
             // Otherwise, add the subscriber to the list of pending subscribers to start receiving
@@ -686,7 +684,6 @@ impl<'a> PhaseLockQueryService<'a> {
         //  let state = other_node.full_state(validator.commit());
         // For now, just assume we are starting at the beginning:
         let block_hashes = HashMap::new();
-        let events = Vec::new();
         // Use the unpruned record Merkle tree.
         assert_eq!(
             record_merkle_tree.commitment(),
@@ -705,7 +702,6 @@ impl<'a> PhaseLockQueryService<'a> {
             past_nullifiers: vec![(nullifiers.hash(), 0)].into_iter().collect(),
             block_hashes,
             proposed: ElaboratedBlock::default(),
-            events,
             subscribers: Default::default(),
             pending_subscribers: Default::default(),
         }));
