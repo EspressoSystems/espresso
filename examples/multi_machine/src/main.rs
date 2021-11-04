@@ -385,6 +385,7 @@ async fn reload_and_init_phaselock(
     );
     let mut genesis_records = MerkleTree::new(MERKLE_HEIGHT).unwrap();
     genesis_records.push(RecordCommitment::from(&ro).to_field_element());
+    let seed_memos = vec![(ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap(), 0)];
 
     // Set up the validator.
     let univ_setup = &*UNIVERSAL_PARAM;
@@ -453,7 +454,7 @@ async fn reload_and_init_phaselock(
             stored_state,
             records,
             nullifiers,
-            memos,
+            seed_memos,
             full_persisted,
         );
         Node::Full(Arc::new(RwLock::new(node)))
