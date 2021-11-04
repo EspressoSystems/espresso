@@ -50,8 +50,7 @@ impl FullPersistence {
             AppendLog::load(&mut loader, Default::default(), &nullifier_set_tag, 1024)?;
         let block_uids = AppendLog::load(&mut loader, Default::default(), &txn_uids_tag, 1024)?;
         let memos = AppendLog::load(&mut loader, Default::default(), &memos_tag, 1024)?;
-        let known_nodes =
-            AppendLog::load(&mut loader, Default::default(), &known_nodes_tag, 1024)?;
+        let known_nodes = AppendLog::load(&mut loader, Default::default(), &known_nodes_tag, 1024)?;
         let atomic_store = AtomicStore::open(loader)?;
         Ok(FullPersistence {
             atomic_store,
@@ -78,7 +77,9 @@ impl FullPersistence {
                 .store_resource(&records.get_leaf(uid).expect_ok().unwrap().1.leaf)
                 .unwrap();
         }
-        self.known_nodes.store_resource(&HashMap::default()).unwrap();
+        self.known_nodes
+            .store_resource(&HashMap::default())
+            .unwrap();
 
         self.state_history.commit_version().unwrap();
         self.nullifier_snapshots.commit_version().unwrap();

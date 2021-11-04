@@ -1,6 +1,6 @@
 use crate::{ElaboratedBlock, ValidatorState};
 use atomic_store::{
-    load_store::BincodeLoadStore, AtomicStore, AtomicStoreLoader, PersistenceError, AppendLog,
+    load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
 };
 use phaselock::{traits::StatefulHandler, H_256};
 
@@ -18,8 +18,7 @@ impl LWPersistence {
         lw_store_path.push("lw_validator");
         let mut loader = AtomicStoreLoader::load(&lw_store_path, key_tag)?;
         let snapshot_tag = format!("{}_state", key_tag);
-        let state_snapshot =
-            AppendLog::load(&mut loader, Default::default(), &snapshot_tag, 1024)?;
+        let state_snapshot = AppendLog::load(&mut loader, Default::default(), &snapshot_tag, 1024)?;
         let atomic_store = AtomicStore::open(loader)?;
         Ok(LWPersistence {
             atomic_store,
