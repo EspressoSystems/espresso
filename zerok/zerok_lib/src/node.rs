@@ -287,12 +287,19 @@ pub enum QueryServiceError {
 
 struct FullState {
     validator: ValidatorState,
-    records: MerkleTree,
     full_persisted: FullPersistence,
+    // Sparse record Merkle tree containing leaves only for those records which have been committed
+    // but for which memos have not yet been posted. When the memos arrive, we will use this tree
+    // to authenticate the new memos to listeners, and then forget them to keep this tree from
+    // growing unbounded.
+    //todo replace with persistent range-mapping-based Merkle tree
+    records_pending_memos: MerkleTree,
     // Map from past nullifier set root hashes to the index of the state in which that root hash
     // occurred.
+    //todo replace with persistent key value store
     past_nullifiers: HashMap<set_hash::Hash, usize>,
     // Block IDs indexed by block hash.
+    //todo replace with persistent key value store
     block_hashes: HashMap<Vec<u8>, usize>,
     // The last block which was proposed. This is currently used to correllate BadBlock and
     // InconsistentBlock errors from PhaseLock with the block that caused the error. In the future,
@@ -398,12 +405,12 @@ impl FullState {
                                     nullifiers.insert(n);
                                 }
                                 for o in txn.output_commitments() {
-                                    self.records.push(o.to_field_element());
+                                    self.records_pending_memos.push(o.to_field_element());
                                 }
                             }
                             assert_eq!(nullifiers.hash(), self.validator.nullifiers_root);
                             assert_eq!(
-                                self.records.commitment(),
+                                self.records_pending_memos.commitment(),
                                 self.validator.record_merkle_commitment
                             );
                             self.full_persisted.store_nullifier_set(&nullifiers);
@@ -609,12 +616,21 @@ impl FullState {
             });
         }
 
-        // Store and broadcast the new memos.
-        //todo !jeb.bearer update memos in storage
-        let merkle_tree = &self.records;
+        // Authenticate the validity of the records corresponding to the memos.
+        let merkle_tree = &mut self.records_pending_memos;
         let merkle_paths = uids
             .iter()
-            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path);
+            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path)
+            .collect::<Vec<_>>();
+        // Once we have generated proofs for the memos, we will not need to generate proofs for
+        // these records again (unless specifically requested) so there is no need to keep them in
+        // memory.
+        for uid in uids {
+            merkle_tree.forget(*uid);
+        }
+
+        // Store and broadcast the new memos.
+        //todo !jeb.bearer update memos in storage
         let event = LedgerEvent::Memos {
             outputs: izip!(
                 new_memos,
@@ -689,15 +705,25 @@ impl<'a> PhaseLockQueryService<'a> {
             record_merkle_tree.commitment(),
             validator.record_merkle_commitment
         );
-        validator.record_merkle_commitment = record_merkle_tree.commitment();
-        validator.record_merkle_frontier = record_merkle_tree.frontier();
+
+        let record_merkle_commitment = record_merkle_tree.commitment();
+        let record_merkle_frontier = record_merkle_tree.frontier();
+        // There have not yet been any transactions, so we are not expecting to receive any memos.
+        // Therefore, the set of record commitments that are pending the receipt of corresponding
+        // memos is the completely sparse merkle tree.
+        let records_pending_memos =
+            MerkleTree::restore_from_frontier(record_merkle_commitment, &record_merkle_frontier)
+                .unwrap();
+
+        validator.record_merkle_commitment = record_merkle_commitment;
+        validator.record_merkle_frontier = record_merkle_frontier;
 
         // Commit the initial state.
         full_persisted.store_initial(&validator, &record_merkle_tree, &nullifiers);
 
         let state = Arc::new(RwLock::new(FullState {
             validator,
-            records: record_merkle_tree,
+            records_pending_memos,
             full_persisted,
             past_nullifiers: vec![(nullifiers.hash(), 0)].into_iter().collect(),
             block_hashes,
@@ -720,8 +746,7 @@ impl<'a> PhaseLockQueryService<'a> {
                         let (comms, merkle_paths): (Vec<_>, Vec<_>) = uids
                             .iter()
                             .map(|uid| {
-                                state
-                                    .records
+                                record_merkle_tree
                                     .get_leaf(*uid)
                                     .expect_ok()
                                     .map(|(_, proof)| (proof.leaf.0, proof.path))
