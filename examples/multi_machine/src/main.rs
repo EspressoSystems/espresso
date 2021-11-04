@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
-use jf_txn::{BaseField, MerkleTree, TransactionVerifyingKey};
+use jf_txn::{MerkleTree, TransactionVerifyingKey};
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
@@ -70,6 +70,11 @@ struct NodeOpt {
     /// Skip this option if public key files already exist.
     #[structopt(long = "gen_pk", short = "g")]
     gen_pk: bool,
+
+    /// Whether to load from persisted state.
+    ///
+    #[structopt(long = "load_from_store", short = "l")]
+    load_from_store: bool,
 
     /// Path to public keys.
     ///
@@ -343,129 +348,8 @@ impl Validator for Node {
     }
 }
 
-async fn reload_and_init_phaselock(
-    public_keys: tc::PublicKeySet,
-    secret_key_share: tc::SecretKeyShare,
-    nodes: u64,
-    threshold: u64,
-    node_id: u64,
-    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>,
-    full_node: bool,
-) -> (Option<MultiXfrTestState>, Node) {
-    // Create the initial phaselock
-    let known_nodes: Vec<_> = (0..nodes).map(get_public_key).collect();
-
-    let config = PhaseLockConfig {
-        total_nodes: nodes as u32,
-        threshold: threshold as u32,
-        max_transactions: 100,
-        known_nodes,
-        next_view_timeout: 10000,
-        timeout_ratio: (11, 10),
-        round_start_delay: 1,
-        start_delay: 1,
-    };
-    debug!(?config);
-
-    let mut rng = zerok_lib::crypto_rng_from_seed([0x42u8; 32]);
-
-    // Read in the public key of the wallet which will get the initial grant of native coins.
-    let mut file = File::open(pk_path).unwrap();
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).unwrap();
-    let pub_key = bincode::deserialize(&bytes).unwrap();
-
-    // Create the initial grant.
-    let ro = RecordOpening::new(
-        &mut rng,
-        1u64 << 32,
-        AssetDefinition::native(),
-        pub_key,
-        FreezeFlag::Unfrozen,
-    );
-    let mut genesis_records = MerkleTree::new(MERKLE_HEIGHT).unwrap();
-    genesis_records.push(RecordCommitment::from(&ro).to_field_element());
-    let seed_memos = vec![(ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap(), 0)];
-
-    // Set up the validator.
-    let univ_setup = &*UNIVERSAL_PARAM;
-    let (_, xfr_verif_key_12, _) =
-        jf_txn::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
-    let (_, xfr_verif_key_23, _) =
-        jf_txn::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
-    let (_, mint_verif_key, _) =
-        jf_txn::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
-    let (_, freeze_verif_key, _) =
-        jf_txn::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
-    let verif_keys = VerifierKeySet {
-        mint: TransactionVerifyingKey::Mint(mint_verif_key),
-        xfr: KeySet::new(
-            vec![
-                TransactionVerifyingKey::Transfer(xfr_verif_key_12),
-                TransactionVerifyingKey::Transfer(xfr_verif_key_23),
-            ]
-            .into_iter(),
-        )
-        .unwrap(),
-        freeze: KeySet::new(vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter())
-            .unwrap(),
-    };
-
-    let nullifiers = Default::default();
-    let genesis_state = ValidatorState::new(verif_keys, genesis_records);
-
-    let lw_persistence =
-        LWPersistence::new(Path::new(&get_store_dir()), "multi_machine_demo").unwrap();
-    let stored_state = lw_persistence
-        .load_latest_state()
-        .ok_or_else(|| genesis_state.clone());
-
-    let genesis_block = ElaboratedBlock::default();
-    let (_, phaselock) = PhaseLock::init(
-        genesis_block,
-        public_keys,
-        secret_key_share,
-        node_id,
-        config,
-        genesis_state,
-        networking,
-        MemoryStorage::default(),
-        lw_persistence,
-    )
-    .await;
-    debug!("phaselock launched");
-
-    let validator = if full_node {
-        let full_persisted =
-            FullPersistence::new(Path::new(&get_store_dir()), "multi_machine_demo").unwrap();
-
-        let mut builder = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
-        for leaf in full_persisted.rmt_leaf_iter() {
-            builder.push(leaf.unwrap().0);
-        }
-        let memos = full_persisted.memos_iter().map(|Ok(memo)| memo).collect();
-        let records = builder.build();
-        let nullifiers = full_persisted
-            .get_latest_nullifier_set()
-            .ok_or_else(|| Default::default());
-        let node = FullNode::new(
-            phaselock,
-            &*UNIVERSAL_PARAM,
-            stored_state,
-            records,
-            nullifiers,
-            seed_memos,
-            full_persisted,
-        );
-        Node::Full(Arc::new(RwLock::new(node)))
-    } else {
-        Node::Light(phaselock)
-    };
-
-    (None, validator)
-}
-
 /// Creates the initial state and phaselock for simulation.
+#[allow(clippy::too_many_arguments)]
 async fn init_state_and_phaselock(
     public_keys: tc::PublicKeySet,
     secret_key_share: tc::SecretKeyShare,
@@ -474,6 +358,7 @@ async fn init_state_and_phaselock(
     node_id: u64,
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
     full_node: bool,
+    load_from_store: bool,
 ) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state
     let (state, validator, records, nullifiers, memos) =
@@ -582,16 +467,26 @@ async fn init_state_and_phaselock(
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
+
+    let lw_persistence =
+        LWPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap();
+    let stored_state = if load_from_store {
+        lw_persistence
+            .load_latest_state()
+            .unwrap_or_else(|_| validator.clone())
+    } else {
+        validator.clone()
+    };
     let (_, phaselock) = PhaseLock::init(
         genesis,
         public_keys,
         secret_key_share,
         node_id,
         config,
-        validator.clone(),
+        validator,
         networking,
         MemoryStorage::default(),
-        LWPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap(),
+        lw_persistence,
     )
     .await;
     debug!("phaselock launched");
@@ -599,12 +494,29 @@ async fn init_state_and_phaselock(
     let validator = if full_node {
         let full_persisted =
             FullPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap();
+
+        let records = if load_from_store {
+            let mut builder = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
+            for leaf in full_persisted.rmt_leaf_iter() {
+                builder.push(leaf.unwrap().0);
+            }
+            builder.build()
+        } else {
+            records
+        };
+        let nullifiers = if load_from_store {
+            full_persisted
+                .get_latest_nullifier_set()
+                .unwrap_or_else(|_| Default::default())
+        } else {
+            nullifiers
+        };
         let node = FullNode::new(
             phaselock,
             &*UNIVERSAL_PARAM,
-            validator.clone(),
-            records.clone(),
-            nullifiers.clone(),
+            stored_state,
+            records,
+            nullifiers,
             memos,
             full_persisted,
         );
@@ -969,16 +881,12 @@ async fn main() -> Result<(), std::io::Error> {
     }
 
     // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
-    let load_from_store = if let Some(load_from_store) = NodeOpt::from_args().load_from_store {
-        if load_from_store {
-            println!("restoring from persisted session");
-        } else {
-            println!("initializing new session");
-        }
-        load_from_store
+    let load_from_store = NodeOpt::from_args().load_from_store;
+    if load_from_store {
+        println!("restoring from persisted session");
     } else {
-        false
-    };
+        println!("initializing new session");
+    }
 
     if let Some(own_id) = NodeOpt::from_args().id {
         println!("Current node: {}", own_id);
@@ -1017,30 +925,18 @@ async fn main() -> Result<(), std::io::Error> {
         }
         println!("All nodes connected to network");
 
-        let (mut state, mut phaselock) = if load_from_store {
-            reload_and_init_phaselock(
-                public_keys,
-                secret_key_share,
-                nodes,
-                threshold,
-                own_id,
-                own_network,
-                NodeOpt::from_args().full,
-            )
-            .await
-        } else {
-            // Initialize the state and phaselock
-            init_state_and_phaselock(
-                public_keys,
-                secret_key_share,
-                nodes,
-                threshold,
-                own_id,
-                own_network,
-                NodeOpt::from_args().full,
-            )
-            .await
-        };
+        // Initialize the state and phaselock
+        let (mut state, mut phaselock) = init_state_and_phaselock(
+            public_keys,
+            secret_key_share,
+            nodes,
+            threshold,
+            own_id,
+            own_network,
+            NodeOpt::from_args().full,
+            load_from_store,
+        )
+        .await;
         let mut events = phaselock.subscribe();
 
         // If we are running a full node, also host a query API to inspect the accumulated state.

@@ -1,7 +1,7 @@
 use crate::{ElaboratedBlock, SetMerkleTree, ValidatorState};
 use atomic_store::{
     append_log::Iter, load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader,
-    PersistenceError, RollingLog,
+    PersistenceError,
 };
 use core::fmt::Debug;
 use jf_txn::{
@@ -25,7 +25,7 @@ pub struct FullPersistence {
     // also, are txn uids not a sequential series? Could this be stored as a list of start/len pairs?
     block_uids: AppendLog<BincodeLoadStore<Vec<Vec<u64>>>>,
     memos: AppendLog<BincodeLoadStore<Vec<OptionalMemoMap>>>,
-    known_nodes: RollingLog<BincodeLoadStore<HashMap<UserAddress, UserPubKey>>>,
+    known_nodes: AppendLog<BincodeLoadStore<HashMap<UserAddress, UserPubKey>>>,
 }
 
 impl FullPersistence {
@@ -49,7 +49,7 @@ impl FullPersistence {
         let block_uids = AppendLog::load(&mut loader, Default::default(), &txn_uids_tag, 1024)?;
         let memos = AppendLog::load(&mut loader, Default::default(), &memos_tag, 1024)?;
         let known_nodes =
-            RollingLog::load(&mut loader, Default::default(), &known_nodes_tag, 1024)?;
+            AppendLog::load(&mut loader, Default::default(), &known_nodes_tag, 1024)?;
         let atomic_store = AtomicStore::open(loader)?;
         Ok(FullPersistence {
             atomic_store,
