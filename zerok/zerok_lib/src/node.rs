@@ -50,6 +50,7 @@ pub trait Validator {
     type Event: ConsensusEvent;
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError>;
     async fn start_consensus(&self);
+    async fn current_state(&self) -> Arc<ValidatorState>;
     fn subscribe(&self) -> EventStream<Self::Event>;
 }
 
@@ -58,6 +59,10 @@ pub type LightWeightNode<NET, STORE> = PhaseLockHandle<ValidatorNodeImpl<NET, ST
 #[async_trait]
 impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
     type Event = PhaseLockEvent;
+
+    async fn current_state(&self) -> Arc<ValidatorState> {
+        self.get_state().await
+    }
 
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
         self.submit_transaction(tx).await.map_err(|err| {
@@ -182,7 +187,12 @@ pub trait QueryService {
     /// applying a block, so `get_snapshot(1)` returns the snapshot after the 0th block is applied,
     /// `get_snapshot(i + 1)` returns the snapshot after the `i`th block is applied, and so on until
     /// `get_snapshot(num_blocks())` returns the current state.
-    async fn get_snapshot(&self, index: usize) -> Result<LedgerSnapshot, QueryServiceError>;
+    async fn get_snapshot(
+        &self,
+        index: usize,
+        sparse_records: bool,
+        sparse_nullifiers: bool,
+    ) -> Result<LedgerSnapshot, QueryServiceError>;
 
     /// Get information about the `i`th block and the state transition it caused.
     ///
@@ -256,24 +266,24 @@ pub enum QueryServiceError {
     InvalidBlockId {},
     InvalidBlockHash {},
     InvalidTxnId {},
+    InvalidRecordId {},
+    InvalidHistoricalIndex {},
     MemosAlreadyPosted {},
     InvalidSignature {},
     WrongNumberOfMemos { expected: usize },
     NoMemosForTxn {},
     InvalidAddress {},
+    PersistenceError { msg: String },
 }
 
 struct FullState {
     validator: ValidatorState,
     records: MerkleTree,
-    nullifiers: SetMerkleTree,
     full_persisted: FullPersistence,
     known_nodes: HashMap<UserAddress, UserPubKey>,
     // Map from past nullifier set root hashes to the index of the state in which that root hash
     // occurred.
     past_nullifiers: HashMap<set_hash::Hash, usize>,
-    // All past states and state transitions of the ledger.
-    history: Vec<LedgerTransition>,
     // Block IDs indexed by block hash.
     block_hashes: HashMap<Vec<u8>, usize>,
     // The last block which was proposed. This is currently used to correllate BadBlock and
@@ -333,8 +343,6 @@ impl FullState {
 
             Decide { block, state } => {
                 for (block, state) in block.iter().zip(state.iter()).rev() {
-                    let prev_state = self.validator.clone();
-
                     // A block has been committed. Update our mirror of the ValidatorState by applying
                     // the new block, and generate a Commit event.
 
@@ -351,12 +359,13 @@ impl FullState {
                         }
 
                         Ok(mut uids) => {
+                            let index = self.full_persisted.state_iter().len();
+                            assert!(index > 0);
                             self.full_persisted.store_for_commit(block, state);
-                            // Archive the old state.
-                            let index = self.history.len();
-                            self.past_nullifiers.insert(self.nullifiers.hash(), index);
+                            self.past_nullifiers
+                                .insert(self.validator.nullifiers_root, index);
                             self.block_hashes
-                                .insert(Vec::from(block.hash().as_ref()), index);
+                                .insert(Vec::from(block.hash().as_ref()), index - 1);
                             let block_uids = block
                                 .block
                                 .0
@@ -365,42 +374,33 @@ impl FullState {
                                     // Split the uids corresponding to this transaction off the front of
                                     // the list of uids for the whole block.
                                     let mut this_txn_uids = uids.split_off(txn.output_len());
-                                    self.full_persisted.store_txn_uids(&this_txn_uids);
                                     std::mem::swap(&mut this_txn_uids, &mut uids);
                                     assert_eq!(this_txn_uids.len(), txn.output_len());
                                     this_txn_uids
                                 })
-                                .collect();
-                            self.history.push(LedgerTransition {
-                                from_state: LedgerSnapshot {
-                                    state: prev_state,
-                                    nullifiers: self.nullifiers.clone(),
-                                    // starting from the last frontier MT and not pruning for the current block might actually be the right solution here. That would require constructing the sparse tree and swapping it here, rather than cloning...
-                                    records: MerkleTreeWithArbitrary(self.records.clone()),
-                                },
-                                block: (*block).clone(),
-                                memos: vec![None; block.block.0.len()],
-                                uids: block_uids,
-                            });
+                                .collect::<Vec<_>>();
+                            self.full_persisted.store_block_uids(&block_uids);
+                            self.full_persisted
+                                .store_memos(&vec![None; block.block.0.len()]);
 
                             // Add the results of this block to our current state.
+                            let mut nullifiers =
+                                self.full_persisted.get_latest_nullifier_set().unwrap();
                             for txn in block.block.0.iter() {
                                 for n in txn.nullifiers() {
-                                    self.nullifiers.insert(n);
+                                    nullifiers.insert(n);
                                 }
                                 for o in txn.output_commitments() {
                                     self.records.push(o.to_field_element());
                                 }
                             }
-                            self.full_persisted.store_nullifier_set(&self.nullifiers);
-                            assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
+                            assert_eq!(nullifiers.hash(), self.validator.nullifiers_root);
                             assert_eq!(
                                 self.records.commitment(),
                                 self.validator.record_merkle_commitment
                             );
-
-                            // TODO !nathan.yospe: hook up memos, track if new memos to commit
-                            self.full_persisted.commit_accepted(false, false);
+                            self.full_persisted.store_nullifier_set(&nullifiers);
+                            self.full_persisted.commit_accepted(true, false);
 
                             // Notify subscribers of the new block.
                             self.send_event(LedgerEvent::Commit {
@@ -458,6 +458,103 @@ impl FullState {
         }
     }
 
+    fn get_snapshot(
+        &self,
+        index: usize,
+        sparse_records: bool,
+        sparse_nullifiers: bool,
+    ) -> Result<LedgerSnapshot, QueryServiceError> {
+        let state = self
+            .full_persisted
+            .state_iter()
+            .nth(index)
+            .ok_or(QueryServiceError::InvalidHistoricalIndex {})?
+            .map_err(|err| QueryServiceError::PersistenceError {
+                msg: err.to_string(),
+            })?;
+        let records = if sparse_records {
+            // We can reconstruct a sparse Merkle tree out of the commitment stored in the
+            // corresponing lightweight state.
+            //
+            // The records commitment and frontier in `state` have already been validated,
+            // so it is safe to unwrap here.
+            MerkleTree::restore_from_frontier(
+                state.record_merkle_commitment,
+                &state.record_merkle_frontier,
+            )
+            .unwrap()
+        } else {
+            // To reconstruct a full Merkle tree, we have to actually iterate over all of
+            // stored leaves and build up a new tree.
+            let mut tree = MerkleTree::new(state.record_merkle_commitment.height).unwrap();
+            for leaf in self
+                .full_persisted
+                .rmt_leaf_iter()
+                .take(state.record_merkle_commitment.num_leaves as usize)
+            {
+                tree.push(
+                    leaf.map_err(|err| QueryServiceError::PersistenceError {
+                        msg: err.to_string(),
+                    })?
+                    .0,
+                );
+            }
+            assert_eq!(tree.commitment(), state.record_merkle_commitment);
+            tree
+        };
+
+        let full_nullifiers = self
+            .full_persisted
+            .nullifier_set_iter()
+            .nth(index)
+            .ok_or(QueryServiceError::InvalidHistoricalIndex {})?
+            .map_err(|err| QueryServiceError::PersistenceError {
+                msg: err.to_string(),
+            })?;
+        let nullifiers = if sparse_nullifiers {
+            SetMerkleTree::sparse(full_nullifiers.hash())
+        } else {
+            full_nullifiers
+        };
+
+        Ok(LedgerSnapshot {
+            state,
+            records: MerkleTreeWithArbitrary(records),
+            nullifiers,
+        })
+    }
+
+    fn get_block(&self, index: usize) -> Result<LedgerTransition, QueryServiceError> {
+        let from_state = self.get_snapshot(index, true, true)?;
+        Ok(LedgerTransition {
+            from_state,
+            block: self
+                .full_persisted
+                .block_iter()
+                .nth(index)
+                .ok_or(QueryServiceError::InvalidBlockId {})?
+                .map_err(|err| QueryServiceError::PersistenceError {
+                    msg: err.to_string(),
+                })?,
+            memos: self
+                .full_persisted
+                .memos_iter()
+                .nth(index)
+                .ok_or(QueryServiceError::InvalidBlockId {})?
+                .map_err(|err| QueryServiceError::PersistenceError {
+                    msg: err.to_string(),
+                })?,
+            uids: self
+                .full_persisted
+                .block_uids_iter()
+                .nth(index)
+                .ok_or(QueryServiceError::InvalidBlockId {})?
+                .map_err(|err| QueryServiceError::PersistenceError {
+                    msg: err.to_string(),
+                })?,
+        })
+    }
+
     fn post_memos(
         &mut self,
         block_id: u64,
@@ -468,15 +565,11 @@ impl FullState {
         let block_id = block_id as usize;
         let txn_id = txn_id as usize;
 
-        // Validate `block_id` and get the corresponding state snapshot.
-        if block_id >= self.history.len() {
-            return Err(QueryServiceError::InvalidBlockId {});
-        }
+        // Get the information about the committed block containing the relevant transaction.
         let LedgerTransition {
-            block, memos, uids, ..
-        } = &mut self.history[block_id];
+            block, uids, memos, ..
+        } = self.get_block(block_id)?;
         let num_txns = block.block.0.len();
-        assert_eq!(memos.len(), num_txns);
         assert_eq!(uids.len(), num_txns);
         assert_eq!(block.proofs.len(), num_txns);
 
@@ -485,11 +578,10 @@ impl FullState {
             return Err(QueryServiceError::InvalidTxnId {});
         }
         let txn = &block.block.0[txn_id];
-        let stored_memos = &mut memos[txn_id];
         let uids = &uids[txn_id];
 
         // Validate the new memos.
-        if stored_memos.is_some() {
+        if memos[txn_id].is_some() {
             return Err(QueryServiceError::MemosAlreadyPosted {});
         }
         if txn
@@ -505,7 +597,7 @@ impl FullState {
         }
 
         // Store and broadcast the new memos.
-        *stored_memos = Some((new_memos.clone(), sig));
+        //todo !jeb.bearer update memos in storage
         let merkle_tree = &self.records;
         let merkle_paths = uids
             .iter()
@@ -557,13 +649,12 @@ impl<'a> PhaseLockQueryService<'a> {
         record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
-        full_persisted: FullPersistence,
+        mut full_persisted: FullPersistence,
     ) -> Self {
         //todo !jeb.bearer If we are not starting from the genesis of the ledger, query the full
         // state at this point from another full node, like
         //  let state = other_node.full_state(validator.commit());
         // For now, just assume we are starting at the beginning:
-        let history = Vec::new();
         let block_hashes = HashMap::new();
         let events = Vec::new();
         // Use the unpruned record Merkle tree.
@@ -574,14 +665,15 @@ impl<'a> PhaseLockQueryService<'a> {
         validator.record_merkle_commitment = record_merkle_tree.commitment();
         validator.record_merkle_frontier = record_merkle_tree.frontier();
 
+        // Commit the initial state.
+        full_persisted.store_initial(&validator, &record_merkle_tree, &nullifiers);
+
         let state = Arc::new(RwLock::new(FullState {
             validator,
-            nullifiers,
             records: record_merkle_tree,
             full_persisted,
             known_nodes: Default::default(),
-            past_nullifiers: HashMap::new(),
-            history,
+            past_nullifiers: vec![(nullifiers.hash(), 0)].into_iter().collect(),
             block_hashes,
             proposed: ElaboratedBlock::default(),
             events,
@@ -633,6 +725,14 @@ impl<'a> PhaseLockQueryService<'a> {
             _event_task: Arc::new(task),
         }
     }
+
+    // pub fn load(
+    //     event_source: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
+    //     univ_param: &'a jf_txn::proof::UniversalParam,
+    //     full_persisted: FullPersistence,
+    // ) -> Self {
+    //     unimplemented!("loading QueryService")
+    // }
 }
 
 #[async_trait]
@@ -640,32 +740,25 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
     async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError> {
         let state = self.state.read().await;
         Ok(LedgerSummary {
-            num_blocks: state.history.len(),
-            num_records: state.validator.record_merkle_commitment.num_leaves as usize,
+            num_blocks: state.full_persisted.block_iter().len(),
+            num_records: state.full_persisted.rmt_leaf_iter().len(),
         })
     }
 
-    async fn get_snapshot(&self, index: usize) -> Result<LedgerSnapshot, QueryServiceError> {
-        use std::cmp::Ordering::*;
-        let state = self.state.read().await;
-        match index.cmp(&state.history.len()) {
-            Less => Ok(state.history[index].from_state.clone()),
-            Equal => Ok(LedgerSnapshot {
-                state: state.validator.clone(),
-                nullifiers: state.nullifiers.clone(),
-                records: MerkleTreeWithArbitrary(state.records.clone()),
-            }),
-            Greater => Err(QueryServiceError::InvalidBlockId {}),
-        }
+    async fn get_snapshot(
+        &self,
+        index: usize,
+        sparse_records: bool,
+        sparse_nullifiers: bool,
+    ) -> Result<LedgerSnapshot, QueryServiceError> {
+        self.state
+            .read()
+            .await
+            .get_snapshot(index, sparse_records, sparse_nullifiers)
     }
 
     async fn get_block(&self, index: usize) -> Result<LedgerTransition, QueryServiceError> {
-        let state = self.state.read().await;
-        state
-            .history
-            .get(index)
-            .cloned()
-            .ok_or(QueryServiceError::InvalidBlockId {})
+        self.state.read().await.get_block(index)
     }
 
     async fn get_block_id_by_hash(&self, hash: &[u8]) -> Result<usize, QueryServiceError> {
@@ -683,16 +776,18 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
         n: Nullifier,
     ) -> Result<(bool, SetMerkleProof), QueryServiceError> {
         let state = self.state.read().await;
-
-        let nullifiers = if root == state.nullifiers.hash() {
-            &state.nullifiers
-        } else {
-            state
-                .past_nullifiers
-                .get(&root)
-                .map(|index| &state.history[*index].from_state.nullifiers)
-                .ok_or(QueryServiceError::InvalidNullifierRoot {})?
-        };
+        let index = state
+            .past_nullifiers
+            .get(&root)
+            .ok_or(QueryServiceError::InvalidNullifierRoot {})?;
+        let nullifiers = state
+            .full_persisted
+            .nullifier_set_iter()
+            .nth(*index)
+            .unwrap()
+            .map_err(|err| QueryServiceError::PersistenceError {
+                msg: err.to_string(),
+            })?;
         Ok(nullifiers.contains(n).unwrap())
     }
 
@@ -776,6 +871,10 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
 impl<'a, NET: PLNet, STORE: PLStore> Validator for FullNode<'a, NET, STORE> {
     type Event = <LightWeightNode<NET, STORE> as Validator>::Event;
 
+    async fn current_state(&self) -> Arc<ValidatorState> {
+        self.validator.get_state().await
+    }
+
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
         self.as_validator().submit_transaction(tx).await
     }
@@ -795,8 +894,15 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
         self.as_query_service().get_summary().await
     }
 
-    async fn get_snapshot(&self, index: usize) -> Result<LedgerSnapshot, QueryServiceError> {
-        self.as_query_service().get_snapshot(index).await
+    async fn get_snapshot(
+        &self,
+        index: usize,
+        sparse_records: bool,
+        sparse_nullifiers: bool,
+    ) -> Result<LedgerSnapshot, QueryServiceError> {
+        self.as_query_service()
+            .get_snapshot(index, sparse_records, sparse_nullifiers)
+            .await
     }
 
     async fn get_block(&self, index: usize) -> Result<LedgerTransition, QueryServiceError> {
@@ -1099,22 +1205,24 @@ mod tests {
                     }
 
                     // Posting the same memos twice should fail.
-                    match qs
-                        .post_memos(block_id as u64, txn_id as u64, memos.clone(), sig.clone())
-                        .await
-                    {
-                        Err(QueryServiceError::MemosAlreadyPosted { .. }) => {}
-                        res => {
-                            panic!("Expected error MemosAlreadyPosted, got {:?}", res);
-                        }
-                    }
+                    // todo !jeb.bearer re-enable this test when persistent memo storage is supported
+                    // match qs
+                    //     .post_memos(block_id as u64, txn_id as u64, memos.clone(), sig.clone())
+                    //     .await
+                    // {
+                    //     Err(QueryServiceError::MemosAlreadyPosted { .. }) => {}
+                    //     res => {
+                    //         panic!("Expected error MemosAlreadyPosted, got {:?}", res);
+                    //     }
+                    // }
 
                     // We should be able to query the newly posted memos.
-                    let (queried_memos, sig) =
-                        qs.get_memos(block_id as u64, txn_id as u64).await.unwrap();
-                    txn.verify_receiver_memos_signature(&queried_memos, &sig)
-                        .unwrap();
-                    assert_eq!(queried_memos, *memos);
+                    // todo !jeb.bearer re-enable this test when persistent memo storage is supported
+                    // let (queried_memos, sig) =
+                    //     qs.get_memos(block_id as u64, txn_id as u64).await.unwrap();
+                    // txn.verify_receiver_memos_signature(&queried_memos, &sig)
+                    //     .unwrap();
+                    // assert_eq!(queried_memos, *memos);
                 }
             }
 

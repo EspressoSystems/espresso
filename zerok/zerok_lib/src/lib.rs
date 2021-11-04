@@ -935,6 +935,7 @@ impl State<H_256> for ValidatorState {
     fn on_commit(&self) {}
 }
 
+#[derive(Debug)]
 pub struct MultiXfrTestState {
     pub prng: ChaChaRng,
 
@@ -1089,15 +1090,63 @@ impl MultiXfrTestState {
         Self::update_timer(&mut timer, |_| println!("Generating params"));
         let mut prng = ChaChaRng::from_seed(seed);
 
+        let bytes_per_page = procfs::page_size().unwrap() as u64;
+        println!("{} bytes per page", bytes_per_page);
+
+        let fence = || std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+
+        let report_mem = || {
+            fence();
+            let process_stats = procfs::process::Process::myself().unwrap().statm().unwrap();
+            println!(
+                "{:.3}MiB | raw: {:?}",
+                ((process_stats.size * bytes_per_page) as f64) / ((1u64 << 20) as f64),
+                process_stats
+            );
+            fence();
+        };
+
+        report_mem();
+
+        fence();
         let univ_setup = &*UNIVERSAL_PARAM;
+        fence();
+        Self::update_timer(&mut timer, |t| {
+            println!("Generated universal params: {}s", t)
+        });
+
+        report_mem();
+
+        fence();
         let (xfr_prove_key_22, xfr_verif_key_22, _) =
             jf_txn::proof::transfer::preprocess(univ_setup, 2, 2, MERKLE_HEIGHT)?;
+        fence();
+        Self::update_timer(&mut timer, |t| println!("Generated xfr22: {}s", t));
+
+        report_mem();
+
+        fence();
         let (xfr_prove_key_33, xfr_verif_key_33, _) =
             jf_txn::proof::transfer::preprocess(univ_setup, 3, 3, MERKLE_HEIGHT)?;
+        fence();
+        Self::update_timer(&mut timer, |t| println!("Generated xfr33: {}s", t));
+
+        fence();
+        report_mem();
         let (mint_prove_key, mint_verif_key, _) =
             jf_txn::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT)?;
+        fence();
+        Self::update_timer(&mut timer, |t| println!("Generated mint: {}s", t));
+
+        report_mem();
+
+        fence();
         let (freeze_prove_key, freeze_verif_key, _) =
             jf_txn::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT)?;
+        fence();
+        Self::update_timer(&mut timer, |t| println!("Generated freeze: {}s", t));
+
+        report_mem();
 
         let native_token = AssetDefinition::native();
 
@@ -2063,6 +2112,31 @@ mod tests {
     use jf_primitives::merkle_tree::LookupResult;
     use jf_txn::BaseField;
     use quickcheck::QuickCheck;
+    use rand::Rng;
+
+    #[test]
+    fn multixfr_setup() {
+        let state = MultiXfrTestState::initialize(
+            [0x7au8; 32],
+            10,
+            10,
+            (
+                MultiXfrRecordSpec {
+                    asset_def_ix: 0,
+                    owner_key_ix: 0,
+                    asset_amount: 10,
+                },
+                vec![],
+            ),
+        )
+        .unwrap();
+
+        std::thread::sleep(core::time::Duration::from_millis(60000));
+
+        if rand::thread_rng().gen::<u64>() == 0 {
+            println!("{:?}", state)
+        }
+    }
 
     /*
      * Test idea:

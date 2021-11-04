@@ -7,7 +7,7 @@ use core::fmt::Debug;
 use jf_txn::{
     keys::{UserAddress, UserPubKey},
     structs::ReceiverMemo,
-    MerkleLeaf, Signature,
+    MerkleLeaf, MerkleTree, Signature,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,9 +22,9 @@ pub struct FullPersistence {
     // TODO: !nathan.yospe - replace with proof accumulators and background periodic roll-ups
     nullifier_snapshots: AppendLog<BincodeLoadStore<SetMerkleTree>>,
     // how long can memos remain unposted? We probably need a custom store for these after demo2
-    // also, are txn_uids not a sequential series? Could this be stored as a start/len pair?
-    txn_uids: AppendLog<BincodeLoadStore<Vec<u64>>>,
-    memos: AppendLog<BincodeLoadStore<OptionalMemoMap>>,
+    // also, are txn uids not a sequential series? Could this be stored as a list of start/len pairs?
+    block_uids: AppendLog<BincodeLoadStore<Vec<Vec<u64>>>>,
+    memos: AppendLog<BincodeLoadStore<Vec<OptionalMemoMap>>>,
     known_nodes: RollingLog<BincodeLoadStore<HashMap<UserAddress, UserPubKey>>>,
 }
 
@@ -46,7 +46,7 @@ impl FullPersistence {
             AppendLog::load(&mut loader, Default::default(), &full_rmt_tag, 1024)?;
         let nullifier_snapshots =
             AppendLog::load(&mut loader, Default::default(), &nullifier_set_tag, 1024)?;
-        let txn_uids = AppendLog::load(&mut loader, Default::default(), &txn_uids_tag, 1024)?;
+        let block_uids = AppendLog::load(&mut loader, Default::default(), &txn_uids_tag, 1024)?;
         let memos = AppendLog::load(&mut loader, Default::default(), &memos_tag, 1024)?;
         let known_nodes =
             RollingLog::load(&mut loader, Default::default(), &known_nodes_tag, 1024)?;
@@ -57,10 +57,35 @@ impl FullPersistence {
             block_history,
             rmt_leaves_full,
             nullifier_snapshots,
-            txn_uids,
+            block_uids,
             memos,
             known_nodes,
         })
+    }
+
+    pub fn store_initial(
+        &mut self,
+        state: &ValidatorState,
+        records: &MerkleTree,
+        nullifiers: &SetMerkleTree,
+    ) {
+        self.state_history.store_resource(state).unwrap();
+        self.nullifier_snapshots.store_resource(nullifiers).unwrap();
+        for uid in 0..records.num_leaves() {
+            self.rmt_leaves_full
+                .store_resource(&records.get_leaf(uid).expect_ok().unwrap().1.leaf)
+                .unwrap();
+        }
+        self.state_history.commit_version().unwrap();
+        self.nullifier_snapshots.commit_version().unwrap();
+        self.rmt_leaves_full.commit_version().unwrap();
+
+        self.block_history.skip_version().unwrap();
+        self.block_uids.skip_version().unwrap();
+        self.memos.skip_version().unwrap();
+        self.known_nodes.skip_version().unwrap();
+
+        self.atomic_store.commit_version().unwrap();
     }
 
     pub fn store_for_commit(&mut self, block: &ElaboratedBlock, state: &ValidatorState) {
@@ -80,8 +105,8 @@ impl FullPersistence {
         }
     }
 
-    pub fn store_txn_uids(&mut self, uids: &[u64]) {
-        self.txn_uids.store_resource(&Vec::from(uids)).unwrap();
+    pub fn store_block_uids(&mut self, uids: &[Vec<u64>]) {
+        self.block_uids.store_resource(&Vec::from(uids)).unwrap();
     }
 
     pub fn store_nullifier_set(&mut self, nullifiers: &SetMerkleTree) {
@@ -89,7 +114,8 @@ impl FullPersistence {
     }
 
     // call when next outstanding by index shows up...
-    pub fn store_memos(&mut self, memos: &Option<(Vec<ReceiverMemo>, Signature)>) {
+    #[allow(clippy::ptr_arg)]
+    pub fn store_memos(&mut self, memos: &Vec<OptionalMemoMap>) {
         self.memos.store_resource(memos).unwrap();
     }
     pub fn update_known_nodes(&mut self, known_nodes: &HashMap<UserAddress, UserPubKey>) {
@@ -99,7 +125,8 @@ impl FullPersistence {
     pub fn commit_accepted(&mut self, memos_updated: bool, known_nodes_updated: bool) {
         self.state_history.commit_version().unwrap();
         self.block_history.commit_version().unwrap();
-        self.txn_uids.commit_version().unwrap();
+        self.rmt_leaves_full.commit_version().unwrap();
+        self.block_uids.commit_version().unwrap();
         self.nullifier_snapshots.commit_version().unwrap();
         if memos_updated {
             self.memos.commit_version().unwrap();
@@ -130,11 +157,15 @@ impl FullPersistence {
         self.nullifier_snapshots.load_latest()
     }
 
-    pub fn txn_uids_iter(&self) -> Iter<BincodeLoadStore<Vec<u64>>> {
-        self.txn_uids.iter()
+    pub fn nullifier_set_iter(&self) -> Iter<BincodeLoadStore<SetMerkleTree>> {
+        self.nullifier_snapshots.iter()
     }
 
-    pub fn memos_iter(&self) -> Iter<BincodeLoadStore<OptionalMemoMap>> {
+    pub fn block_uids_iter(&self) -> Iter<BincodeLoadStore<Vec<Vec<u64>>>> {
+        self.block_uids.iter()
+    }
+
+    pub fn memos_iter(&self) -> Iter<BincodeLoadStore<Vec<OptionalMemoMap>>> {
         self.memos.iter()
     }
 
