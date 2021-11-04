@@ -23,15 +23,15 @@ toml = "0.4.2"
 tracing = "0.1"
 tracing-subscriber = "0.2"
 # phaselock = { version = "0.0.2", registry = "translucence" }
-phaselock = { git = "ssh://git@gitlab.com/translucence/systems/phaselock.git", rev = "a1f6f7001d8e4f478bfcbde5c8e5da251aca4a48" }
+phaselock = { git = "ssh://git@gitlab.com/translucence/systems/phaselock.git", rev = "7b01c31a4953170455d595c71ae3a3713119e5a6" }
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
 
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
-jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
-jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
-jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
-jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "c401a79a2397fa4955d7503c7f65baf9ddbd83a1"}
+jf-plonk = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "787130cccdec290403e4b0f1291291f128bacd1c"}
+jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "787130cccdec290403e4b0f1291291f128bacd1c"}
+jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "787130cccdec290403e4b0f1291291f128bacd1c"}
+jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "787130cccdec290403e4b0f1291291f128bacd1c"}
 
 zerok_lib = { path = "../zerok_lib/" }
 
