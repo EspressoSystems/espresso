@@ -23,7 +23,6 @@ ark-std = { version = "0.3.0", default-features = false }
 ark-ff = { version = "0.3.0", default-features = false }
 ark-serialize = { version = "0.3.0", features = ["derive"] }
 hmac = "0.11.0"
-procfs = "0.11.0"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 rand = "0.7.3"
 rust-argon2 = "0.8.3"
@@ -62,3 +61,7 @@ quickcheck_macros = "1.0"
 proptest = "0.8.7"
 rand_xoshiro = "0.4.0"
 tempdir = "0.3.7"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = "0.11.0"
+
