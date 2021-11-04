@@ -7,6 +7,7 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
 use jf_txn::{MerkleTree, TransactionVerifyingKey};
 use phaselock::{
@@ -69,6 +70,11 @@ struct NodeOpt {
     /// Skip this option if public key files already exist.
     #[structopt(long = "gen_pk", short = "g")]
     gen_pk: bool,
+
+    /// Whether to load from persisted state.
+    ///
+    #[structopt(long = "load_from_store", short = "l")]
+    load_from_store: bool,
 
     /// Path to public keys.
     ///
@@ -343,6 +349,7 @@ impl Validator for Node {
 }
 
 /// Creates the initial state and phaselock for simulation.
+#[allow(clippy::too_many_arguments)]
 async fn init_state_and_phaselock(
     public_keys: tc::PublicKeySet,
     secret_key_share: tc::SecretKeyShare,
@@ -351,6 +358,7 @@ async fn init_state_and_phaselock(
     node_id: u64,
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
     full_node: bool,
+    load_from_store: bool,
 ) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state
     let (state, validator, records, nullifiers, memos) =
@@ -459,16 +467,26 @@ async fn init_state_and_phaselock(
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
+
+    let lw_persistence =
+        LWPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap();
+    let stored_state = if load_from_store {
+        lw_persistence
+            .load_latest_state()
+            .unwrap_or_else(|_| validator.clone())
+    } else {
+        validator.clone()
+    };
     let (_, phaselock) = PhaseLock::init(
         genesis,
         public_keys,
         secret_key_share,
         node_id,
         config,
-        validator.clone(),
+        validator,
         networking,
         MemoryStorage::default(),
-        LWPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap(),
+        lw_persistence,
     )
     .await;
     debug!("phaselock launched");
@@ -476,12 +494,29 @@ async fn init_state_and_phaselock(
     let validator = if full_node {
         let full_persisted =
             FullPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap();
+
+        let records = if load_from_store {
+            let mut builder = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
+            for leaf in full_persisted.rmt_leaf_iter() {
+                builder.push(leaf.unwrap().0);
+            }
+            builder.build()
+        } else {
+            records
+        };
+        let nullifiers = if load_from_store {
+            full_persisted
+                .get_latest_nullifier_set()
+                .unwrap_or_else(|_| Default::default())
+        } else {
+            nullifiers
+        };
         let node = FullNode::new(
             phaselock,
             &*UNIVERSAL_PARAM,
-            validator.clone(),
-            records.clone(),
-            nullifiers.clone(),
+            stored_state,
+            records,
+            nullifiers,
             memos,
             full_persisted,
         );
@@ -846,6 +881,13 @@ async fn main() -> Result<(), std::io::Error> {
     }
 
     // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
+    let load_from_store = NodeOpt::from_args().load_from_store;
+    if load_from_store {
+        println!("restoring from persisted session");
+    } else {
+        println!("initializing new session");
+    }
+
     if let Some(own_id) = NodeOpt::from_args().id {
         println!("Current node: {}", own_id);
         let secret_key_share = secret_keys.secret_key_share(own_id);
@@ -892,6 +934,7 @@ async fn main() -> Result<(), std::io::Error> {
             own_id,
             own_network,
             NodeOpt::from_args().full,
+            load_from_store,
         )
         .await;
         let mut events = phaselock.subscribe();
