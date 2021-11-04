@@ -50,6 +50,7 @@ pub trait Validator {
     type Event: ConsensusEvent;
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError>;
     async fn start_consensus(&self);
+    async fn current_state(&self) -> Arc<ValidatorState>;
     fn subscribe(&self) -> EventStream<Self::Event>;
 }
 
@@ -58,6 +59,10 @@ pub type LightWeightNode<NET, STORE> = PhaseLockHandle<ValidatorNodeImpl<NET, ST
 #[async_trait]
 impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
     type Event = PhaseLockEvent;
+
+    async fn current_state(&self) -> Arc<ValidatorState> {
+        self.get_state().await
+    }
 
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
         self.submit_transaction(tx).await.map_err(|err| {
@@ -775,6 +780,10 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
 #[async_trait]
 impl<'a, NET: PLNet, STORE: PLStore> Validator for FullNode<'a, NET, STORE> {
     type Event = <LightWeightNode<NET, STORE> as Validator>::Event;
+
+    async fn current_state(&self) -> Arc<ValidatorState> {
+        self.validator.get_state().await
+    }
 
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
         self.as_validator().submit_transaction(tx).await
