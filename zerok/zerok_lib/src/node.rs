@@ -616,12 +616,27 @@ impl FullState {
         Ok(())
     }
 
-    fn introduce(&mut self, pub_key: &UserPubKey) {
-        self.known_nodes.insert(pub_key.address(), pub_key.clone());
+    fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
+        let mut known_nodes = self
+            .full_persisted
+            .get_latest_known_nodes()
+            .map_err(|err| QueryServiceError::PersistenceError {
+                msg: err.to_string(),
+            })?;
+        known_nodes.insert(pub_key.address(), pub_key.clone());
+        self.full_persisted.update_known_nodes(&known_nodes);
+        self.full_persisted.commit_known_nodes();
+        Ok(())
     }
 
     fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {
-        self.known_nodes
+        let known_nodes = self
+            .full_persisted
+            .get_latest_known_nodes()
+            .map_err(|err| QueryServiceError::PersistenceError {
+                msg: err.to_string(),
+            })?;
+        known_nodes
             .get(address)
             .cloned()
             .ok_or(QueryServiceError::InvalidAddress {})
@@ -672,7 +687,6 @@ impl<'a> PhaseLockQueryService<'a> {
             validator,
             records: record_merkle_tree,
             full_persisted,
-            known_nodes: Default::default(),
             past_nullifiers: vec![(nullifiers.hash(), 0)].into_iter().collect(),
             block_hashes,
             proposed: ElaboratedBlock::default(),
@@ -808,8 +822,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
     }
 
     async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
-        self.state.write().await.introduce(pub_key);
-        Ok(())
+        self.state.write().await.introduce(pub_key)
     }
 
     async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {
