@@ -1058,19 +1058,24 @@ async fn main() -> Result<(), std::io::Error> {
             None
         };
 
+        #[cfg(target_os = "linux")]
         let bytes_per_page = procfs::page_size().unwrap() as u64;
+        #[cfg(target_os = "linux")]
         println!("{} bytes per page", bytes_per_page);
 
         let fence = || std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 
         let report_mem = || {
             fence();
-            let process_stats = procfs::process::Process::myself().unwrap().statm().unwrap();
-            println!(
-                "{:.3}MiB | raw: {:?}",
-                ((process_stats.size * bytes_per_page) as f64) / ((1u64 << 20) as f64),
-                process_stats
-            );
+            #[cfg(target_os = "linux")]
+            {
+                let process_stats = procfs::process::Process::myself().unwrap().statm().unwrap();
+                println!(
+                    "{:.3}MiB | raw: {:?}",
+                    ((process_stats.size * bytes_per_page) as f64) / ((1u64 << 20) as f64),
+                    process_stats
+                );
+            }
             fence();
         };
 
