@@ -168,6 +168,7 @@ fn cli_login(t: &mut TestState) -> Result<(), String> {
 }
 
 #[test]
+#[ignore]
 fn cli_integration_tests() {
     cli_test(|t| {
         create_wallet(t, 0)?;

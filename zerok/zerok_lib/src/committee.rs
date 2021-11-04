@@ -10,7 +10,7 @@ pub struct Committee<S, const N: usize> {
     stake_table: HashMap<PubKey, u64>,
 
     /// Inner structure for committee election.
-    election: DynamicCommittee<S, N>,
+    _election: PhantomData<DynamicCommittee<S, N>>,
 
     /// State phantom.
     _state_phantom: PhantomData<S>,
@@ -21,7 +21,7 @@ impl<S, const N: usize> Committee<S, N> {
     pub fn new(stake_table: HashMap<PubKey, u64>) -> Self {
         Self {
             stake_table,
-            election: DynamicCommittee::<S, N>::new(),
+            _election: PhantomData,
             _state_phantom: PhantomData,
         }
     }
@@ -52,7 +52,7 @@ impl<S, const N: usize> Election<N> for Committee<S, N> {
 
     /// Determines the leader.
     fn get_leader(&self, table: &Self::StakeTable, view_number: u64) -> PubKey {
-        self.election.get_leader(table, view_number)
+        DynamicCommittee::<S, N>::get_leader(table, view_number)
     }
 
     /// Validates a vote token.
@@ -65,7 +65,7 @@ impl<S, const N: usize> Election<N> for Committee<S, N> {
         token: Self::VoteToken,
         next_state: BlockHash<N>,
     ) -> Option<Self::ValidatedVoteToken> {
-        self.election.get_votes(
+        DynamicCommittee::<S, N>::get_votes(
             table,
             selection_threshold,
             view_number,
@@ -77,7 +77,7 @@ impl<S, const N: usize> Election<N> for Committee<S, N> {
 
     /// Returns the number of votes a validated token has.
     fn get_vote_count(&self, token: &Self::ValidatedVoteToken) -> u64 {
-        self.election.get_vote_count(token)
+        DynamicCommittee::<S, N>::get_vote_count(token)
     }
 
     /// Attempts to generate a vote token for self.
@@ -91,7 +91,7 @@ impl<S, const N: usize> Election<N> for Committee<S, N> {
         private_key: &PrivKey,
         next_state: BlockHash<N>,
     ) -> Option<Self::VoteToken> {
-        self.election.make_vote_token(
+        DynamicCommittee::<S, N>::make_vote_token(
             table,
             selection_threshold,
             view_number,
