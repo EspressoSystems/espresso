@@ -7,7 +7,6 @@ license = "Copyright © 2021 Translucence Research, Inc. All rights reserved."
 default-run = "multi_machine"
 
 [dependencies]
-procfs = "0.11.0"
 async-std = { version = "1.9.0", features = ["unstable", "attributes"] }
 async-trait = "0.1.51"
 async-tungstenite = { version = "0.15.0", features = ["async-std-runtime"] }
@@ -43,3 +42,7 @@ tracing-distributed = "0.3.1"
 tracing-futures = "0.2"
 tracing-subscriber = "0.2.19"
 zerok_lib = { path = "../../zerok/zerok_lib/" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = "0.11.0"
+
