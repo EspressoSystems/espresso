@@ -3,7 +3,6 @@
 use crate::WebState;
 use futures::prelude::*;
 use itertools::izip;
-use jf_txn::MerkleTree;
 use phaselock::BlockContents;
 use server::{best_response_type, response};
 use std::collections::HashMap;
@@ -18,7 +17,6 @@ use tide_websockets::WebSocketConnection;
 use tracing::{event, Level};
 use zerok_lib::api::*;
 use zerok_lib::node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
-use zerok_lib::SetMerkleTree;
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -219,7 +217,7 @@ async fn get_block(
     // The block numbered `index` is the block which was applied to the `index` state. Therefore,
     // the next state (the one that resulted from this block) is `index + 1`.
     let state = query_service
-        .get_snapshot(index + 1)
+        .get_snapshot(index + 1, true, true)
         .await
         .map_err(server_error)?
         .state;
@@ -383,24 +381,11 @@ async fn get_snapshot(
             num_blocks
         }
     };
-    let mut snapshot = query_service
-        .get_snapshot(index)
+    let sparse = bindings[":sparse"].value.as_boolean()?;
+    query_service
+        .get_snapshot(index, sparse, sparse)
         .await
-        .map_err(server_error)?;
-    if bindings[":sparse"].value.as_boolean()? {
-        snapshot.nullifiers = SetMerkleTree::sparse(snapshot.nullifiers.hash());
-        snapshot.records.0 = MerkleTree::restore_from_frontier(
-            snapshot.state.record_merkle_commitment,
-            &snapshot.state.record_merkle_frontier,
-        )
-        .ok_or_else(|| {
-            tide::Error::from_str(
-                tide::StatusCode::InternalServerError,
-                "Could not restore records MerkleTree",
-            )
-        })?
-    }
-    Ok(snapshot)
+        .map_err(server_error)
 }
 
 async fn get_user(

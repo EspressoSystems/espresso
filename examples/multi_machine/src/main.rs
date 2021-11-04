@@ -131,6 +131,10 @@ struct NodeOpt {
     /// Skip this option if want to keep generating transactions till the process is killed.
     #[structopt(long = "num_txn", short = "n")]
     num_txn: Option<u64>,
+
+    /// Wait for web server to exit after transactions complete.
+    #[structopt(long)]
+    wait: bool,
 }
 
 /// Gets public key of a node from its public key file.
@@ -187,10 +191,16 @@ fn default_pk_path() -> PathBuf {
 }
 
 /// Returns the default directory to store persistence files.
-fn default_store_path() -> PathBuf {
+fn default_store_path(node_id: u64) -> PathBuf {
     const STORE_DIR: &str = "src/store";
     let dir = project_path();
-    [&dir, Path::new(STORE_DIR)].iter().collect()
+    [
+        &dir,
+        Path::new(STORE_DIR),
+        Path::new(&format!("node{}", node_id)),
+    ]
+    .iter()
+    .collect()
 }
 
 /// Returns the default path to the API file.
@@ -235,10 +245,10 @@ fn get_pk_dir() -> String {
 }
 
 /// Gets the directory to public key files.
-fn get_store_dir() -> String {
+fn get_store_dir(node_id: u64) -> String {
     let store_path = NodeOpt::from_args().store_path;
     if store_path.is_empty() {
-        default_store_path()
+        default_store_path(node_id)
             .into_os_string()
             .into_string()
             .expect("Error while converting store path to a string")
@@ -317,7 +327,7 @@ impl Validator for Node {
     async fn current_state(&self) -> Arc<ValidatorState> {
         match self {
             Node::Light(n) => n.current_state().await,
-            Node::Full(n) => n.current_state().await,
+            Node::Full(n) => n.read().await.current_state().await,
         }
     }
 
@@ -458,14 +468,14 @@ async fn init_state_and_phaselock(
         validator.clone(),
         networking,
         MemoryStorage::default(),
-        LWPersistence::new(Path::new(&get_store_dir()), "multi_machine_demo").unwrap(),
+        LWPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap(),
     )
     .await;
     debug!("phaselock launched");
 
     let validator = if full_node {
         let full_persisted =
-            FullPersistence::new(Path::new(&get_store_dir()), "multi_machine_demo").unwrap();
+            FullPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap();
         let node = FullNode::new(
             phaselock,
             &*UNIVERSAL_PARAM,
@@ -887,15 +897,19 @@ async fn main() -> Result<(), std::io::Error> {
         let mut events = phaselock.subscribe();
 
         // If we are running a full node, also host a query API to inspect the accumulated state.
-        if let Node::Full(node) = &phaselock {
-            init_web_server(
-                &NodeOpt::from_args().api_path,
-                &NodeOpt::from_args().web_path,
-                own_id,
-                node.clone(),
+        let web_server = if let Node::Full(node) = &phaselock {
+            Some(
+                init_web_server(
+                    &NodeOpt::from_args().api_path,
+                    &NodeOpt::from_args().web_path,
+                    own_id,
+                    node.clone(),
+                )
+                .expect("Failed to initialize web server"),
             )
-            .expect("Failed to initialize web server");
-        }
+        } else {
+            None
+        };
 
         // Start consensus for each transaction
         let mut round = 0;
@@ -930,7 +944,7 @@ async fn main() -> Result<(), std::io::Error> {
             // If the output below is changed, update the message for line.trim() in Validator::new as well
             println!("  - Starting consensus");
             phaselock.start_consensus().await;
-            loop {
+            let success = loop {
                 println!("Waiting for PhaseLock event");
                 let event = events.next().await.expect("PhaseLock unexpectedly closed");
 
@@ -945,61 +959,71 @@ async fn main() -> Result<(), std::io::Error> {
                                 round + 1,
                                 commitment
                             );
-                            break;
+                            break true;
                         }
                     }
                     EventType::ViewTimeout { view_number: _ } => {
                         println!("  - Round {} timed out.", round + 1);
-                        break;
+                        break false;
                     }
                     EventType::Error { error } => {
                         println!("  - Round {} error: {}", round + 1, error);
-                        break;
+                        break false;
                     }
                     _ => {
                         println!("EVENT: {:?}", event);
                     }
                 }
-            }
+            };
 
-            // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
-            // current node), and there is no attached wallet.
-            if let Some((ix, keys_and_memos, sig, t)) = txn {
-                let state = state.as_mut().unwrap();
-                println!("  - Adding the transaction");
-                let mut blk = ElaboratedBlock::default();
-                let (owner_memos, kixs) = {
-                    let mut owner_memos = vec![];
-                    let mut kixs = vec![];
+            if success {
+                // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
+                // current node), and there is no attached wallet.
+                if let Some((ix, keys_and_memos, sig, t)) = txn {
+                    let state = state.as_mut().unwrap();
+                    println!("  - Adding the transaction");
+                    let mut blk = ElaboratedBlock::default();
+                    let (owner_memos, kixs) = {
+                        let mut owner_memos = vec![];
+                        let mut kixs = vec![];
 
-                    for (kix, memo) in keys_and_memos {
-                        kixs.push(kix);
-                        owner_memos.push(memo);
+                        for (kix, memo) in keys_and_memos {
+                            kixs.push(kix);
+                            owner_memos.push(memo);
+                        }
+                        (owner_memos, kixs)
+                    };
+
+                    // If we're running a full node, publish the receiver memos.
+                    if let Node::Full(node) = &mut phaselock {
+                        node.write()
+                            .await
+                            .post_memos(round, ix as u64, owner_memos.clone(), sig)
+                            .await
+                            .unwrap();
                     }
-                    (owner_memos, kixs)
-                };
 
-                // If we're running a full node, publish the receiver memos.
-                if let Node::Full(node) = &mut phaselock {
-                    node.write()
-                        .await
-                        .post_memos(round, ix as u64, owner_memos.clone(), sig)
-                        .await
+                    state
+                        .try_add_transaction(&mut blk, t, round as usize, ix, 1, owner_memos, kixs)
+                        .unwrap();
+                    state
+                        .validate_and_apply(blk, round as usize, 1, 0.0)
                         .unwrap();
                 }
-
-                state
-                    .try_add_transaction(&mut blk, t, round as usize, ix, 1, owner_memos, kixs)
-                    .unwrap();
-                state
-                    .validate_and_apply(blk, round as usize, 1, 0.0)
-                    .unwrap();
             }
 
             round += 1;
         }
 
         println!("All rounds completed");
+
+        if NodeOpt::from_args().wait {
+            if let Some(join_handle) = web_server {
+                join_handle.await.unwrap_or_else(|err| {
+                    panic!("web server exited with an error: {}", err);
+                });
+            }
+        }
     }
 
     Ok(())
