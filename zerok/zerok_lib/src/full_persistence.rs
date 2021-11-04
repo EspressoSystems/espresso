@@ -25,6 +25,8 @@ pub struct FullPersistence {
     // also, are txn uids not a sequential series? Could this be stored as a list of start/len pairs?
     block_uids: AppendLog<BincodeLoadStore<Vec<Vec<u64>>>>,
     memos: AppendLog<BincodeLoadStore<Vec<OptionalMemoMap>>>,
+    // TODO: !jeb.bearer,nathan.yospe - turn this back into a RollingLog once we fix whatever is
+    // wrong with RollingLog; we don't need to store old versions of the known_nodes map
     known_nodes: AppendLog<BincodeLoadStore<HashMap<UserAddress, UserPubKey>>>,
 }
 
@@ -76,14 +78,16 @@ impl FullPersistence {
                 .store_resource(&records.get_leaf(uid).expect_ok().unwrap().1.leaf)
                 .unwrap();
         }
+        self.known_nodes.store_resource(&HashMap::default()).unwrap();
+
         self.state_history.commit_version().unwrap();
         self.nullifier_snapshots.commit_version().unwrap();
         self.rmt_leaves_full.commit_version().unwrap();
+        self.known_nodes.commit_version().unwrap();
 
         self.block_history.skip_version().unwrap();
         self.block_uids.skip_version().unwrap();
         self.memos.skip_version().unwrap();
-        self.known_nodes.skip_version().unwrap();
 
         self.atomic_store.commit_version().unwrap();
     }
@@ -122,22 +126,25 @@ impl FullPersistence {
         self.known_nodes.store_resource(known_nodes).unwrap();
     }
 
-    pub fn commit_accepted(&mut self, memos_updated: bool, known_nodes_updated: bool) {
+    pub fn commit_known_nodes(&mut self) {
+        self.known_nodes.commit_version().unwrap();
+        self.state_history.skip_version().unwrap();
+        self.block_history.skip_version().unwrap();
+        self.rmt_leaves_full.skip_version().unwrap();
+        self.block_uids.skip_version().unwrap();
+        self.nullifier_snapshots.skip_version().unwrap();
+        self.memos.skip_version().unwrap();
+        self.atomic_store.commit_version().unwrap();
+    }
+
+    pub fn commit_accepted(&mut self) {
         self.state_history.commit_version().unwrap();
         self.block_history.commit_version().unwrap();
         self.rmt_leaves_full.commit_version().unwrap();
         self.block_uids.commit_version().unwrap();
         self.nullifier_snapshots.commit_version().unwrap();
-        if memos_updated {
-            self.memos.commit_version().unwrap();
-        } else {
-            self.memos.skip_version().unwrap();
-        }
-        if known_nodes_updated {
-            self.known_nodes.commit_version().unwrap();
-        } else {
-            self.known_nodes.skip_version().unwrap();
-        }
+        self.memos.commit_version().unwrap();
+        self.known_nodes.skip_version().unwrap();
         self.atomic_store.commit_version().unwrap();
     }
 

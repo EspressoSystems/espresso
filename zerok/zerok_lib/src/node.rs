@@ -263,24 +263,32 @@ pub trait QueryService {
 #[derive(Clone, Debug, Snafu, Serialize, Deserialize)]
 pub enum QueryServiceError {
     InvalidNullifierRoot {},
-    InvalidBlockId {},
+    #[snafu(display("invalid block id {} (only {} blocks)", index, num_blocks))]
+    InvalidBlockId {
+        index: usize,
+        num_blocks: usize,
+    },
     InvalidBlockHash {},
     InvalidTxnId {},
     InvalidRecordId {},
     InvalidHistoricalIndex {},
     MemosAlreadyPosted {},
     InvalidSignature {},
-    WrongNumberOfMemos { expected: usize },
+    WrongNumberOfMemos {
+        expected: usize,
+    },
     NoMemosForTxn {},
     InvalidAddress {},
-    PersistenceError { msg: String },
+    #[snafu(display("persistence error: {}", msg))]
+    PersistenceError {
+        msg: String,
+    },
 }
 
 struct FullState {
     validator: ValidatorState,
     records: MerkleTree,
     full_persisted: FullPersistence,
-    known_nodes: HashMap<UserAddress, UserPubKey>,
     // Map from past nullifier set root hashes to the index of the state in which that root hash
     // occurred.
     past_nullifiers: HashMap<set_hash::Hash, usize>,
@@ -359,13 +367,15 @@ impl FullState {
                         }
 
                         Ok(mut uids) => {
-                            let index = self.full_persisted.state_iter().len();
-                            assert!(index > 0);
+                            let hist_index = self.full_persisted.state_iter().len();
+                            assert!(hist_index > 0);
+                            let block_index = hist_index - 1;
+
                             self.full_persisted.store_for_commit(block, state);
                             self.past_nullifiers
-                                .insert(self.validator.nullifiers_root, index);
+                                .insert(self.validator.nullifiers_root, hist_index);
                             self.block_hashes
-                                .insert(Vec::from(block.hash().as_ref()), index - 1);
+                                .insert(Vec::from(block.hash().as_ref()), block_index);
                             let block_uids = block
                                 .block
                                 .0
@@ -400,12 +410,12 @@ impl FullState {
                                 self.validator.record_merkle_commitment
                             );
                             self.full_persisted.store_nullifier_set(&nullifiers);
-                            self.full_persisted.commit_accepted(true, false);
+                            self.full_persisted.commit_accepted();
 
                             // Notify subscribers of the new block.
                             self.send_event(LedgerEvent::Commit {
                                 block: (*block).clone(),
-                                block_id: index as u64,
+                                block_id: block_index as u64,
                                 state_comm: self.validator.commit(),
                             });
                         }
@@ -525,6 +535,11 @@ impl FullState {
     }
 
     fn get_block(&self, index: usize) -> Result<LedgerTransition, QueryServiceError> {
+        let num_blocks = self.full_persisted.block_iter().len();
+        if index >= self.full_persisted.block_iter().len() {
+            return Err(QueryServiceError::InvalidBlockId { index, num_blocks });
+        }
+
         let from_state = self.get_snapshot(index, true, true)?;
         Ok(LedgerTransition {
             from_state,
@@ -532,7 +547,7 @@ impl FullState {
                 .full_persisted
                 .block_iter()
                 .nth(index)
-                .ok_or(QueryServiceError::InvalidBlockId {})?
+                .unwrap()
                 .map_err(|err| QueryServiceError::PersistenceError {
                     msg: err.to_string(),
                 })?,
@@ -540,7 +555,7 @@ impl FullState {
                 .full_persisted
                 .memos_iter()
                 .nth(index)
-                .ok_or(QueryServiceError::InvalidBlockId {})?
+                .unwrap()
                 .map_err(|err| QueryServiceError::PersistenceError {
                     msg: err.to_string(),
                 })?,
@@ -548,7 +563,7 @@ impl FullState {
                 .full_persisted
                 .block_uids_iter()
                 .nth(index)
-                .ok_or(QueryServiceError::InvalidBlockId {})?
+                .unwrap()
                 .map_err(|err| QueryServiceError::PersistenceError {
                     msg: err.to_string(),
                 })?,
@@ -616,12 +631,27 @@ impl FullState {
         Ok(())
     }
 
-    fn introduce(&mut self, pub_key: &UserPubKey) {
-        self.known_nodes.insert(pub_key.address(), pub_key.clone());
+    fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
+        let mut known_nodes = self
+            .full_persisted
+            .get_latest_known_nodes()
+            .map_err(|err| QueryServiceError::PersistenceError {
+                msg: err.to_string(),
+            })?;
+        known_nodes.insert(pub_key.address(), pub_key.clone());
+        self.full_persisted.update_known_nodes(&known_nodes);
+        self.full_persisted.commit_known_nodes();
+        Ok(())
     }
 
     fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {
-        self.known_nodes
+        let known_nodes = self
+            .full_persisted
+            .get_latest_known_nodes()
+            .map_err(|err| QueryServiceError::PersistenceError {
+                msg: err.to_string(),
+            })?;
+        known_nodes
             .get(address)
             .cloned()
             .ok_or(QueryServiceError::InvalidAddress {})
@@ -672,7 +702,6 @@ impl<'a> PhaseLockQueryService<'a> {
             validator,
             records: record_merkle_tree,
             full_persisted,
-            known_nodes: Default::default(),
             past_nullifiers: vec![(nullifiers.hash(), 0)].into_iter().collect(),
             block_hashes,
             proposed: ElaboratedBlock::default(),
@@ -808,8 +837,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
     }
 
     async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
-        self.state.write().await.introduce(pub_key);
-        Ok(())
+        self.state.write().await.introduce(pub_key)
     }
 
     async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {
