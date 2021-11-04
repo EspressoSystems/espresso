@@ -1147,6 +1147,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc32fast"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81156fece84ab6a9f2afdb109ce3ae577e42b1228441eded99bd77f627953b1a"
+dependencies = [
+ "cfg-if 1.0.0",
+]
+
+[[package]]
 name = "crossbeam-channel"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1688,6 +1697,18 @@ dependencies = [
  "toml 0.5.8",
  "uncased",
  "version_check",
+]
+
+[[package]]
+name = "flate2"
+version = "1.0.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e6988e897c1c9c485f43b47a529cef42fde0547f9d8d41a7062518f1d8fc53f"
+dependencies = [
+ "cfg-if 1.0.0",
+ "crc32fast",
+ "libc",
+ "miniz_oxide",
 ]
 
 [[package]]
@@ -2252,7 +2273,7 @@ checksum = "b71991ff56294aa922b450139ee08b3bfc70982c6b2c7562771375cf73542dd4"
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=c401a79a2397fa4955d7503c7f65baf9ddbd83a1#c401a79a2397fa4955d7503c7f65baf9ddbd83a1"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
 dependencies = [
  "ark-bls12-377",
  "ark-ec",
@@ -2279,7 +2300,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=c401a79a2397fa4955d7503c7f65baf9ddbd83a1#c401a79a2397fa4955d7503c7f65baf9ddbd83a1"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2309,7 +2330,7 @@ dependencies = [
 [[package]]
 name = "jf-rescue"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=c401a79a2397fa4955d7503c7f65baf9ddbd83a1#c401a79a2397fa4955d7503c7f65baf9ddbd83a1"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2337,7 +2358,7 @@ dependencies = [
 [[package]]
 name = "jf-txn"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=c401a79a2397fa4955d7503c7f65baf9ddbd83a1#c401a79a2397fa4955d7503c7f65baf9ddbd83a1"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
 dependencies = [
  "anyhow",
  "ark-bls12-377",
@@ -2375,7 +2396,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=c401a79a2397fa4955d7503c7f65baf9ddbd83a1#c401a79a2397fa4955d7503c7f65baf9ddbd83a1"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
 dependencies = [
  "anyhow",
  "ark-ec",
@@ -2392,7 +2413,7 @@ dependencies = [
 [[package]]
 name = "jf-utils-derive"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=c401a79a2397fa4955d7503c7f65baf9ddbd83a1#c401a79a2397fa4955d7503c7f65baf9ddbd83a1"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
 dependencies = [
  "ark-serialize",
  "ark-std",
@@ -2630,6 +2651,7 @@ dependencies = [
  "jf-utils",
  "markdown",
  "phaselock",
+ "procfs",
  "rand_chacha 0.2.2",
  "serde",
  "serde_derive",
@@ -2957,7 +2979,7 @@ dependencies = [
 [[package]]
 name = "phaselock"
 version = "0.0.5-dev"
-source = "git+ssh://git@gitlab.com/translucence/systems/phaselock.git?rev=a1f6f7001d8e4f478bfcbde5c8e5da251aca4a48#a1f6f7001d8e4f478bfcbde5c8e5da251aca4a48"
+source = "git+ssh://git@gitlab.com/translucence/systems/phaselock.git?rev=7b01c31a4953170455d595c71ae3a3713119e5a6#7b01c31a4953170455d595c71ae3a3713119e5a6"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",
@@ -3128,6 +3150,21 @@ dependencies = [
  "syn",
  "version_check",
  "yansi",
+]
+
+[[package]]
+name = "procfs"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f2e7eea7c1d7beccbd5acc1e37ac844afccf176525674aad26ece3de1fc7733"
+dependencies = [
+ "bitflags",
+ "byteorder",
+ "chrono",
+ "flate2",
+ "hex",
+ "lazy_static",
+ "libc",
 ]
 
 [[package]]
@@ -5241,9 +5278,11 @@ dependencies = [
  "jf-utils",
  "lazy_static",
  "phaselock",
+ "procfs",
  "proptest",
  "quickcheck 1.0.3",
  "quickcheck_macros 1.0.0",
+ "rand 0.7.3",
  "rand_chacha 0.3.1",
  "rand_xoshiro",
  "rayon",
