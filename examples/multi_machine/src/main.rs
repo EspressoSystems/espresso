@@ -911,6 +911,22 @@ async fn main() -> Result<(), std::io::Error> {
             None
         };
 
+        let bytes_per_page = procfs::page_size().unwrap() as u64;
+        println!("{} bytes per page", bytes_per_page);
+
+        let fence = || std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+
+        let report_mem = || {
+            fence();
+            let process_stats = procfs::process::Process::myself().unwrap().statm().unwrap();
+            println!(
+                "{:.3}MiB | raw: {:?}",
+                ((process_stats.size * bytes_per_page) as f64) / ((1u64 << 20) as f64),
+                process_stats
+            );
+            fence();
+        };
+
         // Start consensus for each transaction
         let mut round = 0;
         let num_txn = NodeOpt::from_args().num_txn;
@@ -919,6 +935,7 @@ async fn main() -> Result<(), std::io::Error> {
         // Otherwise, keeping running till the process is killed.
         while num_txn.map(|count| round < count).unwrap_or(true) {
             println!("Starting round {}", round + 1);
+            report_mem();
             let commitment =
                 TaggedBase64::new("LEDG", phaselock.current_state().await.commit().as_ref())
                     .unwrap()

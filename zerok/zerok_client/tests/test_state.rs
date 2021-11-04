@@ -207,12 +207,15 @@ impl TestState {
             .write_all(config.to_string().as_bytes())
             .unwrap();
 
-        block_on(futures::future::join_all(
+        let ret = block_on(futures::future::join_all(
             server_ports
                 .into_iter()
                 .enumerate()
                 .map(|(i, port)| Validator::new(&config_file, key_path, i, port)),
-        ))
+        ));
+
+        println!("All validators started");
+        ret
     }
 }
 
@@ -374,7 +377,7 @@ impl Validator {
         );
         let mut key_path = PathBuf::from(key_path);
         key_path.set_extension("pub");
-        spawn_blocking(move || {
+        let ret = spawn_blocking(move || {
             let mut child = cargo_run("multi_machine")
                 .unwrap()
                 .args([
@@ -396,28 +399,31 @@ impl Validator {
             let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
             while let Some(line) = lines.next() {
                 let line = line.unwrap();
+                println!("[id {}] Waiting for start: {}", id, line);
                 if line.trim() == "- Starting consensus" {
-                    // Spawn a detached task to consume the validator's stdout. If we don't do this,
-                    // the validator will eventually fill up its output pipe and block.
-                    if id == 0 {
-                        async_std::task::spawn(async move {
+                    async_std::task::spawn_blocking(
+                        // A detached task to consume the validator's
+                        // stdout. If we don't do this, the validator will
+                        // eventually fill up its output pipe and block.
+                        move || {
                             while let Some(line) = lines.next() {
                                 if line.is_ok() {
-                                    println!("{}", line.unwrap());
+                                    println!("[id {}]{}", id, line.unwrap());
                                 } else {
-                                    println!("{:?}", line.err())
+                                    println!("[id {}]{:?}", id, line.err())
                                 }
                             }
-                        });
-                    } else {
-                        async_std::task::spawn(async move { while lines.next().is_some() {} });
-                    }
+                        },
+                    );
                     return Validator { process: child };
                 }
             }
             panic!("validator {} exited", id);
         })
-        .await
+        .await;
+
+        println!("Leaving Validator::new for {}", id);
+        ret
     }
 }
 
