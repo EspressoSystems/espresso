@@ -392,31 +392,34 @@ async fn init_state_and_phaselock(
             let validator = ValidatorState::new(verif_keys, records.clone());
             (None, validator, records, nullifiers, memos)
         } else {
-            let state = MultiXfrTestState::initialize(
-                STATE_SEED,
-                10,
-                10,
-                (
-                    MultiXfrRecordSpec {
-                        asset_def_ix: 0,
-                        owner_key_ix: 0,
-                        asset_amount: 100,
-                    },
-                    vec![
-                        MultiXfrRecordSpec {
-                            asset_def_ix: 1,
-                            owner_key_ix: 0,
-                            asset_amount: 50,
-                        },
+            let state = async_std::task::spawn_blocking(|| {
+                MultiXfrTestState::initialize(
+                    STATE_SEED,
+                    10,
+                    10,
+                    (
                         MultiXfrRecordSpec {
                             asset_def_ix: 0,
                             owner_key_ix: 0,
-                            asset_amount: 70,
+                            asset_amount: 100,
                         },
-                    ],
-                ),
-            )
-            .unwrap();
+                        vec![
+                            MultiXfrRecordSpec {
+                                asset_def_ix: 1,
+                                owner_key_ix: 0,
+                                asset_amount: 50,
+                            },
+                            MultiXfrRecordSpec {
+                                asset_def_ix: 0,
+                                owner_key_ix: 0,
+                                asset_amount: 70,
+                            },
+                        ],
+                    ),
+                )
+                .unwrap()
+            })
+            .await;
 
             let validator = state.validator.clone();
             let record_merkle_tree = state.record_merkle_tree.clone();
@@ -929,12 +932,22 @@ async fn main() -> Result<(), std::io::Error> {
             // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
             let mut txn = None;
             if own_id == 0 {
-                if let Some(state) = &mut state {
+                if let Some(mut true_state) = core::mem::take(&mut state) {
                     println!("  - Proposing a transaction");
-                    let mut transactions = state
-                        .generate_transactions(round as usize, vec![(true, 0, 0, 0, 0, -2)], 1)
-                        .unwrap();
+                    let (true_state, mut transactions) =
+                        async_std::task::spawn_blocking(move || {
+                            let txs = true_state
+                                .generate_transactions(
+                                    round as usize,
+                                    vec![(true, 0, 0, 0, 0, -2)],
+                                    1,
+                                )
+                                .unwrap();
+                            (true_state, txs)
+                        })
+                        .await;
                     txn = Some(transactions.remove(0));
+                    state = Some(true_state);
                     phaselock
                         .submit_transaction(txn.clone().unwrap().3)
                         .await
