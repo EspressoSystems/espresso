@@ -15,6 +15,7 @@ pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::task::SpawnExt;
 use itertools::izip;
+use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_txn::{
     keys::{UserAddress, UserPubKey},
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
@@ -501,19 +502,20 @@ impl FullState {
         } else {
             // To reconstruct a full Merkle tree, we have to actually iterate over all of
             // stored leaves and build up a new tree.
-            let mut tree = MerkleTree::new(state.record_merkle_commitment.height).unwrap();
+            let mut builder = FilledMTBuilder::new(state.record_merkle_commitment.height).unwrap();
             for leaf in self
                 .full_persisted
                 .rmt_leaf_iter()
                 .take(state.record_merkle_commitment.num_leaves as usize)
             {
-                tree.push(
+                builder.push(
                     leaf.map_err(|err| QueryServiceError::PersistenceError {
                         msg: err.to_string(),
                     })?
                     .0,
                 );
             }
+            let tree = builder.build();
             assert_eq!(tree.commitment(), state.record_merkle_commitment);
             tree
         };
