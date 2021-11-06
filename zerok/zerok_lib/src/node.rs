@@ -101,6 +101,7 @@ impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
 #[non_exhaustive]
 pub struct LedgerSummary {
     pub num_blocks: usize,
+    pub num_txns: usize,
     pub num_records: usize,
     pub num_events: usize,
 }
@@ -282,6 +283,8 @@ struct FullState {
     history: Vec<LedgerTransition>,
     // Block IDs indexed by block hash.
     block_hashes: HashMap<Vec<u8>, usize>,
+    // Total number of committed transactions, aggregated across all blocks.
+    num_txns: usize,
     // The last block which was proposed. This is currently used to correllate BadBlock and
     // InconsistentBlock errors from PhaseLock with the block that caused the error. In the future,
     // PhaseLock errors will contain the bad block (or some kind of reference to it, perhaps through
@@ -397,6 +400,7 @@ impl FullState {
                                     self.records.push(o.to_field_element());
                                 }
                             }
+                            self.num_txns += block.block.0.len();
                             assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
                             assert_eq!(
                                 self.records.commitment(),
@@ -582,6 +586,7 @@ impl<'a> PhaseLockQueryService<'a> {
             known_nodes: Default::default(),
             past_nullifiers: HashMap::new(),
             history,
+            num_txns: 0,
             block_hashes,
             proposed: ElaboratedBlock::default(),
             events,
@@ -642,6 +647,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
         let state = self.state.read().await;
         Ok(LedgerSummary {
             num_blocks: state.history.len(),
+            num_txns: state.num_txns,
             num_records: state.validator.record_merkle_commitment.num_leaves as usize,
             num_events: state.events.len(),
         })
