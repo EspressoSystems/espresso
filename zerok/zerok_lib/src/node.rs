@@ -102,6 +102,7 @@ impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
 pub struct LedgerSummary {
     pub num_blocks: usize,
     pub num_records: usize,
+    pub num_events: usize,
 }
 
 #[ser_test(arbitrary, ark(false))]
@@ -123,6 +124,7 @@ impl<'a> Arbitrary<'a> for MerkleTreeWithArbitrary {
 #[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LedgerSnapshot {
     pub state: ValidatorState,
+    pub state_comm: LedgerStateCommitment,
     pub nullifiers: SetMerkleTree,
     pub records: MerkleTreeWithArbitrary,
 }
@@ -251,6 +253,7 @@ pub trait QueryService {
     /// Make your public key and address known to other nodes.
     async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError>;
 
+    async fn get_users(&self) -> Result<HashMap<UserAddress, UserPubKey>, QueryServiceError>;
     async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError>;
 }
 
@@ -374,6 +377,7 @@ impl FullState {
                                 .collect();
                             self.history.push(LedgerTransition {
                                 from_state: LedgerSnapshot {
+                                    state_comm: prev_state.commit(),
                                     state: prev_state,
                                     nullifiers: self.nullifiers.clone(),
                                     // starting from the last frontier MT and not pruning for the current block might actually be the right solution here. That would require constructing the sparse tree and swapping it here, rather than cloning...
@@ -639,6 +643,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
         Ok(LedgerSummary {
             num_blocks: state.history.len(),
             num_records: state.validator.record_merkle_commitment.num_leaves as usize,
+            num_events: state.events.len(),
         })
     }
 
@@ -648,6 +653,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
         match index.cmp(&state.history.len()) {
             Less => Ok(state.history[index].from_state.clone()),
             Equal => Ok(LedgerSnapshot {
+                state_comm: state.validator.commit(),
                 state: state.validator.clone(),
                 nullifiers: state.nullifiers.clone(),
                 records: MerkleTreeWithArbitrary(state.records.clone()),
@@ -712,6 +718,10 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
     async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
         self.state.write().await.introduce(pub_key);
         Ok(())
+    }
+
+    async fn get_users(&self) -> Result<HashMap<UserAddress, UserPubKey>, QueryServiceError> {
+        Ok(self.state.read().await.known_nodes.clone())
     }
 
     async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {
@@ -833,6 +843,10 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
 
     async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
         self.as_query_service_mut().introduce(pub_key).await
+    }
+
+    async fn get_users(&self) -> Result<HashMap<UserAddress, UserPubKey>, QueryServiceError> {
+        self.as_query_service().get_users().await
     }
 
     async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {
