@@ -1029,6 +1029,9 @@ impl<'a> WalletState<'a> {
                 block_id,
                 state_comm,
             } => {
+                assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
+                let prev_state = self.validator.commit();
+
                 // Don't trust the network connection that provided us this event; validate it
                 // against our local mirror of the ledger and bail out if it is invalid.
                 let mut uids = match self.validator.validate_and_apply(
@@ -1062,12 +1065,70 @@ impl<'a> WalletState<'a> {
                     }
                 };
 
-                for ((txn_id, txn), proofs) in
-                    block.block.0.into_iter().enumerate().zip(block.proofs)
-                {
+                // Update our full copies of sparse validator data structures to be consistent with
+                // the validator state.
+                for txn in &block.block.0 {
+                    // Insert new records.
                     for o in txn.output_commitments() {
                         self.record_merkle_tree_mut().push(o.to_field_element());
                     }
+                }
+                // Update nullifier set.
+                let nullifier_proofs = block
+                    .block
+                    .0
+                    .iter()
+                    .zip(&block.proofs)
+                    .flat_map(|(txn, proofs)| txn.nullifiers().into_iter().zip(proofs))
+                    .collect::<Vec<_>>();
+                // Bring nullifier tree branches containing spent nullifiers into memory, using the
+                // proofs contained in the block. All the proofs are relative to the old nullifiers
+                // set, so we need to bring all the relevant branches into memory before adding any
+                // of the new nullifiers to the set, as this will change the tree and invalidate the
+                // remaining proofs.
+                for (nullifier, proof) in &nullifier_proofs {
+                    if self
+                        .nullifiers
+                        .remember(*nullifier, (*proof).clone())
+                        .is_err()
+                    {
+                        //todo !jeb.bearer handle this case more robustly. If we get here, it
+                        // means the event stream has lied to us, so recovery is quite tricky
+                        // and may require us to fail over to a different query service.
+                        panic!(
+                            "received block with invalid nullifier proof for state {},\
+                            nullifiers {}",
+                            prev_state,
+                            self.nullifiers.hash()
+                        );
+                    }
+                }
+                // Now we can add the new nullifiers to the tree.
+                for (nullifier, _) in &nullifier_proofs {
+                    // This should not fail, since we remembered all the relevant nullifiers in
+                    // the previous loop, so we can unwrap().
+                    self.nullifiers.insert(*nullifier).unwrap();
+                    // If we have a record with this nullifier, remove it as it has been spent.
+                    if let Some(record) = self.records.remove_by_nullifier(*nullifier) {
+                        self.record_merkle_tree_mut().forget(record.uid);
+                    }
+                }
+                // Now that the new nullifiers have all been inserted, we can prune our nullifiers
+                // set back down to restore sparseness.
+                for (nullifier, _) in &nullifier_proofs {
+                    //todo !jeb.bearer for now we unconditionally forget the new nullifier,
+                    // knowing we can get it back from the backend if necessary. However, this
+                    // nullifier may be helping us by representing a branch of the tree that we
+                    // care about, that would allow us to generate a proof that the nullifier
+                    // for one of our owned records is _not_ in the tree. We should be more
+                    // careful about pruning to cut down on the amount we have to ask the
+                    // network.
+                    self.nullifiers.forget(*nullifier);
+                }
+
+                for ((txn_id, txn), proofs) in
+                    block.block.0.into_iter().enumerate().zip(block.proofs)
+                {
                     // Split the uids corresponding to this transaction off the front of `uids`.
                     let mut this_txn_uids = uids;
                     uids = this_txn_uids.split_off(txn.output_len());
@@ -1103,40 +1164,6 @@ impl<'a> WalletState<'a> {
                     // This is someone else's transaction but we can audit it.
                     self.audit_transaction(session, &txn, &mut this_txn_uids)
                         .await;
-
-                    // Update spent nullifiers. First we have to remember the sub-trees of our
-                    // current sparse tree which will receive the new nullifiers, because
-                    // SetMerkleTree::insert has no effect (not even updating the root hashs) if the
-                    // insert goes into a forgotten sub-tree.
-                    for (nullifier, proof) in txn.txn.nullifiers().into_iter().zip(txn.proofs) {
-                        if self.nullifiers.remember(nullifier, proof).is_err() {
-                            //todo !jeb.bearer handle this case more robustly. If we get here, it
-                            // means the event stream has lied to us, so recovery is quite tricky
-                            // and may require us to fail over to a different query service.
-                            panic!("received block with invalid nullifier proof");
-                        }
-                    }
-                    // Now we can insert the new nullifiers, and none of the inserts should fail.
-                    for nullifier in txn.txn.nullifiers() {
-                        // This should not fail after the remember() above, so we can unwrap().
-                        self.nullifiers.insert(nullifier).unwrap();
-                        // If we have a record with this nullifier, remove it as it has been spent.
-                        if let Some(record) = self.records.remove_by_nullifier(nullifier) {
-                            self.record_merkle_tree_mut().forget(record.uid);
-                        }
-                    }
-                    // Now that the new nullifiers have all been inserted, we can prune our
-                    // nullifiers set back down to restore sparseness.
-                    for nullifier in txn.txn.nullifiers() {
-                        //todo !jeb.bearer for now we unconditionally forget the new nullifier,
-                        // knowing we can get it back from the backend if necessary. However, this
-                        // nullifier may be helping us by representing a branch of the tree that we
-                        // care about, that would allow us to generate a proof that the nullifier
-                        // for one of our owned records is _not_ in the tree. We should be more
-                        // careful about pruning to cut down on the amount we have to ask the
-                        // network.
-                        self.nullifiers.forget(nullifier);
-                    }
 
                     // Prune the record Merkle tree of records we don't care about.
                     for (uid, remember) in this_txn_uids {
@@ -2745,13 +2772,18 @@ pub mod test_helpers {
         }
 
         fn generate_event(&mut self, e: LedgerEvent) {
+            println!("EVENT {:?}", e);
             self.events.push(e.clone());
             for s in self.subscribers.iter_mut() {
                 s.start_send(e.clone()).unwrap();
             }
         }
 
-        fn flush(&mut self) {
+        pub fn flush(&mut self) {
+            if self.current_block.block.0.is_empty() {
+                return;
+            }
+
             let block = std::mem::replace(&mut self.current_block, self.validator.next_block());
             match self.validator.validate_and_apply(
                 self.validator.prev_commit_time + 1,
@@ -2870,7 +2902,8 @@ pub mod test_helpers {
         wallets: &[Wallet<'a, impl 'a + WalletBackend<'a> + Send + Sync>],
     ) {
         let t = {
-            let ledger = ledger.lock().unwrap();
+            let mut ledger = ledger.lock().unwrap();
+            ledger.flush();
             if let Some(LedgerEvent::Commit { .. }) = ledger.events.last() {
                 // If the last event is a Commit, wait until the sender receives the Commit event
                 // and posts the receiver memos, generating a new Memos event.
@@ -3105,7 +3138,7 @@ pub mod test_helpers {
             subscribers: Vec::new(),
             current_block,
             committed_blocks: Vec::new(),
-            block_size: 1,
+            block_size: 2,
             hold_next_transaction: false,
             held_transaction: None,
             proving_keys: Arc::new(ProverKeySet {
@@ -3310,7 +3343,6 @@ pub mod test_helpers {
             );
             now = Instant::now();
 
-            // TODO process block as a batch. For now, do txs one by one.
             for (j, (asset_ix, sender_ix, receiver_ix, amount)) in block.iter().enumerate() {
                 println!(
                     "Starting txn {}.{}/{}:{:?}: {}s",
@@ -3409,38 +3441,48 @@ pub mod test_helpers {
                             continue;
                         }
                     }
+                    Err(WalletError::InsufficientBalance { .. }) => {
+                        // If we don't have sufficient balance to make the transaction, it may be
+                        // because a record we need is on hold as part of a previous transaction,
+                        // and we haven't gotten the change yet because the transaction is buffered
+                        // in a block.
+                        println!("flushing pending blocks to retrieve change");
+                        ledger.lock().unwrap().flush();
+                        sync(&ledger, &wallets).await;
+                        wallets[sender_ix + 1]
+                            .transfer(&asset.code, &[(receiver, amount)], 1)
+                            .await
+                            .unwrap()
+                    }
                     Err(err) => {
                         panic!("transaction failed: {:?}", err)
                     }
                 };
-                println!("transaction generated: {}s", now.elapsed().as_secs_f32());
+                println!(
+                    "Generated txn {}.{}/{}: {}s",
+                    i + 1,
+                    j + 1,
+                    block.len(),
+                    now.elapsed().as_secs_f32()
+                );
                 now = Instant::now();
 
                 balances[sender_ix][0] -= 1; // transaction fee
                 balances[sender_ix][asset_ix] -= amount;
                 balances[receiver_ix][asset_ix] += amount;
 
-                // The sending wallet should report the new balance immediately, even before a
-                // validator has confirmed the transaction, because the transferred records are
-                // placed on hold until the transfer is confirmed or rejected.
-                //
-                // Note that the sender may report less than the final balance if it is waiting on a
-                // change output to be confirmed.
-                assert!(sender.balance(&native.code).await <= balances[sender_ix][0]);
-                assert!(sender.balance(&asset.code).await <= balances[sender_ix][asset_ix]);
-
                 ledger.lock().unwrap().release_held_transaction();
-                sync(&ledger, &wallets).await;
-                check_balances(&wallets, &balances, &assets).await;
-
-                println!(
-                    "Finished txn {}.{}/{}: {}s",
-                    i + 1,
-                    j + 1,
-                    block.len(),
-                    now.elapsed().as_secs_f32()
-                );
             }
+
+            sync(&ledger, &wallets).await;
+            check_balances(&wallets, &balances, &assets).await;
+
+            println!(
+                "Finished block {}/{}: {}s",
+                i + 1,
+                block.len(),
+                now.elapsed().as_secs_f32()
+            );
         }
     }
 }
@@ -3765,6 +3807,7 @@ mod tests {
                 );
                 now = Instant::now();
                 ledger.release_held_transaction();
+                ledger.flush();
 
                 // The sender gets back in sync with the validator after their transaction is
                 // rejected.
@@ -3916,9 +3959,11 @@ mod tests {
         );
         let ledger_time = ledger.lock().unwrap().now();
         ledger.lock().unwrap().release_held_transaction().unwrap();
-        // Wait for 3 events: the first Reject event, then a later Commit event after the wallet
-        // resubmits, and finally a Memos event after the wallet receives the Commit event and posts
-        // the receiver memos.
+        ledger.lock().unwrap().flush();
+        // Wait for the Reject event.
+        sync_with(&wallets, ledger_time + 1).await;
+        // Wait for the Commit and Memos events after the wallet resubmits.
+        ledger.lock().unwrap().flush();
         sync_with(&wallets, ledger_time + 3).await;
         assert_eq!(wallets[0].balance(&AssetCode::native()).await, 0);
         assert_eq!(
@@ -4037,6 +4082,21 @@ mod tests {
             (1, 1, 0, 1), // Bob sends 1 of coin 1 to Alice
         ]];
         test_multixfr_wallet(txns, 2, 2, alice_grant, vec![bob_grant]).await;
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_multixfr_wallet_multi_xfr_block() -> std::io::Result<()> {
+        // Alice and Bob each get 1 native token to start.
+        let alice_grant = (0, 0, 1);
+        let bob_grant = (0, 1, 1);
+        // Alice and Bob make independent transactions, so that the transactions can end up in the
+        // same block.
+        let txns = vec![vec![
+            (0, 0, 1, 1), // Alice sends 1 coin to Bob
+            (0, 1, 0, 1), // Bob sends 1 coin to Alice
+        ]];
+        test_multixfr_wallet(txns, 2, 1, alice_grant, vec![bob_grant]).await;
         Ok(())
     }
 
