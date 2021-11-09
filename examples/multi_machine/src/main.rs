@@ -984,7 +984,7 @@ async fn main() -> Result<(), std::io::Error> {
 
         // When `num_txn` is set, run `num_txn` rounds.
         // Otherwise, keeping running till the process is killed.
-        let mut txn: Option<(usize, Vec<(usize, ReceiverMemo)>, _, ElaboratedTransaction)> = None;
+        let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
         let mut txn_proposed_round = 0;
         while num_txn.map(|count| round < count).unwrap_or(true) {
             println!("Starting round {}", round + 1);
@@ -1004,29 +1004,27 @@ async fn main() -> Result<(), std::io::Error> {
                         phaselock.submit_transaction(tx.clone().3).await.unwrap();
                         txn_proposed_round = round;
                     }
-                } else {
-                    if let Some(mut true_state) = core::mem::take(&mut state) {
-                        println!("  - Proposing a transaction");
-                        let (true_state, mut transactions) =
-                            async_std::task::spawn_blocking(move || {
-                                let txs = true_state
-                                    .generate_transactions(
-                                        round as usize,
-                                        vec![(true, 0, 0, 0, 0, -2)],
-                                        1,
-                                    )
-                                    .unwrap();
-                                (true_state, txs)
-                            })
-                            .await;
-                        txn = Some(transactions.remove(0));
-                        state = Some(true_state);
-                        phaselock
-                            .submit_transaction(txn.clone().unwrap().3)
-                            .await
-                            .unwrap();
-                        txn_proposed_round = round;
-                    }
+                } else if let Some(mut true_state) = core::mem::take(&mut state) {
+                    println!("  - Proposing a transaction");
+                    let (true_state, mut transactions) =
+                        async_std::task::spawn_blocking(move || {
+                            let txs = true_state
+                                .generate_transactions(
+                                    round as usize,
+                                    vec![(true, 0, 0, 0, 0, -2)],
+                                    1,
+                                )
+                                .unwrap();
+                            (true_state, txs)
+                        })
+                        .await;
+                    txn = Some(transactions.remove(0));
+                    state = Some(true_state);
+                    phaselock
+                        .submit_transaction(txn.clone().unwrap().3)
+                        .await
+                        .unwrap();
+                    txn_proposed_round = round;
                 }
             }
 
