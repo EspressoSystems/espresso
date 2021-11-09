@@ -998,19 +998,30 @@ async fn main() -> Result<(), std::io::Error> {
             // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
             if own_id == 0 {
                 if let Some(tx) = txn.as_ref() {
-                    println!("  - Reproposing a transaction");
+                    let commitment = TaggedBase64::new(
+                        "LEDG",
+                        state.as_ref().unwrap().validator.commit().as_ref(),
+                    )
+                    .unwrap()
+                    .to_string();
+
+                    println!("  - Reproposing a transaction based on {}", commitment);
                     if txn_proposed_round + 5 < round {
                         // TODO
                         phaselock.submit_transaction(tx.clone().3).await.unwrap();
                         txn_proposed_round = round;
                     }
                 } else if let Some(mut true_state) = core::mem::take(&mut state) {
-                    println!("  - Proposing a transaction");
+                    let commitment =
+                        TaggedBase64::new("LEDG", true_state.validator.commit().as_ref())
+                            .unwrap()
+                            .to_string();
+                    println!("  - Proposing a transaction based on {}", commitment);
                     let (true_state, mut transactions) =
                         async_std::task::spawn_blocking(move || {
                             let txs = true_state
                                 .generate_transactions(
-                                    round as usize,
+                                    true_state.validator.prev_commit_time as usize,
                                     vec![(true, 0, 0, 0, 0, -2)],
                                     1,
                                 )
@@ -1031,7 +1042,7 @@ async fn main() -> Result<(), std::io::Error> {
             // If the output below is changed, update the message for line.trim() in Validator::new as well
             println!("  - Starting consensus");
             phaselock.start_consensus().await;
-            let success = loop {
+            loop {
                 println!("Waiting for PhaseLock event");
                 let event = events.next().await.expect("PhaseLock unexpectedly closed");
 
@@ -1046,57 +1057,68 @@ async fn main() -> Result<(), std::io::Error> {
                                 round + 1,
                                 commitment
                             );
-                            break true;
+                            break; // true;
                         }
                     }
                     EventType::ViewTimeout { view_number: _ } => {
                         println!("  - Round {} timed out.", round + 1);
-                        break false;
+                        break; // false;
                     }
                     EventType::Error { error } => {
                         println!("  - Round {} error: {}", round + 1, error);
-                        break false;
+                        break; // false;
                     }
                     _ => {
                         println!("EVENT: {:?}", event);
                     }
                 }
-            };
+            }
 
-            if success {
-                // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
-                // current node), and there is no attached wallet.
-                if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
-                    let state = state.as_mut().unwrap();
-                    println!("  - Adding the transaction");
-                    let mut blk = ElaboratedBlock::default();
-                    let (owner_memos, kixs) = {
-                        let mut owner_memos = vec![];
-                        let mut kixs = vec![];
+            // if success {
+            // current node), and there is no attached wallet.
+            if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
+                let state = state.as_mut().unwrap();
+                println!("  - Adding the transaction");
+                let mut blk = ElaboratedBlock::default();
+                let (owner_memos, kixs) = {
+                    let mut owner_memos = vec![];
+                    let mut kixs = vec![];
 
-                        for (kix, memo) in keys_and_memos {
-                            kixs.push(kix);
-                            owner_memos.push(memo);
-                        }
-                        (owner_memos, kixs)
-                    };
-
-                    // If we're running a full node, publish the receiver memos.
-                    if let Node::Full(node) = &mut phaselock {
-                        node.write()
-                            .await
-                            .post_memos(round, ix as u64, owner_memos.clone(), sig)
-                            .await
-                            .unwrap();
+                    for (kix, memo) in keys_and_memos {
+                        kixs.push(kix);
+                        owner_memos.push(memo);
                     }
+                    (owner_memos, kixs)
+                };
 
-                    state
-                        .try_add_transaction(&mut blk, t, round as usize, ix, 1, owner_memos, kixs)
-                        .unwrap();
-                    state
-                        .validate_and_apply(blk, round as usize, 1, 0.0)
+                // If we're running a full node, publish the receiver memos.
+                if let Node::Full(node) = &mut phaselock {
+                    node.write()
+                        .await
+                        .post_memos(round, ix as u64, owner_memos.clone(), sig)
+                        .await
                         .unwrap();
                 }
+
+                state
+                    .try_add_transaction(
+                        &mut blk,
+                        t,
+                        (state.validator.prev_commit_time + 1) as usize,
+                        ix,
+                        1,
+                        owner_memos,
+                        kixs,
+                    )
+                    .unwrap();
+                state
+                    .validate_and_apply(
+                        blk,
+                        (state.validator.prev_commit_time + 1) as usize,
+                        1,
+                        0.0,
+                    )
+                    .unwrap();
             }
 
             round += 1;
