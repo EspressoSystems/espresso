@@ -1981,7 +1981,7 @@ impl MultiXfrTestState {
 
     /// Tries to add a transaction to a block.
     ///
-    /// Note: `round` and `num_txs` are for `println!`s only.
+    /// Note: `round`, `ix` and `num_txs` are for `println!`s only.
     // Issue: https://gitlab.com/translucence/systems/system/-/issues/16.
     #[allow(clippy::too_many_arguments)]
     pub fn try_add_transaction(
@@ -2015,7 +2015,7 @@ impl MultiXfrTestState {
 
     /// Validates and applys a block.
     ///
-    /// Note: `round` and `num_txs` are for `println!`s only.
+    /// Note: `round`, `num_txs` and `generation_time` are for `println!`s only.
     // Issue: https://gitlab.com/translucence/systems/system/-/issues/16.
     pub fn validate_and_apply(
         &mut self,
