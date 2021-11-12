@@ -1,6 +1,6 @@
 use crate::{ElaboratedBlock, ValidatorState};
 use atomic_store::{
-    load_store::BincodeLoadStore, AtomicStore, AtomicStoreLoader, PersistenceError, RollingLog,
+    load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
 };
 use phaselock::{traits::StatefulHandler, H_256};
 
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 pub struct LWPersistence {
     atomic_store: AtomicStore,
-    state_snapshot: RollingLog<BincodeLoadStore<ValidatorState>>,
+    state_snapshot: AppendLog<BincodeLoadStore<ValidatorState>>,
 }
 
 impl LWPersistence {
@@ -18,8 +18,7 @@ impl LWPersistence {
         lw_store_path.push("lw_validator");
         let mut loader = AtomicStoreLoader::load(&lw_store_path, key_tag)?;
         let snapshot_tag = format!("{}_state", key_tag);
-        let state_snapshot =
-            RollingLog::load(&mut loader, Default::default(), &snapshot_tag, 1024)?;
+        let state_snapshot = AppendLog::load(&mut loader, Default::default(), &snapshot_tag, 1024)?;
         let atomic_store = AtomicStore::open(loader)?;
         Ok(LWPersistence {
             atomic_store,
@@ -31,6 +30,10 @@ impl LWPersistence {
         self.state_snapshot.store_resource(state).unwrap();
         self.state_snapshot.commit_version().unwrap();
         self.atomic_store.commit_version().unwrap();
+    }
+
+    pub fn load_latest_state(&self) -> Result<ValidatorState, PersistenceError> {
+        self.state_snapshot.load_latest()
     }
 }
 

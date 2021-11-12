@@ -13,6 +13,7 @@ extern crate quickcheck_macros;
 
 pub mod api;
 pub mod committee;
+pub mod full_persistence;
 pub mod lw_persistence;
 pub mod node;
 mod set_merkle_tree;
@@ -28,6 +29,7 @@ use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use core::fmt::Debug;
 use core::iter::once;
+pub use full_persistence::FullPersistence;
 use jf_txn::{
     errors::TxnApiError,
     keys::UserKeyPair,
