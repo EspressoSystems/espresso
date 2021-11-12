@@ -113,6 +113,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a> for Networ
             state: validator,
             nullifiers,
             records,
+            ..
         } = self.get("getsnapshot/0/true").await?;
 
         // Construct proving keys of the same arities as the verifier keys from the validator.
