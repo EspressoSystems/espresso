@@ -3364,7 +3364,7 @@ pub mod test_helpers {
                 };
                 let receiver = wallets[receiver_ix + 1].address();
                 let sender_address = wallets[sender_ix + 1].address();
-                let sender_balance = wallets[sender_ix + 1].balance(&asset.code).await;
+                let sender_balance = balances[sender_ix][asset_ix];
 
                 let mut amount = if *amount <= sender_balance {
                     *amount
@@ -3442,10 +3442,15 @@ pub mod test_helpers {
                         }
                     }
                     Err(WalletError::InsufficientBalance { .. }) => {
-                        // If we don't have sufficient balance to make the transaction, it may be
-                        // because a record we need is on hold as part of a previous transaction,
-                        // and we haven't gotten the change yet because the transaction is buffered
-                        // in a block.
+                        // We should always have enough balance to make the transaction, because we
+                        // adjusted the transaction amount (and potentially minted more of the
+                        // asset) above, so that the transaction is covered by our most up-to-date
+                        // balance.
+                        //
+                        // If we fail due to insufficient balance, it is likely because a record we
+                        // need is on hold as part of a previous transaction, and we haven't gotten
+                        // the change yet because the transaction is buffered in a block. The
+                        // transaction should succeed after we flush any pending transactions.
                         println!("flushing pending blocks to retrieve change");
                         ledger.lock().unwrap().flush();
                         sync(&ledger, &wallets).await;
