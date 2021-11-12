@@ -49,13 +49,13 @@ use jf_txn::{
         AssetDefinition,
         // AssetPolicy,
         // BlindFactor,
-        // FeeInput,
+        FeeInput,
         FreezeFlag,
         Nullifier,
         ReceiverMemo,
         // RecordCommitment,
         RecordOpening,
-        // TxnFeeInfo,
+        TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
     AccMemberWitness,
@@ -188,9 +188,9 @@ pub enum XfrError {
     },
     TimedOut {},
     Cancelled {},
-    // CryptoError {
-    //     source: TxnApiError,
-    // },
+    CryptoError {
+        source: TxnApiError,
+    },
     InvalidAddress {
         address: UserAddress,
     },
@@ -332,6 +332,7 @@ impl<'a> XfrState<'a> {
     async fn generate_transfer(
         &mut self,
         receiver: UserPubKey,
+        fee_rec: Option<(u64, RecordOpening)>,
         fee: u64,
     ) -> Result<TransactionReceipt, XfrError> {
         let (ro, uid) = self.find_record()?;
@@ -357,15 +358,31 @@ impl<'a> XfrState<'a> {
         };
 
         // generate transfer note and receiver memos
+        let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
+
+        let fee_input = FeeInput {
+            ro: fee_ro,
+            owner_keypair: &self.user_keys,
+            acc_member_witness: AccMemberWitness::lookup_from_tree(
+                &self.record_merkle_tree,
+                fee_uid,
+            )
+            .expect_ok()
+            .unwrap()
+            .1,
+        };
+
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut self.prng, fee_input, fee).unwrap();
+
         const UNEXPIRED_VALID_UNTIL: u64 =
             2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
         let (txn, owner_memo_kp) = TransferNote::generate_non_native(
             &mut self.prng,
             vec![input],
             &[output],
-            fee,
+            fee_input,
             UNEXPIRED_VALID_UNTIL,
-            self.proving_key,
+            self.prover_keys,
         )
         .context(CryptoError)?;
 
