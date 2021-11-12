@@ -652,6 +652,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-tungstenite"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0d06e9a20f1c0d64b6067ef6aa9fdf59e194ecde93575591fb4c78063692324"
+dependencies = [
+ "async-std",
+ "futures-io",
+ "futures-util",
+ "log",
+ "pin-project-lite 0.2.7",
+ "tungstenite 0.16.0",
+]
+
+[[package]]
 name = "async_executors"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2978,13 +2992,13 @@ dependencies = [
 
 [[package]]
 name = "phaselock"
-version = "0.0.5-dev"
-source = "git+ssh://git@gitlab.com/translucence/systems/phaselock.git?rev=7b01c31a4953170455d595c71ae3a3713119e5a6#7b01c31a4953170455d595c71ae3a3713119e5a6"
+version = "0.0.5"
+source = "git+ssh://git@gitlab.com/translucence/systems/phaselock.git?rev=14586ed218a35cb48675b73d4a34ae7ae55c67e6#14586ed218a35cb48675b73d4a34ae7ae55c67e6"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",
  "async-std",
- "async-tungstenite 0.15.0",
+ "async-tungstenite 0.16.0",
  "bincode",
  "blake3 1.1.0",
  "byteorder",
@@ -4812,6 +4826,25 @@ name = "tungstenite"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "983d40747bce878d2fb67d910dcb8bd3eca2b2358540c3cc1b98c027407a3ae3"
+dependencies = [
+ "base64 0.13.0",
+ "byteorder",
+ "bytes 1.1.0",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.8.4",
+ "sha-1",
+ "thiserror",
+ "url",
+ "utf-8",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ad3713a14ae247f22a728a0456a545df14acf3867f905adff84be99e23b3ad1"
 dependencies = [
  "base64 0.13.0",
  "byteorder",

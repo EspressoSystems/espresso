@@ -13,7 +13,7 @@ async-std = { version = "1.9.0", features = ["unstable", "attributes"] }
 async-tls = "0.11.0"
 futures = "0.3.0"
 # phaselock = { version = "0.0.2", registry = "translucence" }
-phaselock = { git = "ssh://git@gitlab.com/translucence/systems/phaselock.git", rev = "7b01c31a4953170455d595c71ae3a3713119e5a6" }
+phaselock = { git = "ssh://git@gitlab.com/translucence/systems/phaselock.git", rev = "14586ed218a35cb48675b73d4a34ae7ae55c67e6" }
 rand = "0.7.3"
 serde = { version = "1.0.123", features = ["derive", "rc"] }
 structopt = "0.3"
