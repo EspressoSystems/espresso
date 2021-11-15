@@ -10,7 +10,7 @@ use crate::set_merkle_tree::*;
 // use crate::util::arbitrary_wrappers::*;
 use crate::{
     // ser_test,
-    // ElaboratedTransaction,
+    ElaboratedTransaction,
     ElaboratedTransactionHash,
     ProverKeySet,
     //  ValidationError,
@@ -30,7 +30,7 @@ use crate::{
 //     stream::Stream,
 // };
 use jf_txn::{
-    // errors::TxnApiError,
+    errors::TxnApiError,
     // freeze::{FreezeNote, FreezeNoteInput},
     keys::{
         AuditorKeyPair,
@@ -61,7 +61,7 @@ use jf_txn::{
     AccMemberWitness,
     // MerkleLeafProof,
     MerkleTree,
-    // Signature,
+    Signature,
     TransactionNote,
 };
 // use jf_utils::tagged_blob;
@@ -69,99 +69,14 @@ use jf_txn::{
 // use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 // use serde::{Deserialize, Serialize};
-use snafu::ResultExt;
+// use snafu::ResultExt;
 use std::collections::HashMap;
 // use std::convert::TryFrom;
 // use std::iter::FromIterator;
 // use std::ops::{Index, IndexMut};
 // use std::sync::Arc;
 
-// #[async_trait]
-// pub trait WalletBackend<'a>: Send {
-//     type EventStream: 'a + Stream<Item = LedgerEvent> + Unpin + Send;
-//     type Storage: WalletStorage<'a> + Send;
-
-//     /// Access the persistent storage layer.
-//     ///
-//     /// The interface is specified this way, with the main storage interface in a separate trait and
-//     /// an accessor function here, to allow implementations of WalletBackend to split the storage
-//     /// layer from the networking layer, since the two concerns are generally separate.
-//     ///
-//     /// Note that the return type of this function requires the implementation to guard the storage
-//     /// layer with a mutex, even if it is not internally shared between threads. This is meant to
-//     /// allow shared access to the storage layer internal, not require it. A better interface would
-//     /// be to have an associated type
-//     ///         `type<'l> StorageRef: 'l +  Deref<Target = Self::Storage> + DerefMut`
-//     /// This could be MutexGuard, RwLockWriteGuard, or just `&mut Self::Storage`, depending on the
-//     /// needs of the implementation. Maybe we can clean this up if and when GATs stabilize.
-//     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage>;
-
-//     async fn load(&mut self) -> Result<WalletState<'a>, WalletError> {
-//         let mut storage = self.storage().await;
-//         if storage.exists() {
-//             // If there is a stored wallet with this key pair, load it.
-//             storage.load().await
-//         } else {
-//             // Otherwise, ask the network layer to create and register a brand new wallet.
-//             drop(storage);
-//             self.create().await
-//         }
-//     }
-
-//     /// Make a change to the persisted state using a function describing a transaction.
-//     ///
-//     /// # Example
-//     ///
-//     /// ```ignore
-//     /// backend.store(key_pair, |mut t| async move {
-//     ///     t.store_snapshot(wallet_state).await?;
-//     ///     // If this store fails, the effects of the previous store will be reverted.
-//     ///     t.store_auditable_asset(wallet_state, asset).await?;
-//     ///     Ok(t)
-//     /// }).await?;
-//     /// ```
-//     async fn store<'l, F, Fut>(&'l mut self, update: F) -> Result<(), WalletError>
-//     where
-//         F: Send + Fn(StorageTransaction<'a, 'l, Self::Storage>) -> Fut,
-//         Fut: Send + Future<Output = Result<StorageTransaction<'a, 'l, Self::Storage>, WalletError>>,
-//         Self::Storage: 'l,
-//     {
-//         let storage = self.storage().await;
-//         let fut = update(StorageTransaction::new(storage)).and_then(|mut txn| async move {
-//             txn.storage.commit().await;
-//             Ok(())
-//         });
-//         fut.await
-//     }
-
-//     // Querying the ledger
-//     async fn create(&mut self) -> Result<WalletState<'a>, WalletError>;
-//     async fn subscribe(&self, starting_at: u64) -> Self::EventStream;
-//     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError>;
-//     async fn get_nullifier_proof(
-//         &self,
-//         root: set_hash::Hash,
-//         nullifier: Nullifier,
-//     ) -> Result<(bool, SetMerkleProof), WalletError>;
-
-//     // Submit a transaction to a validator.
-//     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError>;
-//     async fn post_memos(
-//         &mut self,
-//         block_id: u64,
-//         txn_id: u64,
-//         memos: Vec<ReceiverMemo>,
-//         sig: Signature,
-//     ) -> Result<(), WalletError>;
-// }
-
-// pub struct WalletSession<'a, Backend: WalletBackend<'a>> {
-//     backend: Backend,
-//     rng: ChaChaRng,
-//     _marker: std::marker::PhantomData<&'a ()>,
-// }
-
-// #[derive(Debug, Snafu)]
+// #[derive(/*Debug,*/ Snafu)]
 // #[snafu(visibility = "pub")]
 pub enum XfrError {
     InsufficientBalance,
@@ -279,6 +194,17 @@ pub struct TransactionReceipt {
     submitter: UserAddress,
 }
 
+// #[ser_test(arbitrary, ark(false))]
+// #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub(crate) struct PendingTransaction {
+    receiver_memos: Vec<ReceiverMemo>,
+    signature: Signature,
+    freeze_outputs: Vec<RecordOpening>,
+    timeout: u64,
+    uid: TransactionUID,
+    hash: ElaboratedTransactionHash,
+}
+
 #[derive(Debug /*, Clone*/)]
 pub struct XfrState<'a> {
     pub prng: ChaChaRng,
@@ -329,14 +255,70 @@ impl<'a> XfrState<'a> {
         Err(XfrError::InsufficientBalance)
     }
 
+    async fn get_nullifier_proof(
+        &mut self,
+        nullifier: Nullifier,
+    ) -> Result<(bool, SetMerkleProof), XfrError> {
+        if let Some(ret) = self.nullifiers.contains(nullifier) {
+            Ok(ret)
+        } else {
+            let (contains, proof) = self.nullifiers.contains(nullifier).unwrap();
+
+            self.nullifiers.remember(nullifier, proof.clone()).unwrap();
+            Ok((contains, proof))
+        }
+    }
+
+    async fn prove_nullifier_unspent(
+        &mut self,
+        nullifier: Nullifier,
+    ) -> Result<SetMerkleProof, XfrError> {
+        let (spent, proof) = self.get_nullifier_proof(nullifier).await?;
+        if spent {
+            Err(XfrError::NullifierAlreadyPublished { nullifier })
+        } else {
+            Ok(proof)
+        }
+    }
+
+    async fn generate_elaborated_transaction(
+        &mut self,
+        note: TransactionNote,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+        freeze_outputs: Vec<RecordOpening>,
+    ) -> Result<ElaboratedTransaction, XfrError> {
+        let mut nullifier_pfs = Vec::new();
+        for n in note.nullifiers() {
+            let proof = if let Some((contains, proof)) = self.nullifiers.contains(n) {
+                if contains {
+                    return Err(XfrError::NullifierAlreadyPublished { nullifier: n });
+                } else {
+                    proof
+                }
+            } else {
+                let proof = self.prove_nullifier_unspent(n).await?;
+                self.nullifiers.remember(n, proof.clone()).unwrap();
+                proof
+            };
+            nullifier_pfs.push(proof);
+        }
+
+        Ok(ElaboratedTransaction {
+            txn: note,
+            proofs: nullifier_pfs,
+        })
+    }
+
     async fn generate_transfer(
         &mut self,
         receiver: UserPubKey,
         fee_rec: Option<(u64, RecordOpening)>,
         fee: u64,
-    ) -> Result<TransactionReceipt, XfrError> {
+    ) -> Result<ElaboratedTransaction, XfrError> {
         let (ro, uid) = self.find_record()?;
 
+        let mut outputs = vec![];
         let output = RecordOpening::new(
             &mut self.prng,
             ro.amount / 2,
@@ -344,6 +326,7 @@ impl<'a> XfrState<'a> {
             receiver,
             FreezeFlag::Unfrozen,
         );
+        outputs.push(output);
 
         // prepare input
         let acc_member_witness = AccMemberWitness::lookup_from_tree(&self.record_merkle_tree, uid)
@@ -376,29 +359,24 @@ impl<'a> XfrState<'a> {
 
         const UNEXPIRED_VALID_UNTIL: u64 =
             2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
-        let (txn, owner_memo_kp) = TransferNote::generate_non_native(
+        let (note, sig_key) = TransferNote::generate_non_native(
             &mut self.prng,
             vec![input],
-            &[output],
-            fee_input,
+            &outputs,
+            fee_info,
             UNEXPIRED_VALID_UNTIL,
-            self.prover_keys,
+            self.prover_keys.xfr.key_for_size(3, 3).unwrap(),
         )
-        .context(CryptoError)?;
+        .unwrap();
 
-        let outputs: Vec<_> = vec![fee_change_ro]
+        let recv_memos = vec![&fee_out_rec]
             .into_iter()
-            .chain(outputs.into_iter())
-            .collect();
-
-        let recv_memos: Vec<_> = outputs
-            .iter()
-            .map(|ro| ReceiverMemo::from_ro(&mut session.rng, ro, &[]))
+            .chain(outputs.iter())
+            .map(|r| ReceiverMemo::from_ro(&mut self.prng, r, &[]))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let sig = sign_receiver_memos(&kp, &recv_memos).context(CryptoError)?;
-        self.submit_transaction(
-            session,
+        let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
+        self.generate_elaborated_transaction(
             TransactionNote::Transfer(Box::new(note)),
             recv_memos,
             sig,
