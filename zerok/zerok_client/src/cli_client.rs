@@ -501,7 +501,7 @@ impl Validator {
                         // stdout. If we don't do this, the validator will
                         // eventually fill up its output pipe and block.
                         move || {
-                            while let Some(line) = lines.next() {
+                            for line in lines {
                                 if line.is_ok() {
                                     println!("[id {}]{}", id, line.unwrap());
                                 } else {
