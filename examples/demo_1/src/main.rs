@@ -25,7 +25,8 @@ use zerok_lib::{
     MultiXfrRecordSpec, MultiXfrTestState, ValidatorState,
 };
 
-type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>;
+use std::path::Path;
+type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>;
 type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_256>;
 
 /// Generates the `SecretKeySet` for this BFT instance
@@ -42,7 +43,7 @@ pub async fn try_network<
     // TODO: Actually attempt to open the port and find a new one if it doens't work
     let port = rand::thread_rng().gen_range(2000, 5000);
     (
-        WNetwork::new(key, port, None)
+        WNetwork::new(key, "localhost", port, None)
             .await
             .expect("Failed to create network"),
         port,
@@ -79,6 +80,7 @@ pub async fn try_phaselock(
         start_delay: 1,
     };
     let (networking, port) = try_network(pub_key.clone()).await;
+    let temp_path = Path::new("./tmp");
     let phaselock = PhaseLock::new(
         genesis,
         pub_key_set,
@@ -88,7 +90,7 @@ pub async fn try_phaselock(
         initial_state,
         networking.clone(),
         MemoryStorage::default(),
-        LWPersistence::new("demo1"),
+        LWPersistence::new(temp_path, "demo1").unwrap(),
     )
     .await;
     (phaselock, pub_key, port, networking)

@@ -7,8 +7,9 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
-use jf_txn::{MerkleTree, TransactionVerifyingKey};
+use jf_txn::TransactionVerifyingKey;
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
@@ -28,14 +29,14 @@ use threshold_crypto as tc;
 use tide::StatusCode;
 use tide_websockets::{WebSocket, WebSocketConnection};
 use toml::Value;
-use tracing::debug;
+use tracing::{debug, event, Level};
 use zerok_lib::{
     api::*,
     key_set::KeySet,
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
-    ElaboratedBlock, ElaboratedTransaction, LWPersistence, MultiXfrRecordSpec, MultiXfrTestState,
-    ValidatorState, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
+    ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, MultiXfrRecordSpec,
+    MultiXfrTestState, ValidatorState, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
 };
 
 mod disco;
@@ -58,6 +59,10 @@ struct NodeOpt {
     )]
     config: String,
 
+    /// Path to the universal parameter file.
+    #[structopt(long = "universal_param_path", short = "u")]
+    universal_param_path: Option<String>,
+
     /// Whether to generate and store public keys for all nodes.
     ///
     /// Public keys will be stored under the directory specified by `pk_path`.
@@ -65,6 +70,11 @@ struct NodeOpt {
     /// Skip this option if public key files already exist.
     #[structopt(long = "gen_pk", short = "g")]
     gen_pk: bool,
+
+    /// Whether to load from persisted state.
+    ///
+    #[structopt(long = "load_from_store", short = "l")]
+    load_from_store: bool,
 
     /// Path to public keys.
     ///
@@ -76,6 +86,16 @@ struct NodeOpt {
         default_value = ""      // See fn default_pk_path().
     )]
     pk_path: String,
+
+    /// Path to persistence files.
+    ///
+    /// Persistence files will be nested under the specified directory
+    #[structopt(
+        long = "store_path", 
+        short = "s", 
+        default_value = ""      // See fn default_store_path().
+    )]
+    store_path: String,
 
     /// Id of the current node.
     ///
@@ -106,17 +126,24 @@ struct NodeOpt {
     /// Use an external wallet to generate transactions.
     ///
     /// The argument is the path to the wallet's public key. If this option is given, the ledger
-    /// will be initialized with a single record of 2^32 native tokens, owned by the wallet's public
-    /// key. The demo will then wait for the wallet to generate some transactions and submit them to
-    /// the validators using the network API.
+    /// will be initialized with a record of 2^32 native tokens, owned by the wallet's public key.
+    /// The demo will then wait for the wallet to generate some transactions and submit them to the
+    /// validators using the network API.
+    ///
+    /// This option may be passed multiple times to initialize the ledger with multiple native token
+    /// records for different wallets.
     #[structopt(short, long = "wallet")]
-    wallet_pk_path: Option<PathBuf>,
+    wallet_pk_path: Option<Vec<PathBuf>>,
 
     /// Number of transactions to generate.
     ///
     /// Skip this option if want to keep generating transactions till the process is killed.
     #[structopt(long = "num_txn", short = "n")]
     num_txn: Option<u64>,
+
+    /// Wait for web server to exit after transactions complete.
+    #[structopt(long)]
+    wait: bool,
 }
 
 /// Gets public key of a node from its public key file.
@@ -172,6 +199,19 @@ fn default_pk_path() -> PathBuf {
     [&dir, Path::new(PK_DIR)].iter().collect()
 }
 
+/// Returns the default directory to store persistence files.
+fn default_store_path(node_id: u64) -> PathBuf {
+    const STORE_DIR: &str = "src/store";
+    let dir = project_path();
+    [
+        &dir,
+        Path::new(STORE_DIR),
+        Path::new(&format!("node{}", node_id)),
+    ]
+    .iter()
+    .collect()
+}
+
 /// Returns the default path to the API file.
 fn default_api_path() -> PathBuf {
     const API_FILE: &str = "api/api.toml";
@@ -213,6 +253,19 @@ fn get_pk_dir() -> String {
     }
 }
 
+/// Gets the directory to public key files.
+fn get_store_dir(node_id: u64) -> String {
+    let store_path = NodeOpt::from_args().store_path;
+    if store_path.is_empty() {
+        default_store_path(node_id)
+            .into_os_string()
+            .into_string()
+            .expect("Error while converting store path to a string")
+    } else {
+        store_path
+    }
+}
+
 /// Gets IP address and port number of a node from node configuration file.
 fn get_host(node_config: Value, node_id: u64) -> (String, u16) {
     let node = &node_config["nodes"][node_id.to_string()];
@@ -228,11 +281,12 @@ async fn get_networking<
     T: Clone + Serialize + DeserializeOwned + Send + Sync + std::fmt::Debug + 'static,
 >(
     node_id: u64,
+    listen_addr: &str,
     port: u16,
 ) -> (WNetwork<T>, PubKey) {
     let pub_key = get_public_key(node_id);
     debug!(?pub_key);
-    let network = WNetwork::new(pub_key.clone(), port, None).await;
+    let network = WNetwork::new(pub_key.clone(), listen_addr, port, None).await;
     if let Ok(n) = network {
         let (c, sync) = futures::channel::oneshot::channel();
         match n.generate_task(c) {
@@ -251,14 +305,14 @@ async fn get_networking<
     panic!("Failed to open a port");
 }
 
-type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>;
+type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>;
 type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
 
 enum Node {
     Light(LWNode),
-    Full(FullNode<'static>),
+    Full(Arc<RwLock<FullNode<'static>>>),
 }
 
 #[async_trait]
@@ -268,57 +322,81 @@ impl Validator for Node {
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
         match self {
             Node::Light(n) => <LWNode as Validator>::submit_transaction(n, tx).await,
-            Node::Full(n) => n.submit_transaction(tx).await,
+            Node::Full(n) => n.read().await.submit_transaction(tx).await,
         }
     }
 
     async fn start_consensus(&self) {
         match self {
             Node::Light(n) => n.start_consensus().await,
-            Node::Full(n) => n.start_consensus().await,
+            Node::Full(n) => n.read().await.start_consensus().await,
+        }
+    }
+
+    async fn current_state(&self) -> Arc<ValidatorState> {
+        match self {
+            Node::Light(n) => n.current_state().await,
+            Node::Full(n) => n.read().await.current_state().await,
         }
     }
 
     fn subscribe(&self) -> EventStream<Self::Event> {
         match self {
             Node::Light(n) => n.subscribe(),
-            Node::Full(n) => <FullNode as Validator>::subscribe(n),
+            Node::Full(n) => {
+                let node = &*task::block_on(n.read());
+                <FullNode as Validator>::subscribe(node)
+            }
         }
     }
 }
 
 /// Creates the initial state and phaselock for simulation.
+#[allow(clippy::too_many_arguments)]
 async fn init_state_and_phaselock(
     public_keys: tc::PublicKeySet,
     secret_key_share: tc::SecretKeyShare,
     nodes: u64,
     threshold: u64,
     node_id: u64,
-    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, H_256>>,
+    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
     full_node: bool,
+    load_from_store: bool,
 ) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state
     let (state, validator, records, nullifiers, memos) =
-        if let Some(pk_path) = NodeOpt::from_args().wallet_pk_path {
+        if let Some(pk_paths) = NodeOpt::from_args().wallet_pk_path {
             let mut rng = zerok_lib::crypto_rng_from_seed([0x42u8; 32]);
 
-            // Read in the public key of the wallet which will get the initial grant of native coins.
-            let mut file = File::open(pk_path).unwrap();
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes).unwrap();
-            let pub_key = bincode::deserialize(&bytes).unwrap();
+            let mut records = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
+            let mut memos = Vec::new();
 
-            // Create the initial grant.
-            let ro = RecordOpening::new(
-                &mut rng,
-                1u64 << 32,
-                AssetDefinition::native(),
-                pub_key,
-                FreezeFlag::Unfrozen,
-            );
-            let mut records = MerkleTree::new(MERKLE_HEIGHT).unwrap();
-            records.push(RecordCommitment::from(&ro).to_field_element());
-            let memos = vec![(ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap(), 0)];
+            // Process the initial native token records for the wallets.
+            for (i, pk_path) in pk_paths.into_iter().enumerate() {
+                // Read in the public key of the wallet which will get an initial grant of native
+                // coins.
+                let mut file = File::open(pk_path).unwrap();
+                let mut bytes = Vec::new();
+                file.read_to_end(&mut bytes).unwrap();
+                let pub_key: UserPubKey = bincode::deserialize(&bytes).unwrap();
+
+                // Create the initial grant.
+                event!(
+                    Level::INFO,
+                    "creating initial native token record for {}",
+                    pub_key.address()
+                );
+                let ro = RecordOpening::new(
+                    &mut rng,
+                    1u64 << 32,
+                    AssetDefinition::native(),
+                    pub_key,
+                    FreezeFlag::Unfrozen,
+                );
+                records.push(RecordCommitment::from(&ro).to_field_element());
+                memos.push((ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap(), i as u64));
+            }
+            let records = records.build();
 
             // Set up the validator.
             let univ_setup = &*UNIVERSAL_PARAM;
@@ -350,31 +428,34 @@ async fn init_state_and_phaselock(
             let validator = ValidatorState::new(verif_keys, records.clone());
             (None, validator, records, nullifiers, memos)
         } else {
-            let state = MultiXfrTestState::initialize(
-                STATE_SEED,
-                10,
-                10,
-                (
-                    MultiXfrRecordSpec {
-                        asset_def_ix: 0,
-                        owner_key_ix: 0,
-                        asset_amount: 100,
-                    },
-                    vec![
-                        MultiXfrRecordSpec {
-                            asset_def_ix: 1,
-                            owner_key_ix: 0,
-                            asset_amount: 50,
-                        },
+            let state = async_std::task::spawn_blocking(|| {
+                MultiXfrTestState::initialize(
+                    STATE_SEED,
+                    10,
+                    10,
+                    (
                         MultiXfrRecordSpec {
                             asset_def_ix: 0,
                             owner_key_ix: 0,
-                            asset_amount: 70,
+                            asset_amount: 100,
                         },
-                    ],
-                ),
-            )
-            .unwrap();
+                        vec![
+                            MultiXfrRecordSpec {
+                                asset_def_ix: 1,
+                                owner_key_ix: 0,
+                                asset_amount: 50,
+                            },
+                            MultiXfrRecordSpec {
+                                asset_def_ix: 0,
+                                owner_key_ix: 0,
+                                asset_amount: 70,
+                            },
+                        ],
+                    ),
+                )
+                .unwrap()
+            })
+            .await;
 
             let validator = state.validator.clone();
             let record_merkle_tree = state.record_merkle_tree.clone();
@@ -404,30 +485,60 @@ async fn init_state_and_phaselock(
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
+
+    let lw_persistence =
+        LWPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap();
+    let stored_state = if load_from_store {
+        lw_persistence
+            .load_latest_state()
+            .unwrap_or_else(|_| validator.clone())
+    } else {
+        validator.clone()
+    };
     let (_, phaselock) = PhaseLock::init(
         genesis,
         public_keys,
         secret_key_share,
         node_id,
         config,
-        validator.clone(),
+        validator,
         networking,
         MemoryStorage::default(),
-        LWPersistence::new("multi_machine_demo"),
+        lw_persistence,
     )
     .await;
     debug!("phaselock launched");
 
     let validator = if full_node {
+        let full_persisted =
+            FullPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap();
+
+        let records = if load_from_store {
+            let mut builder = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
+            for leaf in full_persisted.rmt_leaf_iter() {
+                builder.push(leaf.unwrap().0);
+            }
+            builder.build()
+        } else {
+            records
+        };
+        let nullifiers = if load_from_store {
+            full_persisted
+                .get_latest_nullifier_set()
+                .unwrap_or_else(|_| Default::default())
+        } else {
+            nullifiers
+        };
         let node = FullNode::new(
             phaselock,
             &*UNIVERSAL_PARAM,
-            validator.clone(),
-            records.clone(),
-            nullifiers.clone(),
+            stored_state,
+            records,
+            nullifiers,
             memos,
+            full_persisted,
         );
-        Node::Full(node)
+        Node::Full(Arc::new(RwLock::new(node)))
     } else {
         Node::Light(phaselock)
     };
@@ -658,7 +769,7 @@ fn init_web_server(
     opt_api_path: &str,
     opt_web_path: &str,
     own_id: u64,
-    node: FullNode<'static>,
+    node: Arc<RwLock<FullNode<'static>>>,
 ) -> Result<task::JoinHandle<Result<(), std::io::Error>>, tide::Error> {
     // Take the command line option for the web asset directory path
     // provided it is not empty. Otherwise, construct the default from
@@ -679,7 +790,7 @@ fn init_web_server(
         connections: Default::default(),
         web_path: web_path.clone(),
         api: api.clone(),
-        node: Arc::new(RwLock::new(node)),
+        node,
     });
     web_server.with(server::trace).with(server::add_error_body);
 
@@ -732,17 +843,22 @@ fn init_web_server(
     }
 
     let port = std::env::var("PORT").unwrap_or_else(|_| (50000 + &own_id).to_string());
-    let addr = format!("127.0.0.1:{}", port);
+    let addr = format!("0.0.0.0:{}", port);
     let join_handle = async_std::task::spawn(web_server.listen(addr));
     Ok(join_handle)
 }
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
-    tracing_subscriber::fmt().init();
+    tracing_subscriber::fmt().pretty().init();
 
     // Get configuration
     let node_config = get_node_config();
+
+    // Override the path to the universal parameter file if it's specified
+    if let Some(dir) = NodeOpt::from_args().universal_param_path {
+        std::env::set_var("UNIVERSAL_PARAM_PATH", dir);
+    }
 
     // Get secret key set
     let seed: [u8; 32] = node_config["seed"]
@@ -782,13 +898,21 @@ async fn main() -> Result<(), std::io::Error> {
         println!("Public key files created");
     }
 
+    // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
+    let load_from_store = NodeOpt::from_args().load_from_store;
+    if load_from_store {
+        println!("restoring from persisted session");
+    } else {
+        println!("initializing new session");
+    }
+
     if let Some(own_id) = NodeOpt::from_args().id {
         println!("Current node: {}", own_id);
         let secret_key_share = secret_keys.secret_key_share(own_id);
 
         // Get networking information
         let (own_network, _) =
-            get_networking(own_id, get_host(node_config.clone(), own_id).1).await;
+            get_networking(own_id, "0.0.0.0", get_host(node_config.clone(), own_id).1).await;
         #[allow(clippy::type_complexity)]
         let mut other_nodes: Vec<(u64, PubKey, String, u16)> = Vec::new();
         for id in 0..nodes {
@@ -828,20 +952,46 @@ async fn main() -> Result<(), std::io::Error> {
             own_id,
             own_network,
             NodeOpt::from_args().full,
+            load_from_store,
         )
         .await;
         let mut events = phaselock.subscribe();
 
         // If we are running a full node, also host a query API to inspect the accumulated state.
-        if let Node::Full(node) = &phaselock {
-            init_web_server(
-                &NodeOpt::from_args().api_path,
-                &NodeOpt::from_args().web_path,
-                own_id,
-                node.clone(),
+        let web_server = if let Node::Full(node) = &phaselock {
+            Some(
+                init_web_server(
+                    &NodeOpt::from_args().api_path,
+                    &NodeOpt::from_args().web_path,
+                    own_id,
+                    node.clone(),
+                )
+                .expect("Failed to initialize web server"),
             )
-            .expect("Failed to initialize web server");
-        }
+        } else {
+            None
+        };
+
+        #[cfg(target_os = "linux")]
+        let bytes_per_page = procfs::page_size().unwrap() as u64;
+        #[cfg(target_os = "linux")]
+        println!("{} bytes per page", bytes_per_page);
+
+        let fence = || std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+
+        let report_mem = || {
+            fence();
+            #[cfg(target_os = "linux")]
+            {
+                let process_stats = procfs::process::Process::myself().unwrap().statm().unwrap();
+                println!(
+                    "{:.3}MiB | raw: {:?}",
+                    ((process_stats.size * bytes_per_page) as f64) / ((1u64 << 20) as f64),
+                    process_stats
+                );
+            }
+            fence();
+        };
 
         // Start consensus for each transaction
         let mut round = 0;
@@ -849,29 +999,50 @@ async fn main() -> Result<(), std::io::Error> {
 
         // When `num_txn` is set, run `num_txn` rounds.
         // Otherwise, keeping running till the process is killed.
+        let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
+        let mut txn_proposed_round = 0;
         while num_txn.map(|count| round < count).unwrap_or(true) {
             println!("Starting round {}", round + 1);
+            report_mem();
+            println!("Commitment: {}", phaselock.current_state().await.commit());
 
             // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
-            let mut txn = None;
             if own_id == 0 {
-                if let Some(state) = &mut state {
+                if let Some(tx) = txn.as_ref() {
+                    println!("  - Reproposing a transaction");
+                    if txn_proposed_round + 5 < round {
+                        // TODO
+                        phaselock.submit_transaction(tx.clone().3).await.unwrap();
+                        txn_proposed_round = round;
+                    }
+                } else if let Some(mut true_state) = core::mem::take(&mut state) {
                     println!("  - Proposing a transaction");
-                    let mut transactions = state
-                        .generate_transactions(round as usize, vec![(true, 0, 0, 0, 0, -2)], 1)
-                        .unwrap();
+                    let (true_state, mut transactions) =
+                        async_std::task::spawn_blocking(move || {
+                            let txs = true_state
+                                .generate_transactions(
+                                    round as usize,
+                                    vec![(true, 0, 0, 0, 0, -2)],
+                                    1,
+                                )
+                                .unwrap();
+                            (true_state, txs)
+                        })
+                        .await;
                     txn = Some(transactions.remove(0));
+                    state = Some(true_state);
                     phaselock
                         .submit_transaction(txn.clone().unwrap().3)
                         .await
                         .unwrap();
+                    txn_proposed_round = round;
                 }
             }
 
             // If the output below is changed, update the message for line.trim() in Validator::new as well
             println!("  - Starting consensus");
             phaselock.start_consensus().await;
-            loop {
+            let success = loop {
                 println!("Waiting for PhaseLock event");
                 let event = events.next().await.expect("PhaseLock unexpectedly closed");
 
@@ -886,59 +1057,71 @@ async fn main() -> Result<(), std::io::Error> {
                                 round + 1,
                                 commitment
                             );
-                            break;
+                            break true;
                         }
                     }
                     EventType::ViewTimeout { view_number: _ } => {
                         println!("  - Round {} timed out.", round + 1);
-                        break;
+                        break false;
                     }
                     EventType::Error { error } => {
                         println!("  - Round {} error: {}", round + 1, error);
-                        break;
+                        break false;
                     }
                     _ => {
                         println!("EVENT: {:?}", event);
                     }
                 }
-            }
+            };
 
-            // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
-            // current node), and there is no attached wallet.
-            if let Some((ix, keys_and_memos, sig, t)) = txn {
-                let state = state.as_mut().unwrap();
-                println!("  - Adding the transaction");
-                let mut blk = ElaboratedBlock::default();
-                let (owner_memos, kixs) = {
-                    let mut owner_memos = vec![];
-                    let mut kixs = vec![];
+            if success {
+                // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
+                // current node), and there is no attached wallet.
+                if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
+                    let state = state.as_mut().unwrap();
+                    println!("  - Adding the transaction");
+                    let mut blk = ElaboratedBlock::default();
+                    let (owner_memos, kixs) = {
+                        let mut owner_memos = vec![];
+                        let mut kixs = vec![];
 
-                    for (kix, memo) in keys_and_memos {
-                        kixs.push(kix);
-                        owner_memos.push(memo);
+                        for (kix, memo) in keys_and_memos {
+                            kixs.push(kix);
+                            owner_memos.push(memo);
+                        }
+                        (owner_memos, kixs)
+                    };
+
+                    // If we're running a full node, publish the receiver memos.
+                    if let Node::Full(node) = &mut phaselock {
+                        node.write()
+                            .await
+                            .post_memos(round, ix as u64, owner_memos.clone(), sig)
+                            .await
+                            .unwrap();
                     }
-                    (owner_memos, kixs)
-                };
 
-                // If we're running a full node, publish the receiver memos.
-                if let Node::Full(node) = &mut phaselock {
-                    node.post_memos(round, ix as u64, owner_memos.clone(), sig)
-                        .await
+                    state
+                        .try_add_transaction(&mut blk, t, round as usize, ix, 1, owner_memos, kixs)
+                        .unwrap();
+                    state
+                        .validate_and_apply(blk, round as usize, 1, 0.0)
                         .unwrap();
                 }
-
-                state
-                    .try_add_transaction(&mut blk, t, round as usize, ix, 1, owner_memos, kixs)
-                    .unwrap();
-                state
-                    .validate_and_apply(blk, round as usize, 1, 0.0)
-                    .unwrap();
             }
 
             round += 1;
         }
 
         println!("All rounds completed");
+
+        if NodeOpt::from_args().wait {
+            if let Some(join_handle) = web_server {
+                join_handle.await.unwrap_or_else(|err| {
+                    panic!("web server exited with an error: {}", err);
+                });
+            }
+        }
     }
 
     Ok(())

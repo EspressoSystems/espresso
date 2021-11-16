@@ -180,12 +180,12 @@ impl WalletLoader for UnencryptedWalletLoader {
     }
 
     fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError> {
-        let key = KeyTree::from_password_and_salt(&[], &[]).context(KeyError)?;
+        let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)?;
         Ok(((), key))
     }
 
     fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
-        KeyTree::from_password_and_salt(&[], &[]).context(KeyError)
+        KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)
     }
 }
 

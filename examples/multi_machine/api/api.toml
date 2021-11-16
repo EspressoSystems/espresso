@@ -178,6 +178,10 @@ PATH = ["getuser/:address"]
 DOC = "Returns the public key of a user with a specified address."
 ERROR_address = "A valid user address is required. User addresses begin with ADDR~, for example, ADDR~Ab12whatever."
 
+[route.getusers]
+PATH = ["getusers"]
+DOC = "Returns a list of the public keys of all known users."
+
 [route.getnullifier]
 PATH = ["getnullifier/:root/:nullifier"]
 ":root" = "TaggedBase64"
@@ -196,3 +200,10 @@ DOC = """
 Gets the requested state commitment. Indexing is the same as for `getsnapshot`.
 """
 ERROR_index = "The index must be a non-negative integer."
+
+[route.getevent]
+PATH = ["getevent/:index"]
+":index" = "Integer"
+DOC = """
+Get the event with the designated index.
+"""

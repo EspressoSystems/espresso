@@ -16,9 +16,8 @@ use tide::StatusCode;
 use tide_websockets::WebSocketConnection;
 use tracing::{event, Level};
 use zerok_lib::api::*;
-use zerok_lib::node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
+use zerok_lib::node::{LedgerEvent, LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
 use zerok_lib::state_comm::LedgerStateCommitment;
-use zerok_lib::SetMerkleTree;
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -113,6 +112,7 @@ pub enum ApiRouteKey {
     getblockcount,
     getblockhash,
     getblockid,
+    getevent,
     getinfo,
     getmempool,
     getnullifier,
@@ -122,6 +122,7 @@ pub enum ApiRouteKey {
     getunspentrecord,
     getunspentrecordsetinfo,
     getuser,
+    getusers,
     subscribe,
 }
 
@@ -220,7 +221,7 @@ async fn get_block(
     // The block numbered `index` is the block which was applied to the `index` state. Therefore,
     // the next state (the one that resulted from this block) is `index + 1`.
     let state = query_service
-        .get_snapshot(index + 1)
+        .get_snapshot(index + 1, true, true)
         .await
         .map_err(server_error)?
         .state;
@@ -384,19 +385,11 @@ async fn get_snapshot(
             num_blocks
         }
     };
-    let mut snapshot = query_service
-        .get_snapshot(index)
+    let sparse = bindings[":sparse"].value.as_boolean()?;
+    query_service
+        .get_snapshot(index, sparse, sparse)
         .await
-        .map_err(server_error)?;
-    if bindings[":sparse"].value.as_boolean()? {
-        snapshot.nullifiers = SetMerkleTree::sparse(snapshot.nullifiers.hash());
-
-        //todo! jeb.bearer There must be a way to quickly sparsify an entire Merkle tree.
-        for i in 0..snapshot.state.record_merkle_frontier.num_leaves() {
-            snapshot.state.record_merkle_frontier.forget(i);
-        }
-    }
-    Ok(snapshot)
+        .map_err(server_error)
 }
 
 async fn get_state_comm(
@@ -416,7 +409,7 @@ async fn get_state_comm(
         }
     };
     let snapshot = query_service
-        .get_snapshot(index)
+        .get_snapshot(index, true, true)
         .await
         .map_err(server_error)?;
     Ok(snapshot.state.commit())
@@ -432,6 +425,16 @@ async fn get_user(
         .map_err(server_error)
 }
 
+async fn get_users(query_service: &impl QueryService) -> Result<Vec<UserPubKey>, tide::Error> {
+    Ok(query_service
+        .get_users()
+        .await
+        .map_err(server_error)?
+        .values()
+        .cloned()
+        .collect())
+}
+
 async fn get_nullifier(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &impl QueryService,
@@ -444,6 +447,17 @@ async fn get_nullifier(
         .await
         .map_err(server_error)?;
     Ok(NullifierProof { spent, proof })
+}
+
+async fn get_event(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &impl QueryService,
+) -> Result<LedgerEvent, tide::Error> {
+    let index = bindings[":index"].value.as_index()? as u64;
+    let mut events = query_service.subscribe(index).await;
+    events.next().await.ok_or_else(|| {
+        tide::Error::from_str(StatusCode::InternalServerError, "event stream terminated")
+    })
 }
 
 async fn subscribe(
@@ -487,6 +501,7 @@ pub async fn dispatch_url(
         ApiRouteKey::getblockcount => response(&req, get_block_count(query_service).await?),
         ApiRouteKey::getblockhash => response(&req, get_block_hash(bindings, query_service).await?),
         ApiRouteKey::getblockid => response(&req, get_block_id(bindings, query_service).await?),
+        ApiRouteKey::getevent => response(&req, get_event(bindings, query_service).await?),
         ApiRouteKey::getinfo => response(&req, get_info(query_service).await?),
         ApiRouteKey::getmempool => dummy_url_eval(route_pattern, bindings),
         ApiRouteKey::gettransaction => {
@@ -498,6 +513,7 @@ pub async fn dispatch_url(
         ApiRouteKey::getunspentrecordsetinfo => dummy_url_eval(route_pattern, bindings),
         ApiRouteKey::getsnapshot => response(&req, get_snapshot(bindings, query_service).await?),
         ApiRouteKey::getuser => response(&req, get_user(bindings, query_service).await?),
+        ApiRouteKey::getusers => response(&req, get_users(query_service).await?),
         ApiRouteKey::getnullifier => response(&req, get_nullifier(bindings, query_service).await?),
         ApiRouteKey::getstatecomm => response(&req, get_state_comm(bindings, query_service).await?),
         _ => Err(tide::Error::from_str(

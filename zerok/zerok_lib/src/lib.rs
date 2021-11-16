@@ -12,6 +12,8 @@ use zerok_macros::*;
 extern crate quickcheck_macros;
 
 pub mod api;
+pub mod committee;
+pub mod full_persistence;
 pub mod lw_persistence;
 pub mod node;
 mod set_merkle_tree;
@@ -25,9 +27,9 @@ use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
-use core::convert::TryFrom;
 use core::fmt::Debug;
 use core::iter::once;
+pub use full_persistence::FullPersistence;
 use jf_txn::{
     errors::TxnApiError,
     keys::UserKeyPair,
@@ -41,7 +43,8 @@ use jf_txn::{
     transfer::{TransferNote, TransferNoteInput},
     txn_batch_verify,
     utils::compute_universal_param_size,
-    AccMemberWitness, MerkleTree, NodeValue, Signature, TransactionNote, TransactionVerifyingKey,
+    AccMemberWitness, MerkleCommitment, MerkleFrontier, MerkleLeafProof, MerkleTree, NodeValue,
+    Signature, TransactionNote, TransactionVerifyingKey,
 };
 use jf_utils::tagged_blob;
 use lazy_static::lazy_static;
@@ -132,12 +135,10 @@ pub struct Block(pub Vec<TransactionNote>);
     Serialize,
     Deserialize,
 )]
-#[serde(into = "CanonicalBytes", from = "CanonicalBytes")]
 pub struct ElaboratedBlock {
     pub block: Block,
     pub proofs: Vec<Vec<SetMerkleProof>>,
 }
-deserialize_canonical_bytes!(ElaboratedBlock);
 
 impl Committable for ElaboratedBlock {
     fn commit(&self) -> Commitment<Self> {
@@ -549,6 +550,46 @@ impl Committable for RecordMerkleHistory {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecordMerkleCommitment(pub MerkleCommitment);
+
+impl Committable for RecordMerkleCommitment {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("RMT Comm")
+            .constant_str("height")
+            .u64(self.0.height as u64)
+            .constant_str("num_leaves")
+            .u64(self.0.num_leaves)
+            .constant_str("root_value")
+            .var_size_bytes(&canonical::serialize(&self.0.root_value).unwrap())
+            .finalize()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecordMerkleFrontier(pub MerkleFrontier);
+
+impl Committable for RecordMerkleFrontier {
+    fn commit(&self) -> commit::Commitment<Self> {
+        let mut ret = commit::RawCommitmentBuilder::new("RMFrontier");
+        match &self.0 {
+            MerkleFrontier::Empty { height } => {
+                ret = ret.constant_str("empty height").u64(*height as u64);
+            }
+            MerkleFrontier::Proof(MerkleLeafProof { leaf, path }) => {
+                ret = ret
+                    .constant_str("leaf")
+                    .var_size_bytes(&canonical::serialize(&leaf.0).unwrap())
+                    .constant_str("path");
+                for step in path.nodes.iter() {
+                    ret = ret.var_size_bytes(&canonical::serialize(step).unwrap())
+                }
+            }
+        }
+        ret.finalize()
+    }
+}
+
 pub mod state_comm {
     use super::*;
     use jf_utils::tagged_blob;
@@ -583,10 +624,10 @@ pub mod state_comm {
         pub prev_commit_time: u64,
         pub prev_state: Option<state_comm::LedgerStateCommitment>,
         pub verif_crs: Commitment<VerifierKeySet>,
-        pub record_merkle_root: NodeValue,
+        pub record_merkle_commitment: Commitment<RecordMerkleCommitment>,
+        pub record_merkle_frontier: Commitment<RecordMerkleFrontier>,
         pub past_record_merkle_roots: Commitment<RecordMerkleHistory>,
         pub nullifiers: set_hash::Hash,
-        pub next_uid: u64,
         pub prev_block: Commitment<Block>,
     }
 
@@ -604,13 +645,10 @@ pub mod state_comm {
                         .collect::<Vec<_>>(),
                 )
                 .field("verif_crs", self.verif_crs)
-                .var_size_field(
-                    "record_merkle_root",
-                    &canonical::serialize(&self.record_merkle_root).unwrap(),
-                )
+                .field("record_merkle_commitment", self.record_merkle_commitment)
+                .field("record_merkle_frontier", self.record_merkle_frontier)
                 .field("past_record_merkle_roots", self.past_record_merkle_roots)
                 .field("nullifiers", self.nullifiers.into())
-                .u64_field("next_uid", self.next_uid)
                 .field("prev_block", self.prev_block)
                 .finalize()
         }
@@ -623,14 +661,14 @@ pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: Option<state_comm::LedgerStateCommitment>,
     pub verif_crs: VerifierKeySet,
-    // The current record Merkle root hash
-    pub record_merkle_root: NodeValue,
+    // The current record Merkle commitment
+    pub record_merkle_commitment: MerkleCommitment,
+    // The current frontier of the record Merkle tree
+    pub record_merkle_frontier: MerkleFrontier,
     // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
     pub past_record_merkle_roots: RecordMerkleHistory,
-    pub record_merkle_frontier: MerkleTree,
     pub nullifiers_root: set_hash::Hash,
-    pub next_uid: u64,
-    pub prev_block: Block,
+    pub prev_block: BlockCommitment,
 }
 
 impl ValidatorState {
@@ -643,20 +681,18 @@ impl ValidatorState {
 
     pub fn new(verif_crs: VerifierKeySet, record_merkle_frontier: MerkleTree) -> Self {
         let nullifiers: SetMerkleTree = Default::default();
-        let next_uid = record_merkle_frontier.num_leaves();
 
         Self {
             prev_commit_time: 0u64,
             prev_state: None,
             verif_crs,
-            record_merkle_root: record_merkle_frontier.get_root_value(),
+            record_merkle_commitment: record_merkle_frontier.commitment(),
+            record_merkle_frontier: record_merkle_frontier.frontier(),
             past_record_merkle_roots: RecordMerkleHistory(VecDeque::with_capacity(
                 Self::RECORD_ROOT_HISTORY_SIZE,
             )),
-            record_merkle_frontier,
             nullifiers_root: nullifiers.hash(),
-            next_uid,
-            prev_block: Default::default(),
+            prev_block: BlockCommitment(Block::default().commit()),
         }
     }
 
@@ -665,7 +701,10 @@ impl ValidatorState {
             prev_commit_time: self.prev_commit_time,
             prev_state: self.prev_state,
             verif_crs: self.verif_crs.commit(),
-            record_merkle_root: self.record_merkle_root,
+            record_merkle_commitment: RecordMerkleCommitment(self.record_merkle_commitment)
+                .commit(),
+            record_merkle_frontier: RecordMerkleFrontier(self.record_merkle_frontier.clone())
+                .commit(),
             // We need to include all the cached past record Merkle roots in the state commitment,
             // even though they are not part of the current ledger state, because they affect
             // validation: two validators with different caches will be able to validate different
@@ -685,8 +724,7 @@ impl ValidatorState {
             past_record_merkle_roots: self.past_record_merkle_roots.commit(),
 
             nullifiers: self.nullifiers_root,
-            next_uid: self.next_uid,
-            prev_block: self.prev_block.commit(),
+            prev_block: self.prev_block.0,
         };
         // dbg!(&inputs);
         inputs.commit().into()
@@ -752,7 +790,7 @@ impl ValidatorState {
                     .map(|note| {
                         // Only validate transactions if we can confirm that the record Merkle root
                         // they were generated with is a valid previous or current ledger state.
-                        if self.record_merkle_root == note.merkle_root()
+                        if self.record_merkle_commitment.root_value == note.merkle_root()
                             || self
                                 .past_record_merkle_roots
                                 .0
@@ -782,7 +820,6 @@ impl ValidatorState {
         now: u64,
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
-        remember_commitments: bool,
     ) -> Result<Vec<u64> /* new uids */, ValidationError> {
         // If the block successfully validates, and the nullifier proofs apply correctly,
         // the remaining (mutating) operations cannot fail, as this would result in an
@@ -791,7 +828,7 @@ impl ValidatorState {
         let (txns, _null_pfs) = self.validate_block_check(now, txns, null_pfs.clone())?;
         let comm = self.commit();
         self.prev_commit_time = now;
-        self.prev_block = txns.clone();
+        self.prev_block = BlockCommitment(txns.commit());
 
         let nullifiers = txns
             .0
@@ -804,26 +841,25 @@ impl ValidatorState {
             .map_err(|_| ValidationError::BadNullifierProof {})?
             .0;
 
+        let mut record_merkle_frontier = MerkleTree::restore_from_frontier(
+            self.record_merkle_commitment,
+            &self.record_merkle_frontier,
+        )
+        .ok_or(ValidationError::BadMerklePath {})?;
         let mut ret = vec![];
+        let mut uid = self.record_merkle_commitment.num_leaves;
         for o in txns
             .0
             .iter()
             .flat_map(|x| x.output_commitments().into_iter())
         {
-            let uid = self.next_uid;
-            self.record_merkle_frontier.push(o.to_field_element());
-            if !remember_commitments {
-                // Always keep the latest leaf, but forget the prior leafs
-                if uid > 0 {
-                    self.record_merkle_frontier
-                        .forget(uid - 1)
-                        .expect_ok()
-                        .unwrap();
-                }
+            record_merkle_frontier.push(o.to_field_element());
+            if uid > 0 {
+                record_merkle_frontier.forget(uid - 1).expect_ok().unwrap();
             }
             ret.push(uid);
-            self.next_uid += 1;
-            assert_eq!(self.next_uid, self.record_merkle_frontier.num_leaves());
+            uid += 1;
+            assert_eq!(uid, record_merkle_frontier.num_leaves());
         }
 
         if self.past_record_merkle_roots.0.len() >= Self::RECORD_ROOT_HISTORY_SIZE {
@@ -831,8 +867,9 @@ impl ValidatorState {
         }
         self.past_record_merkle_roots
             .0
-            .push_front(self.record_merkle_root);
-        self.record_merkle_root = self.record_merkle_frontier.get_root_value();
+            .push_front(self.record_merkle_commitment.root_value);
+        self.record_merkle_commitment = record_merkle_frontier.commitment();
+        self.record_merkle_frontier = record_merkle_frontier.frontier();
         self.prev_state = Some(comm);
         Ok(ret)
     }
@@ -889,7 +926,6 @@ impl State<H_256> for ValidatorState {
             state.prev_commit_time + 1,
             block.block.clone(),
             block.proofs.clone(),
-            false,
         )?;
         Ok(state)
     }
@@ -897,6 +933,7 @@ impl State<H_256> for ValidatorState {
     fn on_commit(&self) {}
 }
 
+#[derive(Debug)]
 pub struct MultiXfrTestState {
     pub prng: ChaChaRng,
 
@@ -921,13 +958,6 @@ pub struct MultiXfrTestState {
 
     pub outer_timer: Instant,
     pub inner_timer: Instant,
-}
-
-/// Returns the path to the universal parameter file.
-fn universal_param_path() -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    const FILE: &str = "src/universal_param";
-    [&dir, Path::new(FILE)].iter().collect()
 }
 
 /// Generates universal parameter and store it to file.
@@ -967,7 +997,8 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
     .unwrap_or_else(|err| panic!("Error while setting up the universal parameter: {}", err));
     let param_bytes = canonical::serialize(&universal_param)
         .unwrap_or_else(|err| panic!("Error while serializing the universal parameter: {}", err));
-    let path = universal_param_path()
+    let path = UNIVERSAL_PARAM_PATH
+        .clone()
         .into_os_string()
         .into_string()
         .expect("Error while converting universal parameter path to a string");
@@ -985,21 +1016,19 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
 /// Reads universal parameter from file if it exists. If not, generates the universal parameter, stores
 /// it to file, and returns it.
 pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalParam {
-    let path = universal_param_path();
-
     // create a new seeded PRNG from the master PRNG when getting the UniversalParam. This ensures a
     // deterministic RNG result after the call, either the UniversalParam is newly generated or loaded
     // from a file.
     let mut new_prng = ChaChaRng::from_rng(prng)
         .unwrap_or_else(|err| panic!("Error while creating a new PRNG: {}", err));
-    let mut file = match File::open(&path) {
+    let mut file = match File::open(&*UNIVERSAL_PARAM_PATH) {
         Ok(f) => f,
         Err(_) => {
             set_universal_param(&mut new_prng);
-            File::open(&path).unwrap_or_else(|_| {
+            File::open(&*UNIVERSAL_PARAM_PATH).unwrap_or_else(|_| {
                 panic!(
                     "Cannot find the universal parameter file after generation: {}",
-                    path.display()
+                    UNIVERSAL_PARAM_PATH.display()
                 )
             })
         }
@@ -1012,6 +1041,17 @@ pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalPara
 }
 
 lazy_static! {
+    // By default, set the path to the universal parameter file as `src/universal_param` under `CARGO_MANIFEST_DIR`.
+    // Override it with the environment variable, `UNIVERSAL_PARAM_PATH`.
+    static ref UNIVERSAL_PARAM_PATH: PathBuf = match std::env::var("UNIVERSAL_PARAM_PATH") {
+        Ok(path) => PathBuf::from(path),
+        _ => [
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            Path::new("src/universal_param")
+        ]
+        .iter()
+        .collect(),
+    };
     pub static ref UNIVERSAL_PARAM: jf_txn::proof::UniversalParam =
         get_universal_param(&mut ChaChaRng::from_seed([0x8au8; 32]));
 }
@@ -1048,15 +1088,68 @@ impl MultiXfrTestState {
         Self::update_timer(&mut timer, |_| println!("Generating params"));
         let mut prng = ChaChaRng::from_seed(seed);
 
+        #[cfg(target_os = "linux")]
+        let bytes_per_page = procfs::page_size().unwrap() as u64;
+        #[cfg(target_os = "linux")]
+        println!("{} bytes per page", bytes_per_page);
+
+        let fence = || std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+
+        let report_mem = || {
+            fence();
+            #[cfg(target_os = "linux")]
+            {
+                let process_stats = procfs::process::Process::myself().unwrap().statm().unwrap();
+                println!(
+                    "{:.3}MiB | raw: {:?}",
+                    ((process_stats.size * bytes_per_page) as f64) / ((1u64 << 20) as f64),
+                    process_stats
+                );
+            }
+            fence();
+        };
+
+        report_mem();
+
+        fence();
         let univ_setup = &*UNIVERSAL_PARAM;
+        fence();
+        Self::update_timer(&mut timer, |t| {
+            println!("Generated universal params: {}s", t)
+        });
+
+        report_mem();
+
+        fence();
         let (xfr_prove_key_22, xfr_verif_key_22, _) =
             jf_txn::proof::transfer::preprocess(univ_setup, 2, 2, MERKLE_HEIGHT)?;
+        fence();
+        Self::update_timer(&mut timer, |t| println!("Generated xfr22: {}s", t));
+
+        report_mem();
+
+        fence();
         let (xfr_prove_key_33, xfr_verif_key_33, _) =
             jf_txn::proof::transfer::preprocess(univ_setup, 3, 3, MERKLE_HEIGHT)?;
+        fence();
+        Self::update_timer(&mut timer, |t| println!("Generated xfr33: {}s", t));
+
+        fence();
+        report_mem();
         let (mint_prove_key, mint_verif_key, _) =
             jf_txn::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT)?;
+        fence();
+        Self::update_timer(&mut timer, |t| println!("Generated mint: {}s", t));
+
+        report_mem();
+
+        fence();
         let (freeze_prove_key, freeze_verif_key, _) =
             jf_txn::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT)?;
+        fence();
+        Self::update_timer(&mut timer, |t| println!("Generated freeze: {}s", t));
+
+        report_mem();
 
         let native_token = AssetDefinition::native();
 
@@ -1225,6 +1318,8 @@ impl MultiXfrTestState {
                                 .get_leaf(fee_ix as u64)
                                 .expect_ok()
                                 .unwrap()
+                                .1
+                                .leaf
                                 .0,
                         );
                         let memo = ret.memos[fee_ix as usize].clone();
@@ -1239,8 +1334,8 @@ impl MultiXfrTestState {
                     };
 
                     assert_eq!(
-                        ret.record_merkle_tree.get_root_value(),
-                        ret.validator.record_merkle_frontier.get_root_value()
+                        ret.record_merkle_tree.commitment(),
+                        ret.validator.record_merkle_commitment
                     );
                     let fee_input = FeeInput {
                         ro: fee_rec,
@@ -1251,8 +1346,9 @@ impl MultiXfrTestState {
                                 .get_leaf(fee_ix)
                                 .expect_ok()
                                 .unwrap()
-                                .1,
-                            root: ret.validator.record_merkle_frontier.get_root_value(),
+                                .1
+                                .path,
+                            root: ret.validator.record_merkle_commitment.root_value,
                             uid: fee_ix,
                         },
                     };
@@ -1376,6 +1472,8 @@ impl MultiXfrTestState {
                                 .get_leaf(i as u64)
                                 .expect_ok()
                                 .unwrap()
+                                .1
+                                .leaf
                                 .0,
                         );
 
@@ -1396,6 +1494,8 @@ impl MultiXfrTestState {
                                         .get_leaf(fee_ix as u64)
                                         .expect_ok()
                                         .unwrap()
+                                        .1
+                                        .leaf
                                         .0,
                                 );
                                 let memo = self.memos[fee_ix as usize].clone();
@@ -1448,6 +1548,8 @@ impl MultiXfrTestState {
                                 .get_leaf(i as u64)
                                 .expect_ok()
                                 .unwrap()
+                                .1
+                                .leaf
                                 .0,
                         );
 
@@ -1475,6 +1577,8 @@ impl MultiXfrTestState {
                                             .get_leaf(fee_ix as u64)
                                             .expect_ok()
                                             .unwrap()
+                                            .1
+                                            .leaf
                                             .0,
                                     );
                                     let memo = self.memos[fee_ix as usize].clone();
@@ -1600,8 +1704,9 @@ impl MultiXfrTestState {
                                 .get_leaf(fee_ix)
                                 .expect_ok()
                                 .unwrap()
-                                .1,
-                            root: self.validator.record_merkle_frontier.get_root_value(),
+                                .1
+                                .path,
+                            root: self.validator.record_merkle_commitment.root_value,
                             uid: fee_ix,
                         },
                     };
@@ -1616,8 +1721,9 @@ impl MultiXfrTestState {
                                 .get_leaf(in1 as u64)
                                 .expect_ok()
                                 .unwrap()
-                                .1,
-                            root: self.validator.record_merkle_frontier.get_root_value(),
+                                .1
+                                .path,
+                            root: self.validator.record_merkle_commitment.root_value,
                             uid: in1 as u64,
                         },
                     };
@@ -1632,8 +1738,9 @@ impl MultiXfrTestState {
                                 .get_leaf(in2 as u64)
                                 .expect_ok()
                                 .unwrap()
-                                .1,
-                            root: self.validator.record_merkle_frontier.get_root_value(),
+                                .1
+                                .path,
+                            root: self.validator.record_merkle_commitment.root_value,
                             uid: in2 as u64,
                         },
                     };
@@ -1778,8 +1885,9 @@ impl MultiXfrTestState {
                     .get_leaf(fee_ix)
                     .expect_ok()
                     .unwrap()
-                    .1,
-                root: self.validator.record_merkle_frontier.get_root_value(),
+                    .1
+                    .path,
+                root: self.validator.record_merkle_commitment.root_value,
                 uid: fee_ix,
             },
         };
@@ -1794,8 +1902,9 @@ impl MultiXfrTestState {
                     .get_leaf(rec_ix as u64)
                     .expect_ok()
                     .unwrap()
-                    .1,
-                root: self.validator.record_merkle_frontier.get_root_value(),
+                    .1
+                    .path,
+                root: self.validator.record_merkle_commitment.root_value,
                 uid: rec_ix as u64,
             },
         };
@@ -1970,6 +2079,8 @@ impl MultiXfrTestState {
                         .get_leaf(uid as u64)
                         .expect_ok()
                         .unwrap()
+                        .1
+                        .leaf
                         .0,
                 );
                 let ro = memo.decrypt(key, &comm, &[]).unwrap();
@@ -2004,6 +2115,31 @@ mod tests {
     use jf_primitives::merkle_tree::LookupResult;
     use jf_txn::BaseField;
     use quickcheck::QuickCheck;
+    use rand::Rng;
+
+    #[test]
+    fn multixfr_setup() {
+        let state = MultiXfrTestState::initialize(
+            [0x7au8; 32],
+            10,
+            10,
+            (
+                MultiXfrRecordSpec {
+                    asset_def_ix: 0,
+                    owner_key_ix: 0,
+                    asset_amount: 10,
+                },
+                vec![],
+            ),
+        )
+        .unwrap();
+
+        std::thread::sleep(core::time::Duration::from_millis(60000));
+
+        if rand::thread_rng().gen::<u64>() == 0 {
+            println!("{:?}", state)
+        }
+    }
 
     /*
      * Test idea:
@@ -2284,8 +2420,8 @@ mod tests {
 
         let mut t = MerkleTree::new(MERKLE_HEIGHT).unwrap();
         assert_eq!(
-            t.get_root_value(),
-            MerkleTree::new(MERKLE_HEIGHT).unwrap().get_root_value()
+            t.commitment(),
+            MerkleTree::new(MERKLE_HEIGHT).unwrap().commitment()
         );
         let alice_rec_elem = RecordCommitment::from(&alice_rec1);
         // dbg!(&RecordCommitment::from(&alice_rec1));
@@ -2294,7 +2430,7 @@ mod tests {
             RecordCommitment::from(&alice_rec1)
         );
         t.push(RecordCommitment::from(&alice_rec1).to_field_element());
-        let alice_rec_path = t.get_leaf(0).expect_ok().unwrap().1;
+        let alice_rec_path = t.get_leaf(0).expect_ok().unwrap().1.path;
         assert_eq!(alice_rec_path.nodes.len(), MERKLE_HEIGHT as usize);
 
         let mut nullifiers: SetMerkleTree = Default::default();
@@ -2302,7 +2438,7 @@ mod tests {
         println!("Tree set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
 
-        let first_root = t.get_root_value();
+        let first_root = t.commitment().root_value;
 
         let alice_rec_final = TransferNoteInput {
             ro: alice_rec1,
@@ -2336,10 +2472,9 @@ mod tests {
         let now = Instant::now();
 
         MerkleTree::check_proof(
-            validator.record_merkle_root,
+            validator.record_merkle_commitment.root_value,
             0,
-            alice_rec_elem.to_field_element(),
-            &alice_rec_path,
+            &MerkleLeafProof::new(alice_rec_elem.to_field_element(), alice_rec_path),
         )
         .unwrap();
 
@@ -2398,7 +2533,6 @@ mod tests {
                 1,
                 Block(vec![TransactionNote::Transfer(Box::new(txn1))]),
                 vec![nullifier_pfs],
-                false,
             )
             .unwrap();
 
@@ -2418,8 +2552,8 @@ mod tests {
             owner_keypair: &bob_key,
             cred: None,
             acc_member_witness: AccMemberWitness {
-                merkle_path: wallet_merkle_tree.get_leaf(2).expect_ok().unwrap().1,
-                root: validator.record_merkle_frontier.get_root_value(),
+                merkle_path: wallet_merkle_tree.get_leaf(2).expect_ok().unwrap().1.path,
+                root: validator.record_merkle_commitment.root_value,
                 uid: 2,
             },
         };
@@ -2480,10 +2614,9 @@ mod tests {
                             (Some(map_val), LookupResult::Ok(_tree_val, tree_proof)) => {
                                 // assert_eq!(map_val,tree_val);
                                 MerkleTree::check_proof(
-                                    t.get_root_value(),
+                                    t.commitment().root_value,
                                     *i as u64,
-                                    map_val,
-                                    &tree_proof,
+                                    &MerkleLeafProof::new(map_val, tree_proof.path),
                                 )
                                 .expect("Merkle path verification failed");
                             }
@@ -2496,7 +2629,7 @@ mod tests {
             }
         }
 
-        assert_eq!(t1.get_root_value(), t2.get_root_value());
+        assert_eq!(t1.commitment(), t2.commitment());
     }
 
     #[test]

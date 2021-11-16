@@ -248,7 +248,7 @@ impl CliClient {
             .write_all(config.to_string().as_bytes())
             .unwrap();
 
-        block_on(futures::future::join_all(
+        let ret = block_on(futures::future::join_all(
             server_ports.into_iter().enumerate().map(|(i, port)| {
                 let mut v = Validator::new(&config_file, key_path, i, port);
                 async move {
@@ -258,7 +258,10 @@ impl CliClient {
             }),
         ))
         .into_iter()
-        .collect::<Result<_, _>>()
+        .collect::<Result<_, _>>();
+
+        println!("All validators started");
+        ret
     }
 }
 
@@ -419,6 +422,7 @@ pub struct Validator {
     process: Option<Child>,
     id: usize,
     cfg_path: PathBuf,
+    store_path: PathBuf,
     key_path: PathBuf,
     port: u64,
 }
@@ -438,6 +442,13 @@ impl Validator {
 
     fn new(cfg_path: &Path, key_path: &Path, id: usize, port: u64) -> Self {
         let cfg_path = PathBuf::from(cfg_path);
+        let mut store_path = cfg_path.clone();
+        store_path.pop(); // remove config toml file
+        store_path.push(format!("store_for_{}", id));
+        println!(
+            "Launching validator with store path {}",
+            store_path.as_os_str().to_str().unwrap()
+        );
         let mut key_path = PathBuf::from(key_path);
         key_path.set_extension("pub");
 
@@ -445,6 +456,7 @@ impl Validator {
             process: None,
             id,
             cfg_path,
+            store_path,
             key_path,
             port,
         }
@@ -456,6 +468,7 @@ impl Validator {
         }
 
         let cfg_path = self.cfg_path.clone();
+        let store_path = self.store_path.clone();
         let key_path = self.key_path.clone();
         let id = self.id;
         let port = self.port;
@@ -465,6 +478,8 @@ impl Validator {
                 .args([
                     "--config",
                     cfg_path.as_os_str().to_str().unwrap(),
+                    "--store_path",
+                    store_path.as_os_str().to_str().unwrap(),
                     "--full",
                     "--id",
                     &id.to_string(),
@@ -479,10 +494,22 @@ impl Validator {
             let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
             while let Some(line) = lines.next() {
                 let line = line.unwrap();
+                println!("[id {}] Waiting for start: {}", id, line);
                 if line.trim() == "- Starting consensus" {
-                    // Spawn a detached task to consume the validator's stdout. If we don't do this,
-                    // the validator will eventually fill up its output pipe and block.
-                    async_std::task::spawn(async move { while lines.next().is_some() {} });
+                    async_std::task::spawn_blocking(
+                        // A detached task to consume the validator's
+                        // stdout. If we don't do this, the validator will
+                        // eventually fill up its output pipe and block.
+                        move || {
+                            while let Some(line) = lines.next() {
+                                if line.is_ok() {
+                                    println!("[id {}]{}", id, line.unwrap());
+                                } else {
+                                    println!("[id {}]{:?}", id, line.err())
+                                }
+                            }
+                        },
+                    );
                     return Ok(child);
                 }
             }
@@ -491,6 +518,7 @@ impl Validator {
         .await?;
 
         self.process = Some(child);
+        println!("Leaving Validator::new for {}", id);
         Ok(())
     }
 

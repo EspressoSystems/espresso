@@ -35,7 +35,6 @@ use jf_utils::{tagged_blob, Tagged};
 use phaselock::BlockHash;
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, ResultExt, Snafu};
-use std::convert::TryFrom;
 use std::fmt;
 use tagged_base64::TaggedBase64;
 
