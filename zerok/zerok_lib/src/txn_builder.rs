@@ -315,7 +315,7 @@ impl<'a> XfrState<'a> {
         receiver: UserPubKey,
         fee_rec: Option<(u64, RecordOpening)>,
         fee: u64,
-    ) -> Result<ElaboratedTransaction, XfrError> {
+    ) -> Result<(Vec<ReceiverMemo>, Signature, ElaboratedTransaction), XfrError> {
         let (ro, uid) = self.find_record()?;
 
         let mut outputs = vec![];
@@ -376,12 +376,17 @@ impl<'a> XfrState<'a> {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
-        self.generate_elaborated_transaction(
-            TransactionNote::Transfer(Box::new(note)),
-            recv_memos,
-            sig,
-            vec![],
-        )
-        .await
+        match self
+            .generate_elaborated_transaction(
+                TransactionNote::Transfer(Box::new(note)),
+                recv_memos,
+                sig,
+                vec![],
+            )
+            .await
+        {
+            Ok(elaborated_txn) => Ok((recv_memos, sig, elaborated_txn)),
+            Err(e) => Err(e),
+        }
     }
 }
