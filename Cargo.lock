@@ -5235,6 +5235,7 @@ dependencies = [
  "jf-txn",
  "jf-utils",
  "lazy_static",
+ "rand 0.8.4",
  "rand_chacha 0.3.1",
  "regex",
  "rpassword",
@@ -5244,9 +5245,12 @@ dependencies = [
  "shutdown_hooks",
  "snafu",
  "structopt",
+ "surf",
  "tagged-base64",
  "tempdir",
  "toml 0.5.8",
+ "tracing",
+ "tracing-subscriber 0.2.25",
  "zerok_lib",
 ]
 
