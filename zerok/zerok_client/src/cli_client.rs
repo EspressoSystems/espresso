@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use async_std::task::{block_on, spawn_blocking};
 use escargot::CargoBuild;
 use lazy_static::lazy_static;
@@ -13,21 +15,21 @@ use toml::Value;
 
 /// Set up and run a test of the wallet CLI.
 ///
-/// This function initializes a [TestState] for a new network of wallets and passes it to the test
+/// This function initializes a [CliClient] for a new network of wallets and passes it to the test
 /// function. The result is converted to an error as if by unwrapping.
 ///
 /// It is important that CLI tests fail by returning an [Err] [Result], rather than by panicking,
-/// because panicking while borrowing from a [TestState] can prevent the [TestState] destructor from
-/// running, which can leak long-lived processes. This function will ensure the [TestState] is
+/// because panicking while borrowing from a [CliClient] can prevent the [CliClient] destructor from
+/// running, which can leak long-lived processes. This function will ensure the [CliClient] is
 /// dropped before it panics.
-pub fn cli_test(test: impl Fn(&mut TestState) -> Result<(), String>) {
-    if let Err(msg) = test(&mut TestState::new().unwrap()) {
+pub fn cli_test(test: impl Fn(&mut CliClient) -> Result<(), String>) {
+    if let Err(msg) = test(&mut CliClient::new().unwrap()) {
         panic!("{}", msg);
     }
 }
 
-pub struct TestState {
-    _validators: Vec<Validator>,
+pub struct CliClient {
+    validators: Vec<Validator>,
     wallets: Vec<Wallet>,
     variables: HashMap<String, String>,
     prev_output: Vec<String>,
@@ -35,8 +37,8 @@ pub struct TestState {
     _tmp_dir: TempDir,
 }
 
-impl TestState {
-    fn new() -> Result<Self, String> {
+impl CliClient {
+    pub fn new() -> Result<Self, String> {
         // Generate keys for the primary wallet.
         let tmp_dir = TempDir::new("test_wallet_cli").map_err(err)?;
         let mut key_path = PathBuf::from(tmp_dir.path());
@@ -53,7 +55,7 @@ impl TestState {
             wallets: Default::default(),
             variables: Default::default(),
             prev_output: Default::default(),
-            _validators: Self::start_validators(tmp_dir.path(), &key_path, &ports),
+            validators: Self::start_validators(tmp_dir.path(), &key_path, &ports)?,
             server_port: ports[0].1,
             _tmp_dir: tmp_dir,
         };
@@ -76,6 +78,24 @@ impl TestState {
         Ok(self)
     }
 
+    pub fn open_validator(&mut self, v: usize) -> Result<&mut Self, String> {
+        block_on(
+            self.validators
+                .get_mut(v)
+                .ok_or_else(|| format!("no such validator {}", v))?
+                .open(),
+        )?;
+        Ok(self)
+    }
+
+    pub fn close_validator(&mut self, v: usize) -> Result<&mut Self, String> {
+        self.validators
+            .get_mut(v)
+            .ok_or_else(|| format!("no such validator {}", v))?
+            .close();
+        Ok(self)
+    }
+
     /// Issue a command to the wallet identified by `wallet`.
     ///
     /// The command string will be preprocessed by replacing each occurrence of `$var` in the
@@ -92,7 +112,6 @@ impl TestState {
             .wallets
             .get_mut(id)
             .ok_or_else(|| format!("wallet {} is not open", id))?;
-        println!("{}> {}", id, command);
         self.prev_output = wallet.command(&command)?;
         Ok(self)
     }
@@ -127,11 +146,29 @@ impl TestState {
         ));
     }
 
+    pub fn last_output(&self) -> impl Iterator<Item = &String> {
+        self.prev_output.iter()
+    }
+
     pub fn var(&self, var: impl AsRef<str>) -> Result<String, String> {
         self.variables
             .get(var.as_ref())
             .cloned()
             .ok_or_else(|| format!("no such variable {}", var.as_ref()))
+    }
+
+    pub fn validators(&self) -> impl Iterator<Item = &Validator> {
+        self.validators.iter()
+    }
+
+    pub fn validator(&self, validator: usize) -> Result<&Validator, String> {
+        self.validators
+            .get(validator)
+            .ok_or_else(|| format!("no such validator {}", validator))
+    }
+
+    pub fn wallets(&self) -> impl Iterator<Item = &Wallet> {
+        self.wallets.iter()
     }
 
     fn load(&mut self, key_path: Option<PathBuf>) -> Result<&mut Self, String> {
@@ -166,7 +203,11 @@ impl TestState {
         Ok(String::from(replaced))
     }
 
-    fn start_validators(tmp_dir: &Path, key_path: &Path, ports: &[(u64, u64)]) -> Vec<Validator> {
+    fn start_validators(
+        tmp_dir: &Path,
+        key_path: &Path,
+        ports: &[(u64, u64)],
+    ) -> Result<Vec<Validator>, String> {
         let (phaselock_ports, server_ports): (Vec<_>, Vec<_>) = ports.iter().cloned().unzip();
         let seed = vec![
             1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5,
@@ -208,11 +249,16 @@ impl TestState {
             .unwrap();
 
         let ret = block_on(futures::future::join_all(
-            server_ports
-                .into_iter()
-                .enumerate()
-                .map(|(i, port)| Validator::new(&config_file, key_path, i, port)),
-        ));
+            server_ports.into_iter().enumerate().map(|(i, port)| {
+                let mut v = Validator::new(&config_file, key_path, i, port);
+                async move {
+                    v.open().await?;
+                    Ok(v)
+                }
+            }),
+        ))
+        .into_iter()
+        .collect::<Result<_, _>>();
 
         println!("All validators started");
         ret
@@ -225,7 +271,7 @@ struct OpenWallet {
     process: Child,
 }
 
-struct Wallet {
+pub struct Wallet {
     process: Option<OpenWallet>,
     key_path: PathBuf,
     storage: TempDir,
@@ -233,6 +279,18 @@ struct Wallet {
 }
 
 impl Wallet {
+    pub fn pid(&self) -> Option<u32> {
+        self.process.as_ref().map(|p| p.process.id())
+    }
+
+    pub fn storage(&self) -> PathBuf {
+        PathBuf::from(self.storage.path())
+    }
+
+    pub fn server(&self) -> String {
+        self.server.clone()
+    }
+
     fn key_gen(key_path: &Path) -> Result<(), String> {
         cargo_run("zerok_client")?
             .args([
@@ -338,7 +396,6 @@ impl Wallet {
                     return Err(String::from(line));
                 }
                 if !line.is_empty() {
-                    println!("< {}", line);
                     lines.push(String::from(line));
                 }
                 match line {
@@ -361,12 +418,29 @@ impl Drop for Wallet {
     }
 }
 
-struct Validator {
-    process: Child,
+pub struct Validator {
+    process: Option<Child>,
+    id: usize,
+    cfg_path: PathBuf,
+    store_path: PathBuf,
+    key_path: PathBuf,
+    port: u64,
 }
 
 impl Validator {
-    async fn new(cfg_path: &Path, key_path: &Path, id: usize, port: u64) -> Self {
+    pub fn pid(&self) -> Option<u32> {
+        self.process.as_ref().map(|p| p.id())
+    }
+
+    pub fn hostname(&self) -> String {
+        String::from("localhost")
+    }
+
+    pub fn port(&self) -> u64 {
+        self.port
+    }
+
+    fn new(cfg_path: &Path, key_path: &Path, id: usize, port: u64) -> Self {
         let cfg_path = PathBuf::from(cfg_path);
         let mut store_path = cfg_path.clone();
         store_path.pop(); // remove config toml file
@@ -377,9 +451,30 @@ impl Validator {
         );
         let mut key_path = PathBuf::from(key_path);
         key_path.set_extension("pub");
-        let ret = spawn_blocking(move || {
+
+        Self {
+            process: None,
+            id,
+            cfg_path,
+            store_path,
+            key_path,
+            port,
+        }
+    }
+
+    async fn open(&mut self) -> Result<(), String> {
+        if self.process.is_some() {
+            return Err(format!("validator {} is already open", self.id));
+        }
+
+        let cfg_path = self.cfg_path.clone();
+        let store_path = self.store_path.clone();
+        let key_path = self.key_path.clone();
+        let id = self.id;
+        let port = self.port;
+        let child = spawn_blocking(move || {
             let mut child = cargo_run("multi_machine")
-                .unwrap()
+                .map_err(err)?
                 .args([
                     "--config",
                     cfg_path.as_os_str().to_str().unwrap(),
@@ -395,7 +490,7 @@ impl Validator {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
-                .unwrap();
+                .map_err(err)?;
             let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
             while let Some(line) = lines.next() {
                 let line = line.unwrap();
@@ -406,7 +501,7 @@ impl Validator {
                         // stdout. If we don't do this, the validator will
                         // eventually fill up its output pipe and block.
                         move || {
-                            while let Some(line) = lines.next() {
+                            for line in lines {
                                 if line.is_ok() {
                                     println!("[id {}]{}", id, line.unwrap());
                                 } else {
@@ -415,22 +510,29 @@ impl Validator {
                             }
                         },
                     );
-                    return Validator { process: child };
+                    return Ok(child);
                 }
             }
-            panic!("validator {} exited", id);
+            Err(format!("validator {} exited", id))
         })
-        .await;
+        .await?;
 
+        self.process = Some(child);
         println!("Leaving Validator::new for {}", id);
-        ret
+        Ok(())
+    }
+
+    fn close(&mut self) {
+        if let Some(mut child) = self.process.take() {
+            child.kill().ok();
+            child.wait().ok();
+        }
     }
 }
 
 impl Drop for Validator {
     fn drop(&mut self) {
-        self.process.kill().ok();
-        self.process.wait().ok();
+        self.close();
     }
 }
 

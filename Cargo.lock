@@ -5242,6 +5242,7 @@ dependencies = [
  "rustyline",
  "serde",
  "serde_derive",
+ "serde_json",
  "shutdown_hooks",
  "snafu",
  "structopt",
