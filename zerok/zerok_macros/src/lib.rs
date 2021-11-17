@@ -1,24 +1,28 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
-use quote::quote;
-use syn::{parse_macro_input, AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta};
+use quote::{quote, ToTokens};
+use syn::{parse_macro_input, AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type};
 
 /// Generate round-trip serialization tests.
 ///
 /// The attribute `ser_test` can be applied to a struct or enum definition to automatically derive
 /// round-trip serialization tests for serde and ark_serialize impls. The generated tests follow the
 /// pattern:
-/// * Create an instance of the type under test, using a mechanism seleected by the arguments to the
+/// * Create an instance of the type under test, using a mechanism selected by the arguments to the
 ///   attribute macro (see Arguments below)
 /// * Serialize the instance, checking that it succeeds
 /// * Deserialize the serialized data and compare the result to the original instance
 ///
 /// There are a few requirements on the type being tested:
-/// * It must not be generic
 /// * It must implement `Debug` and `PartialEq`
 /// * It must implement `Default` unless a different construction method is used (see below)
 /// * It must implement `Serialize` and `DeserializeOwned` unless `serde(false)` is used
 /// * It must implement `CanonicalSerialize` and `CanonicalDeserialize` unless `ark(false)` is used
+///
+/// If testing a generic type, the `types(...)` attribute can be used to specify a comma-separated
+/// list of type parameters to test with. Types must be enclosed in quotation marks if they are more
+/// complex than just a path (e.g. if the type parameters themselves have type parameters). `types`
+/// can be used more than once to test with different combinations of type parameters.
 ///
 /// # Example
 /// ```
@@ -78,6 +82,14 @@ use syn::{parse_macro_input, AttributeArgs, Ident, Item, Lit, Meta, MetaList, Ne
 ///         S6
 ///     }
 /// }
+///
+/// // Deriving tests for a generic type.
+/// #[ser_test(types(u64, "Vec<u64>"), types(u32, bool), ark(false))]
+/// #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+/// struct Generic<T1, T2> {
+///     t1: T1,
+///     t2: T2,
+/// }
 /// ```
 ///
 /// # Arguments
@@ -92,6 +104,7 @@ use syn::{parse_macro_input, AttributeArgs, Ident, Item, Lit, Meta, MetaList, Ne
 ///   instance. `f` mut have a signature compatible with `fn f(&mut ChaChaRng) -> Self`
 /// * `constr(f)` use the type's associated function `f` instead of `Default` to construct the test
 ///   instance. `f` must have the signature `fn f() -> Self`
+/// * `types(...)` test with the given type parameter list
 #[proc_macro_attribute]
 pub fn ser_test(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as AttributeArgs);
@@ -103,19 +116,20 @@ pub fn ser_test(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     // Parse arguments.
-    let mut constr = quote! { #name::default() };
+    let mut constr = Constr::Default;
     let mut test_ark = true;
     let mut test_serde = true;
+    let mut types = Vec::new();
     for arg in args {
         match arg {
             // Path arguments (as in #[ser_test(arg)])
             NestedMeta::Meta(Meta::Path(path)) => match path.get_ident() {
                 Some(id) if *id == "random" => {
-                    constr = random_constr(name, id);
+                    constr = Constr::Random(id.clone());
                 }
 
                 Some(id) if *id == "arbitrary" => {
-                    constr = arbitrary_constr(name);
+                    constr = Constr::Arbitrary;
                 }
 
                 _ => panic!("invalid argument {:?}", path),
@@ -130,7 +144,7 @@ pub fn ser_test(args: TokenStream, input: TokenStream) -> TokenStream {
                     match &nested[0] {
                         NestedMeta::Meta(Meta::Path(p)) => match p.get_ident() {
                             Some(id) => {
-                                constr = random_constr(name, id);
+                                constr = Constr::Random(id.clone());
                             }
                             None => panic!("random argument must be an identifier"),
                         },
@@ -145,7 +159,7 @@ pub fn ser_test(args: TokenStream, input: TokenStream) -> TokenStream {
                     match &nested[0] {
                         NestedMeta::Meta(Meta::Path(p)) => match p.get_ident() {
                             Some(id) => {
-                                constr = assoc_constr(name, id);
+                                constr = Constr::Method(id.clone());
                             }
                             None => panic!("constr argument must be an identifier"),
                         },
@@ -177,6 +191,11 @@ pub fn ser_test(args: TokenStream, input: TokenStream) -> TokenStream {
                     }
                 }
 
+                Some(id) if *id == "types" => {
+                    let params = nested.iter().map(parse_type).collect::<Vec<_>>();
+                    types.push(quote!(<#name<#(#params),*>>));
+                }
+
                 _ => panic!("invalid attribute {:?}", path),
             },
 
@@ -184,76 +203,102 @@ pub fn ser_test(args: TokenStream, input: TokenStream) -> TokenStream {
         }
     }
 
-    let serde_test = if test_serde {
-        let test_name = Ident::new(
-            &format!("ser_test_serde_round_trip_{}", name),
-            Span::mixed_site(),
-        );
-        quote! {
-            #[cfg(test)]
-            #[test]
-            fn #test_name() {
-                let obj = #constr;
-                let buf = bincode::serialize(&obj).unwrap();
-                assert_eq!(obj, bincode::deserialize(&buf).unwrap());
-            }
-        }
-    } else {
-        quote! {}
-    };
-
-    let ark_test = if test_ark {
-        let test_name = Ident::new(
-            &format!("ser_test_ark_serialize_round_trip_{}", name),
-            Span::mixed_site(),
-        );
-        quote! {
-            #[cfg(test)]
-            #[test]
-            fn #test_name() {
-                use ark_serialize::*;
-                let obj = #constr;
-                let mut buf = Vec::new();
-                CanonicalSerialize::serialize(&obj, &mut buf).unwrap();
-                assert_eq!(obj, CanonicalDeserialize::deserialize(buf.as_slice()).unwrap());
-            }
-        }
-    } else {
-        quote! {}
-    };
-
-    let output = quote! {
+    let mut output = quote! {
         #input
-        #serde_test
-        #ark_test
     };
+
+    if types.is_empty() {
+        // If no explicit type parameters were given for us to test with, assume the type under test
+        // takes no type parameters.
+        types.push(quote!(<#name>));
+    }
+
+    for (i, ty) in types.into_iter().enumerate() {
+        let constr = match &constr {
+            Constr::Default => quote! { #ty::default() },
+            Constr::Arbitrary => quote! {
+                {
+                    use arbitrary::Unstructured;
+                    use rand_chacha::{rand_core::{RngCore, SeedableRng}, ChaChaRng};
+                    let mut rng = ChaChaRng::from_seed([42u8; 32]);
+                    let mut data = vec![0u8; 1024];
+                    rng.fill_bytes(&mut data);
+                    Unstructured::new(&data).arbitrary::#ty().unwrap()
+                }
+            },
+            Constr::Random(f) => quote! {
+                {
+                    use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+                    let mut rng = ChaChaRng::from_seed([42u8; 32]);
+                    #ty::#f(&mut rng)
+                }
+            },
+            Constr::Method(f) => quote! {
+                #ty::#f()
+            },
+        };
+
+        let serde_test = if test_serde {
+            let test_name = Ident::new(
+                &format!("ser_test_serde_round_trip_{}_{}", name, i),
+                Span::mixed_site(),
+            );
+            quote! {
+                #[cfg(test)]
+                #[test]
+                fn #test_name() {
+                    let obj = #constr;
+                    let buf = bincode::serialize(&obj).unwrap();
+                    assert_eq!(obj, bincode::deserialize(&buf).unwrap());
+                }
+            }
+        } else {
+            quote! {}
+        };
+
+        let ark_test = if test_ark {
+            let test_name = Ident::new(
+                &format!("ser_test_ark_serialize_round_trip_{}_{}", name, i),
+                Span::mixed_site(),
+            );
+            quote! {
+                #[cfg(test)]
+                #[test]
+                fn #test_name() {
+                    use ark_serialize::*;
+                    let obj = #constr;
+                    let mut buf = Vec::new();
+                    CanonicalSerialize::serialize(&obj, &mut buf).unwrap();
+                    assert_eq!(obj, CanonicalDeserialize::deserialize(buf.as_slice()).unwrap());
+                }
+            }
+        } else {
+            quote! {}
+        };
+
+        output = quote! {
+            #output
+            #serde_test
+            #ark_test
+        };
+    }
+
     output.into()
 }
 
-// Test instance construction methods.
-fn assoc_constr(name: &Ident, f: &Ident) -> proc_macro2::TokenStream {
-    quote! { #name::#f() }
+enum Constr {
+    Default,
+    Random(Ident),
+    Arbitrary,
+    Method(Ident),
 }
 
-fn random_constr(name: &Ident, f: &Ident) -> proc_macro2::TokenStream {
-    quote! {
-        {
-            use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-            let mut rng = ChaChaRng::from_seed([42u8; 32]);
-            #name::#f(&mut rng)
-        }
-    }
-}
-
-fn arbitrary_constr(name: &Ident) -> proc_macro2::TokenStream {
-    quote! {
-        {
-            use arbitrary::Unstructured;
-            use rand_chacha::{rand_core::{RngCore, SeedableRng}, ChaChaRng};
-            let mut rng = ChaChaRng::from_seed([42u8; 32]);
-            let mut data = vec![0u8; 1024];
-            rng.fill_bytes(&mut data);
-            Unstructured::new(&data).arbitrary::<#name>().unwrap()
+fn parse_type(m: &NestedMeta) -> Type {
+    match m {
+        NestedMeta::Lit(Lit::Str(s)) => syn::parse_str(&s.value()).unwrap(),
+        NestedMeta::Meta(Meta::Path(p)) => syn::parse2(p.to_token_stream()).unwrap(),
+        _ => {
+            panic!("expected type");
         }
     }
 }
