@@ -53,13 +53,13 @@ use jf_txn::{
         FreezeFlag,
         Nullifier,
         ReceiverMemo,
-        // RecordCommitment,
+        RecordCommitment,
         RecordOpening,
         TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
     AccMemberWitness,
-    // MerkleLeafProof,
+    MerkleLeafProof,
     MerkleTree,
     Signature,
     TransactionNote,
@@ -70,7 +70,7 @@ use jf_txn::{
 use rand_chacha::ChaChaRng;
 // use serde::{Deserialize, Serialize};
 // use snafu::ResultExt;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 // use std::convert::TryFrom;
 // use std::iter::FromIterator;
 // use std::ops::{Index, IndexMut};
@@ -169,13 +169,136 @@ pub struct RecordDatabase {
     // all records in the database, by uid
     record_info: HashMap<u64, RecordInfo>,
 
-    // // record (size, uid) indexed by asset type, owner, and freeze status, for easy allocation as
-    // // transfer or freeze inputs. The records for each asset are ordered by increasing size, which
-    // // makes it easy to implement a worst-fit allocator that minimizes fragmentation.
-    // asset_records: HashMap<(AssetCode, UserPubKey, FreezeFlag), BTreeSet<(u64, u64)>>,
+    // record (size, uid) indexed by asset type, owner, and freeze status, for easy allocation as
+    // transfer or freeze inputs. The records for each asset are ordered by increasing size, which
+    // makes it easy to implement a worst-fit allocator that minimizes fragmentation.
+    asset_records: HashMap<(AssetCode, UserPubKey, FreezeFlag), BTreeSet<(u64, u64)>>,
 
     // record uids indexed by nullifier, for easy removal when confirmed as transfer inputs
     nullifier_records: HashMap<Nullifier, u64>,
+}
+
+impl RecordDatabase {
+    // fn assets(&'_ self) -> impl '_ + Iterator<Item = AssetDefinition> {
+    //     self.record_info
+    //         .values()
+    //         .map(|rec| rec.ro.asset_def.clone())
+    // }
+
+    // /// Find records which can be the input to a transaction, matching the given parameters.
+    // fn input_records<'a>(
+    //     &'a self,
+    //     asset: &AssetCode,
+    //     owner: &UserPubKey,
+    //     frozen: FreezeFlag,
+    //     now: u64,
+    // ) -> impl Iterator<Item = &'a RecordInfo> {
+    //     self.asset_records
+    //         .get(&(*asset, owner.clone(), frozen))
+    //         .into_iter()
+    //         .flatten()
+    //         .rev()
+    //         .filter_map(move |(_, uid)| {
+    //             let record = &self.record_info[uid];
+    //             if record.ro.amount == 0 || record.on_hold(now) {
+    //                 // Skip useless dummy records and records that are on hold
+    //                 None
+    //             } else {
+    //                 Some(record)
+    //             }
+    //         })
+    // }
+    // /// Find a record with exactly the requested amount, which can be the input to a transaction,
+    // /// matching the given parameters.
+    // fn input_record_with_amount(
+    //     &self,
+    //     asset: &AssetCode,
+    //     owner: &UserPubKey,
+    //     frozen: FreezeFlag,
+    //     amount: u64,
+    //     now: u64,
+    // ) -> Option<&RecordInfo> {
+    //     let unspent_records = self.asset_records.get(&(*asset, owner.clone(), frozen))?;
+    //     let exact_matches = unspent_records.range((amount, 0)..(amount + 1, 0));
+    //     for (match_amount, uid) in exact_matches {
+    //         assert_eq!(*match_amount, amount);
+    //         let record = &self.record_info[uid];
+    //         assert_eq!(record.ro.amount, amount);
+    //         if record.on_hold(now) {
+    //             continue;
+    //         }
+    //         return Some(record);
+    //     }
+
+    //     None
+    // }
+
+    // fn record_with_nullifier(&self, nullifier: &Nullifier) -> Option<&RecordInfo> {
+    //     let uid = self.nullifier_records.get(nullifier)?;
+    //     self.record_info.get(uid)
+    // }
+
+    // fn record_with_nullifier_mut(&mut self, nullifier: &Nullifier) -> Option<&mut RecordInfo> {
+    //     let uid = self.nullifier_records.get(nullifier)?;
+    //     self.record_info.get_mut(uid)
+    // }
+
+    fn insert_record(&mut self, rec: RecordInfo) {
+        self.asset_records
+            .entry((
+                rec.ro.asset_def.code,
+                rec.ro.pub_key.clone(),
+                rec.ro.freeze_flag,
+            ))
+            .or_insert_with(BTreeSet::new)
+            .insert((rec.ro.amount, rec.uid));
+        self.nullifier_records.insert(rec.nullifier, rec.uid);
+        self.record_info.insert(rec.uid, rec);
+    }
+
+    fn insert_with_nullifier(&mut self, ro: RecordOpening, uid: u64, nullifier: Nullifier) {
+        self.insert_record(RecordInfo {
+            ro,
+            uid,
+            nullifier,
+            hold_until: None,
+        });
+    }
+
+    fn insert(&mut self, ro: RecordOpening, uid: u64, key_pair: &UserKeyPair) {
+        let nullifier = key_pair.nullify(
+            ro.asset_def.policy_ref().freezer_pub_key(),
+            uid,
+            &RecordCommitment::from(&ro),
+        );
+        self.insert_with_nullifier(ro, uid, nullifier)
+    }
+
+    // fn insert_freezable(&mut self, ro: RecordOpening, uid: u64, key_pair: &FreezerKeyPair) {
+    //     let nullifier = key_pair.nullify(&ro.pub_key, uid, &RecordCommitment::from(&ro));
+    //     self.insert_with_nullifier(ro, uid, nullifier)
+    // }
+
+    // fn remove_by_nullifier(&mut self, nullifier: Nullifier) -> Option<RecordInfo> {
+    //     self.nullifier_records.remove(&nullifier).map(|uid| {
+    //         let record = self.record_info.remove(&uid).unwrap();
+
+    //         // Remove the record from `asset_records`, and if the sub-collection it was in becomes
+    //         // empty, remove the whole collection.
+    //         let asset_key = &(
+    //             record.ro.asset_def.code,
+    //             record.ro.pub_key.clone(),
+    //             record.ro.freeze_flag,
+    //         );
+    //         let asset_records = self.asset_records.get_mut(asset_key).unwrap();
+    //         asset_records.remove(&(record.ro.amount, uid));
+    //         if asset_records.is_empty() {
+    //             self.asset_records.remove(asset_key);
+    //         }
+
+    //         record
+    //     })
+    // }
 }
 
 // #[ser_test(arbitrary)]
@@ -387,6 +510,39 @@ impl<'a> XfrState<'a> {
         {
             Ok(elaborated_txn) => Ok((recv_memos, sig, elaborated_txn)),
             Err(e) => Err(e),
+        }
+    }
+
+    async fn decrypt_memos(
+        &mut self,
+        memo: ReceiverMemo,
+        proof: Signature,
+    ) -> Result<(), XfrError> {
+        let comm = RecordCommitment::from_field_element(
+            self.record_merkle_tree
+                .get_leaf(fee_ix as u64)
+                .expect_ok()
+                .unwrap()
+                .1
+                .leaf
+                .0,
+        );
+        if let Ok(record_opening) = memo.decrypt(&self.user_keys, &comm, &[]) {
+            if !record_opening.is_dummy() {
+                // If this record is for us (i.e. its corresponding memo decrypts under
+                // our key) and not a dummy, then add it to our owned records.
+                self.records.insert(record_opening, uid, &self.user_keys);
+                if self
+                    .record_merkle_tree
+                    .remember(uid, &MerkleLeafProof::new(comm.to_field_element(), proof))
+                    .is_err()
+                {
+                    println!(
+                        "error: got bad merkle proof from backend for commitment {:?}",
+                        comm
+                    );
+                }
+            }
         }
     }
 }
