@@ -5,6 +5,8 @@
 // allows the user to enter commands for a wallet interactively.
 //
 
+mod cli_client;
+
 use api::UserAddress;
 use async_std::sync::{Arc, Mutex};
 use async_std::task::block_on;
