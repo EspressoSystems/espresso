@@ -2308,8 +2308,13 @@ impl<'a> WalletState<'a> {
         // If we were planning to forget this leaf once a new leaf is appended, stop planning that.
         if self.merkle_leaf_to_forget == Some(leaf) {
             self.merkle_leaf_to_forget = None;
+            // `merkle_leaf_to_forget` is always represented in the tree, so we don't have to call
+            // `remember` in this case.
+            assert!(self.record_mt.get_leaf(leaf).expect_ok().is_ok());
+            true
+        } else {
+            self.record_mt.remember(leaf, proof).is_ok()
         }
-        self.record_mt.remember(leaf, proof).is_ok()
     }
 
     fn append_merkle_leaf(&mut self, comm: RecordCommitment) {
