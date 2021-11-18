@@ -66,11 +66,13 @@ pub mod traits {
         fn commit(&self) -> Self::StateCommitment;
         fn validate_and_apply(&mut self, block: Self::Block) -> Result<Vec<u64>, ValidationError>;
     }
+
+    pub trait Ledger: Copy + Send + Sync {
+        type Validator: traits::Validator;
+    }
 }
 
-pub trait Ledger: Copy + Send + Sync {
-    type Validator: traits::Validator;
-}
+pub use traits::Ledger;
 
 pub type Validator<L> = <L as Ledger>::Validator;
 pub type StateCommitment<L> = <Validator<L> as traits::Validator>::StateCommitment;

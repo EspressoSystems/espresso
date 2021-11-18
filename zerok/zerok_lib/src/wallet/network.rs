@@ -157,11 +157,21 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                     .collect::<Result<_, _>>()?,
             });
 
+        // `records` should be _almost_ completely sparse. However, even a fully pruned Merkle tree
+        // contains the last leaf appended, but as a new wallet, we don't care about _any_ of the
+        // leaves, so make a note to forget the last one once more leaves have been appended.
+        let merkle_leaf_to_forget = if records.0.num_leaves() > 0 {
+            Some(records.0.num_leaves() - 1)
+        } else {
+            None
+        };
+
         let state = WalletState {
             validator,
             proving_keys,
             nullifiers,
             record_mt: records.0,
+            merkle_leaf_to_forget,
             now: 0,
             records: Default::default(),
             defined_assets: Default::default(),

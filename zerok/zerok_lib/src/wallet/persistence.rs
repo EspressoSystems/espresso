@@ -62,6 +62,7 @@ struct WalletSnapshot<L: Ledger> {
     records: RecordDatabase,
     nullifiers: NullifierSet<L>,
     record_mt: MerkleTreeWithArbitrary,
+    merkle_leaf_to_forget: Option<u64>,
     transactions: TransactionDatabase<L>,
 }
 
@@ -84,6 +85,7 @@ impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletSnapshot<L> {
             records: w.records.clone(),
             nullifiers: w.nullifiers.clone(),
             record_mt: MerkleTreeWithArbitrary(w.record_mt.clone()),
+            merkle_leaf_to_forget: w.merkle_leaf_to_forget,
             transactions: w.transactions.clone(),
         }
     }
@@ -102,6 +104,7 @@ where
             records: u.arbitrary()?,
             nullifiers: u.arbitrary()?,
             record_mt: u.arbitrary()?,
+            merkle_leaf_to_forget: None,
             transactions: u.arbitrary()?,
         })
     }
@@ -293,6 +296,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
             records: dynamic_state.records,
             nullifiers: dynamic_state.nullifiers,
             record_mt: dynamic_state.record_mt.0,
+            merkle_leaf_to_forget: dynamic_state.merkle_leaf_to_forget,
             transactions: dynamic_state.transactions,
 
             // Monotonic state
@@ -519,6 +523,7 @@ mod tests {
             auditable_assets: Default::default(),
             nullifiers: Default::default(),
             record_mt: record_merkle_tree,
+            merkle_leaf_to_forget: None,
             defined_assets: Default::default(),
             transactions: Default::default(),
         };

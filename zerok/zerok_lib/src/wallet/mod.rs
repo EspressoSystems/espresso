@@ -192,6 +192,9 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
     pub(crate) nullifiers: NullifierSet<L>,
     // sparse record Merkle tree mirrored from validators
     pub(crate) record_mt: MerkleTree,
+    // when forgetting the last leaf in the tree, the forget operation will be deferred until a new
+    // leaf is appended, using this field, because MerkleTree doesn't allow forgetting the last leaf.
+    pub(crate) merkle_leaf_to_forget: Option<u64>,
     // set of pending transactions
     pub(crate) transactions: TransactionDatabase<L>,
 
@@ -1193,12 +1196,12 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     // Remove spent records.
                     for n in txn.note().nullifiers() {
                         if let Some(record) = self.records.remove_by_nullifier(n) {
-                            self.record_merkle_tree_mut().forget(record.uid);
+                            self.forget_merkle_leaf(record.uid);
                         }
                     }
                     // Insert new records.
                     for o in txn.note().output_commitments() {
-                        self.record_merkle_tree_mut().push(o.to_field_element());
+                        self.append_merkle_leaf(o);
                     }
                 }
                 // Update nullifier set
@@ -1259,7 +1262,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     // Prune the record Merkle tree of records we don't care about.
                     for (uid, remember) in this_txn_uids {
                         if !remember {
-                            self.record_merkle_tree_mut().forget(uid);
+                            self.forget_merkle_leaf(uid);
                         }
                     }
                 }
@@ -1295,14 +1298,10 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                             // If this record is for us (i.e. its corresponding memo decrypts under
                             // our key) and not a dummy, then add it to our owned records.
                             self.records.insert(record_opening, uid, &self.key_pair);
-                            if self
-                                .record_merkle_tree_mut()
-                                .remember(
-                                    uid,
-                                    &MerkleLeafProof::new(comm.to_field_element(), proof),
-                                )
-                                .is_err()
-                            {
+                            if !self.remember_merkle_leaf(
+                                uid,
+                                &MerkleLeafProof::new(comm.to_field_element(), proof),
+                            ) {
                                 println!(
                                     "error: got bad merkle proof from backend for commitment {:?}",
                                     comm
@@ -1661,10 +1660,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         owner: UserAddress,
     ) -> Result<TransactionReceipt<L>, WalletError> {
         let (fee_ro, uid) = self.find_native_record_for_fee(session, fee)?;
-        let acc_member_witness = AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
-            .expect_ok()
-            .unwrap()
-            .1;
+        let acc_member_witness = self.get_merkle_proof(uid);
         let (asset_def, seed, asset_description) = self
             .defined_assets
             .get(asset_code)
@@ -1789,10 +1785,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         // prepare inputs
         let mut inputs = vec![];
         for (ro, uid) in input_records.into_iter() {
-            let witness = AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
-                .expect_ok()
-                .unwrap()
-                .1;
+            let witness = self.get_merkle_proof(uid);
             inputs.push(FreezeNoteInput {
                 ro,
                 acc_member_witness: witness,
@@ -1803,13 +1796,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
         let fee_input = FeeInput {
             ro: fee_ro,
-            acc_member_witness: AccMemberWitness::lookup_from_tree(
-                self.record_merkle_tree(),
-                fee_uid,
-            )
-            .expect_ok()
-            .unwrap()
-            .1,
+            acc_member_witness: self.get_merkle_proof(fee_uid),
             owner_keypair: &self.key_pair,
         };
 
@@ -1865,11 +1852,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         // prepare inputs
         let mut inputs = vec![];
         for (ro, uid) in input_records {
-            let acc_member_witness =
-                AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
-                    .expect_ok()
-                    .unwrap()
-                    .1;
+            let acc_member_witness = self.get_merkle_proof(uid);
             inputs.push(TransferNoteInput {
                 ro,
                 acc_member_witness,
@@ -1974,10 +1957,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         // prepare inputs
         let mut inputs = vec![];
         for (ro, uid) in input_records.into_iter() {
-            let witness = AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
-                .expect_ok()
-                .unwrap()
-                .1;
+            let witness = self.get_merkle_proof(uid);
             inputs.push(TransferNoteInput {
                 ro,
                 acc_member_witness: witness,
@@ -2013,13 +1993,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
         let fee_input = FeeInput {
             ro: fee_ro,
-            acc_member_witness: AccMemberWitness::lookup_from_tree(
-                self.record_merkle_tree(),
-                fee_uid,
-            )
-            .expect_ok()
-            .unwrap()
-            .1,
+            acc_member_witness: self.get_merkle_proof(fee_uid),
             owner_keypair: &self.key_pair,
         };
 
@@ -2406,12 +2380,53 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         Ok(proving_key)
     }
 
-    fn record_merkle_tree(&self) -> &MerkleTree {
-        &self.record_mt
+    fn forget_merkle_leaf(&mut self, leaf: u64) {
+        if leaf < self.record_mt.num_leaves() - 1 {
+            self.record_mt.forget(leaf);
+        } else {
+            assert_eq!(leaf, self.record_mt.num_leaves() - 1);
+            // We can't forget the last leaf in a Merkle tree. Instead, we just note that we want to
+            // forget this leaf, and we'll forget it when we append a new last leaf.
+            //
+            // There can only be one `merkle_leaf_to_forget` at a time, because we will forget the
+            // leaf and clear this field as soon as we append a new leaf.
+            assert!(self.merkle_leaf_to_forget.is_none());
+            self.merkle_leaf_to_forget = Some(leaf);
+        }
     }
 
-    fn record_merkle_tree_mut(&mut self) -> &mut MerkleTree {
-        &mut self.record_mt
+    #[must_use]
+    fn remember_merkle_leaf(&mut self, leaf: u64, proof: &MerkleLeafProof) -> bool {
+        // If we were planning to forget this leaf once a new leaf is appended, stop planning that.
+        if self.merkle_leaf_to_forget == Some(leaf) {
+            self.merkle_leaf_to_forget = None;
+            // `merkle_leaf_to_forget` is always represented in the tree, so we don't have to call
+            // `remember` in this case.
+            assert!(self.record_mt.get_leaf(leaf).expect_ok().is_ok());
+            true
+        } else {
+            self.record_mt.remember(leaf, proof).is_ok()
+        }
+    }
+
+    fn append_merkle_leaf(&mut self, comm: RecordCommitment) {
+        self.record_mt.push(comm.to_field_element());
+
+        // Now that we have appended a new leaf to the Merkle tree, we can forget the old last leaf,
+        // if needed.
+        if let Some(uid) = self.merkle_leaf_to_forget.take() {
+            assert!(uid < self.record_mt.num_leaves() - 1);
+            self.record_mt.forget(uid);
+        }
+    }
+
+    fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
+        // The wallet never needs a Merkle proof that isn't guaranteed to already be in the Merkle
+        // tree, so this unwrap() should never fail.
+        AccMemberWitness::lookup_from_tree(&self.record_mt, leaf)
+            .expect_ok()
+            .unwrap()
+            .1
     }
 }
 
@@ -3019,6 +3034,7 @@ pub mod test_helpers {
             let state = {
                 let ledger = self.ledger.lock().unwrap();
                 let mut rng = ChaChaRng::from_seed(self.seed);
+
                 WalletState {
                     validator: ledger.validator.clone(),
                     proving_keys: ledger.proving_keys.clone(),
@@ -3031,6 +3047,7 @@ pub mod test_helpers {
                     },
                     nullifiers: ledger.nullifiers.clone(),
                     record_mt: ledger.records.clone(),
+                    merkle_leaf_to_forget: None,
                     defined_assets: HashMap::new(),
                     now: 0,
                     transactions: Default::default(),
