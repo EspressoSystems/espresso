@@ -93,7 +93,7 @@ pub struct CommittedBlock {
     pub id: BlockId,
     pub index: usize,
     pub hash: Hash,
-    pub state_commitment: Hash,
+    pub state_commitment: LedgerStateCommitment,
     pub transactions: Vec<CommittedTransaction>,
 }
 

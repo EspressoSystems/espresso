@@ -18,19 +18,21 @@ jf-primitives = { features=["std"], git = "ssh://git@gitlab.com/translucence/cry
 jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "787130cccdec290403e4b0f1291291f128bacd1c"}
 jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "787130cccdec290403e4b0f1291291f128bacd1c"}
 lazy_static = "1.4.0"
+rand = "0.8.4"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 regex = "1.5.4"
 rpassword = "5.0.1"
 rustyline = "9.0.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1.0"
+serde_json = "1.0.61"
 snafu = { version = "0.6.10", features = ["backtraces"] }
 shutdown_hooks = "0.1.0"
 structopt = { version = "0.3", features = ["paw"] }
+surf = "2.3.1"
 tagged-base64 = { git = "ssh://git@gitlab.com/translucence/common/tagged-base64.git", branch = "main"}
 tempdir = "0.3.7"
-zerok_lib = { path = "../zerok_lib/" }
-
-[dev-dependencies]
-tempdir = "0.3.7"
 toml = "0.5"
+tracing = "0.1.26"
+tracing-subscriber = "0.2.19"
+zerok_lib = { path = "../zerok_lib/" }

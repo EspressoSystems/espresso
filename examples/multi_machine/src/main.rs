@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
-use jf_txn::{MerkleTree, TransactionVerifyingKey};
+use jf_txn::TransactionVerifyingKey;
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
@@ -29,7 +29,7 @@ use threshold_crypto as tc;
 use tide::StatusCode;
 use tide_websockets::{WebSocket, WebSocketConnection};
 use toml::Value;
-use tracing::debug;
+use tracing::{debug, event, Level};
 use zerok_lib::{
     api::*,
     key_set::KeySet,
@@ -126,11 +126,14 @@ struct NodeOpt {
     /// Use an external wallet to generate transactions.
     ///
     /// The argument is the path to the wallet's public key. If this option is given, the ledger
-    /// will be initialized with a single record of 2^32 native tokens, owned by the wallet's public
-    /// key. The demo will then wait for the wallet to generate some transactions and submit them to
-    /// the validators using the network API.
+    /// will be initialized with a record of 2^32 native tokens, owned by the wallet's public key.
+    /// The demo will then wait for the wallet to generate some transactions and submit them to the
+    /// validators using the network API.
+    ///
+    /// This option may be passed multiple times to initialize the ledger with multiple native token
+    /// records for different wallets.
     #[structopt(short, long = "wallet")]
-    wallet_pk_path: Option<PathBuf>,
+    wallet_pk_path: Option<Vec<PathBuf>>,
 
     /// Number of transactions to generate.
     ///
@@ -362,26 +365,38 @@ async fn init_state_and_phaselock(
 ) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state
     let (state, validator, records, nullifiers, memos) =
-        if let Some(pk_path) = NodeOpt::from_args().wallet_pk_path {
+        if let Some(pk_paths) = NodeOpt::from_args().wallet_pk_path {
             let mut rng = zerok_lib::crypto_rng_from_seed([0x42u8; 32]);
 
-            // Read in the public key of the wallet which will get the initial grant of native coins.
-            let mut file = File::open(pk_path).unwrap();
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes).unwrap();
-            let pub_key = bincode::deserialize(&bytes).unwrap();
+            let mut records = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
+            let mut memos = Vec::new();
 
-            // Create the initial grant.
-            let ro = RecordOpening::new(
-                &mut rng,
-                1u64 << 32,
-                AssetDefinition::native(),
-                pub_key,
-                FreezeFlag::Unfrozen,
-            );
-            let mut records = MerkleTree::new(MERKLE_HEIGHT).unwrap();
-            records.push(RecordCommitment::from(&ro).to_field_element());
-            let memos = vec![(ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap(), 0)];
+            // Process the initial native token records for the wallets.
+            for (i, pk_path) in pk_paths.into_iter().enumerate() {
+                // Read in the public key of the wallet which will get an initial grant of native
+                // coins.
+                let mut file = File::open(pk_path).unwrap();
+                let mut bytes = Vec::new();
+                file.read_to_end(&mut bytes).unwrap();
+                let pub_key: UserPubKey = bincode::deserialize(&bytes).unwrap();
+
+                // Create the initial grant.
+                event!(
+                    Level::INFO,
+                    "creating initial native token record for {}",
+                    pub_key.address()
+                );
+                let ro = RecordOpening::new(
+                    &mut rng,
+                    1u64 << 32,
+                    AssetDefinition::native(),
+                    pub_key,
+                    FreezeFlag::Unfrozen,
+                );
+                records.push(RecordCommitment::from(&ro).to_field_element());
+                memos.push((ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap(), i as u64));
+            }
+            let records = records.build();
 
             // Set up the validator.
             let univ_setup = &*UNIVERSAL_PARAM;
@@ -984,19 +999,23 @@ async fn main() -> Result<(), std::io::Error> {
 
         // When `num_txn` is set, run `num_txn` rounds.
         // Otherwise, keeping running till the process is killed.
+        let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
+        let mut txn_proposed_round = 0;
         while num_txn.map(|count| round < count).unwrap_or(true) {
             println!("Starting round {}", round + 1);
             report_mem();
-            let commitment =
-                TaggedBase64::new("LEDG", phaselock.current_state().await.commit().as_ref())
-                    .unwrap()
-                    .to_string();
-            println!("Commitment: {}", commitment);
+            println!("Commitment: {}", phaselock.current_state().await.commit());
 
             // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
-            let mut txn = None;
             if own_id == 0 {
-                if let Some(mut true_state) = core::mem::take(&mut state) {
+                if let Some(tx) = txn.as_ref() {
+                    println!("  - Reproposing a transaction");
+                    if txn_proposed_round + 5 < round {
+                        // TODO
+                        phaselock.submit_transaction(tx.clone().3).await.unwrap();
+                        txn_proposed_round = round;
+                    }
+                } else if let Some(mut true_state) = core::mem::take(&mut state) {
                     println!("  - Proposing a transaction");
                     let (true_state, mut transactions) =
                         async_std::task::spawn_blocking(move || {
@@ -1016,6 +1035,7 @@ async fn main() -> Result<(), std::io::Error> {
                         .submit_transaction(txn.clone().unwrap().3)
                         .await
                         .unwrap();
+                    txn_proposed_round = round;
                 }
             }
 
@@ -1057,7 +1077,7 @@ async fn main() -> Result<(), std::io::Error> {
             if success {
                 // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
                 // current node), and there is no attached wallet.
-                if let Some((ix, keys_and_memos, sig, t)) = txn {
+                if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
                     let state = state.as_mut().unwrap();
                     println!("  - Adding the transaction");
                     let mut blk = ElaboratedBlock::default();

@@ -136,12 +136,10 @@ pub struct Block(pub Vec<TransactionNote>);
     Serialize,
     Deserialize,
 )]
-#[serde(into = "CanonicalBytes", from = "CanonicalBytes")]
 pub struct ElaboratedBlock {
     pub block: Block,
     pub proofs: Vec<Vec<SetMerkleProof>>,
 }
-deserialize_canonical_bytes!(ElaboratedBlock);
 
 impl Committable for ElaboratedBlock {
     fn commit(&self) -> Commitment<Self> {

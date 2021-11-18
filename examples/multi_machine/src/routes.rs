@@ -16,7 +16,8 @@ use tide::StatusCode;
 use tide_websockets::WebSocketConnection;
 use tracing::{event, Level};
 use zerok_lib::api::*;
-use zerok_lib::node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
+use zerok_lib::node::{LedgerEvent, LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
+use zerok_lib::state_comm::LedgerStateCommitment;
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -111,14 +112,17 @@ pub enum ApiRouteKey {
     getblockcount,
     getblockhash,
     getblockid,
+    getevent,
     getinfo,
     getmempool,
     getnullifier,
     getsnapshot,
+    getstatecomm,
     gettransaction,
     getunspentrecord,
     getunspentrecordsetinfo,
     getuser,
+    getusers,
     subscribe,
 }
 
@@ -226,7 +230,7 @@ async fn get_block(
         id: BlockId(index),
         index,
         hash: Hash::from(transition.block.hash()),
-        state_commitment: Hash::from(state.commit()),
+        state_commitment: state.commit(),
         transactions: izip!(
             transition.block.block.0,
             transition.block.proofs,
@@ -388,6 +392,29 @@ async fn get_snapshot(
         .map_err(server_error)
 }
 
+async fn get_state_comm(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &impl QueryService,
+) -> Result<LedgerStateCommitment, tide::Error> {
+    let index = match bindings.get(":index") {
+        Some(ix) => ix.value.as_index()?,
+        None => {
+            // No :index parameter indicates they want the latest snapshot.
+            let LedgerSummary { num_blocks, .. } =
+                query_service.get_summary().await.map_err(server_error)?;
+            // Since block represent state transitions, there is a block in between each pair of
+            // snapshots, and so the index of the last snapshot is one greater than the index of the
+            // last block, or, equal to the total number of blocks.
+            num_blocks
+        }
+    };
+    let snapshot = query_service
+        .get_snapshot(index, true, true)
+        .await
+        .map_err(server_error)?;
+    Ok(snapshot.state.commit())
+}
+
 async fn get_user(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &impl QueryService,
@@ -396,6 +423,16 @@ async fn get_user(
         .get_user(&bindings[":address"].value.to::<UserAddress>()?.0)
         .await
         .map_err(server_error)
+}
+
+async fn get_users(query_service: &impl QueryService) -> Result<Vec<UserPubKey>, tide::Error> {
+    Ok(query_service
+        .get_users()
+        .await
+        .map_err(server_error)?
+        .values()
+        .cloned()
+        .collect())
 }
 
 async fn get_nullifier(
@@ -410,6 +447,17 @@ async fn get_nullifier(
         .await
         .map_err(server_error)?;
     Ok(NullifierProof { spent, proof })
+}
+
+async fn get_event(
+    bindings: &HashMap<String, RouteBinding>,
+    query_service: &impl QueryService,
+) -> Result<LedgerEvent, tide::Error> {
+    let index = bindings[":index"].value.as_index()? as u64;
+    let mut events = query_service.subscribe(index).await;
+    events.next().await.ok_or_else(|| {
+        tide::Error::from_str(StatusCode::InternalServerError, "event stream terminated")
+    })
 }
 
 async fn subscribe(
@@ -453,6 +501,7 @@ pub async fn dispatch_url(
         ApiRouteKey::getblockcount => response(&req, get_block_count(query_service).await?),
         ApiRouteKey::getblockhash => response(&req, get_block_hash(bindings, query_service).await?),
         ApiRouteKey::getblockid => response(&req, get_block_id(bindings, query_service).await?),
+        ApiRouteKey::getevent => response(&req, get_event(bindings, query_service).await?),
         ApiRouteKey::getinfo => response(&req, get_info(query_service).await?),
         ApiRouteKey::getmempool => dummy_url_eval(route_pattern, bindings),
         ApiRouteKey::gettransaction => {
@@ -464,7 +513,9 @@ pub async fn dispatch_url(
         ApiRouteKey::getunspentrecordsetinfo => dummy_url_eval(route_pattern, bindings),
         ApiRouteKey::getsnapshot => response(&req, get_snapshot(bindings, query_service).await?),
         ApiRouteKey::getuser => response(&req, get_user(bindings, query_service).await?),
+        ApiRouteKey::getusers => response(&req, get_users(query_service).await?),
         ApiRouteKey::getnullifier => response(&req, get_nullifier(bindings, query_service).await?),
+        ApiRouteKey::getstatecomm => response(&req, get_state_comm(bindings, query_service).await?),
         _ => Err(tide::Error::from_str(
             StatusCode::InternalServerError,
             "server called dispatch_url with an unsupported route; perhaps the route has not \
