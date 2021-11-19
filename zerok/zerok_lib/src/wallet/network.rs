@@ -2,8 +2,9 @@ use super::persistence::{AtomicWalletStorage, WalletLoader};
 use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
 use crate::api;
 use crate::key_set::SizedKey;
+use crate::ledger::AAPLedger;
 use crate::node;
-use crate::set_merkle_tree::{set_hash, SetMerkleProof};
+use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
 use crate::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
 use api::{client::*, BlockId, ClientError, FromError, TransactionId};
 use async_std::sync::{Arc, Mutex, MutexGuard};
@@ -30,7 +31,7 @@ pub struct NetworkBackend<'a, Meta: Serialize + DeserializeOwned> {
     query_client: surf::Client,
     bulletin_client: surf::Client,
     validator_client: surf::Client,
-    storage: Arc<Mutex<AtomicWalletStorage<'a, Meta>>>,
+    storage: Arc<Mutex<AtomicWalletStorage<'a, AAPLedger, Meta>>>,
     key_pair: Option<UserKeyPair>,
 }
 
@@ -103,9 +104,11 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
 }
 
 #[async_trait]
-impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a> for NetworkBackend<'a, Meta> {
+impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
+    for NetworkBackend<'a, Meta>
+{
     type EventStream = node::EventStream<LedgerEvent>;
-    type Storage = AtomicWalletStorage<'a, Meta>;
+    type Storage = AtomicWalletStorage<'a, AAPLedger, Meta>;
 
     async fn create(&mut self) -> Result<WalletState<'a>, WalletError> {
         let mut rng = ChaChaRng::from_entropy();
@@ -113,6 +116,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a> for Networ
             state: validator,
             nullifiers,
             records,
+            ..
         } = self.get("getsnapshot/0/true").await?;
 
         // Construct proving keys of the same arities as the verifier keys from the validator.
@@ -153,11 +157,21 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a> for Networ
                     .collect::<Result<_, _>>()?,
             });
 
+        // `records` should be _almost_ completely sparse. However, even a fully pruned Merkle tree
+        // contains the last leaf appended, but as a new wallet, we don't care about _any_ of the
+        // leaves, so make a note to forget the last one once more leaves have been appended.
+        let merkle_leaf_to_forget = if records.0.num_leaves() > 0 {
+            Some(records.0.num_leaves() - 1)
+        } else {
+            None
+        };
+
         let state = WalletState {
             validator,
             proving_keys,
             nullifiers,
             record_mt: records.0,
+            merkle_leaf_to_forget,
             now: 0,
             records: Default::default(),
             defined_assets: Default::default(),
@@ -221,13 +235,18 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a> for Networ
 
     async fn get_nullifier_proof(
         &self,
-        root: set_hash::Hash,
+        set: &mut SetMerkleTree,
         nullifier: Nullifier,
     ) -> Result<(bool, SetMerkleProof), WalletError> {
-        let api::NullifierProof { proof, spent, .. } = self
-            .get(format!("/getnullifier/{}/{}", root, nullifier))
-            .await?;
-        Ok((spent, proof))
+        if let Some(ret) = set.contains(nullifier) {
+            Ok(ret)
+        } else {
+            let api::NullifierProof { proof, spent, .. } = self
+                .get(format!("/getnullifier/{}/{}", set.hash(), nullifier))
+                .await?;
+            set.remember(nullifier, proof.clone()).unwrap();
+            Ok((spent, proof))
+        }
     }
 
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {

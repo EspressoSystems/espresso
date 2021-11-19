@@ -1,9 +1,8 @@
 use crate::key_set::OrderByOutputs;
+use crate::ledger::*;
 use crate::node::MerkleTreeWithArbitrary;
-use crate::set_merkle_tree::SetMerkleTree;
 use crate::wallet::*;
-use crate::{ProverKeySet, ValidatorState};
-use arbitrary::Arbitrary;
+use crate::ProverKeySet;
 use async_std::sync::Arc;
 use atomic_store::{
     error::PersistenceError,
@@ -42,8 +41,8 @@ struct WalletStaticState<'a> {
     freezer_key_pair: Arc<FreezerKeyPair>,
 }
 
-impl<'a> From<&WalletState<'a>> for WalletStaticState<'a> {
-    fn from(w: &WalletState<'a>) -> Self {
+impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletStaticState<'a> {
+    fn from(w: &WalletState<'a, L>) -> Self {
         Self {
             proving_keys: w.proving_keys.clone(),
             key_pair: (&w.key_pair).clone(),
@@ -54,27 +53,60 @@ impl<'a> From<&WalletState<'a>> for WalletStaticState<'a> {
 }
 
 // Serialization intermediate for the dynamic part of a WalletState.
-#[ser_test(arbitrary, ark(false))]
-#[derive(Arbitrary, Debug, Deserialize, Serialize, PartialEq)]
-struct WalletSnapshot {
+#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(bound = "")]
+struct WalletSnapshot<L: Ledger> {
     now: u64,
-    validator: ValidatorState,
+    validator: Validator<L>,
     records: RecordDatabase,
-    nullifiers: SetMerkleTree,
+    nullifiers: NullifierSet<L>,
     record_mt: MerkleTreeWithArbitrary,
-    transactions: TransactionDatabase,
+    merkle_leaf_to_forget: Option<u64>,
+    transactions: TransactionDatabase<L>,
 }
 
-impl<'a> From<&WalletState<'a>> for WalletSnapshot {
-    fn from(w: &WalletState<'a>) -> Self {
+impl<L: Ledger> PartialEq<Self> for WalletSnapshot<L> {
+    fn eq(&self, other: &Self) -> bool {
+        self.now == other.now
+            && self.validator == other.validator
+            && self.records == other.records
+            && self.nullifiers == other.nullifiers
+            && self.record_mt == other.record_mt
+            && self.transactions == other.transactions
+    }
+}
+
+impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletSnapshot<L> {
+    fn from(w: &WalletState<'a, L>) -> Self {
         Self {
             now: w.now,
             validator: w.validator.clone(),
             records: w.records.clone(),
             nullifiers: w.nullifiers.clone(),
             record_mt: MerkleTreeWithArbitrary(w.record_mt.clone()),
+            merkle_leaf_to_forget: w.merkle_leaf_to_forget,
             transactions: w.transactions.clone(),
         }
+    }
+}
+
+impl<'a, L: Ledger> Arbitrary<'a> for WalletSnapshot<L>
+where
+    Validator<L>: Arbitrary<'a>,
+    NullifierSet<L>: Arbitrary<'a>,
+    TransactionHash<L>: Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            now: u.arbitrary()?,
+            validator: u.arbitrary()?,
+            records: u.arbitrary()?,
+            nullifiers: u.arbitrary()?,
+            record_mt: u.arbitrary()?,
+            merkle_leaf_to_forget: None,
+            transactions: u.arbitrary()?,
+        })
     }
 }
 
@@ -129,7 +161,7 @@ impl<T: Serialize + DeserializeOwned> LoadStore for EncryptingResourceAdapter<T>
     }
 }
 
-pub struct AtomicWalletStorage<'a, Meta: Serialize + DeserializeOwned> {
+pub struct AtomicWalletStorage<'a, L: Ledger, Meta: Serialize + DeserializeOwned> {
     store: AtomicStore,
     // Metadata given at initialization time that may not have been written to disk yet.
     meta: Meta,
@@ -142,7 +174,7 @@ pub struct AtomicWalletStorage<'a, Meta: Serialize + DeserializeOwned> {
     // Snapshot log with a single entry containing the static data.
     static_data: RollingLog<EncryptingResourceAdapter<WalletStaticState<'a>>>,
     static_dirty: bool,
-    dynamic_state: RollingLog<EncryptingResourceAdapter<WalletSnapshot>>,
+    dynamic_state: RollingLog<EncryptingResourceAdapter<WalletSnapshot<L>>>,
     dynamic_state_dirty: bool,
     auditable_assets: AppendLog<EncryptingResourceAdapter<AssetDefinition>>,
     auditable_assets_dirty: bool,
@@ -150,7 +182,7 @@ pub struct AtomicWalletStorage<'a, Meta: Serialize + DeserializeOwned> {
     defined_assets_dirty: bool,
 }
 
-impl<'a, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStorage<'a, Meta> {
+impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStorage<'a, L, Meta> {
     pub fn new(loader: &mut impl WalletLoader<Meta = Meta>) -> Result<Self, WalletError> {
         let directory = loader.location();
         let mut atomic_loader =
@@ -207,7 +239,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStorage<'a, Meta
         })
     }
 
-    pub async fn create(mut self: &mut Self, w: &WalletState<'a>) -> Result<(), WalletError> {
+    pub async fn create(mut self: &mut Self, w: &WalletState<'a, L>) -> Result<(), WalletError> {
         // Store the initial static and dynamic state, and the metadata. We do this in a closure so
         // that if any operation fails, it will exit the closure but not this function, and we can
         // then commit or revert based on the results of the closure.
@@ -240,14 +272,14 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStorage<'a, Meta
 }
 
 #[async_trait]
-impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a>
-    for AtomicWalletStorage<'a, Meta>
+impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a, L>
+    for AtomicWalletStorage<'a, L, Meta>
 {
     fn exists(&self) -> bool {
         self.persisted_meta.load_latest().is_ok()
     }
 
-    async fn load(&mut self) -> Result<WalletState<'a>, WalletError> {
+    async fn load(&mut self) -> Result<WalletState<'a, L>, WalletError> {
         let static_state = self.static_data.load_latest().context(PersistenceError)?;
         let dynamic_state = self.dynamic_state.load_latest().context(PersistenceError)?;
 
@@ -264,6 +296,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a>
             records: dynamic_state.records,
             nullifiers: dynamic_state.nullifiers,
             record_mt: dynamic_state.record_mt.0,
+            merkle_leaf_to_forget: dynamic_state.merkle_leaf_to_forget,
             transactions: dynamic_state.transactions,
 
             // Monotonic state
@@ -283,7 +316,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a>
         })
     }
 
-    async fn store_snapshot(&mut self, w: &WalletState<'a>) -> Result<(), WalletError> {
+    async fn store_snapshot(&mut self, w: &WalletState<'a, L>) -> Result<(), WalletError> {
         self.dynamic_state
             .store_resource(&WalletSnapshot::from(w))
             .context(PersistenceError)?;
@@ -366,7 +399,10 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM};
+    use crate::{
+        ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, VerifierKeySet,
+        MERKLE_HEIGHT, UNIVERSAL_PARAM,
+    };
     use jf_txn::{KeyPair, TransactionVerifyingKey};
     use phaselock::H_256;
     use rand_chacha::{
@@ -487,6 +523,7 @@ mod tests {
             auditable_assets: Default::default(),
             nullifiers: Default::default(),
             record_mt: record_merkle_tree,
+            merkle_leaf_to_forget: None,
             defined_assets: Default::default(),
             transactions: Default::default(),
         };
@@ -569,7 +606,7 @@ mod tests {
             AssetDefinition::new(AssetCode::random(&mut rng).0, Default::default()).unwrap();
         stored.auditable_assets.insert(asset.code, asset.clone());
         {
-            let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::<AAPLedger, _>::new(&mut loader).unwrap();
             storage.store_auditable_asset(&asset).await.unwrap();
             storage.commit().await;
         }
@@ -585,7 +622,7 @@ mod tests {
             .defined_assets
             .insert(asset.code, (asset.clone(), seed, vec![]));
         {
-            let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::<AAPLedger, _>::new(&mut loader).unwrap();
             storage
                 .store_defined_asset(&asset, seed, &[])
                 .await

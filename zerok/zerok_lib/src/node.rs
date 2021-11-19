@@ -2,8 +2,8 @@ use crate::full_persistence::FullPersistence;
 pub use crate::state_comm::LedgerStateCommitment;
 use crate::util::arbitrary_wrappers::*;
 use crate::{
-    ser_test, set_merkle_tree::*, validator_node::*, ElaboratedBlock, ElaboratedTransaction,
-    ValidationError, ValidatorState,
+    ledger, ser_test, set_merkle_tree::*, validator_node::*, ElaboratedBlock,
+    ElaboratedTransaction, ValidationError, ValidatorState,
 };
 use arbitrary::Arbitrary;
 use async_executors::exec::AsyncStd;
@@ -21,6 +21,7 @@ use jf_txn::{
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
     MerklePath, MerkleTree, Signature,
 };
+use ledger::{AAPLedger, Block, Ledger, StateCommitment};
 use phaselock::{
     error::PhaseLockError,
     event::EventType,
@@ -103,7 +104,9 @@ impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
 #[non_exhaustive]
 pub struct LedgerSummary {
     pub num_blocks: usize,
+    pub num_txns: usize,
     pub num_records: usize,
+    pub num_events: usize,
 }
 
 #[ser_test(arbitrary, ark(false))]
@@ -125,6 +128,7 @@ impl<'a> Arbitrary<'a> for MerkleTreeWithArbitrary {
 #[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LedgerSnapshot {
     pub state: ValidatorState,
+    pub state_comm: LedgerStateCommitment,
     pub nullifiers: SetMerkleTree,
     pub records: MerkleTreeWithArbitrary,
 }
@@ -143,22 +147,23 @@ pub struct LedgerTransition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, strum_macros::AsStaticStr)]
-pub enum LedgerEvent {
+#[serde(bound = "")]
+pub enum LedgerEvent<L: Ledger = AAPLedger> {
     /// A new block was added to the ledger.
     ///
     /// Includes the block contents, the unique identifier for the block, and the new state
     /// commitment.
     Commit {
-        block: ElaboratedBlock,
+        block: Block<L>,
         block_id: u64,
-        state_comm: LedgerStateCommitment,
+        state_comm: StateCommitment<L>,
     },
 
     /// A proposed block was rejected.
     ///
     /// Includes the block contents and the reason for rejection.
     Reject {
-        block: ElaboratedBlock,
+        block: Block<L>,
         error: ValidationError,
     },
 
@@ -258,6 +263,7 @@ pub trait QueryService {
     /// Make your public key and address known to other nodes.
     async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError>;
 
+    async fn get_users(&self) -> Result<HashMap<UserAddress, UserPubKey>, QueryServiceError>;
     async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError>;
 }
 
@@ -302,6 +308,8 @@ struct FullState {
     // Block IDs indexed by block hash.
     //todo replace with persistent key value store
     block_hashes: HashMap<Vec<u8>, usize>,
+    // Total number of committed transactions, aggregated across all blocks.
+    num_txns: usize,
     // The last block which was proposed. This is currently used to correllate BadBlock and
     // InconsistentBlock errors from PhaseLock with the block that caused the error. In the future,
     // PhaseLock errors will contain the bad block (or some kind of reference to it, perhaps through
@@ -409,6 +417,7 @@ impl FullState {
                                     self.records_pending_memos.push(o.to_field_element());
                                 }
                             }
+                            self.num_txns += block.block.0.len();
                             assert_eq!(nullifiers.hash(), self.validator.nullifiers_root);
                             assert_eq!(
                                 self.records_pending_memos.commitment(),
@@ -535,6 +544,7 @@ impl FullState {
         };
 
         Ok(LedgerSnapshot {
+            state_comm: state.commit(),
             state,
             records: MerkleTreeWithArbitrary(records),
             nullifiers,
@@ -728,6 +738,7 @@ impl<'a> PhaseLockQueryService<'a> {
             records_pending_memos,
             full_persisted,
             past_nullifiers: vec![(nullifiers.hash(), 0)].into_iter().collect(),
+            num_txns: 0,
             block_hashes,
             proposed: ElaboratedBlock::default(),
             subscribers: Default::default(),
@@ -793,7 +804,9 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
         let state = self.state.read().await;
         Ok(LedgerSummary {
             num_blocks: state.full_persisted.block_iter().len(),
+            num_txns: state.num_txns,
             num_records: state.full_persisted.rmt_leaf_iter().len(),
+            num_events: state.full_persisted.events_iter().len(),
         })
     }
 
@@ -861,6 +874,17 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
 
     async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
         self.state.write().await.introduce(pub_key)
+    }
+
+    async fn get_users(&self) -> Result<HashMap<UserAddress, UserPubKey>, QueryServiceError> {
+        self.state
+            .read()
+            .await
+            .full_persisted
+            .get_latest_known_nodes()
+            .map_err(|err| QueryServiceError::PersistenceError {
+                msg: err.to_string(),
+            })
     }
 
     async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {
@@ -990,6 +1014,10 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
 
     async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
         self.as_query_service_mut().introduce(pub_key).await
+    }
+
+    async fn get_users(&self) -> Result<HashMap<UserAddress, UserPubKey>, QueryServiceError> {
+        self.as_query_service().get_users().await
     }
 
     async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {

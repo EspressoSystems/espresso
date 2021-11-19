@@ -1,7 +1,7 @@
-mod test_state;
-use test_state::{cli_test, TestState};
+extern crate zerok_client;
+use zerok_client::cli_client::{cli_test, CliClient};
 
-fn create_wallet(t: &mut TestState, wallet: usize) -> Result<&mut TestState, String> {
+fn create_wallet(t: &mut CliClient, wallet: usize) -> Result<&mut CliClient, String> {
     t.open(wallet)?
         .output("Create password:")?
         .command(wallet, "test_password")?
@@ -16,7 +16,7 @@ fn create_wallet(t: &mut TestState, wallet: usize) -> Result<&mut TestState, Str
         .output("connecting...")
 }
 
-fn wait_for_starting_balance(t: &mut TestState) -> Result<usize, String> {
+fn wait_for_starting_balance(t: &mut CliClient) -> Result<usize, String> {
     loop {
         t.command(0, "balance 0")?.output("(?P<balance>\\d+)")?;
         let balance = t.var("balance").unwrap().parse().unwrap();
@@ -26,7 +26,7 @@ fn wait_for_starting_balance(t: &mut TestState) -> Result<usize, String> {
     }
 }
 
-fn cli_basic_info(t: &mut TestState) -> Result<(), String> {
+fn cli_basic_info(t: &mut CliClient) -> Result<(), String> {
     t
         // `info`
         .command(0, "info")?
@@ -53,7 +53,7 @@ fn cli_basic_info(t: &mut TestState) -> Result<(), String> {
     Ok(())
 }
 
-fn cli_transfer_native(t: &mut TestState) -> Result<(), String> {
+fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
     let balance = wait_for_starting_balance(t)?;
     t
         // Get the address and balance of both wallets.
@@ -92,7 +92,7 @@ fn cli_transfer_native(t: &mut TestState) -> Result<(), String> {
     Ok(())
 }
 
-fn cli_mint_and_transfer(t: &mut TestState) -> Result<(), String> {
+fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
     wait_for_starting_balance(t)?;
     t
         // Get the address of the receiving wallet.
@@ -153,7 +153,7 @@ fn cli_mint_and_transfer(t: &mut TestState) -> Result<(), String> {
     Ok(())
 }
 
-fn cli_login(t: &mut TestState) -> Result<(), String> {
+fn cli_login(t: &mut CliClient) -> Result<(), String> {
     t.close(0)?
         .open(0)?
         .output("Enter password:")?
