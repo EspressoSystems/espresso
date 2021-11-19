@@ -2,8 +2,8 @@ use crate::full_persistence::FullPersistence;
 pub use crate::state_comm::LedgerStateCommitment;
 use crate::util::arbitrary_wrappers::*;
 use crate::{
-    ser_test, set_merkle_tree::*, validator_node::*, ElaboratedBlock, ElaboratedTransaction,
-    ValidationError, ValidatorState,
+    ledger, ser_test, set_merkle_tree::*, validator_node::*, ElaboratedBlock,
+    ElaboratedTransaction, ValidationError, ValidatorState,
 };
 use arbitrary::Arbitrary;
 use async_executors::exec::AsyncStd;
@@ -21,6 +21,7 @@ use jf_txn::{
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
     MerklePath, MerkleTree, Signature,
 };
+use ledger::{AAPLedger, Block, Ledger, StateCommitment};
 use phaselock::{
     error::PhaseLockError,
     event::EventType,
@@ -146,22 +147,23 @@ pub struct LedgerTransition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, strum_macros::AsStaticStr)]
-pub enum LedgerEvent {
+#[serde(bound = "")]
+pub enum LedgerEvent<L: Ledger = AAPLedger> {
     /// A new block was added to the ledger.
     ///
     /// Includes the block contents, the unique identifier for the block, and the new state
     /// commitment.
     Commit {
-        block: ElaboratedBlock,
+        block: Block<L>,
         block_id: u64,
-        state_comm: LedgerStateCommitment,
+        state_comm: StateCommitment<L>,
     },
 
     /// A proposed block was rejected.
     ///
     /// Includes the block contents and the reason for rejection.
     Reject {
-        block: ElaboratedBlock,
+        block: Block<L>,
         error: ValidationError,
     },
 
