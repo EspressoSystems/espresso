@@ -163,12 +163,12 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a> for Networ
             defined_assets: Default::default(),
             auditable_assets: Default::default(),
             transactions: Default::default(),
-            key_pair: self
+            key_pair: Arc::new(self
                 .key_pair
                 .clone()
-                .unwrap_or_else(|| UserKeyPair::generate(&mut rng)),
-            auditor_key_pair: AuditorKeyPair::generate(&mut rng),
-            freezer_key_pair: FreezerKeyPair::generate(&mut rng),
+                .unwrap_or_else(|| UserKeyPair::generate(&mut rng))),
+            auditor_key_pair: Arc::new(AuditorKeyPair::generate(&mut rng)),
+            freezer_key_pair: Arc::new(FreezerKeyPair::generate(&mut rng)),
         };
         self.storage().await.create(&state).await?;
 

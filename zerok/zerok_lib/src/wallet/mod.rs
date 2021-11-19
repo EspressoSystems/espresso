@@ -169,12 +169,13 @@ pub struct WalletState<'a> {
     // for real applications, but it is very important for tests and costs little.
     pub(crate) proving_keys: Arc<ProverKeySet<'a, key_set::OrderByOutputs>>,
     // key pair for building/receiving transactions
-    pub(crate) key_pair: UserKeyPair,
+    //KALEY
+    pub(crate) key_pair: Arc<UserKeyPair>,
     // key pair for decrypting auditor memos
-    pub(crate) auditor_key_pair: AuditorKeyPair,
+    pub(crate) auditor_key_pair: Arc<AuditorKeyPair>,
     // key pair for computing nullifiers of records owned by someone else but which we can freeze or
     // unfreeze
-    pub(crate) freezer_key_pair: FreezerKeyPair,
+    pub(crate) freezer_key_pair: Arc<FreezerKeyPair>,
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Dynamic state
@@ -2341,6 +2342,10 @@ pub struct Wallet<'a, Backend: WalletBackend<'a>> {
     // the task, so this field is never read, it exists solely to live as long as this struct and
     // then be dropped.
     _event_task: AsyncScope<'a, ()>,
+    //keep a copy of the keys for referential access after they are generated
+    key_pair: Arc<UserKeyPair>,
+    auditor_key_pair: Arc<AuditorKeyPair>,
+    freezer_key_pair: Arc<FreezerKeyPair>,
 }
 
 struct WalletSharedState<'a, Backend: WalletBackend<'a>> {
@@ -2354,6 +2359,10 @@ struct WalletSharedState<'a, Backend: WalletBackend<'a>> {
 impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
     pub async fn new(mut backend: Backend) -> Result<Wallet<'a, Backend>, WalletError> {
         let state = backend.load().await?;
+        //add keys to Wallet
+        let key_pair = state.key_pair.clone();
+        let auditor_key_pair = state.auditor_key_pair.clone();
+        let freezer_key_pair = state.freezer_key_pair.clone();
         let mut events = backend.subscribe(state.now).await;
         let session = WalletSession {
             backend,
@@ -2456,22 +2465,22 @@ impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
         Ok(Self {
             mutex,
             _event_task: event_task,
+            key_pair,
+            auditor_key_pair,
+            freezer_key_pair,
         })
     }
 
     pub fn pub_key(&self) -> UserPubKey {
-        let WalletSharedState { state, session, .. } = &*block_on(self.mutex.lock());
-        state.pub_key(session)
+        (*self).key_pair.pub_key().clone()
     }
 
     pub fn auditor_pub_key(&self) -> AuditorPubKey {
-        let WalletSharedState { state, .. } = &*block_on(self.mutex.lock());
-        state.auditor_key_pair.pub_key()
+        (*self).auditor_key_pair.pub_key().clone()
     }
 
     pub fn freezer_pub_key(&self) -> FreezerPubKey {
-        let WalletSharedState { state, .. } = &*block_on(self.mutex.lock());
-        state.freezer_key_pair.pub_key()
+        (*self).freezer_key_pair.pub_key().clone()
     }
 
     pub fn address(&self) -> UserAddress {
@@ -2937,9 +2946,9 @@ pub mod test_helpers {
                     now: 0,
                     transactions: Default::default(),
                     auditable_assets: Default::default(),
-                    key_pair: self.key_pair.clone(),
-                    auditor_key_pair: AuditorKeyPair::generate(&mut rng),
-                    freezer_key_pair: FreezerKeyPair::generate(&mut rng),
+                    key_pair: Arc::new(self.key_pair.clone()),
+                    auditor_key_pair: Arc::new(AuditorKeyPair::generate(&mut rng)),
+                    freezer_key_pair: Arc::new(FreezerKeyPair::generate(&mut rng)),
                 }
             };
 
