@@ -7,8 +7,12 @@ mod secret;
 use crate::api;
 use crate::key_set;
 use crate::node::LedgerEvent;
+use crate::set_merkle_tree::*;
 use crate::util::arbitrary_wrappers::*;
-use crate::{ledger, ser_test, ProverKeySet, ValidationError, ValidatorState, MERKLE_HEIGHT};
+use crate::{
+    ser_test, ElaboratedTransaction, ElaboratedTransactionHash, ProverKeySet, ValidationError,
+    ValidatorState, MERKLE_HEIGHT,
+};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use async_scoped::AsyncScope;
@@ -39,17 +43,12 @@ use jf_txn::{
 };
 use jf_utils::tagged_blob;
 use key_set::KeySet;
-use ledger::{
-    traits::{Block as _, NullifierSet as _, Transaction as _, Validator as _},
-    *,
-};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::convert::TryFrom;
-use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
@@ -152,7 +151,7 @@ impl api::FromError for WalletError {
 }
 
 #[derive(Debug, Clone)]
-pub struct WalletState<'a, L: Ledger = AAPLedger> {
+pub struct WalletState<'a> {
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Static data
     //
@@ -170,7 +169,6 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
     // for real applications, but it is very important for tests and costs little.
     pub(crate) proving_keys: Arc<ProverKeySet<'a, key_set::OrderByOutputs>>,
     // key pair for building/receiving transactions
-    //KALEY
     pub(crate) key_pair: Arc<UserKeyPair>,
     // key pair for decrypting auditor memos
     pub(crate) auditor_key_pair: Arc<AuditorKeyPair>,
@@ -185,19 +183,16 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
     pub(crate) now: u64,
     // wallets run validation in tandem with the validators, so that they do not have to trust new
     // blocks received from the event stream
-    pub(crate) validator: Validator<L>,
+    pub(crate) validator: ValidatorState,
     // all records we care about, including records we own, records we have audited, and records we
     // can freeze or unfreeze
     pub(crate) records: RecordDatabase,
     // sparse nullifier set Merkle tree mirrored from validators
-    pub(crate) nullifiers: NullifierSet<L>,
+    pub(crate) nullifiers: SetMerkleTree,
     // sparse record Merkle tree mirrored from validators
     pub(crate) record_mt: MerkleTree,
-    // when forgetting the last leaf in the tree, the forget operation will be deferred until a new
-    // leaf is appended, using this field, because MerkleTree doesn't allow forgetting the last leaf.
-    pub(crate) merkle_leaf_to_forget: Option<u64>,
     // set of pending transactions
-    pub(crate) transactions: TransactionDatabase<L>,
+    pub(crate) transactions: TransactionDatabase,
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Monotonic data
@@ -240,17 +235,17 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
 /// implementation to separate the persistence layer from the network layer that implements the rest
 /// of the backend with minimal boilerplate.
 #[async_trait]
-pub trait WalletStorage<'a, L: Ledger> {
+pub trait WalletStorage<'a> {
     /// Check if there is already a stored wallet with this key.
     fn exists(&self) -> bool;
 
     /// Load the stored wallet identified by the given key.
     ///
     /// This function may assume `self.exists(key_pair)`.
-    async fn load(&mut self) -> Result<WalletState<'a, L>, WalletError>;
+    async fn load(&mut self) -> Result<WalletState<'a>, WalletError>;
 
     /// Store a snapshot of the wallet's dynamic state.
-    async fn store_snapshot(&mut self, state: &WalletState<'a, L>) -> Result<(), WalletError>;
+    async fn store_snapshot(&mut self, state: &WalletState<'a>) -> Result<(), WalletError>;
 
     /// Append a new auditable asset to the growing set.
     async fn store_auditable_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError>;
@@ -279,24 +274,22 @@ pub trait WalletStorage<'a, L: Ledger> {
 /// This struct should not be constructed directly, but instead a transaction should be obtained
 /// through the WalletBackend::store() method, which will automatically commit the transaction after
 /// it succeeds.
-pub struct StorageTransaction<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> {
+pub struct StorageTransaction<'a, 'l, Storage: WalletStorage<'a>> {
     storage: MutexGuard<'l, Storage>,
     cancelled: bool,
     _phantom: std::marker::PhantomData<&'a ()>,
-    _phantom2: std::marker::PhantomData<L>,
 }
 
-impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> StorageTransaction<'a, 'l, L, Storage> {
+impl<'a, 'l, Storage: WalletStorage<'a>> StorageTransaction<'a, 'l, Storage> {
     fn new(storage: MutexGuard<'l, Storage>) -> Self {
         Self {
             storage,
             cancelled: false,
             _phantom: Default::default(),
-            _phantom2: Default::default(),
         }
     }
 
-    async fn store_snapshot(&mut self, state: &WalletState<'a, L>) -> Result<(), WalletError> {
+    async fn store_snapshot(&mut self, state: &WalletState<'a>) -> Result<(), WalletError> {
         if !self.cancelled {
             let res = self.storage.store_snapshot(state).await;
             if res.is_err() {
@@ -345,18 +338,16 @@ impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> StorageTransaction<'a, 'l
     }
 }
 
-impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> Drop
-    for StorageTransaction<'a, 'l, L, Storage>
-{
+impl<'a, 'l, Storage: WalletStorage<'a>> Drop for StorageTransaction<'a, 'l, Storage> {
     fn drop(&mut self) {
         block_on(self.cancel())
     }
 }
 
 #[async_trait]
-pub trait WalletBackend<'a, L: Ledger>: Send {
-    type EventStream: 'a + Stream<Item = LedgerEvent<L>> + Unpin + Send;
-    type Storage: WalletStorage<'a, L> + Send;
+pub trait WalletBackend<'a>: Send {
+    type EventStream: 'a + Stream<Item = LedgerEvent> + Unpin + Send;
+    type Storage: WalletStorage<'a> + Send;
 
     /// Access the persistent storage layer.
     ///
@@ -373,7 +364,7 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
     /// needs of the implementation. Maybe we can clean this up if and when GATs stabilize.
     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage>;
 
-    async fn load(&mut self) -> Result<WalletState<'a, L>, WalletError> {
+    async fn load(&mut self) -> Result<WalletState<'a>, WalletError> {
         let mut storage = self.storage().await;
         if storage.exists() {
             // If there is a stored wallet with this key pair, load it.
@@ -399,9 +390,8 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
     /// ```
     async fn store<'l, F, Fut>(&'l mut self, update: F) -> Result<(), WalletError>
     where
-        F: Send + Fn(StorageTransaction<'a, 'l, L, Self::Storage>) -> Fut,
-        Fut: Send
-            + Future<Output = Result<StorageTransaction<'a, 'l, L, Self::Storage>, WalletError>>,
+        F: Send + Fn(StorageTransaction<'a, 'l, Self::Storage>) -> Fut,
+        Fut: Send + Future<Output = Result<StorageTransaction<'a, 'l, Self::Storage>, WalletError>>,
         Self::Storage: 'l,
     {
         let storage = self.storage().await;
@@ -413,17 +403,17 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
     }
 
     // Querying the ledger
-    async fn create(&mut self) -> Result<WalletState<'a, L>, WalletError>;
+    async fn create(&mut self) -> Result<WalletState<'a>, WalletError>;
     async fn subscribe(&self, starting_at: u64) -> Self::EventStream;
     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError>;
     async fn get_nullifier_proof(
         &self,
-        nullifiers: &mut NullifierSet<L>,
+        root: set_hash::Hash,
         nullifier: Nullifier,
-    ) -> Result<(bool, NullifierProof<L>), WalletError>;
+    ) -> Result<(bool, SetMerkleProof), WalletError>;
 
     // Submit a transaction to a validator.
-    async fn submit(&mut self, txn: Transaction<L>) -> Result<(), WalletError>;
+    async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError>;
     async fn post_memos(
         &mut self,
         block_id: u64,
@@ -433,11 +423,10 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
     ) -> Result<(), WalletError>;
 }
 
-pub struct WalletSession<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
+pub struct WalletSession<'a, Backend: WalletBackend<'a>> {
     backend: Backend,
     rng: ChaChaRng,
     _marker: std::marker::PhantomData<&'a ()>,
-    _marker2: std::marker::PhantomData<L>,
 }
 
 #[ser_test(arbitrary, ark(false))]
@@ -656,50 +645,29 @@ impl<'a> Arbitrary<'a> for RecordDatabase {
 
 // Serialization intermediate for TransactionDatabase, which eliminates the redundancy of the
 // in-memory indices in TransactionDatabase.
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(bound = "")]
-struct TransactionStorage<L: Ledger> {
-    pending_txns: Vec<PendingTransaction<L>>,
-    txns_awaiting_memos: Vec<TransactionAwaitingMemos<L>>,
+#[ser_test(arbitrary, ark(false))]
+#[derive(Arbitrary, Debug, Default, Serialize, Deserialize, PartialEq)]
+struct TransactionStorage {
+    pending_txns: Vec<PendingTransaction>,
+    txns_awaiting_memos: Vec<TransactionAwaitingMemos>,
 }
 
-impl<L: Ledger> PartialEq<Self> for TransactionStorage<L> {
-    fn eq(&self, other: &Self) -> bool {
-        self.pending_txns == other.pending_txns
-            && self.txns_awaiting_memos == other.txns_awaiting_memos
-    }
-}
-
-impl<'a, L: Ledger> Arbitrary<'a> for TransactionStorage<L>
-where
-    TransactionHash<L>: Arbitrary<'a>,
-{
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            pending_txns: u.arbitrary()?,
-            txns_awaiting_memos: u.arbitrary()?,
-        })
-    }
-}
-
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(from = "TransactionStorage<L>", into = "TransactionStorage<L>")]
-#[serde(bound = "")]
-pub(crate) struct TransactionDatabase<L: Ledger> {
+#[ser_test(arbitrary, ark(false))]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "TransactionStorage", into = "TransactionStorage")]
+pub(crate) struct TransactionDatabase {
     // The base storage. Every in-flight transaction is either pending or accepted and awaiting
     // memos. All the auxiliary data in this database is just an index into one of these two tables.
-    pending_txns: HashMap<TransactionUID<L>, PendingTransaction<L>>,
-    txns_awaiting_memos: HashMap<TransactionUID<L>, TransactionAwaitingMemos<L>>,
+    pending_txns: HashMap<TransactionUID, PendingTransaction>,
+    txns_awaiting_memos: HashMap<TransactionUID, TransactionAwaitingMemos>,
 
-    txn_uids: HashMap<TransactionHash<L>, TransactionUID<L>>,
-    expiring_txns: BTreeMap<u64, HashSet<TransactionUID<L>>>,
-    uids_awaiting_memos: HashMap<u64, TransactionUID<L>>,
+    txn_uids: HashMap<ElaboratedTransactionHash, TransactionUID>,
+    expiring_txns: BTreeMap<u64, HashSet<TransactionUID>>,
+    uids_awaiting_memos: HashMap<u64, TransactionUID>,
 }
 
-impl<L: Ledger> TransactionDatabase<L> {
-    fn status(&self, uid: &TransactionUID<L>) -> TransactionState {
+impl TransactionDatabase {
+    fn status(&self, uid: &TransactionUID) -> TransactionState {
         if self.pending_txns.contains_key(uid) {
             TransactionState::Pending
         } else if self.txns_awaiting_memos.contains_key(uid) {
@@ -711,7 +679,7 @@ impl<L: Ledger> TransactionDatabase<L> {
 
     // Inform the database that we have received memos for the given record UIDs. Return a list of
     // the transactions that are completed as a result.
-    fn received_memos(&mut self, uids: impl Iterator<Item = u64>) -> Vec<TransactionUID<L>> {
+    fn received_memos(&mut self, uids: impl Iterator<Item = u64>) -> Vec<TransactionUID> {
         let mut completed = Vec::new();
         for uid in uids {
             if let Some(txn_uid) = self.uids_awaiting_memos.remove(&uid) {
@@ -726,14 +694,14 @@ impl<L: Ledger> TransactionDatabase<L> {
         completed
     }
 
-    fn await_memos(&mut self, uid: TransactionUID<L>, pending_uids: impl IntoIterator<Item = u64>) {
+    fn await_memos(&mut self, uid: TransactionUID, pending_uids: impl IntoIterator<Item = u64>) {
         self.insert_awaiting_memos(TransactionAwaitingMemos {
             uid,
             pending_uids: pending_uids.into_iter().collect(),
         })
     }
 
-    fn remove_pending(&mut self, hash: &TransactionHash<L>) -> Option<PendingTransaction<L>> {
+    fn remove_pending(&mut self, hash: &ElaboratedTransactionHash) -> Option<PendingTransaction> {
         self.txn_uids.remove(hash).and_then(|uid| {
             let pending = self.pending_txns.remove(&uid);
             if let Some(pending) = &pending {
@@ -748,7 +716,7 @@ impl<L: Ledger> TransactionDatabase<L> {
         })
     }
 
-    fn remove_expired(&mut self, now: u64) -> Vec<PendingTransaction<L>> {
+    fn remove_expired(&mut self, now: u64) -> Vec<PendingTransaction> {
         #[cfg(any(test, debug_assertions))]
         {
             if let Some(earliest_timeout) = self.expiring_txns.keys().next() {
@@ -771,7 +739,7 @@ impl<L: Ledger> TransactionDatabase<L> {
             .collect()
     }
 
-    fn insert_pending(&mut self, txn: PendingTransaction<L>) {
+    fn insert_pending(&mut self, txn: PendingTransaction) {
         self.txn_uids.insert(txn.hash.clone(), txn.uid.clone());
         self.expiring_txns
             .entry(txn.timeout)
@@ -780,7 +748,7 @@ impl<L: Ledger> TransactionDatabase<L> {
         self.pending_txns.insert(txn.uid.clone(), txn);
     }
 
-    fn insert_awaiting_memos(&mut self, txn: TransactionAwaitingMemos<L>) {
+    fn insert_awaiting_memos(&mut self, txn: TransactionAwaitingMemos) {
         for uid in &txn.pending_uids {
             self.uids_awaiting_memos.insert(*uid, txn.uid.clone());
         }
@@ -788,30 +756,8 @@ impl<L: Ledger> TransactionDatabase<L> {
     }
 }
 
-impl<L: Ledger> Default for TransactionDatabase<L> {
-    fn default() -> Self {
-        Self {
-            pending_txns: Default::default(),
-            txns_awaiting_memos: Default::default(),
-            txn_uids: Default::default(),
-            expiring_txns: Default::default(),
-            uids_awaiting_memos: Default::default(),
-        }
-    }
-}
-
-impl<L: Ledger> PartialEq<TransactionDatabase<L>> for TransactionDatabase<L> {
-    fn eq(&self, other: &TransactionDatabase<L>) -> bool {
-        self.pending_txns == other.pending_txns
-            && self.txns_awaiting_memos == other.txns_awaiting_memos
-            && self.txn_uids == other.txn_uids
-            && self.expiring_txns == other.expiring_txns
-            && self.uids_awaiting_memos == other.uids_awaiting_memos
-    }
-}
-
-impl<L: Ledger> From<TransactionStorage<L>> for TransactionDatabase<L> {
-    fn from(txns: TransactionStorage<L>) -> Self {
+impl From<TransactionStorage> for TransactionDatabase {
+    fn from(txns: TransactionStorage) -> Self {
         let mut db = Self::default();
         for txn in txns.pending_txns {
             db.insert_pending(txn);
@@ -823,8 +769,8 @@ impl<L: Ledger> From<TransactionStorage<L>> for TransactionDatabase<L> {
     }
 }
 
-impl<L: Ledger> From<TransactionDatabase<L>> for TransactionStorage<L> {
-    fn from(db: TransactionDatabase<L>) -> Self {
+impl From<TransactionDatabase> for TransactionStorage {
+    fn from(db: TransactionDatabase) -> Self {
         Self {
             pending_txns: db.pending_txns.into_values().collect(),
             txns_awaiting_memos: db.txns_awaiting_memos.into_values().collect(),
@@ -832,64 +778,29 @@ impl<L: Ledger> From<TransactionDatabase<L>> for TransactionStorage<L> {
     }
 }
 
-impl<'a, L: Ledger> Arbitrary<'a> for TransactionDatabase<L>
-where
-    TransactionHash<L>: Arbitrary<'a>,
-{
+impl<'a> Arbitrary<'a> for TransactionDatabase {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self::from(u.arbitrary::<TransactionStorage<L>>()?))
+        Ok(Self::from(u.arbitrary::<TransactionStorage>()?))
     }
 }
 
-#[ser_test(arbitrary, types(AAPLedger))]
+#[ser_test(arbitrary)]
 #[tagged_blob("TXUID")]
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct TransactionUID<L: Ledger>(TransactionHash<L>);
+#[derive(
+    Arbitrary, Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize,
+)]
+pub struct TransactionUID(ElaboratedTransactionHash);
 
-impl<L: Ledger> PartialEq<TransactionUID<L>> for TransactionUID<L> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl<L: Ledger> Eq for TransactionUID<L> {}
-
-impl<L: Ledger> Hash for TransactionUID<L> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        Hash::hash(&self.0, state)
-    }
-}
-
-impl<'a, L: Ledger> Arbitrary<'a> for TransactionUID<L>
-where
-    TransactionHash<L>: Arbitrary<'a>,
-{
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self(u.arbitrary()?))
-    }
-}
-
-#[ser_test(arbitrary, types(AAPLedger))]
+#[ser_test(arbitrary)]
 #[tagged_blob("TXN")]
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct TransactionReceipt<L: Ledger = AAPLedger> {
-    uid: TransactionUID<L>,
+#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq)]
+pub struct TransactionReceipt {
+    uid: TransactionUID,
     fee_nullifier: Nullifier,
     submitter: UserAddress,
 }
 
-impl<L: Ledger> PartialEq<Self> for TransactionReceipt<L> {
-    fn eq(&self, other: &Self) -> bool {
-        self.uid == other.uid
-            && self.fee_nullifier == other.fee_nullifier
-            && self.submitter == other.submitter
-    }
-}
-
-impl<'a, L: Ledger> Arbitrary<'a> for TransactionReceipt<L>
-where
-    TransactionHash<L>: Arbitrary<'a>,
-{
+impl<'a> Arbitrary<'a> for TransactionReceipt {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Self {
             uid: u.arbitrary()?,
@@ -899,33 +810,18 @@ where
     }
 }
 
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(bound = "")]
-pub(crate) struct PendingTransaction<L: Ledger> {
+#[ser_test(arbitrary, ark(false))]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub(crate) struct PendingTransaction {
     receiver_memos: Vec<ReceiverMemo>,
     signature: Signature,
     freeze_outputs: Vec<RecordOpening>,
     timeout: u64,
-    uid: TransactionUID<L>,
-    hash: TransactionHash<L>,
+    uid: TransactionUID,
+    hash: ElaboratedTransactionHash,
 }
 
-impl<L: Ledger> PartialEq<Self> for PendingTransaction<L> {
-    fn eq(&self, other: &Self) -> bool {
-        self.receiver_memos == other.receiver_memos
-            && self.signature == other.signature
-            && self.freeze_outputs == other.freeze_outputs
-            && self.timeout == other.timeout
-            && self.uid == other.uid
-            && self.hash == other.hash
-    }
-}
-
-impl<'a, L: Ledger> Arbitrary<'a> for PendingTransaction<L>
-where
-    TransactionHash<L>: Arbitrary<'a>,
-{
+impl<'a> Arbitrary<'a> for PendingTransaction {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let memos = std::iter::once(u.arbitrary())
             .chain(u.arbitrary_iter::<ArbitraryReceiverMemo>()?)
@@ -947,32 +843,13 @@ where
     }
 }
 
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(bound = "")]
-pub(crate) struct TransactionAwaitingMemos<L: Ledger> {
+#[ser_test(arbitrary, ark(false))]
+#[derive(Arbitrary, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct TransactionAwaitingMemos {
     // The uid of this transaction.
-    uid: TransactionUID<L>,
+    uid: TransactionUID,
     // The uids of the outputs of this transaction for which memos have not yet been posted.
     pending_uids: HashSet<u64>,
-}
-
-impl<L: Ledger> PartialEq<Self> for TransactionAwaitingMemos<L> {
-    fn eq(&self, other: &Self) -> bool {
-        self.uid == other.uid && self.pending_uids == other.pending_uids
-    }
-}
-
-impl<'a, L: Ledger> Arbitrary<'a> for TransactionAwaitingMemos<L>
-where
-    TransactionHash<L>: Arbitrary<'a>,
-{
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            uid: u.arbitrary()?,
-            pending_uids: u.arbitrary()?,
-        })
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1056,41 +933,32 @@ impl MintInfo {
     }
 }
 
-#[derive(Clone, Debug)]
-struct EventSummary<L: Ledger> {
-    updated_txns: Vec<(TransactionUID<L>, TransactionState)>,
+#[derive(Clone, Debug, Default)]
+struct EventSummary {
+    updated_txns: Vec<(TransactionUID, TransactionState)>,
     spent_nullifiers: Vec<(Nullifier, u64)>,
     rejected_nullifiers: Vec<Nullifier>,
     received_memos: Vec<(ReceiverMemo, u64)>,
 }
 
-impl<L: Ledger> Default for EventSummary<L> {
-    fn default() -> Self {
-        Self {
-            updated_txns: Default::default(),
-            spent_nullifiers: Default::default(),
-            rejected_nullifiers: Default::default(),
-            received_memos: Default::default(),
-        }
-    }
-}
-
-impl<'a, L: Ledger> WalletState<'a, L> {
-    pub fn pub_key(
-        &self,
-        _session: &WalletSession<'a, L, impl WalletBackend<'a, L>>,
-    ) -> UserPubKey {
+impl<'a> WalletState<'a> {
+    pub fn pub_key(&self, _session: &WalletSession<'a, impl WalletBackend<'a>>) -> UserPubKey {
         self.key_pair.pub_key()
     }
 
     pub fn balance(
         &self,
-        session: &WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &WalletSession<'a, impl WalletBackend<'a>>,
         asset: &AssetCode,
         frozen: FreezeFlag,
     ) -> u64 {
         self.records
-            .input_records(asset, &self.pub_key(session), frozen, self.validator.now())
+            .input_records(
+                asset,
+                &self.pub_key(session),
+                frozen,
+                self.validator.prev_commit_time,
+            )
             .map(|record| record.ro.amount)
             .sum()
     }
@@ -1118,8 +986,8 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     pub async fn transaction_status(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        receipt: &TransactionReceipt<L>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        receipt: &TransactionReceipt,
     ) -> Result<TransactionState, WalletError> {
         match self.transactions.status(&receipt.uid) {
             TransactionState::Unknown => {
@@ -1127,9 +995,8 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 // flight (the database only tracks in-flight transactions). So it must be retired,
                 // rejected, or a foreign transaction that we were never tracking to begin with.
                 // Check if it has been accepted by seeing if its fee nullifier is spent.
-                let (spent, _) = session
-                    .backend
-                    .get_nullifier_proof(&mut self.nullifiers, receipt.fee_nullifier)
+                let (spent, _) = self
+                    .get_nullifier_proof(session, receipt.fee_nullifier)
                     .await?;
                 if spent {
                     Ok(TransactionState::Retired)
@@ -1151,9 +1018,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     async fn handle_event(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        event: LedgerEvent<L>,
-    ) -> EventSummary<L> {
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        event: LedgerEvent,
+    ) -> EventSummary {
         self.now += 1;
         let mut summary = EventSummary::default();
         match event {
@@ -1164,7 +1031,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             } => {
                 // Don't trust the network connection that provided us this event; validate it
                 // against our local mirror of the ledger and bail out if it is invalid.
-                let mut uids = match self.validator.validate_and_apply(block.clone()) {
+                let mut uids = match self.validator.validate_and_apply(
+                    self.validator.prev_commit_time + 1,
+                    block.block.clone(),
+                    block.proofs.clone(),
+                ) {
                     Ok(uids) => {
                         if state_comm != self.validator.commit() {
                             // Received a block which validates, but our state commitment does not
@@ -1191,50 +1062,23 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     }
                 };
 
-                // Update our full copies of sparse validator data structures to be consistent with
-                // the validator state.
-                for txn in block.txns() {
-                    // Remove spent records.
-                    for n in txn.note().nullifiers() {
-                        if let Some(record) = self.records.remove_by_nullifier(n) {
-                            self.forget_merkle_leaf(record.uid);
-                        }
+                for ((txn_id, txn), proofs) in
+                    block.block.0.into_iter().enumerate().zip(block.proofs)
+                {
+                    for o in txn.output_commitments() {
+                        self.record_merkle_tree_mut().push(o.to_field_element());
                     }
-                    // Insert new records.
-                    for o in txn.note().output_commitments() {
-                        self.append_merkle_leaf(o);
-                    }
-                }
-                // Update nullifier set
-                let nullifier_proofs = block
-                    .txns()
-                    .into_iter()
-                    .flat_map(|txn| {
-                        txn.note()
-                            .nullifiers()
-                            .into_iter()
-                            .zip(txn.proofs().to_vec())
-                    })
-                    .collect::<Vec<_>>();
-                if self.nullifiers.multi_insert(&nullifier_proofs).is_err() {
-                    //todo !jeb.bearer handle this case more robustly. If we get here, it means the
-                    // event stream has lied to us, so recovery is quite tricky and may require us
-                    // to fail over to a different query service.
-                    panic!("received block with invalid nullifier proof");
-                }
-
-                for (txn_id, txn) in block.txns().into_iter().enumerate() {
                     // Split the uids corresponding to this transaction off the front of `uids`.
                     let mut this_txn_uids = uids;
-                    uids = this_txn_uids.split_off(txn.note().output_len());
+                    uids = this_txn_uids.split_off(txn.output_len());
 
-                    assert_eq!(this_txn_uids.len(), txn.note().output_len());
+                    assert_eq!(this_txn_uids.len(), txn.output_len());
                     summary.spent_nullifiers.extend(
-                        txn.note()
-                            .nullifiers()
+                        txn.nullifiers()
                             .into_iter()
                             .zip(this_txn_uids.iter().map(|(uid, _)| *uid)),
                     );
+                    let txn = ElaboratedTransaction { txn, proofs };
 
                     // Different concerns within the wallet consume transactions in different ways.
                     // Now we give each concern a chance to consume this transaction, performing any
@@ -1257,13 +1101,47 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     }
 
                     // This is someone else's transaction but we can audit it.
-                    self.audit_transaction(session, txn.note(), &mut this_txn_uids)
+                    self.audit_transaction(session, &txn, &mut this_txn_uids)
                         .await;
+
+                    // Update spent nullifiers. First we have to remember the sub-trees of our
+                    // current sparse tree which will receive the new nullifiers, because
+                    // SetMerkleTree::insert has no effect (not even updating the root hashs) if the
+                    // insert goes into a forgotten sub-tree.
+                    for (nullifier, proof) in txn.txn.nullifiers().into_iter().zip(txn.proofs) {
+                        if self.nullifiers.remember(nullifier, proof).is_err() {
+                            //todo !jeb.bearer handle this case more robustly. If we get here, it
+                            // means the event stream has lied to us, so recovery is quite tricky
+                            // and may require us to fail over to a different query service.
+                            panic!("received block with invalid nullifier proof");
+                        }
+                    }
+                    // Now we can insert the new nullifiers, and none of the inserts should fail.
+                    for nullifier in txn.txn.nullifiers() {
+                        // This should not fail after the remember() above, so we can unwrap().
+                        self.nullifiers.insert(nullifier).unwrap();
+                        // If we have a record with this nullifier, remove it as it has been spent.
+                        if let Some(record) = self.records.remove_by_nullifier(nullifier) {
+                            self.record_merkle_tree_mut().forget(record.uid);
+                        }
+                    }
+                    // Now that the new nullifiers have all been inserted, we can prune our
+                    // nullifiers set back down to restore sparseness.
+                    for nullifier in txn.txn.nullifiers() {
+                        //todo !jeb.bearer for now we unconditionally forget the new nullifier,
+                        // knowing we can get it back from the backend if necessary. However, this
+                        // nullifier may be helping us by representing a branch of the tree that we
+                        // care about, that would allow us to generate a proof that the nullifier
+                        // for one of our owned records is _not_ in the tree. We should be more
+                        // careful about pruning to cut down on the amount we have to ask the
+                        // network.
+                        self.nullifiers.forget(nullifier);
+                    }
 
                     // Prune the record Merkle tree of records we don't care about.
                     for (uid, remember) in this_txn_uids {
                         if !remember {
-                            self.forget_merkle_leaf(uid);
+                            self.record_merkle_tree_mut().forget(uid);
                         }
                     }
                 }
@@ -1299,10 +1177,14 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                             // If this record is for us (i.e. its corresponding memo decrypts under
                             // our key) and not a dummy, then add it to our owned records.
                             self.records.insert(record_opening, uid, &self.key_pair);
-                            if !self.remember_merkle_leaf(
-                                uid,
-                                &MerkleLeafProof::new(comm.to_field_element(), proof),
-                            ) {
+                            if self
+                                .record_merkle_tree_mut()
+                                .remember(
+                                    uid,
+                                    &MerkleLeafProof::new(comm.to_field_element(), proof),
+                                )
+                                .is_err()
+                            {
                                 println!(
                                     "error: got bad merkle proof from backend for commitment {:?}",
                                     comm
@@ -1314,10 +1196,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             }
 
             LedgerEvent::Reject { block, error } => {
-                for mut txn in block.txns() {
-                    summary
-                        .rejected_nullifiers
-                        .append(&mut txn.note().nullifiers());
+                for (txn, proofs) in block.block.0.into_iter().zip(block.proofs) {
+                    summary.rejected_nullifiers.append(&mut txn.nullifiers());
+                    let mut txn = ElaboratedTransaction { txn, proofs };
                     if let Some(pending) = self.clear_pending_transaction(session, &txn, None).await
                     {
                         // Try to resubmit if the error is recoverable.
@@ -1379,17 +1260,17 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     async fn clear_pending_transaction<'t>(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        txn: &Transaction<L>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        txn: &ElaboratedTransaction,
         res: Option<CommittedTxn<'t>>,
-    ) -> Option<PendingTransaction<L>> {
-        let now = self.validator.now();
+    ) -> Option<PendingTransaction> {
+        let now = self.validator.prev_commit_time;
 
         // Remove the transaction from pending transaction data structures.
         let txn_hash = txn.hash();
         let pending = self.transactions.remove_pending(&txn_hash);
 
-        for nullifier in txn.note().nullifiers() {
+        for nullifier in txn.txn.nullifiers() {
             if let Some(record) = self.records.record_with_nullifier_mut(&nullifier) {
                 if pending.is_some() {
                     // If we started this transaction, all of its inputs should have been on hold,
@@ -1445,9 +1326,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         pending
     }
 
-    fn clear_expired_transactions(&mut self) -> Vec<TransactionUID<L>> {
+    fn clear_expired_transactions(&mut self) -> Vec<TransactionUID> {
         self.transactions
-            .remove_expired(self.validator.now())
+            .remove_expired(self.validator.prev_commit_time)
             .into_iter()
             .map(|txn| txn.uid)
             .collect()
@@ -1455,13 +1336,13 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     async fn audit_transaction(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        txn: &TransactionNote,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        txn: &ElaboratedTransaction,
         uids: &mut [(u64, bool)],
     ) {
         // Try to decrypt auditor memos.
         let mut audit_data = None;
-        match txn {
+        match &txn.txn {
             TransactionNote::Transfer(xfr) => {
                 for asset in self.auditable_assets.values() {
                     audit_data = self
@@ -1522,21 +1403,14 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     async fn update_nullifier_proofs(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        txn: &mut Transaction<L>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        txn: &mut ElaboratedTransaction,
     ) -> Result<(), WalletError> {
-        let mut proofs = Vec::new();
-        for n in txn.note().nullifiers() {
-            let (spent, proof) = session
-                .backend
-                .get_nullifier_proof(&mut self.nullifiers, n)
-                .await?;
-            if spent {
-                return Err(WalletError::NullifierAlreadyPublished { nullifier: n });
-            }
-            proofs.push(proof);
+        txn.proofs = Vec::new();
+        for n in txn.txn.nullifiers() {
+            let proof = self.prove_nullifier_unspent(session, n).await?;
+            txn.proofs.push(proof);
         }
-        txn.set_proofs(proofs);
         Ok(())
     }
 
@@ -1546,7 +1420,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     // desugaring the type signature.
     fn define_asset<'b>(
         &'b mut self,
-        session: &'b mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &'b mut WalletSession<'a, impl WalletBackend<'a>>,
         description: &'b [u8],
         policy: AssetPolicy,
     ) -> impl 'b + Captures<'a> + Future<Output = Result<AssetDefinition, WalletError>> + Send
@@ -1604,7 +1478,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     /// automatically. Calling this function is unnecessary.
     pub async fn audit_asset(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         asset: &AssetDefinition,
     ) -> Result<(), WalletError> {
         let my_key = self.auditor_key_pair.pub_key();
@@ -1631,11 +1505,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     pub async fn transfer(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         asset: &AssetCode,
         receivers: &[(UserAddress, u64)],
         fee: u64,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         let receivers = iter(receivers)
             .then(|(addr, amt)| {
                 let session = &session;
@@ -1654,14 +1528,17 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     pub async fn mint(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         fee: u64,
         asset_code: &AssetCode,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         let (fee_ro, uid) = self.find_native_record_for_fee(session, fee)?;
-        let acc_member_witness = self.get_merkle_proof(uid);
+        let acc_member_witness = AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
+            .expect_ok()
+            .unwrap()
+            .1;
         let (asset_def, seed, asset_description) = self
             .defined_assets
             .get(asset_code)
@@ -1727,12 +1604,12 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     ///   records we have.
     pub async fn freeze(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         fee: u64,
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         self.freeze_or_unfreeze(session, fee, asset, amount, owner, FreezeFlag::Frozen)
             .await
     }
@@ -1745,25 +1622,25 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     /// Similar restrictions on change apply as for `freeze`.
     pub async fn unfreeze(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         fee: u64,
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         self.freeze_or_unfreeze(session, fee, asset, amount, owner, FreezeFlag::Unfrozen)
             .await
     }
 
     async fn freeze_or_unfreeze(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         fee: u64,
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
         outputs_frozen: FreezeFlag,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         let my_key = self.freezer_key_pair.pub_key();
         let asset_key = asset.policy_ref().freezer_pub_key();
         if my_key != *asset_key {
@@ -1786,7 +1663,10 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         // prepare inputs
         let mut inputs = vec![];
         for (ro, uid) in input_records.into_iter() {
-            let witness = self.get_merkle_proof(uid);
+            let witness = AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
+                .expect_ok()
+                .unwrap()
+                .1;
             inputs.push(FreezeNoteInput {
                 ro,
                 acc_member_witness: witness,
@@ -1797,7 +1677,13 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
         let fee_input = FeeInput {
             ro: fee_ro,
-            acc_member_witness: self.get_merkle_proof(fee_uid),
+            acc_member_witness: AccMemberWitness::lookup_from_tree(
+                self.record_merkle_tree(),
+                fee_uid,
+            )
+            .expect_ok()
+            .unwrap()
+            .1,
             owner_keypair: &self.key_pair,
         };
 
@@ -1834,10 +1720,10 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     async fn transfer_native(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         receivers: &[(UserPubKey, u64)],
         fee: u64,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         let total_output_amount: u64 =
             receivers.iter().fold(0, |sum, (_, amount)| sum + *amount) + fee;
 
@@ -1853,7 +1739,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         // prepare inputs
         let mut inputs = vec![];
         for (ro, uid) in input_records {
-            let acc_member_witness = self.get_merkle_proof(uid);
+            let acc_member_witness =
+                AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
+                    .expect_ok()
+                    .unwrap()
+                    .1;
             inputs.push(TransferNoteInput {
                 ro,
                 acc_member_witness,
@@ -1933,11 +1823,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     async fn transfer_non_native(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         asset: &AssetCode,
         receivers: &[(UserPubKey, u64)],
         fee: u64,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         assert_ne!(
             *asset,
             AssetCode::native(),
@@ -1958,7 +1848,10 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         // prepare inputs
         let mut inputs = vec![];
         for (ro, uid) in input_records.into_iter() {
-            let witness = self.get_merkle_proof(uid);
+            let witness = AccMemberWitness::lookup_from_tree(self.record_merkle_tree(), uid)
+                .expect_ok()
+                .unwrap()
+                .1;
             inputs.push(TransferNoteInput {
                 ro,
                 acc_member_witness: witness,
@@ -1994,7 +1887,13 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
         let fee_input = FeeInput {
             ro: fee_ro,
-            acc_member_witness: self.get_merkle_proof(fee_uid),
+            acc_member_witness: AccMemberWitness::lookup_from_tree(
+                self.record_merkle_tree(),
+                fee_uid,
+            )
+            .expect_ok()
+            .unwrap()
+            .1,
             owner_keypair: &self.key_pair,
         };
 
@@ -2053,25 +1952,32 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     async fn submit_transaction(
         &mut self,
-        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
         note: TransactionNote,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
         freeze_outputs: Vec<RecordOpening>,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         let mut nullifier_pfs = Vec::new();
         for n in note.nullifiers() {
-            let (spent, proof) = session
-                .backend
-                .get_nullifier_proof(&mut self.nullifiers, n)
-                .await?;
-            if spent {
-                return Err(WalletError::NullifierAlreadyPublished { nullifier: n });
-            }
+            let proof = if let Some((contains, proof)) = self.nullifiers.contains(n) {
+                if contains {
+                    return Err(WalletError::NullifierAlreadyPublished { nullifier: n });
+                } else {
+                    proof
+                }
+            } else {
+                let proof = self.prove_nullifier_unspent(session, n).await?;
+                self.nullifiers.remember(n, proof.clone()).unwrap();
+                proof
+            };
             nullifier_pfs.push(proof);
         }
 
-        let txn = Transaction::<L>::new(note, nullifier_pfs);
+        let txn = ElaboratedTransaction {
+            txn: note,
+            proofs: nullifier_pfs,
+        };
         self.submit_elaborated_transaction(session, txn, memos, sig, freeze_outputs, None)
             .await
     }
@@ -2090,13 +1996,13 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     // to indicate the captured lifetime using the Captures trait.
     fn submit_elaborated_transaction<'b>(
         &'b mut self,
-        session: &'b mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        txn: Transaction<L>,
+        session: &'b mut WalletSession<'a, impl WalletBackend<'a>>,
+        txn: ElaboratedTransaction,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
         freeze_outputs: Vec<RecordOpening>,
-        uid: Option<TransactionUID<L>>,
-    ) -> impl 'b + Captures<'a> + Future<Output = Result<TransactionReceipt<L>, WalletError>> + Send
+        uid: Option<TransactionUID>,
+    ) -> impl 'b + Captures<'a> + Future<Output = Result<TransactionReceipt, WalletError>> + Send
     where
         'a: 'b,
     {
@@ -2138,19 +2044,19 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     fn add_pending_transaction(
         &mut self,
-        _session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        txn: &Transaction<L>,
+        _session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        txn: &ElaboratedTransaction,
         receiver_memos: Vec<ReceiverMemo>,
         signature: Signature,
         freeze_outputs: Vec<RecordOpening>,
-        uid: Option<TransactionUID<L>>,
-    ) -> TransactionReceipt<L> {
-        let now = self.validator.now();
+        uid: Option<TransactionUID>,
+    ) -> TransactionReceipt {
+        let now = self.validator.prev_commit_time;
         let timeout = now + RECORD_HOLD_TIME;
         let hash = txn.hash();
         let uid = uid.unwrap_or_else(|| TransactionUID(hash.clone()));
 
-        for nullifier in txn.note().nullifiers() {
+        for nullifier in txn.txn.nullifiers() {
             // hold the record corresponding to this nullifier until the transaction is committed,
             // rejected, or expired.
             if let Some(record) = self.records.record_with_nullifier_mut(&nullifier) {
@@ -2172,7 +2078,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
         TransactionReceipt {
             uid,
-            fee_nullifier: txn.note().nullifiers()[0],
+            fee_nullifier: txn.txn.nullifiers()[0],
             submitter: self.key_pair.address(),
         }
     }
@@ -2186,7 +2092,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         amount: u64,
         max_records: Option<usize>,
     ) -> Result<(Vec<(RecordOpening, u64)>, u64), WalletError> {
-        let now = self.validator.now();
+        let now = self.validator.prev_commit_time;
 
         // If we have a record with the exact size required, use it to avoid fragmenting big records
         // into smaller change records.
@@ -2244,7 +2150,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     /// funds to pay transaction fee
     fn find_native_record_for_fee(
         &self,
-        session: &WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        session: &WalletSession<'a, impl WalletBackend<'a>>,
         fee: u64,
     ) -> Result<(RecordOpening, u64), WalletError> {
         self.find_records(
@@ -2381,67 +2287,56 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         Ok(proving_key)
     }
 
-    fn forget_merkle_leaf(&mut self, leaf: u64) {
-        if leaf < self.record_mt.num_leaves() - 1 {
-            self.record_mt.forget(leaf);
+    fn record_merkle_tree(&self) -> &MerkleTree {
+        &self.record_mt
+    }
+
+    fn record_merkle_tree_mut(&mut self) -> &mut MerkleTree {
+        &mut self.record_mt
+    }
+
+    async fn get_nullifier_proof(
+        &mut self,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        nullifier: Nullifier,
+    ) -> Result<(bool, SetMerkleProof), WalletError> {
+        if let Some(ret) = self.nullifiers.contains(nullifier) {
+            Ok(ret)
         } else {
-            assert_eq!(leaf, self.record_mt.num_leaves() - 1);
-            // We can't forget the last leaf in a Merkle tree. Instead, we just note that we want to
-            // forget this leaf, and we'll forget it when we append a new last leaf.
-            //
-            // There can only be one `merkle_leaf_to_forget` at a time, because we will forget the
-            // leaf and clear this field as soon as we append a new leaf.
-            assert!(self.merkle_leaf_to_forget.is_none());
-            self.merkle_leaf_to_forget = Some(leaf);
+            let (contains, proof) = session
+                .backend
+                .get_nullifier_proof(self.nullifiers.hash(), nullifier)
+                .await?;
+            self.nullifiers.remember(nullifier, proof.clone()).unwrap();
+            Ok((contains, proof))
         }
     }
 
-    #[must_use]
-    fn remember_merkle_leaf(&mut self, leaf: u64, proof: &MerkleLeafProof) -> bool {
-        // If we were planning to forget this leaf once a new leaf is appended, stop planning that.
-        if self.merkle_leaf_to_forget == Some(leaf) {
-            self.merkle_leaf_to_forget = None;
-            // `merkle_leaf_to_forget` is always represented in the tree, so we don't have to call
-            // `remember` in this case.
-            assert!(self.record_mt.get_leaf(leaf).expect_ok().is_ok());
-            true
+    async fn prove_nullifier_unspent(
+        &mut self,
+        session: &mut WalletSession<'a, impl WalletBackend<'a>>,
+        nullifier: Nullifier,
+    ) -> Result<SetMerkleProof, WalletError> {
+        let (spent, proof) = self.get_nullifier_proof(session, nullifier).await?;
+        if spent {
+            Err(WalletError::NullifierAlreadyPublished { nullifier })
         } else {
-            self.record_mt.remember(leaf, proof).is_ok()
+            Ok(proof)
         }
-    }
-
-    fn append_merkle_leaf(&mut self, comm: RecordCommitment) {
-        self.record_mt.push(comm.to_field_element());
-
-        // Now that we have appended a new leaf to the Merkle tree, we can forget the old last leaf,
-        // if needed.
-        if let Some(uid) = self.merkle_leaf_to_forget.take() {
-            assert!(uid < self.record_mt.num_leaves() - 1);
-            self.record_mt.forget(uid);
-        }
-    }
-
-    fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
-        // The wallet never needs a Merkle proof that isn't guaranteed to already be in the Merkle
-        // tree, so this unwrap() should never fail.
-        AccMemberWitness::lookup_from_tree(&self.record_mt, leaf)
-            .expect_ok()
-            .unwrap()
-            .1
     }
 }
 
 /// Note: it is a soundness requirement that the destructor of a `Wallet` run when the `Wallet` is
 /// dropped. Therefore, `std::mem::forget` must not be used to forget a `Wallet` without running its
 /// destructor.
-pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = AAPLedger> {
+pub struct Wallet<'a, Backend: WalletBackend<'a>> {
     // Data shared between the main thread and the event handling thread:
     //  * the trusted, persistent wallet state
     //  * the trusted, ephemeral wallet session
     //  * promise completion handles for futures returned by sync(), indexed by the timestamp at
     //    which the corresponding future is supposed to complete. Handles are added in sync() (main
     //    thread) and removed and completed in the event thread
-    mutex: Arc<Mutex<WalletSharedState<'a, L, Backend>>>,
+    mutex: Arc<Mutex<WalletSharedState<'a, Backend>>>,
     // Handle for the task running the event handling loop. When dropped, this handle will cancel
     // the task, so this field is never read, it exists solely to live as long as this struct and
     // then be dropped.
@@ -2452,18 +2347,16 @@ pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = AAPLedger> {
     freezer_key_pair: Arc<FreezerKeyPair>,
 }
 
-struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
-    state: WalletState<'a, L>,
-    session: WalletSession<'a, L, Backend>,
+struct WalletSharedState<'a, Backend: WalletBackend<'a>> {
+    state: WalletState<'a>,
+    session: WalletSession<'a, Backend>,
     sync_handles: HashMap<u64, Vec<oneshot::Sender<()>>>,
-    txn_subscribers: HashMap<TransactionUID<L>, Vec<oneshot::Sender<TransactionState>>>,
+    txn_subscribers: HashMap<TransactionUID, Vec<oneshot::Sender<TransactionState>>>,
     pending_foreign_txns: HashMap<Nullifier, Vec<oneshot::Sender<TransactionState>>>,
 }
 
-impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
-    Wallet<'a, Backend, L>
-{
-    pub async fn new(mut backend: Backend) -> Result<Wallet<'a, Backend, L>, WalletError> {
+impl<'a, Backend: 'a + WalletBackend<'a> + Send + Sync> Wallet<'a, Backend> {
+    pub async fn new(mut backend: Backend) -> Result<Wallet<'a, Backend>, WalletError> {
         let state = backend.load().await?;
         //add keys to Wallet
         let key_pair = state.key_pair.clone();
@@ -2474,7 +2367,6 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
             backend,
             rng: ChaChaRng::from_entropy(),
             _marker: Default::default(),
-            _marker2: Default::default(),
         };
         let sync_handles = HashMap::new();
         let txn_subscribers = HashMap::new();
@@ -2579,15 +2471,15 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     }
 
     pub fn pub_key(&self) -> UserPubKey {
-        (*self).key_pair.pub_key().clone()
+        self.key_pair.pub_key().clone()
     }
 
     pub fn auditor_pub_key(&self) -> AuditorPubKey {
-        (*self).auditor_key_pair.pub_key().clone()
+        self.auditor_key_pair.pub_key().clone()
     }
 
     pub fn freezer_pub_key(&self) -> FreezerPubKey {
-        (*self).freezer_key_pair.pub_key().clone()
+        self.freezer_key_pair.pub_key().clone()
     }
 
     pub fn address(&self) -> UserAddress {
@@ -2614,7 +2506,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset: &AssetCode,
         receivers: &[(UserAddress, u64)],
         fee: u64,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.transfer(session, asset, receivers, fee).await
     }
@@ -2642,7 +2534,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset_code: &AssetCode,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.mint(session, fee, asset_code, amount, owner).await
     }
@@ -2653,7 +2545,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.freeze(session, fee, asset, amount, owner).await
     }
@@ -2664,14 +2556,14 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.unfreeze(session, fee, asset, amount, owner).await
     }
 
     pub async fn transaction_status(
         &self,
-        receipt: &TransactionReceipt<L>,
+        receipt: &TransactionReceipt,
     ) -> Result<TransactionState, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.transaction_status(session, receipt).await
@@ -2679,7 +2571,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
 
     pub async fn await_transaction(
         &self,
-        receipt: &TransactionReceipt<L>,
+        receipt: &TransactionReceipt,
     ) -> Result<TransactionState, WalletError> {
         let mut guard = self.mutex.lock().await;
         let WalletSharedState {
@@ -2744,8 +2636,8 @@ pub fn new_key_pair() -> UserKeyPair {
 pub mod test_helpers {
     use super::*;
     use crate::{
-        node, Block, ElaboratedBlock, ElaboratedTransaction, SetMerkleProof, SetMerkleTree,
-        TransactionVerifyingKey, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
+        node, Block, ElaboratedBlock, TransactionVerifyingKey, VerifierKeySet, MERKLE_HEIGHT,
+        UNIVERSAL_PARAM,
     };
     use futures::channel::mpsc as channel;
     use futures::future;
@@ -2785,7 +2677,7 @@ pub mod test_helpers {
     }
 
     #[async_trait]
-    impl<'a> WalletStorage<'a, AAPLedger> for MockWalletStorage<'a> {
+    impl<'a> WalletStorage<'a> for MockWalletStorage<'a> {
         fn exists(&self) -> bool {
             self.committed.is_some()
         }
@@ -2861,18 +2753,13 @@ pub mod test_helpers {
         }
 
         fn generate_event(&mut self, e: LedgerEvent) {
-            println!("EVENT {:?}", e);
             self.events.push(e.clone());
             for s in self.subscribers.iter_mut() {
                 s.start_send(e.clone()).unwrap();
             }
         }
 
-        pub fn flush(&mut self) {
-            if self.current_block.block.0.is_empty() {
-                return;
-            }
-
+        fn flush(&mut self) {
             let block = std::mem::replace(&mut self.current_block, self.validator.next_block());
             match self.validator.validate_and_apply(
                 self.validator.prev_commit_time + 1,
@@ -2944,7 +2831,7 @@ pub mod test_helpers {
                         block: Block(vec![txn.txn]),
                         proofs: vec![txn.proofs],
                     };
-                    self.generate_event(LedgerEvent::<AAPLedger>::Reject {
+                    self.generate_event(LedgerEvent::Reject {
                         block: rejected,
                         error,
                     });
@@ -2978,7 +2865,7 @@ pub mod test_helpers {
                         .1
                 })
                 .collect::<Vec<_>>();
-            self.generate_event(LedgerEvent::<AAPLedger>::Memos {
+            self.generate_event(LedgerEvent::Memos {
                 outputs: izip!(memos, comms, uids, merkle_paths).collect(),
             });
 
@@ -2988,11 +2875,10 @@ pub mod test_helpers {
 
     pub async fn sync<'a>(
         ledger: &Arc<SyncMutex<MockLedger<'a>>>,
-        wallets: &[Wallet<'a, impl 'a + WalletBackend<'a, AAPLedger> + Send + Sync>],
+        wallets: &[Wallet<'a, impl 'a + WalletBackend<'a> + Send + Sync>],
     ) {
         let t = {
-            let mut ledger = ledger.lock().unwrap();
-            ledger.flush();
+            let ledger = ledger.lock().unwrap();
             if let Some(LedgerEvent::Commit { .. }) = ledger.events.last() {
                 // If the last event is a Commit, wait until the sender receives the Commit event
                 // and posts the receiver memos, generating a new Memos event.
@@ -3014,7 +2900,7 @@ pub mod test_helpers {
     }
 
     pub async fn sync_with<'a>(
-        wallets: &[Wallet<'a, impl 'a + WalletBackend<'a, AAPLedger> + Send + Sync>],
+        wallets: &[Wallet<'a, impl 'a + WalletBackend<'a> + Send + Sync>],
         t: u64,
     ) {
         println!("waiting for sync point {}", t);
@@ -3031,7 +2917,7 @@ pub mod test_helpers {
     }
 
     #[async_trait]
-    impl<'a> WalletBackend<'a, AAPLedger> for MockWalletBackend<'a> {
+    impl<'a> WalletBackend<'a> for MockWalletBackend<'a> {
         type EventStream = Pin<Box<dyn Stream<Item = LedgerEvent> + Send>>;
         type Storage = MockWalletStorage<'a>;
 
@@ -3043,7 +2929,6 @@ pub mod test_helpers {
             let state = {
                 let ledger = self.ledger.lock().unwrap();
                 let mut rng = ChaChaRng::from_seed(self.seed);
-
                 WalletState {
                     validator: ledger.validator.clone(),
                     proving_keys: ledger.proving_keys.clone(),
@@ -3056,7 +2941,6 @@ pub mod test_helpers {
                     },
                     nullifiers: ledger.nullifiers.clone(),
                     record_mt: ledger.records.clone(),
-                    merkle_leaf_to_forget: None,
                     defined_assets: HashMap::new(),
                     now: 0,
                     transactions: Default::default(),
@@ -3107,11 +2991,11 @@ pub mod test_helpers {
 
         async fn get_nullifier_proof(
             &self,
-            set: &mut SetMerkleTree,
+            root: set_hash::Hash,
             nullifier: Nullifier,
         ) -> Result<(bool, SetMerkleProof), WalletError> {
             let ledger = self.ledger.lock().unwrap();
-            if set.hash() == ledger.nullifiers.hash() {
+            if root == ledger.nullifiers.hash() {
                 Ok(ledger.nullifiers.contains(nullifier).unwrap())
             } else {
                 Err(WalletError::QueryServiceError {
@@ -3229,7 +3113,7 @@ pub mod test_helpers {
             subscribers: Vec::new(),
             current_block,
             committed_blocks: Vec::new(),
-            block_size: 2,
+            block_size: 1,
             hold_next_transaction: false,
             held_transaction: None,
             proving_keys: Arc::new(ProverKeySet {
@@ -3434,6 +3318,7 @@ pub mod test_helpers {
             );
             now = Instant::now();
 
+            // TODO process block as a batch. For now, do txs one by one.
             for (j, (asset_ix, sender_ix, receiver_ix, amount)) in block.iter().enumerate() {
                 println!(
                     "Starting txn {}.{}/{}:{:?}: {}s",
@@ -3455,7 +3340,7 @@ pub mod test_helpers {
                 };
                 let receiver = wallets[receiver_ix + 1].address();
                 let sender_address = wallets[sender_ix + 1].address();
-                let sender_balance = balances[sender_ix][asset_ix];
+                let sender_balance = wallets[sender_ix + 1].balance(&asset.code).await;
 
                 let mut amount = if *amount <= sender_balance {
                     *amount
@@ -3532,53 +3417,38 @@ pub mod test_helpers {
                             continue;
                         }
                     }
-                    Err(WalletError::InsufficientBalance { .. }) => {
-                        // We should always have enough balance to make the transaction, because we
-                        // adjusted the transaction amount (and potentially minted more of the
-                        // asset) above, so that the transaction is covered by our most up-to-date
-                        // balance.
-                        //
-                        // If we fail due to insufficient balance, it is likely because a record we
-                        // need is on hold as part of a previous transaction, and we haven't gotten
-                        // the change yet because the transaction is buffered in a block. The
-                        // transaction should succeed after we flush any pending transactions.
-                        println!("flushing pending blocks to retrieve change");
-                        ledger.lock().unwrap().flush();
-                        sync(&ledger, &wallets).await;
-                        wallets[sender_ix + 1]
-                            .transfer(&asset.code, &[(receiver, amount)], 1)
-                            .await
-                            .unwrap()
-                    }
                     Err(err) => {
                         panic!("transaction failed: {:?}", err)
                     }
                 };
-                println!(
-                    "Generated txn {}.{}/{}: {}s",
-                    i + 1,
-                    j + 1,
-                    block.len(),
-                    now.elapsed().as_secs_f32()
-                );
+                println!("transaction generated: {}s", now.elapsed().as_secs_f32());
                 now = Instant::now();
 
                 balances[sender_ix][0] -= 1; // transaction fee
                 balances[sender_ix][asset_ix] -= amount;
                 balances[receiver_ix][asset_ix] += amount;
 
+                // The sending wallet should report the new balance immediately, even before a
+                // validator has confirmed the transaction, because the transferred records are
+                // placed on hold until the transfer is confirmed or rejected.
+                //
+                // Note that the sender may report less than the final balance if it is waiting on a
+                // change output to be confirmed.
+                assert!(sender.balance(&native.code).await <= balances[sender_ix][0]);
+                assert!(sender.balance(&asset.code).await <= balances[sender_ix][asset_ix]);
+
                 ledger.lock().unwrap().release_held_transaction();
+                sync(&ledger, &wallets).await;
+                check_balances(&wallets, &balances, &assets).await;
+
+                println!(
+                    "Finished txn {}.{}/{}: {}s",
+                    i + 1,
+                    j + 1,
+                    block.len(),
+                    now.elapsed().as_secs_f32()
+                );
             }
-
-            sync(&ledger, &wallets).await;
-            check_balances(&wallets, &balances, &assets).await;
-
-            println!(
-                "Finished block {}/{}: {}s",
-                i + 1,
-                block.len(),
-                now.elapsed().as_secs_f32()
-            );
         }
     }
 }
@@ -3903,7 +3773,6 @@ mod tests {
                 );
                 now = Instant::now();
                 ledger.release_held_transaction();
-                ledger.flush();
 
                 // The sender gets back in sync with the validator after their transaction is
                 // rejected.
@@ -4055,11 +3924,9 @@ mod tests {
         );
         let ledger_time = ledger.lock().unwrap().now();
         ledger.lock().unwrap().release_held_transaction().unwrap();
-        ledger.lock().unwrap().flush();
-        // Wait for the Reject event.
-        sync_with(&wallets, ledger_time + 1).await;
-        // Wait for the Commit and Memos events after the wallet resubmits.
-        ledger.lock().unwrap().flush();
+        // Wait for 3 events: the first Reject event, then a later Commit event after the wallet
+        // resubmits, and finally a Memos event after the wallet receives the Commit event and posts
+        // the receiver memos.
         sync_with(&wallets, ledger_time + 3).await;
         assert_eq!(wallets[0].balance(&AssetCode::native()).await, 0);
         assert_eq!(
@@ -4178,21 +4045,6 @@ mod tests {
             (1, 1, 0, 1), // Bob sends 1 of coin 1 to Alice
         ]];
         test_multixfr_wallet(txns, 2, 2, alice_grant, vec![bob_grant]).await;
-        Ok(())
-    }
-
-    #[async_std::test]
-    async fn test_multixfr_wallet_multi_xfr_block() -> std::io::Result<()> {
-        // Alice and Bob each get 1 native token to start.
-        let alice_grant = (0, 0, 1);
-        let bob_grant = (0, 1, 1);
-        // Alice and Bob make independent transactions, so that the transactions can end up in the
-        // same block.
-        let txns = vec![vec![
-            (0, 0, 1, 1), // Alice sends 1 coin to Bob
-            (0, 1, 0, 1), // Bob sends 1 coin to Alice
-        ]];
-        test_multixfr_wallet(txns, 2, 1, alice_grant, vec![bob_grant]).await;
         Ok(())
     }
 

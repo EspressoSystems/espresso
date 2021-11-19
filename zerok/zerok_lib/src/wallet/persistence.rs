@@ -45,7 +45,7 @@ impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletStaticState<'a> {
     fn from(w: &WalletState<'a, L>) -> Self {
         Self {
             proving_keys: w.proving_keys.clone(),
-            key_pair: (&w.key_pair).clone(),
+            key_pair: w.key_pair.clone(),
             auditor_key_pair: w.auditor_key_pair.clone(),
             freezer_key_pair: w.freezer_key_pair.clone(),
         }
