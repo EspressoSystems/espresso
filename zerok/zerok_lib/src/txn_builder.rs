@@ -1,83 +1,24 @@
-// pub mod encryption;
-// pub mod hd;
-// pub mod network;
-// pub mod persistence;
-// mod secret;
-// use crate::api;
-// use crate::key_set;
-// use crate::node::LedgerEvent;
+use crate::node::LedgerEvent;
 use crate::set_merkle_tree::*;
-// use crate::util::arbitrary_wrappers::*;
 use crate::{
-    // ser_test,
     ElaboratedTransaction,
-    ElaboratedTransactionHash,
     ProverKeySet,
-    //  ValidationError,
     ValidatorState,
-    // MERKLE_HEIGHT,
 };
-// use arbitrary::{Arbitrary, Unstructured};
-// use ark_serialize::*;
-// use async_scoped::AsyncScope;
-// use async_std::sync::MutexGuard;
-// use async_std::task::block_on;
-// use async_trait::async_trait;
-// use core::fmt::Debug;
-// use futures::{
-//     // channel::oneshot,
-//     prelude::*,
-//     stream::Stream,
-// };
 use jf_txn::{
     errors::TxnApiError,
-    // freeze::{FreezeNote, FreezeNoteInput},
-    keys::{
-        AuditorKeyPair,
-        // AuditorPubKey,
-        FreezerKeyPair,
-        //  FreezerPubKey,
-        UserAddress,
-        UserKeyPair,
-        UserPubKey,
-    },
-    // proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
+    keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey},
     sign_receiver_memos,
     structs::{
-        AssetCode,
-        AssetCodeSeed,
-        AssetDefinition,
-        // AssetPolicy,
-        // BlindFactor,
-        FeeInput,
-        FreezeFlag,
-        Nullifier,
-        ReceiverMemo,
-        RecordCommitment,
-        RecordOpening,
-        TxnFeeInfo,
+        AssetCode, AssetCodeSeed, AssetDefinition, FeeInput, FreezeFlag, Nullifier, ReceiverMemo,
+        RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness,
-    MerkleLeafProof,
-    MerkleTree,
-    Signature,
-    TransactionNote,
+    AccMemberWitness, MerkleLeafProof, MerkleTree, Signature, TransactionNote,
 };
-// use jf_utils::tagged_blob;
-// use key_set::KeySet;
-// use rand_chacha::rand_core::SeedableRng;
+use phaselock::EventType;
 use rand_chacha::ChaChaRng;
-// use serde::{Deserialize, Serialize};
-// use snafu::ResultExt;
 use std::collections::{BTreeSet, HashMap};
-// use std::convert::TryFrom;
-// use std::iter::FromIterator;
-// use std::ops::{Index, IndexMut};
-// use std::sync::Arc;
-
-// #[derive(/*Debug,*/ Snafu)]
-// #[snafu(visibility = "pub")]
 pub enum XfrError {
     InsufficientBalance,
     Fragmentation {
@@ -95,9 +36,6 @@ pub enum XfrError {
     UndefinedAsset {
         asset: AssetCode,
     },
-    // InvalidBlock {
-    //     source: ValidationError,
-    // },
     NullifierAlreadyPublished {
         nullifier: Nullifier,
     },
@@ -109,27 +47,12 @@ pub enum XfrError {
     InvalidAddress {
         address: UserAddress,
     },
-    // InvalidAuditorKey {
-    //     my_key: AuditorPubKey,
-    //     asset_key: AuditorPubKey,
-    // },
-    // InvalidFreezerKey {
-    //     my_key: FreezerPubKey,
-    //     asset_key: FreezerPubKey,
-    // },
     NetworkError {
         source: phaselock::networking::NetworkError,
     },
     QueryServiceError {
         source: crate::node::QueryServiceError,
     },
-    // ClientConfigError {
-    //     source: <surf::Client as TryFrom<surf::Config>>::Error,
-    // },
-    // ConsensusError {
-    //     #[snafu(source(false))]
-    //     source: Result<phaselock::error::PhaseLockError, String>,
-    // },
     PersistenceError {
         source: atomic_store::error::PersistenceError,
     },
@@ -139,20 +62,12 @@ pub enum XfrError {
     BincodeError {
         source: bincode::Error,
     },
-    // EncryptionError {
-    //     source: encryption::Error,
-    // },
     KeyError {
         source: argon2::Error,
     },
-    // #[snafu(display("{}", msg))]
-    // Failed {
-    //     msg: String,
-    // },
 }
 
-// #[ser_test(arbitrary, ark(false))]
-#[derive(Clone, Debug /*, Deserialize, Serialize, PartialEq*/)]
+#[derive(Clone, Debug)]
 pub struct RecordInfo {
     ro: RecordOpening,
     uid: u64,
@@ -162,9 +77,7 @@ pub struct RecordInfo {
     hold_until: Option<u64>,
 }
 
-// #[ser_test(ark(false))]
-#[derive(Clone, Debug /*, Default, PartialEq, Serialize, Deserialize*/)]
-// #[serde(from = "Vec<RecordInfo>", into = "Vec<RecordInfo>")]
+#[derive(Clone, Debug)]
 pub struct RecordDatabase {
     // all records in the database, by uid
     record_info: HashMap<u64, RecordInfo>,
@@ -179,70 +92,6 @@ pub struct RecordDatabase {
 }
 
 impl RecordDatabase {
-    // fn assets(&'_ self) -> impl '_ + Iterator<Item = AssetDefinition> {
-    //     self.record_info
-    //         .values()
-    //         .map(|rec| rec.ro.asset_def.clone())
-    // }
-
-    // /// Find records which can be the input to a transaction, matching the given parameters.
-    // fn input_records<'a>(
-    //     &'a self,
-    //     asset: &AssetCode,
-    //     owner: &UserPubKey,
-    //     frozen: FreezeFlag,
-    //     now: u64,
-    // ) -> impl Iterator<Item = &'a RecordInfo> {
-    //     self.asset_records
-    //         .get(&(*asset, owner.clone(), frozen))
-    //         .into_iter()
-    //         .flatten()
-    //         .rev()
-    //         .filter_map(move |(_, uid)| {
-    //             let record = &self.record_info[uid];
-    //             if record.ro.amount == 0 || record.on_hold(now) {
-    //                 // Skip useless dummy records and records that are on hold
-    //                 None
-    //             } else {
-    //                 Some(record)
-    //             }
-    //         })
-    // }
-    // /// Find a record with exactly the requested amount, which can be the input to a transaction,
-    // /// matching the given parameters.
-    // fn input_record_with_amount(
-    //     &self,
-    //     asset: &AssetCode,
-    //     owner: &UserPubKey,
-    //     frozen: FreezeFlag,
-    //     amount: u64,
-    //     now: u64,
-    // ) -> Option<&RecordInfo> {
-    //     let unspent_records = self.asset_records.get(&(*asset, owner.clone(), frozen))?;
-    //     let exact_matches = unspent_records.range((amount, 0)..(amount + 1, 0));
-    //     for (match_amount, uid) in exact_matches {
-    //         assert_eq!(*match_amount, amount);
-    //         let record = &self.record_info[uid];
-    //         assert_eq!(record.ro.amount, amount);
-    //         if record.on_hold(now) {
-    //             continue;
-    //         }
-    //         return Some(record);
-    //     }
-
-    //     None
-    // }
-
-    // fn record_with_nullifier(&self, nullifier: &Nullifier) -> Option<&RecordInfo> {
-    //     let uid = self.nullifier_records.get(nullifier)?;
-    //     self.record_info.get(uid)
-    // }
-
-    // fn record_with_nullifier_mut(&mut self, nullifier: &Nullifier) -> Option<&mut RecordInfo> {
-    //     let uid = self.nullifier_records.get(nullifier)?;
-    //     self.record_info.get_mut(uid)
-    // }
-
     fn insert_record(&mut self, rec: RecordInfo) {
         self.asset_records
             .entry((
@@ -273,59 +122,6 @@ impl RecordDatabase {
         );
         self.insert_with_nullifier(ro, uid, nullifier)
     }
-
-    // fn insert_freezable(&mut self, ro: RecordOpening, uid: u64, key_pair: &FreezerKeyPair) {
-    //     let nullifier = key_pair.nullify(&ro.pub_key, uid, &RecordCommitment::from(&ro));
-    //     self.insert_with_nullifier(ro, uid, nullifier)
-    // }
-
-    // fn remove_by_nullifier(&mut self, nullifier: Nullifier) -> Option<RecordInfo> {
-    //     self.nullifier_records.remove(&nullifier).map(|uid| {
-    //         let record = self.record_info.remove(&uid).unwrap();
-
-    //         // Remove the record from `asset_records`, and if the sub-collection it was in becomes
-    //         // empty, remove the whole collection.
-    //         let asset_key = &(
-    //             record.ro.asset_def.code,
-    //             record.ro.pub_key.clone(),
-    //             record.ro.freeze_flag,
-    //         );
-    //         let asset_records = self.asset_records.get_mut(asset_key).unwrap();
-    //         asset_records.remove(&(record.ro.amount, uid));
-    //         if asset_records.is_empty() {
-    //             self.asset_records.remove(asset_key);
-    //         }
-
-    //         record
-    //     })
-    // }
-}
-
-// #[ser_test(arbitrary)]
-// #[tagged_blob("TXUID")]
-// #[derive(
-//     Arbitrary, Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize,
-// )]
-pub struct TransactionUID(ElaboratedTransactionHash);
-
-// #[ser_test(arbitrary)]
-// #[tagged_blob("TXN")]
-// #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq)]
-pub struct TransactionReceipt {
-    uid: TransactionUID,
-    // fee_nullifier: Nullifier,
-    submitter: UserAddress,
-}
-
-// #[ser_test(arbitrary, ark(false))]
-// #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub(crate) struct PendingTransaction {
-    receiver_memos: Vec<ReceiverMemo>,
-    signature: Signature,
-    freeze_outputs: Vec<RecordOpening>,
-    timeout: u64,
-    uid: TransactionUID,
-    hash: ElaboratedTransactionHash,
 }
 
 #[derive(Debug /*, Clone*/)]
@@ -355,23 +151,20 @@ pub struct XfrState<'a> {
     // sparse record Merkle tree mirrored from validators
     pub record_merkle_tree: MerkleTree,
 
-    // // set of pending transactions
-    // pub transactions: TransactionDatabase,
-
-    // // asset definitions for which we are an auditor, indexed by code
-    // pub(crate) auditable_assets: HashMap<AssetCode, AssetDefinition>,
-
     // maps defined asset code to asset definition, seed and description of the asset
     pub defined_assets: HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
 }
 
 impl<'a> XfrState<'a> {
-    fn find_record(&self) -> Result<(RecordOpening, u64), XfrError> {
-        let now = self.validator.prev_commit_time;
+    fn find_records(&self, num_records: usize) -> Result<Vec<(RecordOpening, u64)>, XfrError> {
+        let mut records = Vec::new();
 
-        for record in self.records.record_info {
+        for record in self.records.record_info.clone() {
+            if records.len() == num_records {
+                return Ok(records);
+            }
             if record.1.ro.amount > 0 {
-                return Ok((record.1.ro, record.1.uid));
+                records.push((record.1.ro, record.1.uid));
             }
         }
 
@@ -407,9 +200,6 @@ impl<'a> XfrState<'a> {
     async fn generate_elaborated_transaction(
         &mut self,
         note: TransactionNote,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-        freeze_outputs: Vec<RecordOpening>,
     ) -> Result<ElaboratedTransaction, XfrError> {
         let mut nullifier_pfs = Vec::new();
         for n in note.nullifiers() {
@@ -433,39 +223,25 @@ impl<'a> XfrState<'a> {
         })
     }
 
-    async fn generate_transfer(
+    pub async fn generate_transfer(
         &mut self,
         receiver: UserPubKey,
-        fee_rec: Option<(u64, RecordOpening)>,
         fee: u64,
     ) -> Result<(Vec<ReceiverMemo>, Signature, ElaboratedTransaction), XfrError> {
-        let (ro, uid) = self.find_record()?;
-
-        let mut outputs = vec![];
-        let output = RecordOpening::new(
-            &mut self.prng,
-            ro.amount / 2,
-            ro.asset_def,
-            receiver,
-            FreezeFlag::Unfrozen,
-        );
-        outputs.push(output);
-
-        // prepare input
-        let acc_member_witness = AccMemberWitness::lookup_from_tree(&self.record_merkle_tree, uid)
-            .expect_ok()
-            .unwrap()
-            .1;
+        // Prepare inputs
+        let input_records = self.find_records(2)?;
+        let (ro, uid) = input_records[0].clone();
         let input = TransferNoteInput {
-            ro,
-            acc_member_witness,
+            ro: ro.clone(),
+            acc_member_witness: AccMemberWitness::lookup_from_tree(&self.record_merkle_tree, uid)
+                .expect_ok()
+                .unwrap()
+                .1,
             owner_keypair: &self.user_keys,
             cred: None,
         };
 
-        // generate transfer note and receiver memos
-        let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
-
+        let (fee_ro, fee_uid) = input_records[1].clone();
         let fee_input = FeeInput {
             ro: fee_ro,
             owner_keypair: &self.user_keys,
@@ -478,7 +254,16 @@ impl<'a> XfrState<'a> {
             .1,
         };
 
-        let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut self.prng, fee_input, fee).unwrap();
+        // Prepere outputs
+        let output = RecordOpening::new(
+            &mut self.prng,
+            ro.amount / 2,
+            ro.asset_def,
+            receiver,
+            FreezeFlag::Unfrozen,
+        );
+        let outputs = vec![output];
+        let (fee_info, fee_out) = TxnFeeInfo::new(&mut self.prng, fee_input, fee).unwrap();
 
         const UNEXPIRED_VALID_UNTIL: u64 =
             2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
@@ -492,7 +277,7 @@ impl<'a> XfrState<'a> {
         )
         .unwrap();
 
-        let recv_memos = vec![&fee_out_rec]
+        let recv_memos = vec![&fee_out]
             .into_iter()
             .chain(outputs.iter())
             .map(|r| ReceiverMemo::from_ro(&mut self.prng, r, &[]))
@@ -500,12 +285,7 @@ impl<'a> XfrState<'a> {
             .unwrap();
         let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
         match self
-            .generate_elaborated_transaction(
-                TransactionNote::Transfer(Box::new(note)),
-                recv_memos,
-                sig,
-                vec![],
-            )
+            .generate_elaborated_transaction(TransactionNote::Transfer(Box::new(note)))
             .await
         {
             Ok(elaborated_txn) => Ok((recv_memos, sig, elaborated_txn)),
@@ -513,36 +293,48 @@ impl<'a> XfrState<'a> {
         }
     }
 
-    async fn decrypt_memos(
-        &mut self,
-        memo: ReceiverMemo,
-        proof: Signature,
-    ) -> Result<(), XfrError> {
-        let comm = RecordCommitment::from_field_element(
-            self.record_merkle_tree
-                .get_leaf(fee_ix as u64)
-                .expect_ok()
-                .unwrap()
-                .1
-                .leaf
-                .0,
-        );
-        if let Ok(record_opening) = memo.decrypt(&self.user_keys, &comm, &[]) {
-            if !record_opening.is_dummy() {
-                // If this record is for us (i.e. its corresponding memo decrypts under
-                // our key) and not a dummy, then add it to our owned records.
-                self.records.insert(record_opening, uid, &self.user_keys);
-                if self
-                    .record_merkle_tree
-                    .remember(uid, &MerkleLeafProof::new(comm.to_field_element(), proof))
-                    .is_err()
-                {
-                    println!(
-                        "error: got bad merkle proof from backend for commitment {:?}",
-                        comm
-                    );
+    pub async fn handle_memos_event(&mut self, event: LedgerEvent) {
+        match event {
+            LedgerEvent::Memos { outputs } => {
+                for (memo, comm, uid, proof) in outputs {
+                    if let Ok(record_opening) = memo.decrypt(&self.user_keys, &comm, &[]) {
+                        if !record_opening.is_dummy() {
+                            // If this record is for us (i.e. its corresponding memo decrypts under
+                            // our key) and not a dummy, then add it to our owned records.
+                            self.records.insert(record_opening, uid, &self.user_keys);
+                            if self
+                                .record_merkle_tree
+                                .remember(
+                                    uid,
+                                    &MerkleLeafProof::new(comm.to_field_element(), proof),
+                                )
+                                .is_err()
+                            {
+                                println!(
+                                    "error: got bad merkle proof from backend for commitment {:?}",
+                                    comm
+                                );
+                            }
+                        }
+                    }
                 }
+            }
+
+            event => {
+                panic!("Expected memos event. Received: {:?}", event);
             }
         }
     }
+
+    // pub async fn handle_phaselock_decide_event(&mut self, event:EventType) {
+    //     match event {
+    //         EventType::Decide {block,state} -> {
+
+    //         }
+    //         event => {
+    //             panic!("Expected memos event. Received: {:?}", event);
+    //         }
+    //     }
+    // }
+
 }
