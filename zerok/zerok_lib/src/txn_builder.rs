@@ -326,15 +326,15 @@ impl<'a> XfrState<'a> {
         }
     }
 
-    // pub async fn handle_phaselock_decide_event(&mut self, event:EventType) {
-    //     match event {
-    //         EventType::Decide {block,state} -> {
+    pub async fn handle_phaselock_decide_event(&mut self, event:EventType) {
+        match event {
+            EventType::Decide {block,state} -> {
 
-    //         }
-    //         event => {
-    //             panic!("Expected memos event. Received: {:?}", event);
-    //         }
-    //     }
-    // }
+            }
+            event => {
+                panic!("Expected memos event. Received: {:?}", event);
+            }
+        }
+    }
 
 }
