@@ -136,7 +136,7 @@ dependencies = [
 [[package]]
 name = "ark-bls12-377"
 version = "0.3.0"
-source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_twisted_edwards_param#8990c1c9c55094ce0968d6897c351aa442adf1ba"
+source = "git+https://github.com/arkworks-rs/curves#f1e36c5bed4c55411ef4add0730e0f4be91847f5"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -168,7 +168,7 @@ dependencies = [
 [[package]]
 name = "ark-bw6-761"
 version = "0.3.0"
-source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_twisted_edwards_param#8990c1c9c55094ce0968d6897c351aa442adf1ba"
+source = "git+https://github.com/arkworks-rs/curves#f1e36c5bed4c55411ef4add0730e0f4be91847f5"
 dependencies = [
  "ark-bls12-377",
  "ark-ec",
@@ -194,7 +194,7 @@ dependencies = [
 [[package]]
 name = "ark-ed-on-bls12-377"
 version = "0.3.0"
-source = "git+ssh://git@gitlab.com/translucence/crypto/curves.git?branch=bls_twisted_edwards_param#8990c1c9c55094ce0968d6897c351aa442adf1ba"
+source = "git+https://github.com/arkworks-rs/curves#f1e36c5bed4c55411ef4add0730e0f4be91847f5"
 dependencies = [
  "ark-bls12-377",
  "ark-ec",
@@ -207,6 +207,17 @@ name = "ark-ed-on-bls12-381"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43b7ada17db3854f5994e74e60b18e10e818594935ee7e1d329800c117b32970"
+dependencies = [
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-ff",
+ "ark-std",
+]
+
+[[package]]
+name = "ark-ed-on-bls12-381-bandersnatch"
+version = "0.3.0"
+source = "git+https://github.com/arkworks-rs/curves#f1e36c5bed4c55411ef4add0730e0f4be91847f5"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -2056,10 +2067,14 @@ checksum = "b71991ff56294aa922b450139ee08b3bfc70982c6b2c7562771375cf73542dd4"
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "ark-bls12-377",
+ "ark-bls12-381",
+ "ark-bn254",
+ "ark-bw6-761",
  "ark-ec",
+ "ark-ed-on-bls12-381-bandersnatch",
  "ark-ff",
  "ark-poly",
  "ark-poly-commit",
@@ -2083,7 +2098,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2092,6 +2107,7 @@ dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-377",
  "ark-ed-on-bls12-381",
+ "ark-ed-on-bls12-381-bandersnatch",
  "ark-ed-on-bn254",
  "ark-ff",
  "ark-serialize",
@@ -2113,7 +2129,7 @@ dependencies = [
 [[package]]
 name = "jf-rescue"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2141,7 +2157,7 @@ dependencies = [
 [[package]]
 name = "jf-txn"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "anyhow",
  "ark-bls12-377",
@@ -2179,7 +2195,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "anyhow",
  "ark-ec",
@@ -2196,7 +2212,7 @@ dependencies = [
 [[package]]
 name = "jf-utils-derive"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=787130cccdec290403e4b0f1291291f128bacd1c#787130cccdec290403e4b0f1291291f128bacd1c"
+source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "ark-serialize",
  "ark-std",

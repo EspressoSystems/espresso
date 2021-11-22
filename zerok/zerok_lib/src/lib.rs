@@ -1770,6 +1770,7 @@ impl MultiXfrTestState {
                         fee_info,
                         self.validator.prev_commit_time + 1,
                         self.prove_keys.xfr.key_for_size(3, 3).unwrap(),
+                        vec![],
                     )
                     .unwrap();
                     let sig = sign_receiver_memos(&owner_memo_kp, &owner_memos).unwrap();
@@ -1934,6 +1935,7 @@ impl MultiXfrTestState {
             fee_info,
             self.validator.prev_commit_time + 1,
             self.prove_keys.xfr.key_for_size(2, 2).unwrap(),
+            vec![],
         )
         .unwrap();
         let sig = sign_receiver_memos(&owner_memo_kp, &owner_memos).unwrap();
