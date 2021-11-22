@@ -1,10 +1,6 @@
 use crate::node::LedgerEvent;
 use crate::set_merkle_tree::*;
-use crate::{
-    ElaboratedTransaction,
-    ProverKeySet,
-    ValidatorState,
-};
+use crate::{ElaboratedTransaction, ProverKeySet, ValidatorState};
 use jf_txn::{
     errors::TxnApiError,
     keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey},
@@ -19,6 +15,7 @@ use jf_txn::{
 use phaselock::EventType;
 use rand_chacha::ChaChaRng;
 use std::collections::{BTreeSet, HashMap};
+use zerok_lib::ElaboratedBlock;
 pub enum XfrError {
     InsufficientBalance,
     Fragmentation {
@@ -325,16 +322,4 @@ impl<'a> XfrState<'a> {
             }
         }
     }
-
-    pub async fn handle_phaselock_decide_event(&mut self, event:EventType) {
-        match event {
-            EventType::Decide {block,state} -> {
-
-            }
-            event => {
-                panic!("Expected memos event. Received: {:?}", event);
-            }
-        }
-    }
-
 }
