@@ -2317,7 +2317,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
         if num_outputs < key_outputs {
             // pad with dummy (0-amount) outputs,leaving room for the fee change output
-            while {
+            loop {
                 outputs.push(RecordOpening::new(
                     rng,
                     0,
@@ -2325,8 +2325,10 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     me.clone(),
                     FreezeFlag::Unfrozen,
                 ));
-                outputs.len() < key_outputs - fee_outputs
-            } {}
+                if outputs.len() >= key_outputs - fee_outputs {
+                    break;
+                }
+            }
         }
 
         // Return the required number of dummy inputs. We can't easily create the dummy inputs here,
@@ -2366,15 +2368,18 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
         if num_inputs < key_inputs {
             // pad with dummy inputs, leaving room for the fee input
-            while {
+            
+            loop {
                 let (ro, _) = RecordOpening::dummy(rng, FreezeFlag::Unfrozen);
                 inputs.push(FreezeNoteInput {
                     ro,
                     acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
                     keypair,
                 });
-                inputs.len() < key_inputs - 1
-            } {}
+                if inputs.len() >= key_inputs - 1 {
+                    break;
+                }
+            }
         }
 
         Ok(proving_key)
@@ -2445,6 +2450,10 @@ pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = AAPLedger> {
     // the task, so this field is never read, it exists solely to live as long as this struct and
     // then be dropped.
     _event_task: AsyncScope<'a, ()>,
+    //keep a copy of the keys for referential access after they are generated
+    key_pair: Arc<UserKeyPair>,
+    auditor_key_pair: Arc<AuditorKeyPair>,
+    freezer_key_pair: Arc<FreezerKeyPair>,
 }
 
 struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
@@ -2460,6 +2469,10 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
 {
     pub async fn new(mut backend: Backend) -> Result<Wallet<'a, Backend, L>, WalletError> {
         let state = backend.load().await?;
+        //add keys to Wallet
+        let key_pair = state.key_pair.clone();
+        let auditor_key_pair = state.auditor_key_pair.clone();
+        let freezer_key_pair = state.freezer_key_pair.clone();
         let mut events = backend.subscribe(state.now).await;
         let session = WalletSession {
             backend,
@@ -2563,22 +2576,22 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         Ok(Self {
             mutex,
             _event_task: event_task,
+            key_pair,
+            freezer_key_pair,
+            auditor_key_pair,
         })
     }
 
     pub fn pub_key(&self) -> UserPubKey {
-        let WalletSharedState { state, session, .. } = &*block_on(self.mutex.lock());
-        state.pub_key(session)
+        self.key_pair.pub_key()
     }
 
     pub fn auditor_pub_key(&self) -> AuditorPubKey {
-        let WalletSharedState { state, .. } = &*block_on(self.mutex.lock());
-        state.auditor_key_pair.pub_key()
+        self.auditor_key_pair.pub_key()
     }
 
     pub fn freezer_pub_key(&self) -> FreezerPubKey {
-        let WalletSharedState { state, .. } = &*block_on(self.mutex.lock());
-        state.freezer_key_pair.pub_key()
+        self.freezer_key_pair.pub_key()
     }
 
     pub fn address(&self) -> UserAddress {
@@ -3052,9 +3065,9 @@ pub mod test_helpers {
                     now: 0,
                     transactions: Default::default(),
                     auditable_assets: Default::default(),
-                    key_pair: self.key_pair.clone(),
-                    auditor_key_pair: AuditorKeyPair::generate(&mut rng),
-                    freezer_key_pair: FreezerKeyPair::generate(&mut rng),
+                    key_pair: Arc::new(self.key_pair.clone()),
+                    auditor_key_pair: Arc::new(AuditorKeyPair::generate(&mut rng)),
+                    freezer_key_pair: Arc::new(FreezerKeyPair::generate(&mut rng)),
                 }
             };
 
