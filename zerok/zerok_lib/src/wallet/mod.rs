@@ -564,7 +564,7 @@ impl RecordDatabase {
     }
 
     fn insert_freezable(&mut self, ro: RecordOpening, uid: u64, key_pair: &FreezerKeyPair) {
-        let nullifier = key_pair.nullify(&ro.pub_key, uid, &RecordCommitment::from(&ro));
+        let nullifier = key_pair.nullify(&ro.pub_key.address(), uid, &RecordCommitment::from(&ro));
         self.insert_with_nullifier(ro, uid, nullifier)
     }
 
@@ -2031,6 +2031,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             fee_info,
             UNEXPIRED_VALID_UNTIL,
             proving_key,
+            vec![],
         )
         .context(CryptoError)?;
         let recv_memos = vec![&fee_out_rec]
