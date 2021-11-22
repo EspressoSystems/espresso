@@ -2368,7 +2368,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
         if num_inputs < key_inputs {
             // pad with dummy inputs, leaving room for the fee input
-            
+
             loop {
                 let (ro, _) = RecordOpening::dummy(rng, FreezeFlag::Unfrozen);
                 inputs.push(FreezeNoteInput {
