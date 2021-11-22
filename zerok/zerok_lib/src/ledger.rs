@@ -42,7 +42,7 @@ pub mod traits {
             proofs: Vec<<Self::NullifierSet as NullifierSet>::Proof>,
         ) -> Self;
         fn note(&self) -> &TransactionNote;
-        fn proofs(&self) -> &[<Self::NullifierSet as NullifierSet>::Proof];
+        fn proofs(&self) -> Vec<<Self::NullifierSet as NullifierSet>::Proof>;
         fn hash(&self) -> Self::Hash;
 
         fn set_proofs(&mut self, proofs: Vec<<Self::NullifierSet as NullifierSet>::Proof>) {
@@ -129,8 +129,8 @@ impl traits::Transaction for ElaboratedTransaction {
         &self.txn
     }
 
-    fn proofs(&self) -> &[SetMerkleProof] {
-        &self.proofs
+    fn proofs(&self) -> Vec<SetMerkleProof> {
+        self.proofs.clone()
     }
 
     fn hash(&self) -> Self::Hash {
