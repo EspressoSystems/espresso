@@ -2305,9 +2305,9 @@ mod tests {
                 let _ = state.try_add_transaction(
                     &mut blk,
                     txn,
+                    ix,
                     owner_memos,
                     kixs,
-                    ix,
                     TxnPrintInfo::new_no_time(i, num_txs),
                 );
             }

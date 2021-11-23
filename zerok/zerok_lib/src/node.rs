@@ -1144,9 +1144,9 @@ mod tests {
                     .try_add_transaction(
                         &mut blk,
                         txn,
+                        ix,
                         owner_memos.clone(),
                         kixs,
-                        ix,
                         TxnPrintInfo::new_no_time(i, num_txs),
                     )
                     .is_ok()
