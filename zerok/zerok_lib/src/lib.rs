@@ -1059,10 +1059,10 @@ lazy_static! {
 
 /// Transaction Information for println! only
 pub struct TxnPrintInfo {
-    /// Round number, optional.
-    round: Option<usize>,
-    /// Number of transactions, optional.
-    num_txs: Option<usize>,
+    /// Round number.
+    round: usize,
+    /// Number of transactions.
+    num_txs: usize,
     /// Time measurement, optional.
     now: Option<Instant>,
 }
@@ -1071,8 +1071,8 @@ impl TxnPrintInfo {
     /// Constructs all transaction information for println! only.
     pub fn new(round: usize, num_txs: usize, now: Instant) -> Self {
         Self {
-            round: Some(round),
-            num_txs: Some(num_txs),
+            round: round,
+            num_txs: num_txs,
             now: Some(now),
         }
     }
@@ -1080,8 +1080,8 @@ impl TxnPrintInfo {
     /// Constructs println! information with round number and the number of transactions.
     pub fn new_no_time(round: usize, num_txs: usize) -> Self {
         Self {
-            round: Some(round),
-            num_txs: Some(num_txs),
+            round: round,
+            num_txs: num_txs,
             now: None,
         }
     }
@@ -1483,9 +1483,7 @@ impl MultiXfrTestState {
                 |((ix, (multi_input, in1, in2, k1, k2, amt_diff)), mut prng)| {
                     let now = Instant::now();
 
-                    if let Some(round) = print_info.round {
-                        println!("Txn {}.{}/{:?}", round + 1, ix, print_info.num_txs);
-                    }
+                    println!("Txn {}.{}/{}", print_info.round + 1, ix, print_info.num_txs);
 
                     let mut fee_rec = None;
                     let mut rec1 = None;
@@ -1557,11 +1555,7 @@ impl MultiXfrTestState {
                                 fee_rec,
                                 k1,
                                 ix,
-                                TxnPrintInfo {
-                                    round: print_info.round,
-                                    num_txs: print_info.num_txs,
-                                    now: Some(now),
-                                },
+                                TxnPrintInfo::new(print_info.round, print_info.num_txs, now),
                             );
                         }
                     }
@@ -1644,25 +1638,19 @@ impl MultiXfrTestState {
                                 fee_rec,
                                 k1,
                                 ix,
-                                TxnPrintInfo {
-                                    round: print_info.round,
-                                    num_txs: print_info.num_txs,
-                                    now: Some(now),
-                                },
+                                TxnPrintInfo::new(print_info.round, print_info.num_txs, now),
                             );
                         }
                     }
 
                     if rec1.is_none() || rec2.is_none() {
-                        if let Some(round) = print_info.round {
-                            println!(
-                                "Txn {}.{}/{:?}: No records found, {}s",
-                                round + 1,
-                                ix,
-                                print_info.num_txs,
-                                now.elapsed().as_secs_f32()
-                            );
-                        }
+                        println!(
+                            "Txn {}.{}/{}: No records found, {}s",
+                            print_info.round + 1,
+                            ix,
+                            print_info.num_txs,
+                            now.elapsed().as_secs_f32()
+                        );
                         return None;
                     }
 
@@ -1728,15 +1716,13 @@ impl MultiXfrTestState {
                     // self.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec1, &[]).unwrap());
                     // self.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec2, &[]).unwrap());
 
-                    if let Some(round) = print_info.round {
-                        println!(
-                            "Txn {}.{}/{:?} inputs chosen: {}s",
-                            round + 1,
-                            ix,
-                            print_info.num_txs,
-                            now.elapsed().as_secs_f32()
-                        );
-                    }
+                    println!(
+                        "Txn {}.{}/{} inputs chosen: {}s",
+                        print_info.round + 1,
+                        ix,
+                        print_info.num_txs,
+                        now.elapsed().as_secs_f32()
+                    );
                     let now = Instant::now();
 
                     let fee_input = FeeInput {
@@ -1789,15 +1775,13 @@ impl MultiXfrTestState {
                         },
                     };
 
-                    if let Some(round) = print_info.round {
-                        println!(
-                            "Txn {}.{}/{:?} inputs generated: {}s",
-                            round + 1,
-                            ix,
-                            print_info.num_txs,
-                            now.elapsed().as_secs_f32()
-                        );
-                    }
+                    println!(
+                        "Txn {}.{}/{} inputs generated: {}s",
+                        print_info.round + 1,
+                        ix,
+                        print_info.num_txs,
+                        now.elapsed().as_secs_f32()
+                    );
                     let now = Instant::now();
 
                     let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut prng, fee_input, 1).unwrap();
@@ -1823,15 +1807,13 @@ impl MultiXfrTestState {
                     // owner_memos_key
                     // .verify(&helpers::get_owner_memos_digest(&owner_memos),
                     //     &owner_memos_sig)?;
-                    if let Some(round) = print_info.round {
-                        println!(
-                            "Txn {}.{}/{:?} note generated: {}s",
-                            round + 1,
-                            ix,
-                            print_info.num_txs,
-                            now.elapsed().as_secs_f32()
-                        );
-                    }
+                    println!(
+                        "Txn {}.{}/{} note generated: {}s",
+                        print_info.round + 1,
+                        ix,
+                        print_info.num_txs,
+                        now.elapsed().as_secs_f32()
+                    );
                     let now = Instant::now();
 
                     let nullifier_pfs = txn
@@ -1840,15 +1822,13 @@ impl MultiXfrTestState {
                         .map(|n| self.nullifiers.contains(*n).unwrap().1)
                         .collect();
 
-                    if let Some(round) = print_info.round {
-                        println!(
-                            "Txn {}.{}/{:?} nullifier proofs generated: {}s",
-                            round + 1,
-                            ix,
-                            print_info.num_txs,
-                            now.elapsed().as_secs_f32()
-                        );
-                    }
+                    println!(
+                        "Txn {}.{}/{} nullifier proofs generated: {}s",
+                        print_info.round + 1,
+                        ix,
+                        print_info.num_txs,
+                        now.elapsed().as_secs_f32()
+                    );
 
                     assert_eq!(owner_memos.len(), 3);
                     let keys_and_memos = vec![in_key1_ix, k1_ix, k2_ix]
@@ -1892,16 +1872,14 @@ impl MultiXfrTestState {
         Signature,
         ElaboratedTransaction,
     )> {
-        if let Some(round) = print_info.round {
-            if let Some(now) = print_info.now {
-                println!(
-                    "Txn {}.{}/{:?} generating single-input transaction: {}s",
-                    round + 1,
-                    ix,
-                    print_info.num_txs,
-                    now.elapsed().as_secs_f32()
-                );
-            }
+        if let Some(now) = print_info.now {
+            println!(
+                "Txn {}.{}/{} generating single-input transaction: {}s",
+                print_info.round + 1,
+                ix,
+                print_info.num_txs,
+                now.elapsed().as_secs_f32()
+            );
         }
         let now = Instant::now();
 
@@ -1920,15 +1898,13 @@ impl MultiXfrTestState {
             FreezeFlag::Unfrozen,
         );
 
-        if let Some(round) = print_info.round {
-            println!(
-                "Txn {}.{}/{:?} inputs chosen: {}s",
-                round + 1,
-                ix,
-                print_info.num_txs,
-                now.elapsed().as_secs_f32()
-            );
-        }
+        println!(
+            "Txn {}.{}/{} inputs chosen: {}s",
+            print_info.round + 1,
+            ix,
+            print_info.num_txs,
+            now.elapsed().as_secs_f32()
+        );
         let now = Instant::now();
 
         let fee_input = FeeInput {
@@ -1964,15 +1940,13 @@ impl MultiXfrTestState {
             },
         };
 
-        if let Some(round) = print_info.round {
-            println!(
-                "Txn {}.{}/{:?} inputs generated: {}s",
-                round + 1,
-                ix,
-                print_info.num_txs,
-                now.elapsed().as_secs_f32()
-            );
-        }
+        println!(
+            "Txn {}.{}/{} inputs generated: {}s",
+            print_info.round + 1,
+            ix,
+            print_info.num_txs,
+            now.elapsed().as_secs_f32()
+        );
         let now = Instant::now();
 
         let (fee_info, fee_out_rec) = TxnFeeInfo::new(prng, fee_input, 1).unwrap();
@@ -1995,15 +1969,13 @@ impl MultiXfrTestState {
         .unwrap();
         let sig = sign_receiver_memos(&owner_memo_kp, &owner_memos).unwrap();
 
-        if let Some(round) = print_info.round {
-            println!(
-                "Txn {}.{}/{:?} inputs generated: {}s",
-                round + 1,
-                ix,
-                print_info.num_txs,
-                now.elapsed().as_secs_f32()
-            );
-        }
+        println!(
+            "Txn {}.{}/{} inputs generated: {}s",
+            print_info.round + 1,
+            ix,
+            print_info.num_txs,
+            now.elapsed().as_secs_f32()
+        );
         let now = Instant::now();
 
         let nullifier_pfs = txn
@@ -2012,15 +1984,13 @@ impl MultiXfrTestState {
             .map(|n| self.nullifiers.contains(*n).unwrap().1)
             .collect();
 
-        if let Some(round) = print_info.round {
-            println!(
-                "Txn {}.{}/{:?} nullifier proofs generated: {}s",
-                round + 1,
-                ix,
-                print_info.num_txs,
-                now.elapsed().as_secs_f32()
-            );
-        }
+        println!(
+            "Txn {}.{}/{} nullifier proofs generated: {}s",
+            print_info.round + 1,
+            ix,
+            print_info.num_txs,
+            now.elapsed().as_secs_f32()
+        );
 
         assert_eq!(owner_memos.len(), 2);
         let keys_and_memos = vec![in_key_ix, out_key_ix]
@@ -2050,14 +2020,12 @@ impl MultiXfrTestState {
         kixs: Vec<usize>,
         print_info: TxnPrintInfo,
     ) -> Result<(), ValidationError> {
-        if let Some(round) = print_info.round {
-            println!(
-                "Block {}/{:?} trying to add {:?}",
-                round + 1,
-                print_info.num_txs,
-                ix
-            );
-        }
+        println!(
+            "Block {}/{} trying to add {:?}",
+            print_info.round + 1,
+            print_info.num_txs,
+            ix
+        );
 
         let base_ix = self.record_merkle_tree.num_leaves()
             + blk
@@ -2067,14 +2035,12 @@ impl MultiXfrTestState {
                 .map(|x| x.output_commitments().len() as u64)
                 .sum::<u64>();
         let newblk = blk.add_transaction_raw(&txn)?;
-        if let Some(round) = print_info.round {
-            println!(
-                "Block {}/{:?} adding {:?}",
-                round + 1,
-                print_info.num_txs,
-                ix
-            );
-        }
+        println!(
+            "Block {}/{:?} adding {:?}",
+            print_info.round + 1,
+            print_info.num_txs,
+            ix
+        );
         self.memos.extend(owner_memos);
         self.fee_records[kixs[0]] = base_ix;
         self.owners.extend(kixs);
@@ -2120,17 +2086,15 @@ impl MultiXfrTestState {
         });
 
         Self::update_timer(&mut self.outer_timer, |t| {
-            if let Some(round) = print_info.round {
-                println!(
-                    "Block {}/{:?}: {} transactions, {}s ({}s generation, {}s checking)",
-                    round + 1,
-                    print_info.num_txs,
-                    blk.block.0.len(),
-                    t,
-                    generation_time,
-                    checking_time
-                )
-            }
+            println!(
+                "Block {}/{}: {} transactions, {}s ({}s generation, {}s checking)",
+                print_info.round + 1,
+                print_info.num_txs,
+                blk.block.0.len(),
+                t,
+                generation_time,
+                checking_time
+            )
         });
 
         assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
