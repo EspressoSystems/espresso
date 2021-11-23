@@ -1071,8 +1071,8 @@ impl TxnPrintInfo {
     /// Constructs all transaction information for println! only.
     pub fn new(round: usize, num_txs: usize, now: Instant) -> Self {
         Self {
-            round: round,
-            num_txs: num_txs,
+            round,
+            num_txs,
             now: Some(now),
         }
     }
@@ -1080,8 +1080,8 @@ impl TxnPrintInfo {
     /// Constructs println! information with round number and the number of transactions.
     pub fn new_no_time(round: usize, num_txs: usize) -> Self {
         Self {
-            round: round,
-            num_txs: num_txs,
+            round,
+            num_txs,
             now: None,
         }
     }
