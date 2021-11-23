@@ -36,9 +36,9 @@ pub trait WalletLoader {
 #[derive(Deserialize, Serialize)]
 struct WalletStaticState<'a> {
     proving_keys: Arc<ProverKeySet<'a, OrderByOutputs>>,
-    key_pair: UserKeyPair,
-    auditor_key_pair: AuditorKeyPair,
-    freezer_key_pair: FreezerKeyPair,
+    key_pair: Arc<UserKeyPair>,
+    auditor_key_pair: Arc<AuditorKeyPair>,
+    freezer_key_pair: Arc<FreezerKeyPair>,
 }
 
 impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletStaticState<'a> {
@@ -513,9 +513,9 @@ mod tests {
                 freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
                 mint: mint_prove_key,
             }),
-            key_pair: UserKeyPair::generate(&mut rng),
-            auditor_key_pair: AuditorKeyPair::generate(&mut rng),
-            freezer_key_pair: FreezerKeyPair::generate(&mut rng),
+            key_pair: Arc::new(UserKeyPair::generate(&mut rng)),
+            auditor_key_pair: Arc::new(AuditorKeyPair::generate(&mut rng)),
+            freezer_key_pair: Arc::new(FreezerKeyPair::generate(&mut rng)),
             validator,
             now: 0,
 

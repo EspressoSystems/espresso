@@ -20,7 +20,7 @@ jf-txn = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jel
 jf-utils = { features=["std"], git = "ssh://git@gitlab.com/translucence/crypto/jellyfish.git", rev = "4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"}
 markdown = "0.3"
 # phaselock = { version = "0.0.2", registry = "translucence"}
-phaselock = { git = "ssh://git@gitlab.com/translucence/systems/phaselock.git", rev = "7b01c31a4953170455d595c71ae3a3713119e5a6" }
+phaselock = { git = "ssh://git@gitlab.com/translucence/systems/phaselock.git", rev = "14586ed218a35cb48675b73d4a34ae7ae55c67e6" }
 rand_chacha = "0.2.2"
 serde = { version = "1.0.123", features = ["derive", "rc"] }
 serde_derive = "1.0.118"
