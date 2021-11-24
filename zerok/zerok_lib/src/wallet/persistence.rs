@@ -11,7 +11,7 @@ use atomic_store::{
 };
 use encryption::Cipher;
 use hd::KeyTree;
-use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserKeyPair};
+use jf_txn::keys::UserKeyPair;
 use jf_txn::structs::AssetDefinition;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -36,18 +36,14 @@ pub trait WalletLoader {
 #[derive(Deserialize, Serialize)]
 struct WalletStaticState<'a> {
     proving_keys: Arc<ProverKeySet<'a, OrderByOutputs>>,
-    key_pair: Arc<UserKeyPair>,
-    auditor_key_pair: Arc<AuditorKeyPair>,
-    freezer_key_pair: Arc<FreezerKeyPair>,
+    immutable_keys: Arc<WalletImmutableKeySet>,
 }
 
 impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletStaticState<'a> {
     fn from(w: &WalletState<'a, L>) -> Self {
         Self {
             proving_keys: w.proving_keys.clone(),
-            key_pair: w.key_pair.clone(),
-            auditor_key_pair: w.auditor_key_pair.clone(),
-            freezer_key_pair: w.freezer_key_pair.clone(),
+            immutable_keys: w.immutable_keys.clone(),
         }
     }
 }
@@ -286,9 +282,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         Ok(WalletState {
             // Static state
             proving_keys: static_state.proving_keys,
-            key_pair: static_state.key_pair,
-            auditor_key_pair: static_state.auditor_key_pair,
-            freezer_key_pair: static_state.freezer_key_pair,
+            immutable_keys: static_state.immutable_keys,
 
             // Dynamic state
             validator: dynamic_state.validator,
@@ -513,9 +507,11 @@ mod tests {
                 freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
                 mint: mint_prove_key,
             }),
-            key_pair: Arc::new(UserKeyPair::generate(&mut rng)),
-            auditor_key_pair: Arc::new(AuditorKeyPair::generate(&mut rng)),
-            freezer_key_pair: Arc::new(FreezerKeyPair::generate(&mut rng)),
+            immutable_keys: Arc::new(WalletImmutableKeySet {
+                key_pair: UserKeyPair::generate(&mut rng),
+                auditor_key_pair: AuditorKeyPair::generate(&mut rng),
+                freezer_key_pair: FreezerKeyPair::generate(&mut rng),
+            }),
             validator,
             now: 0,
 
@@ -556,7 +552,7 @@ mod tests {
         assert_wallet_states_eq(&stored, &loaded);
 
         // Modify some dynamic state and load the wallet again.
-        let ro = random_ro(&mut rng, &stored.key_pair);
+        let ro = random_ro(&mut rng, &stored.immutable_keys.key_pair);
         let comm = RecordCommitment::from(&ro);
         stored.record_mt.push(comm.to_field_element());
         stored
@@ -574,14 +570,14 @@ mod tests {
         stored.records.insert(
             ro,
             stored.validator.record_merkle_commitment.num_leaves,
-            &stored.key_pair,
+            &stored.immutable_keys.key_pair,
         );
-        let (receiver_memos, signature) = random_memos(&mut rng, &stored.key_pair);
+        let (receiver_memos, signature) = random_memos(&mut rng, &stored.immutable_keys.key_pair);
         let txn_uid = TransactionUID(random_txn_hash(&mut rng));
         let txn = PendingTransaction {
             receiver_memos,
             signature,
-            freeze_outputs: random_ros(&mut rng, &stored.key_pair),
+            freeze_outputs: random_ros(&mut rng, &stored.immutable_keys.key_pair),
             timeout: 5000,
             uid: txn_uid.clone(),
             hash: random_txn_hash(&mut rng),
@@ -662,15 +658,17 @@ mod tests {
 
             let (code, seed) = AssetCode::random(&mut rng);
             let asset = AssetDefinition::new(code, Default::default()).unwrap();
-            let ro = random_ro(&mut rng, &stored.key_pair);
-            let nullifier = stored.key_pair.nullify(
+            let ro = random_ro(&mut rng, &stored.immutable_keys.key_pair);
+            let nullifier = stored.immutable_keys.key_pair.nullify(
                 ro.asset_def.policy_ref().freezer_pub_key(),
                 0,
                 &RecordCommitment::from(&ro),
             );
 
             // Store some data.
-            stored.records.insert(ro, 0, &stored.key_pair);
+            stored
+                .records
+                .insert(ro, 0, &stored.immutable_keys.key_pair);
             storage.store_snapshot(&stored).await.unwrap();
             storage.store_auditable_asset(&asset).await.unwrap();
             storage

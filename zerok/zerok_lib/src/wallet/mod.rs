@@ -151,6 +151,17 @@ impl api::FromError for WalletError {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletImmutableKeySet {
+    // key pair for building/receiving transactions
+    pub(crate) key_pair: UserKeyPair,
+    // key pair for decrypting auditor memos
+    pub(crate) auditor_key_pair: AuditorKeyPair,
+    // key pair for computing nullifiers of records owned by someone else but which we can freeze or
+    // unfreeze
+    pub(crate) freezer_key_pair: FreezerKeyPair,
+}
+
 #[derive(Debug, Clone)]
 pub struct WalletState<'a, L: Ledger = AAPLedger> {
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -169,14 +180,8 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
     // memory requirements of applications that create multiple wallets. This is not very realistic
     // for real applications, but it is very important for tests and costs little.
     pub(crate) proving_keys: Arc<ProverKeySet<'a, key_set::OrderByOutputs>>,
-    // key pair for building/receiving transactions
-    pub(crate) key_pair: Arc<UserKeyPair>,
-    // key pair for decrypting auditor memos
-    pub(crate) auditor_key_pair: Arc<AuditorKeyPair>,
-    // key pair for computing nullifiers of records owned by someone else but which we can freeze or
-    // unfreeze
-    pub(crate) freezer_key_pair: Arc<FreezerKeyPair>,
 
+    pub(crate) immutable_keys: Arc<WalletImmutableKeySet>,
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Dynamic state
     //
@@ -1079,7 +1084,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &self,
         _session: &WalletSession<'a, L, impl WalletBackend<'a, L>>,
     ) -> UserPubKey {
-        self.key_pair.pub_key()
+        self.immutable_keys.key_pair.pub_key()
     }
 
     pub fn balance(
@@ -1136,7 +1141,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     // If the transaction isn't in our pending data structures, but its fee record
                     // has not been spent, then either it was rejected, or it's someone else's
                     // transaction that we haven't been tracking through the lifecycle.
-                    if receipt.submitter == self.key_pair.address() {
+                    if receipt.submitter == self.immutable_keys.key_pair.address() {
                         Ok(TransactionState::Rejected)
                     } else {
                         Ok(TransactionState::Unknown)
@@ -1293,11 +1298,14 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
                 for (memo, comm, uid, proof) in outputs {
                     summary.received_memos.push((memo.clone(), uid));
-                    if let Ok(record_opening) = memo.decrypt(&self.key_pair, &comm, &[]) {
+                    if let Ok(record_opening) =
+                        memo.decrypt(&self.immutable_keys.key_pair, &comm, &[])
+                    {
                         if !record_opening.is_dummy() {
                             // If this record is for us (i.e. its corresponding memo decrypts under
                             // our key) and not a dummy, then add it to our owned records.
-                            self.records.insert(record_opening, uid, &self.key_pair);
+                            self.records
+                                .insert(record_opening, uid, &self.immutable_keys.key_pair);
                             if !self.remember_merkle_leaf(
                                 uid,
                                 &MerkleLeafProof::new(comm.to_field_element(), proof),
@@ -1434,8 +1442,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 // the first uid corresponds to the fee change output, which is not one of the
                 // `freeze_outputs`, so we skip that one
                 for ((uid, remember), ro) in uids.iter_mut().skip(1).zip(&pending.freeze_outputs) {
-                    self.records
-                        .insert_freezable(ro.clone(), *uid, &self.freezer_key_pair);
+                    self.records.insert_freezable(
+                        ro.clone(),
+                        *uid,
+                        &self.immutable_keys.freezer_key_pair,
+                    );
                     *remember = true;
                 }
             }
@@ -1464,6 +1475,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             TransactionNote::Transfer(xfr) => {
                 for asset in self.auditable_assets.values() {
                     audit_data = self
+                        .immutable_keys
                         .auditor_key_pair
                         .open_transfer_audit_memo(asset, xfr)
                         .ok();
@@ -1474,6 +1486,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             }
             TransactionNote::Mint(mint) => {
                 audit_data = self
+                    .immutable_keys
                     .auditor_key_pair
                     .open_mint_audit_memo(mint)
                     .ok()
@@ -1501,7 +1514,8 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 ) {
                     // If the audit memo contains all the information we need to potentially freeze
                     // this record, save it in our database for later freezing.
-                    if *asset_def.policy_ref().freezer_pub_key() == self.freezer_key_pair.pub_key()
+                    if *asset_def.policy_ref().freezer_pub_key()
+                        == self.immutable_keys.freezer_key_pair.pub_key()
                     {
                         let record_opening = RecordOpening {
                             amount,
@@ -1510,8 +1524,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                             freeze_flag: FreezeFlag::Unfrozen,
                             blind,
                         };
-                        self.records
-                            .insert_freezable(record_opening, *uid, &self.freezer_key_pair);
+                        self.records.insert_freezable(
+                            record_opening,
+                            *uid,
+                            &self.immutable_keys.freezer_key_pair,
+                        );
                         *remember = true;
                     }
                 }
@@ -1560,8 +1577,8 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
             // If the policy lists ourself as the auditor, we will automatically start auditing
             // transactions involving this asset.
-            let audit =
-                *asset_definition.policy_ref().auditor_pub_key() == self.auditor_key_pair.pub_key();
+            let audit = *asset_definition.policy_ref().auditor_pub_key()
+                == self.immutable_keys.auditor_key_pair.pub_key();
 
             // Persist the change that we're about to make before updating our in-memory state. We
             // can't report success until we know the new asset has been saved to disk (otherwise we
@@ -1606,7 +1623,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         asset: &AssetDefinition,
     ) -> Result<(), WalletError> {
-        let my_key = self.auditor_key_pair.pub_key();
+        let my_key = self.immutable_keys.auditor_key_pair.pub_key();
         let asset_key = asset.policy_ref().auditor_pub_key();
         if my_key != *asset_key {
             return Err(WalletError::InvalidAuditorKey {
@@ -1676,7 +1693,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let fee_input = FeeInput {
             ro: fee_ro,
             acc_member_witness,
-            owner_keypair: &self.key_pair,
+            owner_keypair: &self.immutable_keys.key_pair,
         };
         let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut session.rng, fee_input, fee).unwrap();
         let rng = &mut session.rng;
@@ -1763,7 +1780,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         owner: UserAddress,
         outputs_frozen: FreezeFlag,
     ) -> Result<TransactionReceipt<L>, WalletError> {
-        let my_key = self.freezer_key_pair.pub_key();
+        let my_key = self.immutable_keys.freezer_key_pair.pub_key();
         let asset_key = asset.policy_ref().freezer_pub_key();
         if my_key != *asset_key {
             return Err(WalletError::InvalidFreezerKey {
@@ -1789,7 +1806,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             inputs.push(FreezeNoteInput {
                 ro,
                 acc_member_witness: witness,
-                keypair: &self.freezer_key_pair,
+                keypair: &self.immutable_keys.freezer_key_pair,
             })
         }
 
@@ -1797,7 +1814,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let fee_input = FeeInput {
             ro: fee_ro,
             acc_member_witness: self.get_merkle_proof(fee_uid),
-            owner_keypair: &self.key_pair,
+            owner_keypair: &self.immutable_keys.key_pair,
         };
 
         // find a proving key which can handle this transaction size
@@ -1806,7 +1823,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             &self.proving_keys.freeze,
             asset,
             &mut inputs,
-            &self.freezer_key_pair,
+            &self.immutable_keys.freezer_key_pair,
         )?;
 
         // generate transfer note and receiver memos
@@ -1856,7 +1873,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             inputs.push(TransferNoteInput {
                 ro,
                 acc_member_witness,
-                owner_keypair: &self.key_pair,
+                owner_keypair: &self.immutable_keys.key_pair,
                 cred: None,
             });
         }
@@ -1876,7 +1893,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         // find a proving key which can handle this transaction size
         let (proving_key, dummy_inputs) = Self::xfr_proving_key(
             &mut session.rng,
-            self.key_pair.pub_key(),
+            self.immutable_keys.key_pair.pub_key(),
             &self.proving_keys.xfr,
             &AssetDefinition::native(),
             &mut inputs,
@@ -1961,7 +1978,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             inputs.push(TransferNoteInput {
                 ro,
                 acc_member_witness: witness,
-                owner_keypair: &self.key_pair,
+                owner_keypair: &self.immutable_keys.key_pair,
                 cred: None, // TODO support credentials
             })
         }
@@ -1994,13 +2011,13 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let fee_input = FeeInput {
             ro: fee_ro,
             acc_member_witness: self.get_merkle_proof(fee_uid),
-            owner_keypair: &self.key_pair,
+            owner_keypair: &self.immutable_keys.key_pair,
         };
 
         // find a proving key which can handle this transaction size
         let (proving_key, dummy_inputs) = Self::xfr_proving_key(
             &mut session.rng,
-            self.key_pair.pub_key(),
+            self.immutable_keys.key_pair.pub_key(),
             &self.proving_keys.xfr,
             &asset,
             &mut inputs,
@@ -2172,7 +2189,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         TransactionReceipt {
             uid,
             fee_nullifier: txn.note().nullifiers()[0],
-            submitter: self.key_pair.address(),
+            submitter: self.immutable_keys.key_pair.address(),
         }
     }
 
@@ -2451,9 +2468,7 @@ pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = AAPLedger> {
     // then be dropped.
     _event_task: AsyncScope<'a, ()>,
     //keep a copy of the keys for referential access after they are generated
-    key_pair: Arc<UserKeyPair>,
-    auditor_key_pair: Arc<AuditorKeyPair>,
-    freezer_key_pair: Arc<FreezerKeyPair>,
+    immutable_keys: Arc<WalletImmutableKeySet>,
 }
 
 struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
@@ -2470,9 +2485,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     pub async fn new(mut backend: Backend) -> Result<Wallet<'a, Backend, L>, WalletError> {
         let state = backend.load().await?;
         //add keys to Wallet
-        let key_pair = state.key_pair.clone();
-        let auditor_key_pair = state.auditor_key_pair.clone();
-        let freezer_key_pair = state.freezer_key_pair.clone();
+        let immutable_keys = state.immutable_keys.clone();
         let mut events = backend.subscribe(state.now).await;
         let session = WalletSession {
             backend,
@@ -2576,22 +2589,20 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         Ok(Self {
             mutex,
             _event_task: event_task,
-            key_pair,
-            freezer_key_pair,
-            auditor_key_pair,
+            immutable_keys,
         })
     }
 
     pub fn pub_key(&self) -> UserPubKey {
-        self.key_pair.pub_key()
+        self.immutable_keys.key_pair.pub_key()
     }
 
     pub fn auditor_pub_key(&self) -> AuditorPubKey {
-        self.auditor_key_pair.pub_key()
+        self.immutable_keys.auditor_key_pair.pub_key()
     }
 
     pub fn freezer_pub_key(&self) -> FreezerPubKey {
-        self.freezer_key_pair.pub_key()
+        self.immutable_keys.freezer_key_pair.pub_key()
     }
 
     pub fn address(&self) -> UserAddress {
@@ -2700,7 +2711,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         } else {
             let (sender, receiver) = oneshot::channel();
 
-            if receipt.submitter == state.key_pair.address() {
+            if receipt.submitter == state.immutable_keys.key_pair.address() {
                 // If we submitted this transaction, we have all the information we need to track it
                 // through the lifecycle based on its uid alone.
                 txn_subscribers
@@ -2773,9 +2784,15 @@ pub mod test_helpers {
         assert_eq!(w1.records, w2.records);
         // We can't directly compare key pairs, but if two key pairs have the same public key then
         // the private keys are equal with overwhelming probability.
-        assert_eq!(w1.auditor_key_pair.pub_key(), w2.auditor_key_pair.pub_key());
+        assert_eq!(
+            w1.immutable_keys.auditor_key_pair.pub_key(),
+            w2.immutable_keys.auditor_key_pair.pub_key()
+        );
         assert_eq!(w1.auditable_assets, w2.auditable_assets);
-        assert_eq!(w1.freezer_key_pair, w2.freezer_key_pair);
+        assert_eq!(
+            w1.immutable_keys.freezer_key_pair,
+            w2.immutable_keys.freezer_key_pair
+        );
         assert_eq!(w1.nullifiers.hash(), w2.nullifiers.hash());
         assert_eq!(w1.record_mt.commitment(), w2.record_mt.commitment());
         assert_eq!(w1.defined_assets, w2.defined_assets);
@@ -3065,9 +3082,11 @@ pub mod test_helpers {
                     now: 0,
                     transactions: Default::default(),
                     auditable_assets: Default::default(),
-                    key_pair: Arc::new(self.key_pair.clone()),
-                    auditor_key_pair: Arc::new(AuditorKeyPair::generate(&mut rng)),
-                    freezer_key_pair: Arc::new(FreezerKeyPair::generate(&mut rng)),
+                    immutable_keys: Arc::new(WalletImmutableKeySet {
+                        key_pair: self.key_pair.clone(),
+                        auditor_key_pair: AuditorKeyPair::generate(&mut rng),
+                        freezer_key_pair: FreezerKeyPair::generate(&mut rng),
+                    }),
                 }
             };
 
