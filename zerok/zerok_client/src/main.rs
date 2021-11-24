@@ -29,13 +29,7 @@ impl<'a> CLI<'a> for AapCli {
         let server = args.server.clone().ok_or(WalletError::Failed {
             msg: String::from("server is required"),
         })?;
-        NetworkBackend::new(
-            univ_param,
-            server.clone(),
-            server.clone(),
-            server,
-            loader,
-        )
+        NetworkBackend::new(univ_param, server.clone(), server.clone(), server, loader)
     }
 }
 
