@@ -1057,6 +1057,36 @@ lazy_static! {
         get_universal_param(&mut ChaChaRng::from_seed([0x8au8; 32]));
 }
 
+/// Transaction Information for println! only
+pub struct TxnPrintInfo {
+    /// Round number.
+    round: usize,
+    /// Number of transactions.
+    num_txs: usize,
+    /// Time measurement, optional.
+    now: Option<Instant>,
+}
+
+impl TxnPrintInfo {
+    /// Constructs all transaction information for println! only.
+    pub fn new(round: usize, num_txs: usize, now: Instant) -> Self {
+        Self {
+            round,
+            num_txs,
+            now: Some(now),
+        }
+    }
+
+    /// Constructs println! information with round number and the number of transactions.
+    pub fn new_no_time(round: usize, num_txs: usize) -> Self {
+        Self {
+            round,
+            num_txs,
+            now: None,
+        }
+    }
+}
+
 #[derive(Arbitrary, Debug, Clone, Copy)]
 pub struct MultiXfrRecordSpec {
     pub asset_def_ix: u8,
@@ -1386,24 +1416,31 @@ impl MultiXfrTestState {
                         txn: TransactionNote::Mint(Box::new(note)),
                         proofs: vec![nul],
                     },
-                    0,
                     ix,
-                    0,
                     memos,
                     vec![kix, kix],
+                    TxnPrintInfo::new_no_time(0, 0),
                 )
                 .unwrap();
             }
 
             keys_in_block.clear();
-            ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
-                .unwrap();
+            ret.validate_and_apply(
+                core::mem::take(&mut setup_block),
+                0.0,
+                TxnPrintInfo::new_no_time(0, 0),
+            )
+            .unwrap();
 
             setup_block = ret.validator.next_block();
         }
 
-        ret.validate_and_apply(core::mem::take(&mut setup_block), 0, 0, 0.0)
-            .unwrap();
+        ret.validate_and_apply(
+            core::mem::take(&mut setup_block),
+            0.0,
+            TxnPrintInfo::new_no_time(0, 0),
+        )
+        .unwrap();
 
         Ok(ret)
     }
@@ -1420,15 +1457,11 @@ impl MultiXfrTestState {
     ///     (receiver memos, receiver indices)
     ///     receiver memos signature
     ///     transaction
-    ///
-    /// Note: `round` and `num_txs` are for `println!`s only.
-    // Issue: https://gitlab.com/translucence/systems/system/-/issues/16.
     #[allow(clippy::type_complexity)]
     pub fn generate_transactions(
         &mut self,
-        round: usize,
         block: Vec<(bool, u16, u16, u8, u8, i32)>,
-        num_txs: usize,
+        print_info: TxnPrintInfo,
     ) -> Result<
         Vec<(
             usize,
@@ -1450,7 +1483,7 @@ impl MultiXfrTestState {
                 |((ix, (multi_input, in1, in2, k1, k2, amt_diff)), mut prng)| {
                     let now = Instant::now();
 
-                    println!("Txn {}.{}/{}", round + 1, ix, num_txs);
+                    println!("Txn {}.{}/{}", print_info.round + 1, ix, print_info.num_txs);
 
                     let mut fee_rec = None;
                     let mut rec1 = None;
@@ -1521,10 +1554,8 @@ impl MultiXfrTestState {
                                 *in_key1,
                                 fee_rec,
                                 k1,
-                                round,
                                 ix,
-                                num_txs,
-                                now,
+                                TxnPrintInfo::new(print_info.round, print_info.num_txs, now),
                             );
                         }
                     }
@@ -1606,10 +1637,8 @@ impl MultiXfrTestState {
                                 *in_key2,
                                 fee_rec,
                                 k1,
-                                round,
                                 ix,
-                                num_txs,
-                                now,
+                                TxnPrintInfo::new(print_info.round, print_info.num_txs, now),
                             );
                         }
                     }
@@ -1617,9 +1646,9 @@ impl MultiXfrTestState {
                     if rec1.is_none() || rec2.is_none() {
                         println!(
                             "Txn {}.{}/{}: No records found, {}s",
-                            round + 1,
+                            print_info.round + 1,
                             ix,
-                            num_txs,
+                            print_info.num_txs,
                             now.elapsed().as_secs_f32()
                         );
                         return None;
@@ -1688,10 +1717,10 @@ impl MultiXfrTestState {
                     // self.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec2, &[]).unwrap());
 
                     println!(
-                        "Txn {}.{}/{} inputs chosen: {}",
-                        round + 1,
+                        "Txn {}.{}/{} inputs chosen: {}s",
+                        print_info.round + 1,
                         ix,
-                        num_txs,
+                        print_info.num_txs,
                         now.elapsed().as_secs_f32()
                     );
                     let now = Instant::now();
@@ -1747,10 +1776,10 @@ impl MultiXfrTestState {
                     };
 
                     println!(
-                        "Txn {}.{}/{} inputs generated: {}",
-                        round + 1,
+                        "Txn {}.{}/{} inputs generated: {}s",
+                        print_info.round + 1,
                         ix,
-                        num_txs,
+                        print_info.num_txs,
                         now.elapsed().as_secs_f32()
                     );
                     let now = Instant::now();
@@ -1779,10 +1808,10 @@ impl MultiXfrTestState {
                     // .verify(&helpers::get_owner_memos_digest(&owner_memos),
                     //     &owner_memos_sig)?;
                     println!(
-                        "Txn {}.{}/{} note generated: {}",
-                        round + 1,
+                        "Txn {}.{}/{} note generated: {}s",
+                        print_info.round + 1,
                         ix,
-                        num_txs,
+                        print_info.num_txs,
                         now.elapsed().as_secs_f32()
                     );
                     let now = Instant::now();
@@ -1795,9 +1824,9 @@ impl MultiXfrTestState {
 
                     println!(
                         "Txn {}.{}/{} nullifier proofs generated: {}s",
-                        round + 1,
+                        print_info.round + 1,
                         ix,
-                        num_txs,
+                        print_info.num_txs,
                         now.elapsed().as_secs_f32()
                     );
 
@@ -1835,23 +1864,23 @@ impl MultiXfrTestState {
         in_key_ix: usize,
         fee_rec: Option<(u64, RecordOpening)>,
         out_key_ix: u8,
-        round: usize,
         ix: usize,
-        num_txs: usize,
-        now: Instant,
+        print_info: TxnPrintInfo,
     ) -> Option<(
         usize,
         Vec<(usize, ReceiverMemo)>,
         Signature,
         ElaboratedTransaction,
     )> {
-        println!(
-            "Txn {}.{}/{}: generating single-input transaction {}s",
-            round + 1,
-            ix,
-            num_txs,
-            now.elapsed().as_secs_f32()
-        );
+        if let Some(now) = print_info.now {
+            println!(
+                "Txn {}.{}/{} generating single-input transaction: {}s",
+                print_info.round + 1,
+                ix,
+                print_info.num_txs,
+                now.elapsed().as_secs_f32()
+            );
+        }
         let now = Instant::now();
 
         let in_key = &self.keys[in_key_ix];
@@ -1870,10 +1899,10 @@ impl MultiXfrTestState {
         );
 
         println!(
-            "Txn {}.{}/{} inputs chosen: {}",
-            round + 1,
+            "Txn {}.{}/{} inputs chosen: {}s",
+            print_info.round + 1,
             ix,
-            num_txs,
+            print_info.num_txs,
             now.elapsed().as_secs_f32()
         );
         let now = Instant::now();
@@ -1912,10 +1941,10 @@ impl MultiXfrTestState {
         };
 
         println!(
-            "Txn {}.{}/{} inputs generated: {}",
-            round + 1,
+            "Txn {}.{}/{} inputs generated: {}s",
+            print_info.round + 1,
             ix,
-            num_txs,
+            print_info.num_txs,
             now.elapsed().as_secs_f32()
         );
         let now = Instant::now();
@@ -1941,10 +1970,10 @@ impl MultiXfrTestState {
         let sig = sign_receiver_memos(&owner_memo_kp, &owner_memos).unwrap();
 
         println!(
-            "Txn {}.{}/{} note generated: {}",
-            round + 1,
+            "Txn {}.{}/{} inputs generated: {}s",
+            print_info.round + 1,
             ix,
-            num_txs,
+            print_info.num_txs,
             now.elapsed().as_secs_f32()
         );
         let now = Instant::now();
@@ -1957,9 +1986,9 @@ impl MultiXfrTestState {
 
         println!(
             "Txn {}.{}/{} nullifier proofs generated: {}s",
-            round + 1,
+            print_info.round + 1,
             ix,
-            num_txs,
+            print_info.num_txs,
             now.elapsed().as_secs_f32()
         );
 
@@ -1981,21 +2010,22 @@ impl MultiXfrTestState {
     }
 
     /// Tries to add a transaction to a block.
-    ///
-    /// Note: `round` and `num_txs` are for `println!`s only.
-    // Issue: https://gitlab.com/translucence/systems/system/-/issues/16.
     #[allow(clippy::too_many_arguments)]
     pub fn try_add_transaction(
         &mut self,
         blk: &mut ElaboratedBlock,
         txn: ElaboratedTransaction,
-        round: usize,
         ix: usize,
-        num_txs: usize,
         owner_memos: Vec<ReceiverMemo>,
         kixs: Vec<usize>,
+        print_info: TxnPrintInfo,
     ) -> Result<(), ValidationError> {
-        println!("Block {}/{} trying to add {}", round + 1, num_txs, ix);
+        println!(
+            "Block {}/{} trying to add {:?}",
+            print_info.round + 1,
+            print_info.num_txs,
+            ix
+        );
 
         let base_ix = self.record_merkle_tree.num_leaves()
             + blk
@@ -2005,7 +2035,12 @@ impl MultiXfrTestState {
                 .map(|x| x.output_commitments().len() as u64)
                 .sum::<u64>();
         let newblk = blk.add_transaction_raw(&txn)?;
-        println!("Block {}/{} adding {}", round + 1, num_txs, ix);
+        println!(
+            "Block {}/{:?} adding {:?}",
+            print_info.round + 1,
+            print_info.num_txs,
+            ix
+        );
         self.memos.extend(owner_memos);
         self.fee_records[kixs[0]] = base_ix;
         self.owners.extend(kixs);
@@ -2015,15 +2050,11 @@ impl MultiXfrTestState {
     }
 
     /// Validates and applys a block.
-    ///
-    /// Note: `round` and `num_txs` are for `println!`s only.
-    // Issue: https://gitlab.com/translucence/systems/system/-/issues/16.
     pub fn validate_and_apply(
         &mut self,
         blk: ElaboratedBlock,
-        round: usize,
-        num_txs: usize,
         generation_time: f32,
+        print_info: TxnPrintInfo,
     ) -> Result<(), ValidationError> {
         Self::update_timer(&mut self.inner_timer, |_| ());
 
@@ -2057,8 +2088,8 @@ impl MultiXfrTestState {
         Self::update_timer(&mut self.outer_timer, |t| {
             println!(
                 "Block {}/{}: {} transactions, {}s ({}s generation, {}s checking)",
-                round + 1,
-                num_txs,
+                print_info.round + 1,
+                print_info.num_txs,
                 blk.block.0.len(),
                 t,
                 generation_time,
@@ -2212,7 +2243,9 @@ mod tests {
             });
 
             // let block = block.into_iter().take(5).collect::<Vec<_>>();
-            let txns = state.generate_transactions(i, block, num_txs).unwrap();
+            let txns = state
+                .generate_transactions(block, TxnPrintInfo::new_no_time(i, num_txs))
+                .unwrap();
 
             let mut generation_time: f32 = 0.0;
             MultiXfrTestState::update_timer(&mut state.outer_timer, |t| {
@@ -2233,11 +2266,18 @@ mod tests {
                     (owner_memos, kixs)
                 };
 
-                let _ = state.try_add_transaction(&mut blk, txn, i, ix, num_txs, owner_memos, kixs);
+                let _ = state.try_add_transaction(
+                    &mut blk,
+                    txn,
+                    ix,
+                    owner_memos,
+                    kixs,
+                    TxnPrintInfo::new_no_time(i, num_txs),
+                );
             }
 
             state
-                .validate_and_apply(blk, i, num_txs, generation_time)
+                .validate_and_apply(blk, generation_time, TxnPrintInfo::new_no_time(i, num_txs))
                 .unwrap();
         }
     }

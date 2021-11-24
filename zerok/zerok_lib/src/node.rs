@@ -1028,7 +1028,7 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MultiXfrRecordSpec, MultiXfrTestState, UNIVERSAL_PARAM};
+    use crate::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo, UNIVERSAL_PARAM};
     use async_std::task::block_on;
     use jf_primitives::jubjub_dsa::KeyPair;
     use jf_txn::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
@@ -1116,7 +1116,9 @@ mod tests {
             });
 
             // let block = block.into_iter().take(5).collect::<Vec<_>>();
-            let txns = state.generate_transactions(i, block, num_txs).unwrap();
+            let txns = state
+                .generate_transactions(block, TxnPrintInfo::new_no_time(i, num_txs))
+                .unwrap();
 
             let mut generation_time: f32 = 0.0;
             MultiXfrTestState::update_timer(&mut state.outer_timer, |t| {
@@ -1139,7 +1141,14 @@ mod tests {
                 };
 
                 if state
-                    .try_add_transaction(&mut blk, txn, i, ix, num_txs, owner_memos.clone(), kixs)
+                    .try_add_transaction(
+                        &mut blk,
+                        txn,
+                        ix,
+                        owner_memos.clone(),
+                        kixs,
+                        TxnPrintInfo::new_no_time(i, num_txs),
+                    )
                     .is_ok()
                 {
                     signed_memos.push((owner_memos, sig));
@@ -1148,7 +1157,11 @@ mod tests {
 
             let prev_state = state.validator.clone();
             state
-                .validate_and_apply(blk.clone(), i, num_txs, generation_time)
+                .validate_and_apply(
+                    blk.clone(),
+                    generation_time,
+                    TxnPrintInfo::new_no_time(i, num_txs),
+                )
                 .unwrap();
             history.push((prev_state, blk, signed_memos, state.validator.clone()));
         }
