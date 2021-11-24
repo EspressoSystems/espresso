@@ -3521,12 +3521,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shutdown_hooks"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6057adedbec913419c92996f395ba69931acbd50b7d56955394cd3f7bedbfa45"
-
-[[package]]
 name = "signal-hook"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4617,12 +4611,10 @@ dependencies = [
  "rand 0.8.4",
  "rand_chacha 0.3.1",
  "regex",
- "rpassword",
  "rustyline",
  "serde",
  "serde_derive",
  "serde_json",
- "shutdown_hooks",
  "snafu",
  "structopt",
  "surf",
@@ -4670,7 +4662,9 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rand_xoshiro",
  "rayon",
+ "rpassword",
  "rust-argon2",
+ "rustyline",
  "serde",
  "serde_cbor",
  "serde_derive",
@@ -4678,6 +4672,7 @@ dependencies = [
  "serde_with",
  "sha3",
  "snafu",
+ "structopt",
  "strum",
  "strum_macros",
  "surf",

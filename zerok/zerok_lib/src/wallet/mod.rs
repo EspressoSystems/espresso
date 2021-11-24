@@ -1,3 +1,4 @@
+pub mod cli;
 pub mod encryption;
 pub mod hd;
 pub mod network;
