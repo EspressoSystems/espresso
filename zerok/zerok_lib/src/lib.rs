@@ -22,7 +22,7 @@ mod util;
 pub mod validator_node;
 pub mod wallet;
 use commit::{Commitment, Committable};
-use util::commit;
+pub use util::commit;
 
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
