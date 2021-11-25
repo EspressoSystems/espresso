@@ -32,77 +32,36 @@ use std::io::{Read, Write};
 use std::iter::once;
 use std::path::PathBuf;
 use std::str::FromStr;
-use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use tempdir::TempDir;
 use wallet::{
-    encryption, hd::KeyTree, ledger::Ledger, network::*, persistence::WalletLoader, AssetInfo,
-    BincodeError, EncryptionError, IoError, KeyError, MintInfo, TransactionReceipt,
-    TransactionState, WalletBackend, WalletError,
+    encryption, hd::KeyTree, ledger::Ledger, persistence::WalletLoader, AssetInfo, BincodeError,
+    EncryptionError, IoError, KeyError, MintInfo, TransactionReceipt, TransactionState,
+    WalletBackend, WalletError,
 };
 
 pub trait CLI<'a> {
     type Ledger: 'static + Ledger;
     type Backend: 'a + WalletBackend<'a, Self::Ledger> + Send + Sync;
+    type Args: CLIArgs;
 
     fn init_backend(
         universal_param: &'a UniversalParam,
-        args: &'a Args,
+        args: &'a Self::Args,
         loader: &mut impl WalletLoader<Meta = WalletMetadata>,
     ) -> Result<Self::Backend, WalletError>;
 }
 
-type Wallet<'a, C> = wallet::Wallet<'a, <C as CLI<'a>>::Backend, <C as CLI<'a>>::Ledger>;
-
-#[derive(StructOpt)]
-pub struct Args {
-    /// Generate keys for a wallet, do not run the REPL.
-    ///
-    /// The keys are stored in FILE and FILE.pub.
-    #[structopt(short = "g", long)]
-    pub key_gen: Option<PathBuf>,
-
-    /// Path to a private key file to use for the wallet.
-    ///
-    /// If not given, new keys are generated randomly.
-    #[structopt(short, long)]
-    pub key_path: Option<PathBuf>,
-
-    /// Path to a saved wallet, or a new directory where this wallet will be saved.
-    ///
-    /// If not given, the wallet will be stored in ~/.translucence/wallet. If a wallet already
-    /// exists there, it will be loaded. Otherwise, a new wallet will be created.
-    #[structopt(short, long)]
-    pub storage: Option<PathBuf>,
-
-    /// Store the contents of the wallet in plaintext.
-    ///
-    /// You will not require a password to access your wallet, and your wallet will not be protected
-    /// from malicious software that gains access to a device where you loaded your wallet.
-    ///
-    /// This option is only available when creating a new wallet. When loading an existing wallet, a
-    /// password will always be required if the wallet was created without the --unencrypted flag.
-    #[structopt(long)]
-    pub unencrypted: bool,
-
-    /// Create a new wallet and store it an a temporary location which will be deleted on exit.
-    ///
-    /// This option is mutually exclusive with --storage.
-    #[structopt(long)]
-    #[structopt(conflicts_with("storage"))]
-    #[structopt(hidden(true))]
-    pub tmp_storage: bool,
-
-    #[structopt(long)]
-    /// Run in a mode which is friendlier to automated scripting.
-    ///
-    /// Instead of prompting the user for input with a line editor, the prompt will be printed,
-    /// followed by a newline, and the input will be read without an editor.
-    pub non_interactive: bool,
-
-    /// URL of a server for interacting with the ledger
-    pub server: Option<Url>,
+pub trait CLIArgs {
+    fn key_gen_path(&self) -> Option<PathBuf>;
+    fn storage_path(&self) -> Option<PathBuf>;
+    fn key_path(&self) -> Option<PathBuf>;
+    fn interactive(&self) -> bool;
+    fn encrypted(&self) -> bool;
+    fn use_tmp_storage(&self) -> bool;
 }
+
+type Wallet<'a, C> = wallet::Wallet<'a, <C as CLI<'a>>::Backend, <C as CLI<'a>>::Ledger>;
 
 // A REPL command.
 struct Command<'a, C: CLI<'a>> {
@@ -577,11 +536,11 @@ enum Reader {
 }
 
 impl Reader {
-    fn new(args: &Args) -> Self {
-        if args.non_interactive {
-            Self::Automated
-        } else {
+    fn new(args: &impl CLIArgs) -> Self {
+        if args.interactive() {
             Self::Interactive(rustyline::Editor::<()>::new())
+        } else {
+            Self::Automated
         }
     }
 
@@ -732,9 +691,9 @@ impl WalletLoader for PasswordLoader {
     }
 }
 
-pub async fn cli_main<'a, C: CLI<'a>>(args: &'a Args) -> Result<(), WalletError> {
-    if let Some(path) = &args.key_gen {
-        key_gen(path.clone())
+pub async fn cli_main<'a, C: CLI<'a>>(args: &'a C::Args) -> Result<(), WalletError> {
+    if let Some(path) = args.key_gen_path() {
+        key_gen(path)
     } else {
         repl::<C>(args).await
     }
@@ -755,10 +714,10 @@ fn key_gen(mut path: PathBuf) -> Result<(), WalletError> {
     Ok(())
 }
 
-async fn repl<'a, C: CLI<'a>>(args: &'a Args) -> Result<(), WalletError> {
-    let (storage, _tmp_dir) = match &args.storage {
-        Some(storage) => (storage.clone(), None),
-        None if !args.tmp_storage => {
+async fn repl<'a, C: CLI<'a>>(args: &'a C::Args) -> Result<(), WalletError> {
+    let (storage, _tmp_dir) = match args.storage_path() {
+        Some(storage) => (storage, None),
+        None if !args.use_tmp_storage() => {
             let home = std::env::var("HOME").map_err(|_| WalletError::Failed {
                 msg: String::from(
                     "HOME directory is not set. Please set your HOME directory, or specify \
@@ -781,7 +740,7 @@ async fn repl<'a, C: CLI<'a>>(args: &'a Args) -> Result<(), WalletError> {
     );
     println!("(c) 2021 Translucence Research, Inc.");
 
-    let key_pair = if let Some(path) = &args.key_path {
+    let key_pair = if let Some(path) = args.key_path() {
         let mut file = File::open(path).context(IoError)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes).context(IoError)?;
@@ -793,7 +752,7 @@ async fn repl<'a, C: CLI<'a>>(args: &'a Args) -> Result<(), WalletError> {
     let reader = Reader::new(args);
     let mut loader = PasswordLoader {
         dir: storage,
-        encrypted: !args.unencrypted,
+        encrypted: args.encrypted(),
         rng: ChaChaRng::from_entropy(),
         key_pair,
         reader,
