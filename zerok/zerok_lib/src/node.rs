@@ -2,8 +2,8 @@ use crate::full_persistence::FullPersistence;
 pub use crate::state_comm::LedgerStateCommitment;
 use crate::util::arbitrary_wrappers::*;
 use crate::{
-    ser_test, set_merkle_tree::*, validator_node::*, ElaboratedBlock, ElaboratedTransaction,
-    ValidationError, ValidatorState,
+    ledger, ser_test, set_merkle_tree::*, validator_node::*, ElaboratedBlock,
+    ElaboratedTransaction, ValidationError, ValidatorState,
 };
 use arbitrary::Arbitrary;
 use async_executors::exec::AsyncStd;
@@ -21,6 +21,7 @@ use jf_txn::{
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
     MerklePath, MerkleTree, Signature,
 };
+use ledger::{AAPLedger, Block, Ledger, StateCommitment};
 use phaselock::{
     error::PhaseLockError,
     event::EventType,
@@ -146,22 +147,23 @@ pub struct LedgerTransition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, strum_macros::AsStaticStr)]
-pub enum LedgerEvent {
+#[serde(bound = "")]
+pub enum LedgerEvent<L: Ledger = AAPLedger> {
     /// A new block was added to the ledger.
     ///
     /// Includes the block contents, the unique identifier for the block, and the new state
     /// commitment.
     Commit {
-        block: ElaboratedBlock,
+        block: Block<L>,
         block_id: u64,
-        state_comm: LedgerStateCommitment,
+        state_comm: StateCommitment<L>,
     },
 
     /// A proposed block was rejected.
     ///
     /// Includes the block contents and the reason for rejection.
     Reject {
-        block: ElaboratedBlock,
+        block: Block<L>,
         error: ValidationError,
     },
 
@@ -1027,7 +1029,7 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MultiXfrRecordSpec, MultiXfrTestState, UNIVERSAL_PARAM};
+    use crate::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo, UNIVERSAL_PARAM};
     use async_std::task::block_on;
     use jf_primitives::jubjub_dsa::KeyPair;
     use jf_txn::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
@@ -1115,7 +1117,9 @@ mod tests {
             });
 
             // let block = block.into_iter().take(5).collect::<Vec<_>>();
-            let txns = state.generate_transactions(i, block, num_txs).unwrap();
+            let txns = state
+                .generate_transactions(block, TxnPrintInfo::new_no_time(i, num_txs))
+                .unwrap();
 
             let mut generation_time: f32 = 0.0;
             MultiXfrTestState::update_timer(&mut state.outer_timer, |t| {
@@ -1138,7 +1142,14 @@ mod tests {
                 };
 
                 if state
-                    .try_add_transaction(&mut blk, txn, i, ix, num_txs, owner_memos.clone(), kixs)
+                    .try_add_transaction(
+                        &mut blk,
+                        txn,
+                        ix,
+                        owner_memos.clone(),
+                        kixs,
+                        TxnPrintInfo::new_no_time(i, num_txs),
+                    )
                     .is_ok()
                 {
                     signed_memos.push((owner_memos, sig));
@@ -1147,7 +1158,11 @@ mod tests {
 
             let prev_state = state.validator.clone();
             state
-                .validate_and_apply(blk.clone(), i, num_txs, generation_time)
+                .validate_and_apply(
+                    blk.clone(),
+                    generation_time,
+                    TxnPrintInfo::new_no_time(i, num_txs),
+                )
                 .unwrap();
             history.push((prev_state, blk, signed_memos, state.validator.clone()));
         }
