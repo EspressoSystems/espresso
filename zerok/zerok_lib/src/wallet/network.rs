@@ -1,5 +1,7 @@
 use super::persistence::{AtomicWalletStorage, WalletLoader};
-use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
+use super::{
+    ClientConfigError, CryptoError, WalletBackend, WalletError, WalletImmutableKeySet, WalletState,
+};
 use crate::api;
 use crate::key_set::SizedKey;
 use crate::ledger::AAPLedger;
@@ -177,18 +179,24 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
             defined_assets: Default::default(),
             auditable_assets: Default::default(),
             transactions: Default::default(),
-            key_pair: Arc::new(
-                self.key_pair
+            immutable_keys: Arc::new(WalletImmutableKeySet {
+                key_pair: self
+                    .key_pair
                     .clone()
                     .unwrap_or_else(|| UserKeyPair::generate(&mut rng)),
-            ),
-            auditor_key_pair: Arc::new(AuditorKeyPair::generate(&mut rng)),
-            freezer_key_pair: Arc::new(FreezerKeyPair::generate(&mut rng)),
+                auditor_key_pair: AuditorKeyPair::generate(&mut rng),
+                freezer_key_pair: FreezerKeyPair::generate(&mut rng),
+            }),
         };
         self.storage().await.create(&state).await?;
 
         // Publish the address of the new wallet.
-        Self::post(&self.bulletin_client, "/users", &state.key_pair.pub_key()).await?;
+        Self::post(
+            &self.bulletin_client,
+            "/users",
+            &state.immutable_keys.key_pair.pub_key(),
+        )
+        .await?;
 
         Ok(state)
     }

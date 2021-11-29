@@ -36,7 +36,8 @@ use zerok_lib::{
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
     ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, MultiXfrRecordSpec,
-    MultiXfrTestState, ValidatorState, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
+    MultiXfrTestState, TxnPrintInfo, ValidatorState, VerifierKeySet, MERKLE_HEIGHT,
+    UNIVERSAL_PARAM,
 };
 
 mod disco;
@@ -1021,9 +1022,8 @@ async fn main() -> Result<(), std::io::Error> {
                         async_std::task::spawn_blocking(move || {
                             let txs = true_state
                                 .generate_transactions(
-                                    round as usize,
                                     vec![(true, 0, 0, 0, 0, -2)],
-                                    1,
+                                    TxnPrintInfo::new_no_time(round as usize, 1),
                                 )
                                 .unwrap();
                             (true_state, txs)
@@ -1102,10 +1102,17 @@ async fn main() -> Result<(), std::io::Error> {
                     }
 
                     state
-                        .try_add_transaction(&mut blk, t, round as usize, ix, 1, owner_memos, kixs)
+                        .try_add_transaction(
+                            &mut blk,
+                            t,
+                            ix,
+                            owner_memos,
+                            kixs,
+                            TxnPrintInfo::new_no_time(round as usize, 1),
+                        )
                         .unwrap();
                     state
-                        .validate_and_apply(blk, round as usize, 1, 0.0)
+                        .validate_and_apply(blk, 0.0, TxnPrintInfo::new_no_time(round as usize, 1))
                         .unwrap();
                 }
             }
