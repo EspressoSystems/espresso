@@ -264,6 +264,36 @@ impl TransactionStatus {
     }
 }
 
+#[ser_test(arbitrary, types(AAPLedger))]
+#[tagged_blob("TXN")]
+#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
+pub struct TransactionReceipt<L: Ledger = AAPLedger> {
+    uid: TransactionUID<L>,
+    fee_nullifier: Nullifier,
+    submitter: UserAddress,
+}
+
+impl<L: Ledger> PartialEq<Self> for TransactionReceipt<L> {
+    fn eq(&self, other: &Self) -> bool {
+        self.uid == other.uid
+            && self.fee_nullifier == other.fee_nullifier
+            && self.submitter == other.submitter
+    }
+}
+
+impl<'a, L: Ledger> Arbitrary<'a> for TransactionReceipt<L>
+where
+    TransactionHash<L>: Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            uid: u.arbitrary()?,
+            fee_nullifier: u.arbitrary::<ArbitraryNullifier>()?.into(),
+            submitter: u.arbitrary::<ArbitraryUserAddress>()?.into(),
+        })
+    }
+}
+
 #[ser_test(arbitrary, types(AAPLedger), ark(false))]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(bound = "")]

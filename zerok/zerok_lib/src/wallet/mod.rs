@@ -51,9 +51,6 @@ use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use std::collections::HashMap;
 use std::convert::TryFrom;
-// use std::hash::{Hash, Hasher};
-// use std::iter::FromIterator;
-// use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
 #[derive(Debug, Snafu)]
@@ -428,36 +425,6 @@ pub struct WalletSession<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
     rng: ChaChaRng,
     _marker: std::marker::PhantomData<&'a ()>,
     _marker2: std::marker::PhantomData<L>,
-}
-
-#[ser_test(arbitrary, types(AAPLedger))]
-#[tagged_blob("TXN")]
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct TransactionReceipt<L: Ledger = AAPLedger> {
-    uid: TransactionUID<L>,
-    fee_nullifier: Nullifier,
-    submitter: UserAddress,
-}
-
-impl<L: Ledger> PartialEq<Self> for TransactionReceipt<L> {
-    fn eq(&self, other: &Self) -> bool {
-        self.uid == other.uid
-            && self.fee_nullifier == other.fee_nullifier
-            && self.submitter == other.submitter
-    }
-}
-
-impl<'a, L: Ledger> Arbitrary<'a> for TransactionReceipt<L>
-where
-    TransactionHash<L>: Arbitrary<'a>,
-{
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            uid: u.arbitrary()?,
-            fee_nullifier: u.arbitrary::<ArbitraryNullifier>()?.into(),
-            submitter: u.arbitrary::<ArbitraryUserAddress>()?.into(),
-        })
-    }
 }
 
 // a never expired target
