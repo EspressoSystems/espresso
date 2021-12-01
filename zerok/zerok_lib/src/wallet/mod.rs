@@ -9,10 +9,8 @@ use crate::api;
 use crate::key_set;
 use crate::node::LedgerEvent;
 use crate::txn_builder::*;
-use crate::util::arbitrary_wrappers::*;
 use crate::{ledger, ser_test, ProverKeySet, ValidationError, ValidatorState, MERKLE_HEIGHT};
 use arbitrary::{Arbitrary, Unstructured};
-use ark_serialize::*;
 use async_scoped::AsyncScope;
 use async_std::sync::{Mutex, MutexGuard};
 use async_std::task::block_on;
@@ -37,9 +35,8 @@ use jf_txn::{
         Nullifier, ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness, MerkleLeafProof, /*MerkleTree,*/ Signature, TransactionNote,
+    AccMemberWitness, MerkleLeafProof, Signature, TransactionNote,
 };
-use jf_utils::tagged_blob;
 use key_set::KeySet;
 use ledger::{
     traits::{Block as _, NullifierSet as _, Transaction as _, Validator as _},

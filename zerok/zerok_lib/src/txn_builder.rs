@@ -3,7 +3,7 @@ use crate::{ledger, ser_test};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use jf_txn::{
-    keys::{FreezerKeyPair, UserKeyPair, UserPubKey},
+    keys::{FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey},
     sign_receiver_memos,
     structs::{
         AssetCode, AssetDefinition, FreezeFlag, Nullifier, ReceiverMemo, RecordCommitment,
@@ -268,9 +268,9 @@ impl TransactionStatus {
 #[tagged_blob("TXN")]
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct TransactionReceipt<L: Ledger = AAPLedger> {
-    uid: TransactionUID<L>,
-    fee_nullifier: Nullifier,
-    submitter: UserAddress,
+    pub uid: TransactionUID<L>,
+    pub fee_nullifier: Nullifier,
+    pub submitter: UserAddress,
 }
 
 impl<L: Ledger> PartialEq<Self> for TransactionReceipt<L> {
