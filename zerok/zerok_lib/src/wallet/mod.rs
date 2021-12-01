@@ -2207,6 +2207,7 @@ pub mod test_helpers {
     use futures::channel::mpsc as channel;
     use futures::future;
     use itertools::izip;
+    use jf_txn::MerkleTree;
     use phaselock::traits::state::State;
     use phaselock::BlockContents;
     use rand_chacha::rand_core::RngCore;
@@ -2225,7 +2226,7 @@ pub mod test_helpers {
             w1.txn_state.validator.commit(),
             w2.txn_state.validator.commit()
         );
-        assert_eq!(w1.txn_state.proving_keys, w2.txn_state.proving_keys);
+        assert_eq!(w1.proving_keys, w2.proving_keys);
         assert_eq!(w1.txn_state.records, w2.txn_state.records);
         // We can't directly compare key pairs, but if two key pairs have the same public key then
         // the private keys are equal with overwhelming probability.
@@ -2246,7 +2247,7 @@ pub mod test_helpers {
             w1.txn_state.record_mt.commitment(),
             w2.txn_state.record_mt.commitment()
         );
-        assert_eq!(w1.txn_state.defined_assets, w2.txn_state.defined_assets);
+        assert_eq!(w1.defined_assets, w2.defined_assets);
         assert_eq!(w1.txn_state.transactions, w2.txn_state.transactions);
     }
 

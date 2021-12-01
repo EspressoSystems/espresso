@@ -396,11 +396,12 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::txn_builder::{PendingTransaction, TransactionUID};
     use crate::{
         ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, VerifierKeySet,
         MERKLE_HEIGHT, UNIVERSAL_PARAM,
     };
-    use jf_txn::{KeyPair, TransactionVerifyingKey};
+    use jf_txn::{KeyPair, MerkleTree, TransactionVerifyingKey};
     use phaselock::H_256;
     use rand_chacha::{
         rand_core::{RngCore, SeedableRng},
@@ -558,22 +559,34 @@ mod tests {
         // Modify some dynamic state and load the wallet again.
         let ro = random_ro(&mut rng, &stored.immutable_keys.key_pair);
         let comm = RecordCommitment::from(&ro);
-        stored.record_mt.push(comm.to_field_element());
+        stored.txn_state.record_mt.push(comm.to_field_element());
         stored
+            .txn_state
             .validator
             .past_record_merkle_roots
             .0
-            .push_back(stored.validator.record_merkle_commitment.root_value);
-        stored.validator.record_merkle_commitment = stored.record_mt.commitment();
-        stored.validator.record_merkle_frontier = stored.record_mt.frontier();
+            .push_back(
+                stored
+                    .txn_state
+                    .validator
+                    .record_merkle_commitment
+                    .root_value,
+            );
+        stored.txn_state.validator.record_merkle_commitment =
+            stored.txn_state.record_mt.commitment();
+        stored.txn_state.validator.record_merkle_frontier = stored.txn_state.record_mt.frontier();
         let mut nullifiers = SetMerkleTree::default();
         nullifiers.insert(Nullifier::random_for_test(&mut rng));
-        stored.validator.nullifiers_root = nullifiers.hash();
-        stored.nullifiers = nullifiers;
-        stored.now += 1;
-        stored.records.insert(
+        stored.txn_state.validator.nullifiers_root = nullifiers.hash();
+        stored.txn_state.nullifiers = nullifiers;
+        stored.txn_state.now += 1;
+        stored.txn_state.records.insert(
             ro,
-            stored.validator.record_merkle_commitment.num_leaves,
+            stored
+                .txn_state
+                .validator
+                .record_merkle_commitment
+                .num_leaves,
             &stored.immutable_keys.key_pair,
         );
         let (receiver_memos, signature) = random_memos(&mut rng, &stored.immutable_keys.key_pair);
@@ -586,8 +599,11 @@ mod tests {
             uid: txn_uid.clone(),
             hash: random_txn_hash(&mut rng),
         };
-        stored.transactions.insert_pending(txn);
-        stored.transactions.await_memos(txn_uid, vec![1, 2, 3]);
+        stored.txn_state.transactions.insert_pending(txn);
+        stored
+            .txn_state
+            .transactions
+            .await_memos(txn_uid, vec![1, 2, 3]);
 
         // Snapshot the modified dynamic state and then reload.
         {
@@ -671,6 +687,7 @@ mod tests {
 
             // Store some data.
             stored
+                .txn_state
                 .records
                 .insert(ro, 0, &stored.immutable_keys.key_pair);
             storage.store_snapshot(&stored).await.unwrap();
@@ -680,7 +697,11 @@ mod tests {
                 .await
                 .unwrap();
             // Revert the changes.
-            stored.records.remove_by_nullifier(nullifier).unwrap();
+            stored
+                .txn_state
+                .records
+                .remove_by_nullifier(nullifier)
+                .unwrap();
             storage.revert().await;
 
             // Commit after revert should be a no-op.
