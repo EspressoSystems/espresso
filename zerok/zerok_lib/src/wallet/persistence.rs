@@ -1,9 +1,9 @@
 use crate::key_set::OrderByOutputs;
 use crate::ledger::*;
 use crate::node::MerkleTreeWithArbitrary;
+use crate::txn_builder::TransactionState;
 use crate::wallet::*;
 use crate::ProverKeySet;
-use crate::txn_builder::TransactionState;
 use async_std::sync::Arc;
 use atomic_store::{
     error::PersistenceError,
@@ -516,13 +516,13 @@ mod tests {
                 freezer_key_pair: FreezerKeyPair::generate(&mut rng),
             }),
             txn_state: TransactionState {
-            validator,
-            now: 0,
-            records: Default::default(),
-            nullifiers: Default::default(),
-            record_mt: record_merkle_tree,
-            merkle_leaf_to_forget: None,
-            transactions: Default::default(),
+                validator,
+                now: 0,
+                records: Default::default(),
+                nullifiers: Default::default(),
+                record_mt: record_merkle_tree,
+                merkle_leaf_to_forget: None,
+                transactions: Default::default(),
             },
             auditable_assets: Default::default(),
             defined_assets: Default::default(),
