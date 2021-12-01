@@ -36,7 +36,7 @@ use tagged_base64::TaggedBase64;
 use tempdir::TempDir;
 use wallet::{
     encryption, hd::KeyTree, ledger::Ledger, persistence::WalletLoader, AssetInfo, BincodeError,
-    EncryptionError, IoError, KeyError, MintInfo, TransactionReceipt, TransactionState,
+    EncryptionError, IoError, KeyError, MintInfo, TransactionReceipt, TransactionStatus,
     WalletBackend, WalletError,
 };
 
@@ -427,7 +427,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                                 Err(err) => {
                                     println!("Error waiting for transaction to complete: {}", err);
                                 }
-                                Ok(TransactionState::Retired) => {},
+                                Ok(TransactionStatus::Retired) => {},
                                 _ => {
                                     println!("Transaction failed");
                                 }
@@ -479,7 +479,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                                 Err(err) => {
                                     println!("Error waiting for transaction to complete: {}", err);
                                 }
-                                Ok(TransactionState::Retired) => {},
+                                Ok(TransactionStatus::Retired) => {},
                                 _ => {
                                     println!("Transaction failed");
                                 }

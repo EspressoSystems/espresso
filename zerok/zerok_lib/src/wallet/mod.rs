@@ -37,7 +37,7 @@ use jf_txn::{
         Nullifier, ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness, MerkleLeafProof, MerkleTree, Signature, TransactionNote,
+    AccMemberWitness, MerkleLeafProof, /*MerkleTree,*/ Signature, TransactionNote,
 };
 use jf_utils::tagged_blob;
 use key_set::KeySet;
@@ -49,11 +49,11 @@ use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::hash::{Hash, Hasher};
-use std::iter::FromIterator;
-use std::ops::{Index, IndexMut};
+// use std::hash::{Hash, Hasher};
+// use std::iter::FromIterator;
+// use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
 #[derive(Debug, Snafu)]
@@ -460,37 +460,6 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TransactionStatus {
-    Pending,
-    AwaitingMemos,
-    Retired,
-    Rejected,
-    Unknown,
-}
-
-impl std::fmt::Display for TransactionStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Self::Pending => write!(f, "pending"),
-            Self::AwaitingMemos => write!(f, "accepted, waiting for owner memos"),
-            Self::Retired => write!(f, "accepted"),
-            Self::Rejected => write!(f, "rejected"),
-            Self::Unknown => write!(f, "unknown"),
-        }
-    }
-}
-
-impl TransactionStatus {
-    pub fn is_final(&self) -> bool {
-        matches!(self, Self::Retired | Self::Rejected)
-    }
-
-    pub fn succeeded(&self) -> bool {
-        matches!(self, Self::Retired)
-    }
-}
-
 // a never expired target
 const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
 // how long (in number of validator states) a record used as an input to an unconfirmed transaction
@@ -574,8 +543,14 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         asset: &AssetCode,
         frozen: FreezeFlag,
     ) -> u64 {
-        self.records
-            .input_records(asset, &self.pub_key(session), frozen, self.validator.now())
+        self.txn_state
+            .records
+            .input_records(
+                asset,
+                &self.pub_key(session),
+                frozen,
+                self.txn_state.validator.now(),
+            )
             .map(|record| record.ro.amount)
             .sum()
     }
@@ -583,6 +558,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     pub fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
         // Get the asset definitions of each record we own.
         let mut assets: HashMap<AssetCode, AssetInfo> = self
+            .txn_state
             .records
             .assets()
             .map(|def| (def.code, AssetInfo::from(def)))
@@ -1904,7 +1880,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         if leaf < self.txn_state.record_mt.num_leaves() - 1 {
             self.txn_state.record_mt.forget(leaf);
         } else {
-            assert_eq!(leaf, self.record_mt.num_leaves() - 1);
+            assert_eq!(leaf, self.txn_state.record_mt.num_leaves() - 1);
             // We can't forget the last leaf in a Merkle tree. Instead, we just note that we want to
             // forget this leaf, and we'll forget it when we append a new last leaf.
             //
@@ -2577,6 +2553,12 @@ pub mod test_helpers {
                 let mut rng = ChaChaRng::from_seed(self.seed);
 
                 WalletState {
+                    proving_keys: ledger.proving_keys.clone(),
+                    immutable_keys: Arc::new(WalletImmutableKeySet {
+                        key_pair: self.key_pair.clone(),
+                        auditor_key_pair: AuditorKeyPair::generate(&mut rng),
+                        freezer_key_pair: FreezerKeyPair::generate(&mut rng),
+                    }),
                     txn_state: TransactionState {
                         validator: ledger.validator.clone(),
 
@@ -2594,14 +2576,8 @@ pub mod test_helpers {
                         now: 0,
                         transactions: Default::default(),
                     },
-                    proving_keys: ledger.proving_keys.clone(),
-                    defined_assets: HashMap::new(),
                     auditable_assets: Default::default(),
-                    immutable_keys: Arc::new(WalletImmutableKeySet {
-                        key_pair: self.key_pair.clone(),
-                        auditor_key_pair: AuditorKeyPair::generate(&mut rng),
-                        freezer_key_pair: FreezerKeyPair::generate(&mut rng),
-                    }),
+                    defined_assets: HashMap::new(),
                 }
             };
 

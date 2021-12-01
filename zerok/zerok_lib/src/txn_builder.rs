@@ -1,74 +1,45 @@
-use crate::api;
-use crate::key_set;
-use crate::node::LedgerEvent;
 use crate::util::arbitrary_wrappers::*;
-use crate::{ledger, ser_test, ProverKeySet, ValidationError, ValidatorState, MERKLE_HEIGHT};
+use crate::{ledger, ser_test};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
-use async_scoped::AsyncScope;
-use async_std::sync::{Mutex, MutexGuard};
-use async_std::task::block_on;
-use async_trait::async_trait;
-use core::fmt::Debug;
-use futures::{
-    channel::oneshot,
-    prelude::*,
-    stream::{iter, Stream},
-};
 use jf_txn::{
-    errors::TxnApiError,
-    freeze::{FreezeNote, FreezeNoteInput},
-    keys::{
-        AuditorKeyPair, AuditorPubKey, FreezerKeyPair, FreezerPubKey, UserAddress, UserKeyPair,
-        UserPubKey,
-    },
-    proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
+    keys::{FreezerKeyPair, UserKeyPair, UserPubKey},
     sign_receiver_memos,
     structs::{
-        AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, BlindFactor, FeeInput, FreezeFlag,
-        Nullifier, ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
+        AssetCode, AssetDefinition, FreezeFlag, Nullifier, ReceiverMemo, RecordCommitment,
+        RecordOpening,
     },
-    transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness, MerkleLeafProof, MerkleTree, Signature, TransactionNote,
+    MerkleTree, Signature,
 };
 use jf_utils::tagged_blob;
-use key_set::KeySet;
-use ledger::{
-    traits::{Block as _, NullifierSet as _, Transaction as _, Validator as _},
-    *,
-};
-use rand_chacha::rand_core::SeedableRng;
-use rand_chacha::ChaChaRng;
+use ledger::*;
 use serde::{Deserialize, Serialize};
-use snafu::{ResultExt, Snafu};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
 use std::ops::{Index, IndexMut};
-use std::sync::Arc;
 
 #[ser_test(arbitrary, ark(false))]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct RecordInfo {
-    ro: RecordOpening,
-    uid: u64,
-    nullifier: Nullifier,
+    pub ro: RecordOpening,
+    pub uid: u64,
+    pub nullifier: Nullifier,
     // if Some(t), this record is on hold until the validator timestamp surpasses `t`, because this
     // record has been used as an input to a transaction that is not yet confirmed.
-    hold_until: Option<u64>,
+    pub hold_until: Option<u64>,
 }
 
 impl RecordInfo {
-    fn on_hold(&self, now: u64) -> bool {
+    pub fn on_hold(&self, now: u64) -> bool {
         matches!(self.hold_until, Some(t) if t > now)
     }
 
-    fn hold_until(&mut self, until: u64) {
+    pub fn hold_until(&mut self, until: u64) {
         self.hold_until = Some(until);
     }
 
-    fn unhold(&mut self) {
+    pub fn unhold(&mut self) {
         self.hold_until = None;
     }
 }
@@ -84,7 +55,6 @@ impl<'a> Arbitrary<'a> for RecordInfo {
     }
 }
 
-// TODO keyao! Functions were private.
 #[ser_test(ark(false))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(from = "Vec<RecordInfo>", into = "Vec<RecordInfo>")]
@@ -263,6 +233,113 @@ impl<'a> Arbitrary<'a> for RecordDatabase {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransactionStatus {
+    Pending,
+    AwaitingMemos,
+    Retired,
+    Rejected,
+    Unknown,
+}
+
+impl std::fmt::Display for TransactionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "pending"),
+            Self::AwaitingMemos => write!(f, "accepted, waiting for owner memos"),
+            Self::Retired => write!(f, "accepted"),
+            Self::Rejected => write!(f, "rejected"),
+            Self::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+impl TransactionStatus {
+    pub fn is_final(&self) -> bool {
+        matches!(self, Self::Retired | Self::Rejected)
+    }
+
+    pub fn succeeded(&self) -> bool {
+        matches!(self, Self::Retired)
+    }
+}
+
+#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(bound = "")]
+pub struct PendingTransaction<L: Ledger> {
+    pub receiver_memos: Vec<ReceiverMemo>,
+    pub signature: Signature,
+    pub freeze_outputs: Vec<RecordOpening>,
+    pub timeout: u64,
+    pub uid: TransactionUID<L>,
+    pub hash: TransactionHash<L>,
+}
+
+impl<L: Ledger> PartialEq<Self> for PendingTransaction<L> {
+    fn eq(&self, other: &Self) -> bool {
+        self.receiver_memos == other.receiver_memos
+            && self.signature == other.signature
+            && self.freeze_outputs == other.freeze_outputs
+            && self.timeout == other.timeout
+            && self.uid == other.uid
+            && self.hash == other.hash
+    }
+}
+
+impl<'a, L: Ledger> Arbitrary<'a> for PendingTransaction<L>
+where
+    TransactionHash<L>: Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let memos = std::iter::once(u.arbitrary())
+            .chain(u.arbitrary_iter::<ArbitraryReceiverMemo>()?)
+            .map(|a| Ok(a?.into()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let key = u.arbitrary::<ArbitraryKeyPair>()?.into();
+        let signature = sign_receiver_memos(&key, &memos).unwrap();
+        Ok(Self {
+            receiver_memos: memos,
+            signature,
+            freeze_outputs: u
+                .arbitrary_iter::<ArbitraryRecordOpening>()?
+                .map(|a| Ok(a?.into()))
+                .collect::<Result<_, _>>()?,
+            timeout: u.arbitrary()?,
+            uid: u.arbitrary()?,
+            hash: u.arbitrary()?,
+        })
+    }
+}
+
+#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(bound = "")]
+pub struct TransactionAwaitingMemos<L: Ledger> {
+    // The uid of this transaction.
+    uid: TransactionUID<L>,
+    // The uids of the outputs of this transaction for which memos have not yet been posted.
+    pending_uids: HashSet<u64>,
+}
+
+impl<L: Ledger> PartialEq<Self> for TransactionAwaitingMemos<L> {
+    fn eq(&self, other: &Self) -> bool {
+        self.uid == other.uid && self.pending_uids == other.pending_uids
+    }
+}
+
+impl<'a, L: Ledger> Arbitrary<'a> for TransactionAwaitingMemos<L>
+where
+    TransactionHash<L>: Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            uid: u.arbitrary()?,
+            pending_uids: u.arbitrary()?,
+        })
+    }
+}
+
 // Serialization intermediate for TransactionDatabase, which eliminates the redundancy of the
 // in-memory indices in TransactionDatabase.
 #[ser_test(arbitrary, types(AAPLedger), ark(false))]
@@ -320,84 +397,6 @@ where
     }
 }
 
-// TODO keyao! Why was it pub(crate) in wallet/mode.rs?
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(bound = "")]
-pub struct PendingTransaction<L: Ledger> {
-    receiver_memos: Vec<ReceiverMemo>,
-    signature: Signature,
-    freeze_outputs: Vec<RecordOpening>,
-    timeout: u64,
-    uid: TransactionUID<L>,
-    hash: TransactionHash<L>,
-}
-
-impl<L: Ledger> PartialEq<Self> for PendingTransaction<L> {
-    fn eq(&self, other: &Self) -> bool {
-        self.receiver_memos == other.receiver_memos
-            && self.signature == other.signature
-            && self.freeze_outputs == other.freeze_outputs
-            && self.timeout == other.timeout
-            && self.uid == other.uid
-            && self.hash == other.hash
-    }
-}
-
-impl<'a, L: Ledger> Arbitrary<'a> for PendingTransaction<L>
-where
-    TransactionHash<L>: Arbitrary<'a>,
-{
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let memos = std::iter::once(u.arbitrary())
-            .chain(u.arbitrary_iter::<ArbitraryReceiverMemo>()?)
-            .map(|a| Ok(a?.into()))
-            .collect::<Result<Vec<_>, _>>()?;
-        let key = u.arbitrary::<ArbitraryKeyPair>()?.into();
-        let signature = sign_receiver_memos(&key, &memos).unwrap();
-        Ok(Self {
-            receiver_memos: memos,
-            signature,
-            freeze_outputs: u
-                .arbitrary_iter::<ArbitraryRecordOpening>()?
-                .map(|a| Ok(a?.into()))
-                .collect::<Result<_, _>>()?,
-            timeout: u.arbitrary()?,
-            uid: u.arbitrary()?,
-            hash: u.arbitrary()?,
-        })
-    }
-}
-
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(bound = "")]
-pub(crate) struct TransactionAwaitingMemos<L: Ledger> {
-    // The uid of this transaction.
-    uid: TransactionUID<L>,
-    // The uids of the outputs of this transaction for which memos have not yet been posted.
-    pending_uids: HashSet<u64>,
-}
-
-impl<L: Ledger> PartialEq<Self> for TransactionAwaitingMemos<L> {
-    fn eq(&self, other: &Self) -> bool {
-        self.uid == other.uid && self.pending_uids == other.pending_uids
-    }
-}
-
-impl<'a, L: Ledger> Arbitrary<'a> for TransactionAwaitingMemos<L>
-where
-    TransactionHash<L>: Arbitrary<'a>,
-{
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            uid: u.arbitrary()?,
-            pending_uids: u.arbitrary()?,
-        })
-    }
-}
-
-// TODO keyao! Why was it pub(crate) in wallet/mode.rs?
 #[ser_test(arbitrary, types(AAPLedger), ark(false))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(from = "TransactionStorage<L>", into = "TransactionStorage<L>")]
@@ -413,15 +412,14 @@ pub struct TransactionDatabase<L: Ledger> {
     uids_awaiting_memos: HashMap<u64, TransactionUID<L>>,
 }
 
-// TODO keyao! Functions were private.
 impl<L: Ledger> TransactionDatabase<L> {
-    pub fn status(&self, uid: &TransactionUID<L>) -> TransactionState {
+    pub fn status(&self, uid: &TransactionUID<L>) -> TransactionStatus {
         if self.pending_txns.contains_key(uid) {
-            TransactionState::Pending
+            TransactionStatus::Pending
         } else if self.txns_awaiting_memos.contains_key(uid) {
-            TransactionState::AwaitingMemos
+            TransactionStatus::AwaitingMemos
         } else {
-            TransactionState::Unknown
+            TransactionStatus::Unknown
         }
     }
 
@@ -561,13 +559,11 @@ where
     }
 }
 
-// TODO keyao! Why were fields pub(crate) in wallet/mode.rs?
 #[derive(Debug, Clone)]
 pub struct TransactionState<L: Ledger = AAPLedger> {
     // sequence number of the last event processed
     pub now: u64,
-    // wallets run validation in tandem with the validators, so that they do not have to trust new
-    // blocks received from the event stream
+    // validator
     pub validator: Validator<L>,
     // all records we care about, including records we own, records we have audited, and records we
     // can freeze or unfreeze

@@ -3,6 +3,7 @@ use crate::ledger::*;
 use crate::node::MerkleTreeWithArbitrary;
 use crate::wallet::*;
 use crate::ProverKeySet;
+use crate::txn_builder::TransactionState;
 use async_std::sync::Arc;
 use atomic_store::{
     error::PersistenceError,
@@ -76,13 +77,13 @@ impl<L: Ledger> PartialEq<Self> for WalletSnapshot<L> {
 impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletSnapshot<L> {
     fn from(w: &WalletState<'a, L>) -> Self {
         Self {
-            now: w.now,
-            validator: w.validator.clone(),
-            records: w.records.clone(),
-            nullifiers: w.nullifiers.clone(),
-            record_mt: MerkleTreeWithArbitrary(w.record_mt.clone()),
-            merkle_leaf_to_forget: w.merkle_leaf_to_forget,
-            transactions: w.transactions.clone(),
+            now: w.txn_state.now,
+            validator: w.txn_state.validator.clone(),
+            records: w.txn_state.records.clone(),
+            nullifiers: w.txn_state.nullifiers.clone(),
+            record_mt: MerkleTreeWithArbitrary(w.txn_state.record_mt.clone()),
+            merkle_leaf_to_forget: w.txn_state.merkle_leaf_to_forget,
+            transactions: w.txn_state.transactions.clone(),
         }
     }
 }
@@ -285,13 +286,15 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
             immutable_keys: static_state.immutable_keys,
 
             // Dynamic state
-            validator: dynamic_state.validator,
-            now: dynamic_state.now,
-            records: dynamic_state.records,
-            nullifiers: dynamic_state.nullifiers,
-            record_mt: dynamic_state.record_mt.0,
-            merkle_leaf_to_forget: dynamic_state.merkle_leaf_to_forget,
-            transactions: dynamic_state.transactions,
+            txn_state: TransactionState {
+                validator: dynamic_state.validator,
+                now: dynamic_state.now,
+                records: dynamic_state.records,
+                nullifiers: dynamic_state.nullifiers,
+                record_mt: dynamic_state.record_mt.0,
+                merkle_leaf_to_forget: dynamic_state.merkle_leaf_to_forget,
+                transactions: dynamic_state.transactions,
+            },
 
             // Monotonic state
             auditable_assets: self
@@ -512,16 +515,17 @@ mod tests {
                 auditor_key_pair: AuditorKeyPair::generate(&mut rng),
                 freezer_key_pair: FreezerKeyPair::generate(&mut rng),
             }),
+            txn_state: TransactionState {
             validator,
             now: 0,
-
             records: Default::default(),
-            auditable_assets: Default::default(),
             nullifiers: Default::default(),
             record_mt: record_merkle_tree,
             merkle_leaf_to_forget: None,
-            defined_assets: Default::default(),
             transactions: Default::default(),
+            },
+            auditable_assets: Default::default(),
+            defined_assets: Default::default(),
         };
 
         let mut loader = MockWalletLoader {
