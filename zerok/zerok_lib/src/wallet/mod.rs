@@ -494,24 +494,16 @@ impl<L: Ledger> Default for EventSummary<L> {
 }
 
 impl<'a, L: Ledger> WalletState<'a, L> {
-    pub fn pub_key(
-        &self,
-        _session: &WalletSession<'a, L, impl WalletBackend<'a, L>>,
-    ) -> UserPubKey {
+    pub fn pub_key(&self) -> UserPubKey {
         self.immutable_keys.key_pair.pub_key()
     }
 
-    pub fn balance(
-        &self,
-        session: &WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        asset: &AssetCode,
-        frozen: FreezeFlag,
-    ) -> u64 {
+    pub fn balance(&self, asset: &AssetCode, frozen: FreezeFlag) -> u64 {
         self.txn_state
             .records
             .input_records(
                 asset,
-                &self.pub_key(session),
+                &self.pub_key(),
                 frozen,
                 self.txn_state.validator.now(),
             )
@@ -1108,7 +1100,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         amount: u64,
         owner: UserAddress,
     ) -> Result<TransactionReceipt<L>, WalletError> {
-        let (fee_ro, uid) = self.find_native_record_for_fee(session, fee)?;
+        let (fee_ro, uid) = self.find_native_record_for_fee(fee)?;
         let acc_member_witness = self.get_merkle_proof(uid);
         let (asset_def, seed, asset_description) = self
             .defined_assets
@@ -1242,7 +1234,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             })
         }
 
-        let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
+        let (fee_ro, fee_uid) = self.find_native_record_for_fee(fee)?;
         let fee_input = FeeInput {
             ro: fee_ro,
             acc_member_witness: self.get_merkle_proof(fee_uid),
@@ -1292,7 +1284,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         // find input records which account for at least the total amount, and possibly some change.
         let (input_records, _change) = self.find_records(
             &AssetCode::native(),
-            &self.pub_key(session),
+            &self.pub_key(),
             FreezeFlag::Unfrozen,
             total_output_amount,
             None,
@@ -1396,7 +1388,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         // find input records of the asset type to spend (this does not include the fee input)
         let (input_records, change) = self.find_records(
             asset,
-            &self.pub_key(session),
+            &self.pub_key(),
             FreezeFlag::Unfrozen,
             total_output_amount,
             None,
@@ -1428,7 +1420,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
         // change in the asset type being transfered (not fee change)
         if change > 0 {
-            let me = self.pub_key(session);
+            let me = self.pub_key();
             let change_ro = RecordOpening::new(
                 &mut session.rng,
                 change,
@@ -1439,7 +1431,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             outputs.push(change_ro);
         }
 
-        let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
+        let (fee_ro, fee_uid) = self.find_native_record_for_fee(fee)?;
         let fee_input = FeeInput {
             ro: fee_ro,
             acc_member_witness: self.get_merkle_proof(fee_uid),
@@ -1550,8 +1542,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         'a: 'b,
     {
         async move {
-            let receipt =
-                self.add_pending_transaction(session, &txn, memos, sig, freeze_outputs, uid);
+            let receipt = self.add_pending_transaction(&txn, memos, sig, freeze_outputs, uid);
 
             // Persist the pending transaction.
             if let Err(err) = session
@@ -1587,7 +1578,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     fn add_pending_transaction(
         &mut self,
-        _session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         txn: &Transaction<L>,
         receiver_memos: Vec<ReceiverMemo>,
         signature: Signature,
@@ -1696,14 +1686,10 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     /// find a record and corresponding uid on the native asset type with enough
     /// funds to pay transaction fee
-    fn find_native_record_for_fee(
-        &self,
-        session: &WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        fee: u64,
-    ) -> Result<(RecordOpening, u64), WalletError> {
+    fn find_native_record_for_fee(&self, fee: u64) -> Result<(RecordOpening, u64), WalletError> {
         self.find_records(
             &AssetCode::native(),
-            &self.pub_key(session),
+            &self.pub_key(),
             FreezeFlag::Unfrozen,
             fee,
             Some(1),
@@ -2052,13 +2038,13 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     }
 
     pub async fn balance(&self, asset: &AssetCode) -> u64 {
-        let WalletSharedState { state, session, .. } = &*self.mutex.lock().await;
-        state.balance(session, asset, FreezeFlag::Unfrozen)
+        let WalletSharedState { state, .. } = &*self.mutex.lock().await;
+        state.balance(asset, FreezeFlag::Unfrozen)
     }
 
     pub async fn frozen_balance(&self, asset: &AssetCode) -> u64 {
-        let WalletSharedState { state, session, .. } = &*self.mutex.lock().await;
-        state.balance(session, asset, FreezeFlag::Frozen)
+        let WalletSharedState { state, .. } = &*self.mutex.lock().await;
+        state.balance(asset, FreezeFlag::Frozen)
     }
 
     pub async fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
