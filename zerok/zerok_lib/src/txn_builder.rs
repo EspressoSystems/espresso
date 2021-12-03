@@ -3,21 +3,100 @@ use crate::{ledger, ser_test};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use jf_txn::{
-    keys::{FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey},
+    errors::TxnApiError,
+    keys::{AuditorPubKey, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey},
     sign_receiver_memos,
     structs::{
-        AssetCode, AssetDefinition, FreezeFlag, Nullifier, ReceiverMemo, RecordCommitment,
-        RecordOpening,
+        AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FreezeFlag, Nullifier,
+        ReceiverMemo, RecordCommitment, RecordOpening,
     },
     MerkleTree, Signature,
 };
 use jf_utils::tagged_blob;
 use ledger::*;
+use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
 use std::ops::{Index, IndexMut};
+
+#[derive(Debug, Snafu)]
+#[snafu(visibility = "pub")]
+pub enum TransactionError {
+    // InsufficientBalance {
+    //     asset: AssetCode,
+    //     required: u64,
+    //     actual: u64,
+    // },
+    // Fragmentation {
+    //     asset: AssetCode,
+    //     amount: u64,
+    //     suggested_amount: u64,
+    //     max_records: usize,
+    // },
+    // TooManyOutputs {
+    //     asset: AssetCode,
+    //     max_records: usize,
+    //     num_receivers: usize,
+    //     num_change_records: usize,
+    // },
+    // UndefinedAsset {
+    //     asset: AssetCode,
+    // },
+    // InvalidBlock {
+    //     source: ValidationError,
+    // },
+    // NullifierAlreadyPublished {
+    //     nullifier: Nullifier,
+    // },
+    // TimedOut {},
+    // Cancelled {},
+    CryptoError { source: TxnApiError },
+    // InvalidAddress {
+    //     address: UserAddress,
+    // },
+    // InvalidAuditorKey {
+    //     my_key: AuditorPubKey,
+    //     asset_key: AuditorPubKey,
+    // },
+    // InvalidFreezerKey {
+    //     my_key: FreezerPubKey,
+    //     asset_key: FreezerPubKey,
+    // },
+    // NetworkError {
+    //     source: phaselock::networking::NetworkError,
+    // },
+    // QueryServiceError {
+    //     source: crate::node::QueryServiceError,
+    // },
+    // ClientConfigError {
+    //     source: <surf::Client as TryFrom<surf::Config>>::Error,
+    // },
+    // ConsensusError {
+    //     #[snafu(source(false))]
+    //     source: Result<phaselock::error::PhaseLockError, String>,
+    // },
+    // PersistenceError {
+    //     source: atomic_store::error::PersistenceError,
+    // },
+    // IoError {
+    //     source: std::io::Error,
+    // },
+    // BincodeError {
+    //     source: bincode::Error,
+    // },
+    // EncryptionError {
+    //     source: encryption::Error,
+    // },
+    // KeyError {
+    //     source: argon2::Error,
+    // },
+    // #[snafu(display("{}", msg))]
+    // Failed {
+    //     msg: String,
+    // },
+}
 
 #[ser_test(arbitrary, ark(false))]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -589,6 +668,42 @@ where
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct MintInfo {
+    pub seed: AssetCodeSeed,
+    pub desc: Vec<u8>,
+}
+
+impl MintInfo {
+    pub fn new(seed: AssetCodeSeed, desc: Vec<u8>) -> Self {
+        Self { seed, desc }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssetInfo {
+    pub asset: AssetDefinition,
+    pub mint_info: Option<MintInfo>,
+}
+
+impl AssetInfo {
+    pub fn new(asset: AssetDefinition, mint_info: MintInfo) -> Self {
+        Self {
+            asset,
+            mint_info: Some(mint_info),
+        }
+    }
+}
+
+impl From<AssetDefinition> for AssetInfo {
+    fn from(asset: AssetDefinition) -> Self {
+        Self {
+            asset,
+            mint_info: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TransactionState<L: Ledger = AAPLedger> {
     // sequence number of the last event processed
@@ -607,4 +722,936 @@ pub struct TransactionState<L: Ledger = AAPLedger> {
     pub merkle_leaf_to_forget: Option<u64>,
     // set of pending transactions
     pub transactions: TransactionDatabase<L>,
+}
+
+impl<L: Ledger> TransactionState<L> {
+    pub fn balance(&self, asset: &AssetCode, pub_key: &UserPubKey, frozen: FreezeFlag) -> u64 {
+        self.records
+            .input_records(asset, pub_key, frozen, self.validator.now())
+            .map(|record| record.ro.amount)
+            .sum()
+    }
+
+    pub fn assets(
+        &self,
+        auditable_assets: &HashMap<AssetCode, AssetDefinition>,
+        defined_assets: &HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
+    ) -> HashMap<AssetCode, AssetInfo> {
+        // Get the asset definitions of each record we own.
+        let mut assets: HashMap<AssetCode, AssetInfo> = self
+            .records
+            .assets()
+            .map(|def| (def.code, AssetInfo::from(def)))
+            .collect();
+        // Add any assets that we know about through auditing.
+        for (code, def) in auditable_assets {
+            assets.insert(*code, AssetInfo::from(def.clone()));
+        }
+        // Add the minting information (seed and description) for each asset we've defined.
+        for (code, (def, seed, desc)) in defined_assets {
+            assets.insert(
+                *code,
+                AssetInfo::new(def.clone(), MintInfo::new(*seed, desc.clone())),
+            );
+        }
+        assets
+    }
+
+    fn clear_expired_transactions(&mut self) -> Vec<TransactionUID<L>> {
+        self.transactions
+            .remove_expired(self.validator.now())
+            .into_iter()
+            .map(|txn| txn.uid)
+            .collect()
+    }
+
+    fn define_asset<'b>(
+        &'b mut self,
+        rng: &mut ChaChaRng,
+        description: &'b [u8],
+        policy: AssetPolicy,
+    ) -> Result<AssetDefinition, TransactionError> {
+        let seed = AssetCodeSeed::generate(&mut rng);
+        let code = AssetCode::new(seed, description);
+        let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
+        Ok(asset_definition)
+    }
+
+    /// Use `audit_asset` to start auditing transactions with a given asset type, when the asset
+    /// type was defined by someone else and sent to us out of band.
+    ///
+    /// Auditing of assets created by this user with an appropriate asset policy begins
+    /// automatically. Calling this function is unnecessary.
+    pub async fn audit_asset(
+        &mut self,
+        auditor_pub_key: AuditorPubKey,
+        asset: &AssetDefinition,
+    ) -> Result<(), TransactionError> {
+        let asset_key = asset.policy_ref().auditor_pub_key();
+        if auditor_pub_key != *asset_key {
+            return Err(TransactionError::InvalidAuditorKey {
+                auditor_pub_key,
+                asset_key: asset_key.clone(),
+            });
+        }
+        Ok(())
+    }
+
+    fn add_pending_transaction(
+        &mut self,
+        txn: &Transaction<L>,
+        receiver_memos: Vec<ReceiverMemo>,
+        signature: Signature,
+        freeze_outputs: Vec<RecordOpening>,
+        uid: Option<TransactionUID<L>>,
+        user_address: UserAddress,
+    ) -> TransactionReceipt<L> {
+        let now = self.validator.now();
+        let timeout = now + RECORD_HOLD_TIME;
+        let hash = txn.hash();
+        let uid = uid.unwrap_or_else(|| TransactionUID(hash.clone()));
+
+        for nullifier in txn.note().nullifiers() {
+            // hold the record corresponding to this nullifier until the transaction is committed,
+            // rejected, or expired.
+            if let Some(record) = self.records.record_with_nullifier_mut(&nullifier) {
+                assert!(!record.on_hold(now));
+                record.hold_until(timeout);
+            }
+        }
+
+        // Add the transaction to `transactions`.
+        let pending = PendingTransaction {
+            receiver_memos,
+            signature,
+            timeout,
+            freeze_outputs,
+            uid: uid.clone(),
+            hash,
+        };
+        self.transactions.insert_pending(pending);
+
+        TransactionReceipt {
+            uid,
+            fee_nullifier: txn.note().nullifiers()[0],
+            submitter: user_address,
+        }
+    }
+
+    async fn clear_pending_transaction<'t>(
+        &mut self,
+        txn: &Transaction<L>,
+        res: Option<CommittedTxn<'t>>,
+    ) -> Option<PendingTransaction<L>> {
+        let now = self.txn_state.validator.now();
+
+        // Remove the transaction from pending transaction data structures.
+        let txn_hash = txn.hash();
+        let pending = self.txn_state.transactions.remove_pending(&txn_hash);
+
+        for nullifier in txn.note().nullifiers() {
+            if let Some(record) = self.txn_state.records.record_with_nullifier_mut(&nullifier) {
+                if pending.is_some() {
+                    // If we started this transaction, all of its inputs should have been on hold,
+                    // to preserve the invariant that all input nullifiers of all pending
+                    // transactions are on hold.
+                    assert!(record.on_hold(now));
+
+                    if res.is_none() {
+                        // If the transaction was not accepted for any reason, its nullifiers have
+                        // not been spent, so remove the hold we placed on them.
+                        record.unhold();
+                    }
+                } else {
+                    // This isn't even our transaction.
+                    assert!(!record.on_hold(now));
+                }
+            }
+        }
+
+        // If this was a successful transaction, add all of its frozen/unfrozen outputs to our
+        // freezable database (for freeze/unfreeze transactions).
+        if let Some((block_id, txn_id, uids)) = res {
+            if let Some(pending) = &pending {
+                // the first uid corresponds to the fee change output, which is not one of the
+                // `freeze_outputs`, so we skip that one
+                for ((uid, remember), ro) in uids.iter_mut().skip(1).zip(&pending.freeze_outputs) {
+                    self.txn_state.records.insert_freezable(
+                        ro.clone(),
+                        *uid,
+                        &self.immutable_keys.freezer_key_pair,
+                    );
+                    *remember = true;
+                }
+            }
+        }
+
+        pending
+    }
+
+    // // For reasons that are not clearly understood, the default async desugaring for this function
+    // // loses track of the fact that the result type implements Send, which causes very confusing
+    // // error messages farther up the call stack (apparently at the point where this function is
+    // // monomorphized) which do not point back to this location. This is likely due to a bug in type
+    // // inference, or at least a deficiency around async sugar combined with a bug in diagnostics.
+    // //
+    // // As a work-around, we do the desugaring manually so that we can explicitly specify that the
+    // // return type implements Send. The return type also captures a reference with lifetime 'a,
+    // // which is different from (but related to) the lifetime 'b of the returned Future, and
+    // // `impl 'a + 'b + ...` does not work, so we use the work-around described at
+    // // https://stackoverflow.com/questions/50547766/how-can-i-get-impl-trait-to-use-the-appropriate-lifetime-for-a-mutable-reference
+    // // to indicate the captured lifetime using the Captures trait.
+    // fn submit_elaborated_transaction<'b>(
+    //     &'b mut self,
+    //     session: &'b mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+    //     txn: Transaction<L>,
+    //     memos: Vec<ReceiverMemo>,
+    //     sig: Signature,
+    //     freeze_outputs: Vec<RecordOpening>,
+    //     uid: Option<TransactionUID<L>>,
+    // ) -> impl 'b + Captures<'a> + Future<Output = Result<TransactionReceipt<L>, WalletError>> + Send
+    // where
+    //     'a: 'b,
+    // {
+    //     async move {
+    //         let receipt = self.add_pending_transaction(&txn, memos, sig, freeze_outputs, uid);
+
+    //         // Persist the pending transaction.
+    //         if let Err(err) = session
+    //             .backend
+    //             .store(|mut t| {
+    //                 let state = &self;
+    //                 async move {
+    //                     t.store_snapshot(state).await?;
+    //                     Ok(t)
+    //                 }
+    //             })
+    //             .await
+    //         {
+    //             // If we failed to persist the pending transaction, we cannot submit it, because if
+    //             // we then exit and reload the process from storage, there will be an in-flight
+    //             // transaction which is not accounted for in our pending transaction data
+    //             // structures. Instead, we remove the pending transaction from our in-memory data
+    //             // structures and return the error.
+    //             self.clear_pending_transaction(session, &txn, None).await;
+    //             return Err(err);
+    //         }
+
+    //         // If we succeeded in creating and persisting the pending transaction, submit it to the
+    //         // validators.
+    //         if let Err(err) = session.backend.submit(txn.clone()).await {
+    //             self.clear_pending_transaction(session, &txn, None).await;
+    //             return Err(err);
+    //         }
+
+    //         Ok(receipt)
+    //     }
+    // }
+
+    // fn submit_transaction(
+    //     &mut self,
+    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+    //     note: TransactionNote,
+    //     memos: Vec<ReceiverMemo>,
+    //     sig: Signature,
+    //     freeze_outputs: Vec<RecordOpening>,
+    // ) -> Result<TransactionReceipt<L>, WalletError> {
+    //     let mut nullifier_pfs = Vec::new();
+    //     for n in note.nullifiers() {
+    //         let (spent, proof) = session
+    //             .backend
+    //             .get_nullifier_proof(&mut self.txn_state.nullifiers, n)
+    //             .await?;
+    //         if spent {
+    //             return Err(WalletError::NullifierAlreadyPublished { nullifier: n });
+    //         }
+    //         nullifier_pfs.push(proof);
+    //     }
+
+    //     let txn = Transaction::<L>::new(note, nullifier_pfs);
+    //     self.submit_elaborated_transaction(session, txn, memos, sig, freeze_outputs, None)
+    //         .await
+    // }
+
+    // async fn transfer_native(
+    //     &mut self,
+    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+    //     receivers: &[(UserPubKey, u64)],
+    //     fee: u64,
+    // ) -> Result<TransactionReceipt<L>, WalletError> {
+    //     let total_output_amount: u64 =
+    //         receivers.iter().fold(0, |sum, (_, amount)| sum + *amount) + fee;
+
+    //     // find input records which account for at least the total amount, and possibly some change.
+    //     let (input_records, _change) = self.find_records(
+    //         &AssetCode::native(),
+    //         &self.pub_key(),
+    //         FreezeFlag::Unfrozen,
+    //         total_output_amount,
+    //         None,
+    //     )?;
+
+    //     // prepare inputs
+    //     let mut inputs = vec![];
+    //     for (ro, uid) in input_records {
+    //         let acc_member_witness = self.get_merkle_proof(uid);
+    //         inputs.push(TransferNoteInput {
+    //             ro,
+    //             acc_member_witness,
+    //             owner_keypair: &self.immutable_keys.key_pair,
+    //             cred: None,
+    //         });
+    //     }
+
+    //     // prepare outputs, excluding fee change (which will be automatically generated)
+    //     let mut outputs = vec![];
+    //     for (pub_key, amount) in receivers {
+    //         outputs.push(RecordOpening::new(
+    //             &mut session.rng,
+    //             *amount,
+    //             AssetDefinition::native(),
+    //             pub_key.clone(),
+    //             FreezeFlag::Unfrozen,
+    //         ));
+    //     }
+
+    //     // find a proving key which can handle this transaction size
+    //     let (proving_key, dummy_inputs) = Self::xfr_proving_key(
+    //         &mut session.rng,
+    //         self.immutable_keys.key_pair.pub_key(),
+    //         &self.proving_keys.xfr,
+    //         &AssetDefinition::native(),
+    //         &mut inputs,
+    //         &mut outputs,
+    //         false,
+    //     )?;
+    //     // pad with dummy inputs if necessary
+    //     let rng = &mut session.rng;
+    //     let dummy_inputs = (0..dummy_inputs)
+    //         .map(|_| RecordOpening::dummy(rng, FreezeFlag::Unfrozen))
+    //         .collect::<Vec<_>>();
+    //     for (ro, owner_keypair) in &dummy_inputs {
+    //         let dummy_input = TransferNoteInput {
+    //             ro: ro.clone(),
+    //             acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
+    //             owner_keypair,
+    //             cred: None,
+    //         };
+    //         inputs.push(dummy_input);
+    //     }
+
+    //     // generate transfer note and receiver memos
+    //     let (note, kp, fee_change_ro) = TransferNote::generate_native(
+    //         &mut session.rng,
+    //         inputs,
+    //         &outputs,
+    //         fee,
+    //         UNEXPIRED_VALID_UNTIL,
+    //         proving_key,
+    //     )
+    //     .context(CryptoError)?;
+
+    //     let outputs: Vec<_> = vec![fee_change_ro]
+    //         .into_iter()
+    //         .chain(outputs.into_iter())
+    //         .collect();
+
+    //     let recv_memos: Vec<_> = outputs
+    //         .iter()
+    //         .map(|ro| ReceiverMemo::from_ro(&mut session.rng, ro, &[]))
+    //         .collect::<Result<Vec<_>, _>>()
+    //         .unwrap();
+    //     let sig = sign_receiver_memos(&kp, &recv_memos).context(CryptoError)?;
+    //     self.submit_transaction(
+    //         session,
+    //         TransactionNote::Transfer(Box::new(note)),
+    //         recv_memos,
+    //         sig,
+    //         vec![],
+    //     )
+    //     .await
+    // }
+
+    // async fn transfer_non_native(
+    //     &mut self,
+    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+    //     asset: &AssetCode,
+    //     receivers: &[(UserPubKey, u64)],
+    //     fee: u64,
+    // ) -> Result<TransactionReceipt<L>, WalletError> {
+    //     assert_ne!(
+    //         *asset,
+    //         AssetCode::native(),
+    //         "call `transfer_native()` instead"
+    //     );
+    //     let total_output_amount: u64 = receivers.iter().fold(0, |sum, (_, amount)| sum + *amount);
+
+    //     // find input records of the asset type to spend (this does not include the fee input)
+    //     let (input_records, change) = self.find_records(
+    //         asset,
+    //         &self.pub_key(),
+    //         FreezeFlag::Unfrozen,
+    //         total_output_amount,
+    //         None,
+    //     )?;
+    //     let asset = input_records[0].0.asset_def.clone();
+
+    //     // prepare inputs
+    //     let mut inputs = vec![];
+    //     for (ro, uid) in input_records.into_iter() {
+    //         let witness = self.get_merkle_proof(uid);
+    //         inputs.push(TransferNoteInput {
+    //             ro,
+    //             acc_member_witness: witness,
+    //             owner_keypair: &self.immutable_keys.key_pair,
+    //             cred: None, // TODO support credentials
+    //         })
+    //     }
+
+    //     // prepare outputs, excluding fee change (which will be automatically generated)
+    //     let mut outputs = vec![];
+    //     for (pub_key, amount) in receivers {
+    //         outputs.push(RecordOpening::new(
+    //             &mut session.rng,
+    //             *amount,
+    //             asset.clone(),
+    //             pub_key.clone(),
+    //             FreezeFlag::Unfrozen,
+    //         ));
+    //     }
+    //     // change in the asset type being transfered (not fee change)
+    //     if change > 0 {
+    //         let me = self.pub_key();
+    //         let change_ro = RecordOpening::new(
+    //             &mut session.rng,
+    //             change,
+    //             asset.clone(),
+    //             me,
+    //             FreezeFlag::Unfrozen,
+    //         );
+    //         outputs.push(change_ro);
+    //     }
+
+    //     let (fee_ro, fee_uid) = self.find_native_record_for_fee(fee)?;
+    //     let fee_input = FeeInput {
+    //         ro: fee_ro,
+    //         acc_member_witness: self.get_merkle_proof(fee_uid),
+    //         owner_keypair: &self.immutable_keys.key_pair,
+    //     };
+
+    //     // find a proving key which can handle this transaction size
+    //     let (proving_key, dummy_inputs) = Self::xfr_proving_key(
+    //         &mut session.rng,
+    //         self.immutable_keys.key_pair.pub_key(),
+    //         &self.proving_keys.xfr,
+    //         &asset,
+    //         &mut inputs,
+    //         &mut outputs,
+    //         change > 0,
+    //     )?;
+    //     // pad with dummy inputs if necessary
+    //     let rng = &mut session.rng;
+    //     let dummy_inputs = (0..dummy_inputs)
+    //         .map(|_| RecordOpening::dummy(rng, FreezeFlag::Unfrozen))
+    //         .collect::<Vec<_>>();
+    //     for (ro, owner_keypair) in &dummy_inputs {
+    //         let dummy_input = TransferNoteInput {
+    //             ro: ro.clone(),
+    //             acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
+    //             owner_keypair,
+    //             cred: None,
+    //         };
+    //         inputs.push(dummy_input);
+    //     }
+
+    //     // generate transfer note and receiver memos
+    //     let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut session.rng, fee_input, fee).unwrap();
+    //     let (note, sig_key) = TransferNote::generate_non_native(
+    //         &mut session.rng,
+    //         inputs,
+    //         &outputs,
+    //         fee_info,
+    //         UNEXPIRED_VALID_UNTIL,
+    //         proving_key,
+    //         vec![],
+    //     )
+    //     .context(CryptoError)?;
+    //     let recv_memos = vec![&fee_out_rec]
+    //         .into_iter()
+    //         .chain(outputs.iter())
+    //         .map(|r| ReceiverMemo::from_ro(&mut session.rng, r, &[]))
+    //         .collect::<Result<Vec<_>, _>>()
+    //         .unwrap();
+    //     let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
+    //     self.submit_transaction(
+    //         session,
+    //         TransactionNote::Transfer(Box::new(note)),
+    //         recv_memos,
+    //         sig,
+    //         vec![],
+    //     )
+    //     .await
+    // }
+
+    // pub async fn transfer(
+    //     &mut self,
+    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+    //     asset: &AssetCode,
+    //     receivers: &[(UserAddress, u64)],
+    //     fee: u64,
+    // ) -> Result<TransactionReceipt<L>, WalletError> {
+    //     let receivers = iter(receivers)
+    //         .then(|(addr, amt)| {
+    //             let session = &session;
+    //             async move { Ok((session.backend.get_public_key(addr).await?, *amt)) }
+    //         })
+    //         .try_collect::<Vec<_>>()
+    //         .await?;
+
+    //     if *asset == AssetCode::native() {
+    //         self.transfer_native(session, &receivers, fee).await
+    //     } else {
+    //         self.transfer_non_native(session, asset, &receivers, fee)
+    //             .await
+    //     }
+    // }
+
+    // pub async fn mint(
+    //     &mut self,
+    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+    //     fee: u64,
+    //     asset_code: &AssetCode,
+    //     amount: u64,
+    //     owner: UserAddress,
+    // ) -> Result<TransactionReceipt<L>, WalletError> {
+    //     let (fee_ro, uid) = self.find_native_record_for_fee(fee)?;
+    //     let acc_member_witness = self.get_merkle_proof(uid);
+    //     let (asset_def, seed, asset_description) = self
+    //         .defined_assets
+    //         .get(asset_code)
+    //         .ok_or(WalletError::UndefinedAsset { asset: *asset_code })?;
+    //     let mint_record = RecordOpening {
+    //         amount,
+    //         asset_def: asset_def.clone(),
+    //         pub_key: session.backend.get_public_key(&owner).await?,
+    //         freeze_flag: FreezeFlag::Unfrozen,
+    //         blind: BlindFactor::rand(&mut session.rng),
+    //     };
+
+    //     let fee_input = FeeInput {
+    //         ro: fee_ro,
+    //         acc_member_witness,
+    //         owner_keypair: &self.immutable_keys.key_pair,
+    //     };
+    //     let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut session.rng, fee_input, fee).unwrap();
+    //     let rng = &mut session.rng;
+    //     let recv_memos = vec![&fee_out_rec, &mint_record]
+    //         .into_iter()
+    //         .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
+    //         .collect::<Result<Vec<_>, _>>()
+    //         .unwrap();
+    //     let (mint_note, sig_key) = jf_txn::mint::MintNote::generate(
+    //         &mut session.rng,
+    //         mint_record,
+    //         *seed,
+    //         asset_description.as_slice(),
+    //         fee_info,
+    //         &self.proving_keys.mint,
+    //     )
+    //     .context(CryptoError)?;
+    //     let signature = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
+    //     self.submit_transaction(
+    //         session,
+    //         TransactionNote::Mint(Box::new(mint_note)),
+    //         recv_memos,
+    //         signature,
+    //         vec![],
+    //     )
+    //     .await
+    // }
+
+    // /// Freeze at least `amount` of a particular asset owned by a given user.
+    // ///
+    // /// In order to freeze an asset, this wallet must be an auditor of that asset type, and it must
+    // /// have observed enough transactions to determine that the target user owns at least `amount`
+    // /// of that asset.
+    // ///
+    // /// Freeze transactions do not currently support change, so the amount frozen will be at least
+    // /// `amount` but might be more, depending on the distribution of the freezable records we have
+    // /// for the target user.
+    // ///
+    // /// Some of these restrictions can be rolled back in the future:
+    // /// * An API can be provided for freezing without being an auditor, if a freezable record
+    // ///   opening is provided to us out of band by an auditor.
+    // /// * `freeze` uses the same allocation scheme for input records as transfers, which tries to
+    // ///   minimize fragmentation. But freeze transactions do not increase fragmentation because they
+    // ///   have no change output, so we could use a different allocation scheme that tries to
+    // ///   minimize change, which would limit the amount we can over-freeze, and would guarantee that
+    // ///   we freeze the exact amount if it is possible to make exact change with the freezable
+    // ///   records we have.
+    // pub async fn freeze(
+    //     &mut self,
+    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+    //     fee: u64,
+    //     asset: &AssetDefinition,
+    //     amount: u64,
+    //     owner: UserAddress,
+    // ) -> Result<TransactionReceipt<L>, WalletError> {
+    //     self.freeze_or_unfreeze(session, fee, asset, amount, owner, FreezeFlag::Frozen)
+    //         .await
+    // }
+
+    // /// Unfreeze at least `amount` of a particular asset owned by a given user.
+    // ///
+    // /// This wallet must have previously been used to freeze (without an intervening `unfreeze`) at
+    // /// least `amount` of the given asset for the given user.
+    // ///
+    // /// Similar restrictions on change apply as for `freeze`.
+    // pub async fn unfreeze(
+    //     &mut self,
+    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+    //     fee: u64,
+    //     asset: &AssetDefinition,
+    //     amount: u64,
+    //     owner: UserAddress,
+    // ) -> Result<TransactionReceipt<L>, WalletError> {
+    //     self.freeze_or_unfreeze(session, fee, asset, amount, owner, FreezeFlag::Unfrozen)
+    //         .await
+    // }
+
+    // async fn freeze_or_unfreeze(
+    //     &mut self,
+    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+    //     fee: u64,
+    //     asset: &AssetDefinition,
+    //     amount: u64,
+    //     owner: UserAddress,
+    //     outputs_frozen: FreezeFlag,
+    // ) -> Result<TransactionReceipt<L>, WalletError> {
+    //     let my_key = self.immutable_keys.freezer_key_pair.pub_key();
+    //     let asset_key = asset.policy_ref().freezer_pub_key();
+    //     if my_key != *asset_key {
+    //         return Err(WalletError::InvalidFreezerKey {
+    //             my_key,
+    //             asset_key: asset_key.clone(),
+    //         });
+    //     }
+
+    //     let owner = session.backend.get_public_key(&owner).await?;
+
+    //     // find input records of the asset type to freeze (this does not include the fee input)
+    //     let inputs_frozen = match outputs_frozen {
+    //         FreezeFlag::Frozen => FreezeFlag::Unfrozen,
+    //         FreezeFlag::Unfrozen => FreezeFlag::Frozen,
+    //     };
+    //     let (input_records, _) =
+    //         self.find_records(&asset.code, &owner, inputs_frozen, amount, None)?;
+
+    //     // prepare inputs
+    //     let mut inputs = vec![];
+    //     for (ro, uid) in input_records.into_iter() {
+    //         let witness = self.get_merkle_proof(uid);
+    //         inputs.push(FreezeNoteInput {
+    //             ro,
+    //             acc_member_witness: witness,
+    //             keypair: &self.immutable_keys.freezer_key_pair,
+    //         })
+    //     }
+
+    //     let (fee_ro, fee_uid) = self.find_native_record_for_fee(fee)?;
+    //     let fee_input = FeeInput {
+    //         ro: fee_ro,
+    //         acc_member_witness: self.get_merkle_proof(fee_uid),
+    //         owner_keypair: &self.immutable_keys.key_pair,
+    //     };
+
+    //     // find a proving key which can handle this transaction size
+    //     let proving_key = Self::freeze_proving_key(
+    //         &mut session.rng,
+    //         &self.proving_keys.freeze,
+    //         asset,
+    //         &mut inputs,
+    //         &self.immutable_keys.freezer_key_pair,
+    //     )?;
+
+    //     // generate transfer note and receiver memos
+    //     let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut session.rng, fee_input, fee).unwrap();
+    //     let (note, sig_key, outputs) =
+    //         FreezeNote::generate(&mut session.rng, inputs, fee_info, proving_key)
+    //             .context(CryptoError)?;
+    //     let recv_memos = vec![&fee_out_rec]
+    //         .into_iter()
+    //         .chain(outputs.iter())
+    //         .map(|r| ReceiverMemo::from_ro(&mut session.rng, r, &[]))
+    //         .collect::<Result<Vec<_>, _>>()
+    //         .unwrap();
+    //     let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
+    //     self.submit_transaction(
+    //         session,
+    //         TransactionNote::Freeze(Box::new(note)),
+    //         recv_memos,
+    //         sig,
+    //         outputs,
+    //     )
+    //     .await
+    // }
+
+    // #[allow(clippy::type_complexity)]
+    // fn find_records(
+    //     &self,
+    //     asset: &AssetCode,
+    //     owner: &UserPubKey,
+    //     frozen: FreezeFlag,
+    //     amount: u64,
+    //     max_records: Option<usize>,
+    // ) -> Result<(Vec<(RecordOpening, u64)>, u64), WalletError> {
+    //     let now = self.txn_state.validator.now();
+
+    //     // If we have a record with the exact size required, use it to avoid fragmenting big records
+    //     // into smaller change records.
+    //     if let Some(record) = self
+    //         .txn_state
+    //         .records
+    //         .input_record_with_amount(asset, owner, frozen, amount, now)
+    //     {
+    //         return Ok((vec![(record.ro.clone(), record.uid)], 0));
+    //     }
+
+    //     // Take the biggest records we have until they exceed the required amount, as a heuristic to
+    //     // try and get the biggest possible change record. This is a simple algorithm that
+    //     // guarantees we will always return the minimum number of blocks, and thus we always succeed
+    //     // in making a transaction if it is possible to do so within the allowed number of inputs.
+    //     //
+    //     // This algorithm is not optimal, though. For instance, it's possible we might be able to
+    //     // make exact change using combinations of larger and smaller blocks. We can replace this
+    //     // with something more sophisticated later.
+    //     let mut result = vec![];
+    //     let mut current_amount = 0u64;
+    //     for record in self
+    //         .txn_state
+    //         .records
+    //         .input_records(asset, owner, frozen, now)
+    //     {
+    //         if let Some(max_records) = max_records {
+    //             if result.len() >= max_records {
+    //                 // Too much fragmentation: we can't make the required amount using few enough
+    //                 // records. This should be less likely once we implement a better allocation
+    //                 // strategy (or, any allocation strategy).
+    //                 //
+    //                 // In this case, we could either simply return an error, or we could
+    //                 // automatically generate a merge transaction to defragment our assets.
+    //                 // Automatically merging assets would implicitly incur extra transaction fees,
+    //                 // so for now we do the simple, uncontroversial thing and error out.
+    //                 return Err(WalletError::Fragmentation {
+    //                     asset: *asset,
+    //                     amount,
+    //                     suggested_amount: current_amount,
+    //                     max_records,
+    //                 });
+    //             }
+    //         }
+    //         current_amount += record.ro.amount;
+    //         result.push((record.ro.clone(), record.uid));
+    //         if current_amount >= amount {
+    //             return Ok((result, current_amount - amount));
+    //         }
+    //     }
+
+    //     Err(WalletError::InsufficientBalance {
+    //         asset: *asset,
+    //         required: amount,
+    //         actual: current_amount,
+    //     })
+    // }
+
+    // /// find a record and corresponding uid on the native asset type with enough
+    // /// funds to pay transaction fee
+    // fn find_native_record_for_fee(&self, fee: u64) -> Result<(RecordOpening, u64), WalletError> {
+    //     self.find_records(
+    //         &AssetCode::native(),
+    //         &self.pub_key(),
+    //         FreezeFlag::Unfrozen,
+    //         fee,
+    //         Some(1),
+    //     )
+    //     .map(|(ros, _change)| ros.into_iter().next().unwrap())
+    // }
+
+    // // Find a proving key large enough to prove the given transaction, returning the number of dummy
+    // // inputs needed to pad the transaction.
+    // //
+    // // `proving_keys` should always be `&self.proving_key`. This is a non-member function in order
+    // // to prove to the compiler that the result only borrows from `&self.proving_key`, not all of
+    // // `&self`.
+    // #[allow(clippy::too_many_arguments)]
+    // fn xfr_proving_key<'k>(
+    //     rng: &mut ChaChaRng,
+    //     me: UserPubKey,
+    //     proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
+    //     asset: &AssetDefinition,
+    //     inputs: &mut Vec<TransferNoteInput<'k>>,
+    //     outputs: &mut Vec<RecordOpening>,
+    //     change_record: bool,
+    // ) -> Result<(&'k TransferProvingKey<'a>, usize), WalletError> {
+    //     let total_output_amount = outputs.iter().map(|ro| ro.amount).sum();
+    //     // non-native transfers have an extra fee input, which is not included in `inputs`.
+    //     let fee_inputs = if *asset == AssetDefinition::native() {
+    //         0
+    //     } else {
+    //         1
+    //     };
+    //     // both native and non-native transfers have an extra fee change output which is
+    //     // automatically generated and not included in `outputs`.
+    //     let fee_outputs = 1;
+
+    //     let num_inputs = inputs.len() + fee_inputs;
+    //     let num_outputs = outputs.len() + fee_outputs;
+    //     let (key_inputs, key_outputs, proving_key) = proving_keys
+    //         .best_fit_key(num_inputs, num_outputs)
+    //         .map_err(|(max_inputs, max_outputs)| {
+    //             if max_outputs >= num_outputs {
+    //                 // If there is a key that can fit the correct number of outputs had we only
+    //                 // managed to find fewer inputs, call this a fragmentation error.
+    //                 WalletError::Fragmentation {
+    //                     asset: asset.code,
+    //                     amount: total_output_amount,
+    //                     suggested_amount: inputs
+    //                         .iter()
+    //                         .take(max_inputs - fee_inputs)
+    //                         .map(|input| input.ro.amount)
+    //                         .sum(),
+    //                     max_records: max_inputs,
+    //                 }
+    //             } else {
+    //                 // Otherwise, we just have too many outputs for any of our available keys. There
+    //                 // is nothing we can do about that on the wallet side.
+    //                 WalletError::TooManyOutputs {
+    //                     asset: asset.code,
+    //                     max_records: max_outputs,
+    //                     num_receivers: outputs.len() - change_record as usize,
+    //                     num_change_records: 1 + change_record as usize,
+    //                 }
+    //             }
+    //         })?;
+    //     assert!(num_inputs <= key_inputs);
+    //     assert!(num_outputs <= key_outputs);
+
+    //     if num_outputs < key_outputs {
+    //         // pad with dummy (0-amount) outputs,leaving room for the fee change output
+    //         loop {
+    //             outputs.push(RecordOpening::new(
+    //                 rng,
+    //                 0,
+    //                 asset.clone(),
+    //                 me.clone(),
+    //                 FreezeFlag::Unfrozen,
+    //             ));
+    //             if outputs.len() >= key_outputs - fee_outputs {
+    //                 break;
+    //             }
+    //         }
+    //     }
+
+    //     // Return the required number of dummy inputs. We can't easily create the dummy inputs here,
+    //     // because it requires creating a new dummy key pair and then borrowing from the key pair to
+    //     // form the transfer input, so the key pair must be owned by the caller.
+    //     let dummy_inputs = key_inputs.saturating_sub(num_inputs);
+    //     Ok((proving_key, dummy_inputs))
+    // }
+
+    // fn freeze_proving_key<'k>(
+    //     rng: &mut ChaChaRng,
+    //     proving_keys: &'k KeySet<FreezeProvingKey<'a>, key_set::OrderByOutputs>,
+    //     asset: &AssetDefinition,
+    //     inputs: &mut Vec<FreezeNoteInput<'k>>,
+    //     keypair: &'k FreezerKeyPair,
+    // ) -> Result<&'k FreezeProvingKey<'a>, WalletError> {
+    //     let total_output_amount = inputs.iter().map(|input| input.ro.amount).sum();
+
+    //     let num_inputs = inputs.len() + 1; // make sure to include fee input
+    //     let num_outputs = num_inputs; // freeze transactions always have equal outputs and inputs
+    //     let (key_inputs, key_outputs, proving_key) = proving_keys
+    //         .best_fit_key(num_inputs, num_outputs)
+    //         .map_err(|(max_inputs, _)| {
+    //             WalletError::Fragmentation {
+    //                 asset: asset.code,
+    //                 amount: total_output_amount,
+    //                 suggested_amount: inputs
+    //                     .iter()
+    //                     .take(max_inputs - 1) // leave room for fee input
+    //                     .map(|input| input.ro.amount)
+    //                     .sum(),
+    //                 max_records: max_inputs,
+    //             }
+    //         })?;
+    //     assert!(num_inputs <= key_inputs);
+    //     assert!(num_outputs <= key_outputs);
+
+    //     if num_inputs < key_inputs {
+    //         // pad with dummy inputs, leaving room for the fee input
+
+    //         loop {
+    //             let (ro, _) = RecordOpening::dummy(rng, FreezeFlag::Unfrozen);
+    //             inputs.push(FreezeNoteInput {
+    //                 ro,
+    //                 acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
+    //                 keypair,
+    //             });
+    //             if inputs.len() >= key_inputs - 1 {
+    //                 break;
+    //             }
+    //         }
+    //     }
+
+    //     Ok(proving_key)
+    // }
+
+    // fn forget_merkle_leaf(&mut self, leaf: u64) {
+    //     if leaf < self.txn_state.record_mt.num_leaves() - 1 {
+    //         self.txn_state.record_mt.forget(leaf);
+    //     } else {
+    //         assert_eq!(leaf, self.txn_state.record_mt.num_leaves() - 1);
+    //         // We can't forget the last leaf in a Merkle tree. Instead, we just note that we want to
+    //         // forget this leaf, and we'll forget it when we append a new last leaf.
+    //         //
+    //         // There can only be one `merkle_leaf_to_forget` at a time, because we will forget the
+    //         // leaf and clear this field as soon as we append a new leaf.
+    //         assert!(self.txn_state.merkle_leaf_to_forget.is_none());
+    //         self.txn_state.merkle_leaf_to_forget = Some(leaf);
+    //     }
+    // }
+
+    // #[must_use]
+    // fn remember_merkle_leaf(&mut self, leaf: u64, proof: &MerkleLeafProof) -> bool {
+    //     // If we were planning to forget this leaf once a new leaf is appended, stop planning that.
+    //     if self.txn_state.merkle_leaf_to_forget == Some(leaf) {
+    //         self.txn_state.merkle_leaf_to_forget = None;
+    //         // `merkle_leaf_to_forget` is always represented in the tree, so we don't have to call
+    //         // `remember` in this case.
+    //         assert!(self.txn_state.record_mt.get_leaf(leaf).expect_ok().is_ok());
+    //         true
+    //     } else {
+    //         self.txn_state.record_mt.remember(leaf, proof).is_ok()
+    //     }
+    // }
+
+    // fn append_merkle_leaf(&mut self, comm: RecordCommitment) {
+    //     self.txn_state.record_mt.push(comm.to_field_element());
+
+    //     // Now that we have appended a new leaf to the Merkle tree, we can forget the old last leaf,
+    //     // if needed.
+    //     if let Some(uid) = self.txn_state.merkle_leaf_to_forget.take() {
+    //         assert!(uid < self.txn_state.record_mt.num_leaves() - 1);
+    //         self.txn_state.record_mt.forget(uid);
+    //     }
+    // }
+
+    // fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
+    //     // The wallet never needs a Merkle proof that isn't guaranteed to already be in the Merkle
+    //     // tree, so this unwrap() should never fail.
+    //     AccMemberWitness::lookup_from_tree(&self.txn_state.record_mt, leaf)
+    //         .expect_ok()
+    //         .unwrap()
+    //         .1
+    // }
 }

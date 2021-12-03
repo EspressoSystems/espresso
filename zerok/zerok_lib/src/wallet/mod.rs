@@ -444,36 +444,6 @@ pub struct AssetInfo {
     pub mint_info: Option<MintInfo>,
 }
 
-impl AssetInfo {
-    pub fn new(asset: AssetDefinition, mint_info: MintInfo) -> Self {
-        Self {
-            asset,
-            mint_info: Some(mint_info),
-        }
-    }
-}
-
-impl From<AssetDefinition> for AssetInfo {
-    fn from(asset: AssetDefinition) -> Self {
-        Self {
-            asset,
-            mint_info: None,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct MintInfo {
-    pub seed: AssetCodeSeed,
-    pub desc: Vec<u8>,
-}
-
-impl MintInfo {
-    pub fn new(seed: AssetCodeSeed, desc: Vec<u8>) -> Self {
-        Self { seed, desc }
-    }
-}
-
 #[derive(Clone, Debug)]
 struct EventSummary<L: Ledger> {
     updated_txns: Vec<(TransactionUID<L>, TransactionStatus)>,
@@ -499,40 +469,15 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     }
 
     pub fn balance(&self, asset: &AssetCode, frozen: FreezeFlag) -> u64 {
-        self.txn_state
-            .records
-            .input_records(
-                asset,
-                &self.pub_key(),
-                frozen,
-                self.txn_state.validator.now(),
-            )
-            .map(|record| record.ro.amount)
-            .sum()
+        self.txn_state.balance(asset, &self.pub_key(), frozen)
     }
 
     pub fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
-        // Get the asset definitions of each record we own.
-        let mut assets: HashMap<AssetCode, AssetInfo> = self
-            .txn_state
-            .records
-            .assets()
-            .map(|def| (def.code, AssetInfo::from(def)))
-            .collect();
-        // Add any assets that we know about through auditing.
-        for (code, def) in &self.auditable_assets {
-            assets.insert(*code, AssetInfo::from(def.clone()));
-        }
-        // Add the minting information (seed and description) for each asset we've defined.
-        for (code, (def, seed, desc)) in &self.defined_assets {
-            assets.insert(
-                *code,
-                AssetInfo::new(def.clone(), MintInfo::new(*seed, desc.clone())),
-            );
-        }
-        assets
+        self.txn_state
+            .assets(&self.auditable_assets, &self.defined_assets)
     }
 
+    // TODO: add to TransactionState?
     pub async fn transaction_status(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -566,6 +511,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
     }
 
+    // TODO: add to TransactionState?
     async fn handle_event(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -812,34 +758,10 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         txn: &Transaction<L>,
         res: Option<CommittedTxn<'t>>,
     ) -> Option<PendingTransaction<L>> {
-        let now = self.txn_state.validator.now();
+        let pending = self.txn_state.clear_pending_transaction(txn, res);
 
-        // Remove the transaction from pending transaction data structures.
-        let txn_hash = txn.hash();
-        let pending = self.txn_state.transactions.remove_pending(&txn_hash);
-
-        for nullifier in txn.note().nullifiers() {
-            if let Some(record) = self.txn_state.records.record_with_nullifier_mut(&nullifier) {
-                if pending.is_some() {
-                    // If we started this transaction, all of its inputs should have been on hold,
-                    // to preserve the invariant that all input nullifiers of all pending
-                    // transactions are on hold.
-                    assert!(record.on_hold(now));
-
-                    if res.is_none() {
-                        // If the transaction was not accepted for any reason, its nullifiers have
-                        // not been spent, so remove the hold we placed on them.
-                        record.unhold();
-                    }
-                } else {
-                    // This isn't even our transaction.
-                    assert!(!record.on_hold(now));
-                }
-            }
-        }
-
-        // If this was a successful transaction, post its receiver memos and add all of its
-        // frozen/unfrozen outputs to our freezable database (for freeze/unfreeze transactions).
+        // TODO keyao! Handle memo posting in TransactionState?
+        // If this was a successful transaction, post its receiver memos.
         if let Some((block_id, txn_id, uids)) = res {
             if let Some(pending) = &pending {
                 if let Err(err) = session
@@ -861,17 +783,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                         .transactions
                         .await_memos(pending.uid.clone(), uids.iter().map(|(uid, _)| *uid));
                 }
-
-                // the first uid corresponds to the fee change output, which is not one of the
-                // `freeze_outputs`, so we skip that one
-                for ((uid, remember), ro) in uids.iter_mut().skip(1).zip(&pending.freeze_outputs) {
-                    self.txn_state.records.insert_freezable(
-                        ro.clone(),
-                        *uid,
-                        &self.immutable_keys.freezer_key_pair,
-                    );
-                    *remember = true;
-                }
             }
         }
 
@@ -879,14 +790,10 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     }
 
     fn clear_expired_transactions(&mut self) -> Vec<TransactionUID<L>> {
-        self.txn_state
-            .transactions
-            .remove_expired(self.txn_state.validator.now())
-            .into_iter()
-            .map(|txn| txn.uid)
-            .collect()
+        self.txn_state.clear_expired_transactions()
     }
 
+    // TODO: add to TransactionState?
     async fn audit_transaction(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -960,6 +867,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
     }
 
+    // TODO: add to TransactionState?
     async fn update_nullifier_proofs(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -994,9 +902,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         'a: 'b,
     {
         async move {
-            let seed = AssetCodeSeed::generate(&mut session.rng);
-            let code = AssetCode::new(seed, description);
-            let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
+            let asset_definition =
+                self.txn_state
+                    .define_asset(&mut session.rng, description, policy)?;
             let desc = description.to_vec();
 
             // If the policy lists ourself as the auditor, we will automatically start auditing
@@ -1047,14 +955,8 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         asset: &AssetDefinition,
     ) -> Result<(), WalletError> {
-        let my_key = self.immutable_keys.auditor_key_pair.pub_key();
-        let asset_key = asset.policy_ref().auditor_pub_key();
-        if my_key != *asset_key {
-            return Err(WalletError::InvalidAuditorKey {
-                my_key,
-                asset_key: asset_key.clone(),
-            });
-        }
+        let auditor_pub_key = self.immutable_keys.auditor_key_pair.pub_key();
+        self.txn_state.audit_asset(auditor_pub_key, asset)?;
 
         // Store the new asset on disk before adding it to our in-memory data structure. We don't
         // want to update the in-memory structure if the persistent store fails.
@@ -1584,36 +1486,14 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         freeze_outputs: Vec<RecordOpening>,
         uid: Option<TransactionUID<L>>,
     ) -> TransactionReceipt<L> {
-        let now = self.txn_state.validator.now();
-        let timeout = now + RECORD_HOLD_TIME;
-        let hash = txn.hash();
-        let uid = uid.unwrap_or_else(|| TransactionUID(hash.clone()));
-
-        for nullifier in txn.note().nullifiers() {
-            // hold the record corresponding to this nullifier until the transaction is committed,
-            // rejected, or expired.
-            if let Some(record) = self.txn_state.records.record_with_nullifier_mut(&nullifier) {
-                assert!(!record.on_hold(now));
-                record.hold_until(timeout);
-            }
-        }
-
-        // Add the transaction to `transactions`.
-        let pending = PendingTransaction {
+        self.txn_state.add_pending_transaction(
+            txn,
             receiver_memos,
             signature,
-            timeout,
             freeze_outputs,
-            uid: uid.clone(),
-            hash,
-        };
-        self.txn_state.transactions.insert_pending(pending);
-
-        TransactionReceipt {
             uid,
-            fee_nullifier: txn.note().nullifiers()[0],
-            submitter: self.immutable_keys.key_pair.address(),
-        }
+            self.immutable_keys.key_pair.address(),
+        )
     }
 
     #[allow(clippy::type_complexity)]
