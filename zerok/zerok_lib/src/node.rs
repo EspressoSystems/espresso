@@ -1,9 +1,11 @@
 use crate::full_persistence::FullPersistence;
-pub use crate::state_comm::LedgerStateCommitment;
+pub use crate::state::state_comm::LedgerStateCommitment;
 use crate::util::arbitrary_wrappers::*;
 use crate::{
-    ledger, ser_test, set_merkle_tree::*, validator_node::*, ElaboratedBlock,
-    ElaboratedTransaction, ValidationError, ValidatorState,
+    ledger, ser_test,
+    set_merkle_tree::*,
+    state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
+    validator_node::*,
 };
 use arbitrary::Arbitrary;
 use async_executors::exec::AsyncStd;
@@ -1028,7 +1030,10 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo, UNIVERSAL_PARAM};
+    use crate::{
+        testing::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo},
+        universal_params::UNIVERSAL_PARAM,
+    };
     use async_std::task::block_on;
     use jf_primitives::jubjub_dsa::KeyPair;
     use jf_txn::{sign_receiver_memos, MerkleLeafProof, MerkleTree};

@@ -1,4 +1,7 @@
-use crate::{node::LedgerEvent, ElaboratedBlock, SetMerkleTree, ValidatorState};
+use crate::{
+    node::LedgerEvent,
+    state::{ElaboratedBlock, SetMerkleTree, ValidatorState},
+};
 use atomic_store::{
     append_log::Iter, load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader,
     PersistenceError,

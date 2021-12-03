@@ -17,7 +17,7 @@ use tide_websockets::WebSocketConnection;
 use tracing::{event, Level};
 use zerok_lib::api::*;
 use zerok_lib::node::{LedgerEvent, LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
-use zerok_lib::state_comm::LedgerStateCommitment;
+use zerok_lib::state::state_comm::LedgerStateCommitment;
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {

@@ -32,12 +32,15 @@ use toml::Value;
 use tracing::{debug, event, Level};
 use zerok_lib::{
     api::*,
-    key_set::KeySet,
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
-    ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, MultiXfrRecordSpec,
-    MultiXfrTestState, TxnPrintInfo, ValidatorState, VerifierKeySet, MERKLE_HEIGHT,
-    UNIVERSAL_PARAM,
+    state::key_set::KeySet,
+    state::{
+        ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, ValidatorState,
+        VerifierKeySet, MERKLE_HEIGHT,
+    },
+    testing::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo},
+    universal_params::UNIVERSAL_PARAM,
 };
 
 mod disco;
@@ -367,7 +370,7 @@ async fn init_state_and_phaselock(
     // Create the initial state
     let (state, validator, records, nullifiers, memos) =
         if let Some(pk_paths) = NodeOpt::from_args().wallet_pk_path {
-            let mut rng = zerok_lib::crypto_rng_from_seed([0x42u8; 32]);
+            let mut rng = zerok_lib::testing::crypto_rng_from_seed([0x42u8; 32]);
 
             let mut records = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
             let mut memos = Vec::new();

@@ -1,4 +1,4 @@
-use crate::{
+use crate::state::{
     state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction,
     ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
@@ -134,7 +134,7 @@ impl traits::Transaction for ElaboratedTransaction {
     }
 
     fn hash(&self) -> Self::Hash {
-        self.hash()
+        self.etxn_hash()
     }
 
     fn set_proofs(&mut self, proofs: Vec<SetMerkleProof>) {
@@ -149,7 +149,7 @@ impl traits::Block for ElaboratedBlock {
         let (txns, proofs): (Vec<TransactionNote>, Vec<_>) =
             txns.into_iter().map(|txn| (txn.txn, txn.proofs)).unzip();
         Self {
-            block: crate::Block(txns),
+            block: crate::state::Block(txns),
             proofs,
         }
     }

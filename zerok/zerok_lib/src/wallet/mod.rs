@@ -6,10 +6,13 @@ pub mod persistence;
 mod secret;
 
 use crate::api;
-use crate::key_set;
 use crate::node::LedgerEvent;
+use crate::state::key_set;
 use crate::util::arbitrary_wrappers::*;
-use crate::{ledger, ser_test, ProverKeySet, ValidationError, ValidatorState, MERKLE_HEIGHT};
+use crate::{
+    ledger, ser_test,
+    state::{ProverKeySet, ValidationError, ValidatorState, MERKLE_HEIGHT},
+};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use async_scoped::AsyncScope;
@@ -2761,12 +2764,17 @@ pub fn new_key_pair() -> UserKeyPair {
 pub mod test_helpers {
     use super::*;
     use crate::{
-        node, Block, ElaboratedBlock, ElaboratedTransaction, SetMerkleProof, SetMerkleTree,
-        TransactionVerifyingKey, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
+        node,
+        state::{
+            Block, ElaboratedBlock, ElaboratedTransaction, SetMerkleProof, SetMerkleTree,
+            VerifierKeySet, MERKLE_HEIGHT,
+        },
+        universal_params::UNIVERSAL_PARAM,
     };
     use futures::channel::mpsc as channel;
     use futures::future;
     use itertools::izip;
+    use jf_txn::TransactionVerifyingKey;
     use phaselock::traits::state::State;
     use phaselock::BlockContents;
     use rand_chacha::rand_core::RngCore;
