@@ -15,6 +15,7 @@ use async_scoped::AsyncScope;
 use async_std::sync::{Mutex, MutexGuard};
 use async_std::task::block_on;
 use async_trait::async_trait;
+use chrono::{DateTime, Local};
 use core::fmt::Debug;
 use futures::{
     channel::oneshot,
@@ -39,7 +40,9 @@ use jf_txn::{
 };
 use key_set::KeySet;
 use ledger::{
-    traits::{Block as _, NullifierSet as _, Transaction as _, Validator as _},
+    traits::{
+        Block as _, NullifierSet as _, Transaction as _, TransactionKind as _, Validator as _,
+    },
     *,
 };
 use rand_chacha::rand_core::SeedableRng;
@@ -192,6 +195,28 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
     pub(crate) defined_assets: HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct TransactionHistoryEntry<L: Ledger> {
+    time: DateTime<Local>,
+    asset: AssetCode,
+    kind: TransactionKind<L>,
+    // Receivers and corresponding amounts.
+    receivers: Vec<(UserAddress, u64)>,
+    // If we sent this transaction, a receipt to track its progress.
+    receipt: Option<TransactionReceipt<L>>,
+}
+
+impl<L: Ledger> PartialEq<Self> for TransactionHistoryEntry<L> {
+    fn eq(&self, other: &Self) -> bool {
+        self.time == other.time
+            && self.asset == other.asset
+            && self.kind == other.kind
+            && self.receivers == other.receivers
+            && self.receipt == other.receipt
+    }
+}
+
 /// The interface required by the wallet from the persistence layer.
 ///
 /// The persistent storage needed by the wallet is divided into 3 categories, based on usage
@@ -246,6 +271,13 @@ pub trait WalletStorage<'a, L: Ledger> {
         seed: AssetCodeSeed,
         desc: &[u8],
     ) -> Result<(), WalletError>;
+
+    async fn store_transaction(
+        &mut self,
+        txn: TransactionHistoryEntry<L>,
+    ) -> Result<(), WalletError>;
+    async fn transaction_history(&mut self)
+        -> Result<Vec<TransactionHistoryEntry<L>>, WalletError>;
 
     /// Commit to outstanding changes.
     async fn commit(&mut self);
@@ -321,6 +353,21 @@ impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> StorageTransaction<'a, 'l
         }
     }
 
+    async fn store_transaction(
+        &mut self,
+        transaction: TransactionHistoryEntry<L>,
+    ) -> Result<(), WalletError> {
+        if !self.cancelled {
+            let res = self.storage.store_transaction(transaction).await;
+            if res.is_err() {
+                self.cancel().await;
+            }
+            res
+        } else {
+            Ok(())
+        }
+    }
+
     async fn cancel(&mut self) {
         if !self.cancelled {
             self.cancelled = true;
@@ -383,7 +430,7 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
     /// ```
     async fn store<'l, F, Fut>(&'l mut self, update: F) -> Result<(), WalletError>
     where
-        F: Send + Fn(StorageTransaction<'a, 'l, L, Self::Storage>) -> Fut,
+        F: Send + FnOnce(StorageTransaction<'a, 'l, L, Self::Storage>) -> Fut,
         Fut: Send
             + Future<Output = Result<StorageTransaction<'a, 'l, L, Self::Storage>, WalletError>>,
         Self::Storage: 'l,
@@ -405,6 +452,11 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
         nullifiers: &mut NullifierSet<L>,
         nullifier: Nullifier,
     ) -> Result<(bool, NullifierProof<L>), WalletError>;
+    async fn get_transaction(
+        &self,
+        block_id: u64,
+        txn_id: u64,
+    ) -> Result<Transaction<L>, WalletError>;
 
     // Submit a transaction to a validator.
     async fn submit(&mut self, txn: Transaction<L>) -> Result<(), WalletError>;
@@ -711,11 +763,15 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 }
             }
 
-            LedgerEvent::Memos { outputs } => {
+            LedgerEvent::Memos {
+                outputs,
+                transaction,
+            } => {
                 let completed = self
                     .txn_state
                     .transactions
                     .received_memos(outputs.iter().map(|info| info.2));
+                let self_published = !completed.is_empty();
                 summary.updated_txns.extend(
                     completed
                         .into_iter()
@@ -723,6 +779,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                         .collect::<Vec<_>>(),
                 );
 
+                let mut received_assets = Vec::new();
                 for (memo, comm, uid, proof) in outputs {
                     summary.received_memos.push((memo.clone(), uid));
                     if let Ok(record_opening) =
@@ -731,6 +788,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                         if !record_opening.is_dummy() {
                             // If this record is for us (i.e. its corresponding memo decrypts under
                             // our key) and not a dummy, then add it to our owned records.
+                            received_assets.push((
+                                record_opening.asset_def.code,
+                                record_opening.amount,
+                                record_opening.freeze_flag,
+                            ));
                             self.txn_state.records.insert(
                                 record_opening,
                                 uid,
@@ -745,6 +807,78 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                                     comm
                                 );
                             }
+                        }
+                    }
+                }
+
+                if !self_published && !received_assets.is_empty() {
+                    if let Some((block_id, txn_id)) = transaction {
+                        // If this batch of memos didn't complete one of our own transactions (i.e.
+                        // it wasn't published by us) but it was _for_ us, then we will add a
+                        // transaction history entry for the received transaction using the
+                        // information decrypted from the memos.
+                        //
+                        // First we need to fetch the actual transaction for these memos to figure
+                        // out what type it was.
+                        let kind = match session.backend.get_transaction(block_id, txn_id).await {
+                            Ok(txn) => {
+                                let kind = txn.kind();
+                                if kind == TransactionKind::<L>::send() {
+                                    TransactionKind::<L>::receive()
+                                } else if kind == TransactionKind::<L>::freeze()
+                                    && received_assets[0].2 == FreezeFlag::Unfrozen
+                                {
+                                    TransactionKind::<L>::unfreeze()
+                                } else {
+                                    kind
+                                }
+                            }
+                            Err(err) => {
+                                println!(
+                                    "Error fetching received transaction ({}, {}) from network: {}. \
+                                        Transaction will be recorded with unknown type.",
+                                    block_id, txn_id, err
+                                );
+                                TransactionKind::<L>::unknown()
+                            }
+                        };
+
+                        let txn_asset = received_assets[0].0;
+                        let history = TransactionHistoryEntry {
+                            time: Local::now(),
+                            asset: txn_asset,
+                            kind,
+                            receivers: received_assets
+                                .clone()
+                                .into_iter()
+                                .filter_map(|(asset, amount, _)| {
+                                    if asset == txn_asset {
+                                        Some((self.immutable_keys.key_pair.address(), amount))
+                                    } else {
+                                        println!(
+                                            "Received transaction ({}, {}) contains outputs with \
+                                            multiple asset types. Ignoring some of them.",
+                                            block_id, txn_id
+                                        );
+                                        None
+                                    }
+                                })
+                                .collect(),
+                            receipt: None,
+                        };
+
+                        if let Err(err) = session
+                            .backend
+                            .store(|mut t| async move {
+                                t.store_transaction(history).await?;
+                                Ok(t)
+                            })
+                            .await
+                        {
+                            println!(
+                                "Failed to store transaction history for ({}, {}): {}.",
+                                block_id, txn_id, err
+                            );
                         }
                     }
                 }
@@ -770,6 +904,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                                         pending.receiver_memos,
                                         pending.signature,
                                         pending.freeze_outputs,
+                                        None,
                                         Some(pending.uid.clone()),
                                     )
                                     .await
@@ -796,12 +931,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
         if let Err(err) = session
             .backend
-            .store(|mut t| {
-                let state = &self;
-                async move {
-                    t.store_snapshot(state).await?;
-                    Ok(t)
-                }
+            .store(|mut t| async {
+                t.store_snapshot(self).await?;
+                Ok(t)
             })
             .await
         {
@@ -850,6 +982,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         // frozen/unfrozen outputs to our freezable database (for freeze/unfreeze transactions).
         if let Some((block_id, txn_id, uids)) = res {
             if let Some(pending) = &pending {
+                // Post receiver memos.
                 if let Err(err) = session
                     .backend
                     .post_memos(
@@ -1018,19 +1151,16 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             // in-memory state if we're not going to report success.
             session
                 .backend
-                .store(|mut t| {
-                    let asset_definition = &asset_definition;
-                    let desc = &desc;
-                    async move {
-                        t.store_defined_asset(asset_definition, seed, desc).await?;
-                        if audit {
-                            // If we are going to be an auditor of the new asset, we must also
-                            // persist that information to disk before doing anything to the
-                            // in-memory state.
-                            t.store_auditable_asset(asset_definition).await?;
-                        }
-                        Ok(t)
+                .store(|mut t| async {
+                    t.store_defined_asset(&asset_definition, seed, &desc)
+                        .await?;
+                    if audit {
+                        // If we are going to be an auditor of the new asset, we must also
+                        // persist that information to disk before doing anything to the
+                        // in-memory state.
+                        t.store_auditable_asset(&asset_definition).await?;
                     }
+                    Ok(t)
                 })
                 .await?;
 
@@ -1150,6 +1280,13 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             recv_memos,
             signature,
             vec![],
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: *asset_code,
+                kind: TransactionKind::<L>::mint(),
+                receivers: vec![(owner, amount)],
+                receipt: None,
+            },
         )
         .await
     }
@@ -1276,6 +1413,16 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             recv_memos,
             sig,
             outputs,
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: asset.code,
+                kind: match outputs_frozen {
+                    FreezeFlag::Frozen => TransactionKind::<L>::freeze(),
+                    FreezeFlag::Unfrozen => TransactionKind::<L>::unfreeze(),
+                },
+                receivers: vec![(owner.address(), amount)],
+                receipt: None,
+            },
         )
         .await
     }
@@ -1375,6 +1522,16 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             recv_memos,
             sig,
             vec![],
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: AssetCode::native(),
+                kind: TransactionKind::<L>::send(),
+                receivers: receivers
+                    .iter()
+                    .map(|(pub_key, amount)| (pub_key.address(), *amount))
+                    .collect(),
+                receipt: None,
+            },
         )
         .await
     }
@@ -1496,6 +1653,16 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             recv_memos,
             sig,
             vec![],
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: asset.code,
+                kind: TransactionKind::<L>::send(),
+                receivers: receivers
+                    .iter()
+                    .map(|(pub_key, amount)| (pub_key.address(), *amount))
+                    .collect(),
+                receipt: None,
+            },
         )
         .await
     }
@@ -1507,6 +1674,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         memos: Vec<ReceiverMemo>,
         sig: Signature,
         freeze_outputs: Vec<RecordOpening>,
+        history: TransactionHistoryEntry<L>,
     ) -> Result<TransactionReceipt<L>, WalletError> {
         let mut nullifier_pfs = Vec::new();
         for n in note.nullifiers() {
@@ -1521,8 +1689,16 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
 
         let txn = Transaction::<L>::new(note, nullifier_pfs);
-        self.submit_elaborated_transaction(session, txn, memos, sig, freeze_outputs, None)
-            .await
+        self.submit_elaborated_transaction(
+            session,
+            txn,
+            memos,
+            sig,
+            freeze_outputs,
+            Some(history),
+            None,
+        )
+        .await
     }
 
     // For reasons that are not clearly understood, the default async desugaring for this function
@@ -1537,6 +1713,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     // `impl 'a + 'b + ...` does not work, so we use the work-around described at
     // https://stackoverflow.com/questions/50547766/how-can-i-get-impl-trait-to-use-the-appropriate-lifetime-for-a-mutable-reference
     // to indicate the captured lifetime using the Captures trait.
+    #[allow(clippy::too_many_arguments)]
     fn submit_elaborated_transaction<'b>(
         &'b mut self,
         session: &'b mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -1544,24 +1721,29 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         memos: Vec<ReceiverMemo>,
         sig: Signature,
         freeze_outputs: Vec<RecordOpening>,
+        history: Option<TransactionHistoryEntry<L>>,
         uid: Option<TransactionUID<L>>,
     ) -> impl 'b + Captures<'a> + Future<Output = Result<TransactionReceipt<L>, WalletError>> + Send
     where
         'a: 'b,
     {
         async move {
-            let receipt =
-                self.add_pending_transaction(session, &txn, memos, sig, freeze_outputs, uid);
+            let receipt = self.add_pending_transaction(&txn, memos, sig, freeze_outputs, uid);
 
             // Persist the pending transaction.
             if let Err(err) = session
                 .backend
-                .store(|mut t| {
-                    let state = &self;
-                    async move {
-                        t.store_snapshot(state).await?;
-                        Ok(t)
+                .store(|mut t| async {
+                    t.store_snapshot(self).await?;
+
+                    // If we're submitting this transaction for the first time (as opposed to
+                    // updating and resubmitting a failed transaction) add it to the history.
+                    if let Some(mut history) = history {
+                        history.receipt = Some(receipt.clone());
+                        t.store_transaction(history).await?;
                     }
+
+                    Ok(t)
                 })
                 .await
             {
@@ -1587,7 +1769,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     fn add_pending_transaction(
         &mut self,
-        _session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         txn: &Transaction<L>,
         receiver_memos: Vec<ReceiverMemo>,
         signature: Signature,
@@ -2066,6 +2247,14 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         state.assets()
     }
 
+    pub async fn transaction_history(
+        &self,
+    ) -> Result<Vec<TransactionHistoryEntry<L>>, WalletError> {
+        let WalletSharedState { session, .. } = &mut *self.mutex.lock().await;
+        let mut storage = session.backend.storage().await;
+        storage.transaction_history().await
+    }
+
     pub async fn transfer(
         &mut self,
         asset: &AssetCode,
@@ -2201,9 +2390,10 @@ pub fn new_key_pair() -> UserKeyPair {
 pub mod test_helpers {
     use super::*;
     use crate::{
-        node, Block, ElaboratedBlock, ElaboratedTransaction, SetMerkleProof, SetMerkleTree,
-        TransactionVerifyingKey, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
+        api::FromError, node, Block, ElaboratedBlock, ElaboratedTransaction, SetMerkleProof,
+        SetMerkleTree, TransactionVerifyingKey, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
     };
+    use chrono::Duration;
     use futures::channel::mpsc as channel;
     use futures::future;
     use itertools::izip;
@@ -2251,10 +2441,30 @@ pub mod test_helpers {
         assert_eq!(w1.txn_state.transactions, w2.txn_state.transactions);
     }
 
+    #[derive(Clone, Debug)]
+    pub struct TxnHistoryWithTimeTolerantEq(pub TransactionHistoryEntry<AAPLedger>);
+
+    impl PartialEq<Self> for TxnHistoryWithTimeTolerantEq {
+        fn eq(&self, other: &Self) -> bool {
+            let time_tolerance = Duration::minutes(5);
+            let times_eq = if self.0.time < other.0.time {
+                other.0.time - self.0.time < time_tolerance
+            } else {
+                self.0.time - other.0.time < time_tolerance
+            };
+            times_eq
+                && self.0.asset == other.0.asset
+                && self.0.kind == other.0.kind
+                && self.0.receivers == other.0.receivers
+                && self.0.receipt == other.0.receipt
+        }
+    }
+
     #[derive(Clone, Debug, Default)]
     pub struct MockWalletStorage<'a> {
         committed: Option<WalletState<'a>>,
         working: Option<WalletState<'a>>,
+        txn_history: Vec<TransactionHistoryEntry<AAPLedger>>,
     }
 
     #[async_trait]
@@ -2303,6 +2513,20 @@ pub mod test_helpers {
             Ok(())
         }
 
+        async fn store_transaction(
+            &mut self,
+            txn: TransactionHistoryEntry<AAPLedger>,
+        ) -> Result<(), WalletError> {
+            self.txn_history.push(txn);
+            Ok(())
+        }
+
+        async fn transaction_history(
+            &mut self,
+        ) -> Result<Vec<TransactionHistoryEntry<AAPLedger>>, WalletError> {
+            Ok(self.txn_history.clone())
+        }
+
         async fn commit(&mut self) {
             self.committed = self.working.clone();
         }
@@ -2334,7 +2558,15 @@ pub mod test_helpers {
         }
 
         fn generate_event(&mut self, e: LedgerEvent) {
-            println!("EVENT {:?}", e);
+            println!(
+                "generating event {}: {}",
+                self.events.len(),
+                match &e {
+                    LedgerEvent::Commit { .. } => "Commit",
+                    LedgerEvent::Reject { .. } => "Reject",
+                    LedgerEvent::Memos { .. } => "Memos",
+                }
+            );
             self.events.push(e.clone());
             for s in self.subscribers.iter_mut() {
                 s.start_send(e.clone()).unwrap();
@@ -2453,6 +2685,7 @@ pub mod test_helpers {
                 .collect::<Vec<_>>();
             self.generate_event(LedgerEvent::<AAPLedger>::Memos {
                 outputs: izip!(memos, comms, uids, merkle_paths).collect(),
+                transaction: Some((block_id, txn_id)),
             });
 
             Ok(())
@@ -2466,10 +2699,10 @@ pub mod test_helpers {
         let t = {
             let mut ledger = ledger.lock().unwrap();
             ledger.flush();
-            if let Some(LedgerEvent::Commit { .. }) = ledger.events.last() {
-                // If the last event is a Commit, wait until the sender receives the Commit event
-                // and posts the receiver memos, generating a new Memos event.
-                ledger.now() + 1
+            if let Some(LedgerEvent::Commit { block, .. }) = ledger.events.last() {
+                // If the last event is a Commit, wait until all of the senders from the block
+                // receive the Commit event and post the receiver memos, generating new Memos events.
+                ledger.now() + (block.block.0.len() as u64)
             } else {
                 ledger.now()
             }
@@ -2597,6 +2830,33 @@ pub mod test_helpers {
                     source: node::QueryServiceError::InvalidNullifierRoot {},
                 })
             }
+        }
+
+        async fn get_transaction(
+            &self,
+            block_id: u64,
+            txn_id: u64,
+        ) -> Result<ElaboratedTransaction, WalletError> {
+            let ledger = self.ledger.lock().unwrap();
+            let block = &ledger
+                .committed_blocks
+                .get(block_id as usize)
+                .ok_or_else(|| {
+                    WalletError::from_query_service_error(node::QueryServiceError::InvalidBlockId {
+                        index: block_id as usize,
+                        num_blocks: ledger.committed_blocks.len(),
+                    })
+                })?
+                .0;
+
+            if txn_id as usize >= block.block.0.len() {
+                return Err(WalletError::from_query_service_error(
+                    node::QueryServiceError::InvalidTxnId {},
+                ));
+            }
+            let txn = block.block.0[txn_id as usize].clone();
+            let proofs = block.proofs[txn_id as usize].clone();
+            Ok(ElaboratedTransaction { txn, proofs })
         }
 
         async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {
@@ -2786,6 +3046,10 @@ pub mod test_helpers {
             (3, 2), // non-native merge
         ];
         let mut balances = vec![vec![0; ndefs as usize + 1]; nkeys as usize];
+        // `histories` is a map from wallet indices to vectors of blocks of history entries. The
+        // reason for blocking the history entries is that entries corresponding to transactions
+        // that were validated in the same block can be recorded by the wallets in any order.
+        let mut histories = vec![vec![vec![]]; nkeys as usize];
         let grants =
             // The issuer (wallet 0) gets 1 coin per initial record, to pay transaction fees while
             // it mints and distributes the records, and 1 coin per transaction, to pay transaction
@@ -2855,6 +3119,19 @@ pub mod test_helpers {
         );
         now = Instant::now();
 
+        fn push_history(
+            wallet_ix: usize,
+            histories: &mut [Vec<Vec<TransactionHistoryEntry<AAPLedger>>>],
+            entry: TransactionHistoryEntry<AAPLedger>,
+        ) {
+            histories[wallet_ix].last_mut().unwrap().push(entry);
+        }
+        fn close_history_block(histories: &mut [Vec<Vec<TransactionHistoryEntry<AAPLedger>>>]) {
+            for history in histories {
+                history.push(vec![])
+            }
+        }
+
         // Define all of the test assets and mint initial records.
         let mut assets = vec![];
         for i in 0..ndefs {
@@ -2874,10 +3151,22 @@ pub mod test_helpers {
             let address = wallets[(owner % nkeys) as usize + 1].address();
             balances[(owner % nkeys) as usize][asset] += amount;
             wallets[0]
-                .mint(1, &assets[asset - 1].code, amount, address)
+                .mint(1, &assets[asset - 1].code, amount, address.clone())
                 .await
                 .unwrap();
+            push_history(
+                (owner % nkeys) as usize,
+                &mut histories,
+                TransactionHistoryEntry {
+                    time: Local::now(),
+                    asset: assets[asset - 1].code,
+                    kind: TransactionKind::<AAPLedger>::mint(),
+                    receivers: vec![(address, amount)],
+                    receipt: None,
+                },
+            );
             sync(&ledger, &wallets).await;
+            close_history_block(&mut histories);
         }
 
         println!("assets minted: {}s", now.elapsed().as_secs_f32());
@@ -2902,6 +3191,47 @@ pub mod test_helpers {
             }
         }
         check_balances(&wallets, &balances, &assets).await;
+
+        async fn check_histories<'a>(
+            wallets: &[Wallet<'a, MockWalletBackend<'a>>],
+            histories: &[Vec<Vec<TransactionHistoryEntry<AAPLedger>>>],
+        ) {
+            assert_eq!(wallets.len(), histories.len() + 1);
+            for (wallet, history) in wallets.iter().skip(1).zip(histories) {
+                let mut wallet_history = wallet.transaction_history().await.unwrap();
+                assert_eq!(
+                    wallet_history.len(),
+                    history.iter().map(|block| block.len()).sum::<usize>()
+                );
+
+                for block in history {
+                    let remaining = wallet_history.split_off(block.len());
+                    let wallet_block = wallet_history;
+                    wallet_history = remaining;
+
+                    // Compare the blocks, allowing for slight deviations in the timestamps of
+                    // corresponding entries. We compare blocks modulo order by checking that they
+                    // have the same length and that every entry in one is in the other, and vice
+                    // versa.
+                    assert_eq!(wallet_block.len(), block.len());
+                    let wallet_block = wallet_block
+                        .into_iter()
+                        .map(TxnHistoryWithTimeTolerantEq)
+                        .collect::<Vec<_>>();
+                    let block = block
+                        .iter()
+                        .map(|txn| TxnHistoryWithTimeTolerantEq(txn.clone()))
+                        .collect::<Vec<_>>();
+                    for txn in wallet_block.iter() {
+                        assert!(block.contains(txn));
+                    }
+                    for txn in block.iter() {
+                        assert!(wallet_block.contains(txn));
+                    }
+                }
+            }
+        }
+        check_histories(&wallets, &histories).await;
 
         // Run the test transactions.
         for (i, block) in txs.iter().enumerate() {
@@ -2961,11 +3291,22 @@ pub mod test_helpers {
                     );
                     now = Instant::now();
                     wallets[0]
-                        .mint(1, &asset.code, 2 * amount, sender_address)
+                        .mint(1, &asset.code, 2 * amount, sender_address.clone())
                         .await
                         .unwrap();
                     sync(&ledger, &wallets).await;
                     balances[sender_ix][asset_ix] += 2 * amount;
+                    push_history(
+                        sender_ix,
+                        &mut histories,
+                        TransactionHistoryEntry {
+                            time: Local::now(),
+                            asset: asset.code,
+                            kind: TransactionKind::<AAPLedger>::mint(),
+                            receivers: vec![(sender_address, 2 * amount)],
+                            receipt: None,
+                        },
+                    );
 
                     println!("asset minted: {}s", now.elapsed().as_secs_f32());
                     now = Instant::now();
@@ -2974,11 +3315,11 @@ pub mod test_helpers {
 
                 ledger.lock().unwrap().hold_next_transaction();
                 let sender = &mut wallets[sender_ix + 1];
-                match sender
+                let receipt = match sender
                     .transfer(&asset.code, &[(receiver.clone(), amount)], 1)
                     .await
                 {
-                    Ok(txn) => txn,
+                    Ok(receipt) => receipt,
                     Err(WalletError::Fragmentation {
                         suggested_amount, ..
                     }) => {
@@ -2999,7 +3340,7 @@ pub mod test_helpers {
 
                             amount = suggested_amount;
                             sender
-                                .transfer(&asset.code, &[(receiver, amount)], 1)
+                                .transfer(&asset.code, &[(receiver.clone(), amount)], 1)
                                 .await
                                 .unwrap()
                         } else {
@@ -3025,7 +3366,7 @@ pub mod test_helpers {
                         ledger.lock().unwrap().flush();
                         sync(&ledger, &wallets).await;
                         wallets[sender_ix + 1]
-                            .transfer(&asset.code, &[(receiver, amount)], 1)
+                            .transfer(&asset.code, &[(receiver.clone(), amount)], 1)
                             .await
                             .unwrap()
                     }
@@ -3046,11 +3387,38 @@ pub mod test_helpers {
                 balances[sender_ix][asset_ix] -= amount;
                 balances[receiver_ix][asset_ix] += amount;
 
+                push_history(
+                    sender_ix,
+                    &mut histories,
+                    TransactionHistoryEntry {
+                        time: Local::now(),
+                        asset: asset.code,
+                        kind: TransactionKind::<AAPLedger>::send(),
+                        receivers: vec![(receiver.clone(), amount)],
+                        receipt: Some(receipt),
+                    },
+                );
+                if receiver_ix != sender_ix {
+                    push_history(
+                        receiver_ix,
+                        &mut histories,
+                        TransactionHistoryEntry {
+                            time: Local::now(),
+                            asset: asset.code,
+                            kind: TransactionKind::<AAPLedger>::receive(),
+                            receivers: vec![(receiver, amount)],
+                            receipt: None,
+                        },
+                    );
+                }
+
                 ledger.lock().unwrap().release_held_transaction();
             }
 
             sync(&ledger, &wallets).await;
+            close_history_block(&mut histories);
             check_balances(&wallets, &balances, &assets).await;
+            check_histories(&wallets, &histories).await;
 
             println!(
                 "Finished block {}/{}: {}s",
@@ -3635,7 +4003,7 @@ mod tests {
 
         println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
         let dst = wallets[1].address();
-        wallets[0]
+        let xfr_receipt = wallets[0]
             .transfer(&asset.code, &[(dst, 1)], 1)
             .await
             .unwrap();
@@ -3643,6 +4011,49 @@ mod tests {
         assert_eq!(wallets[0].balance(&asset.code).await, 0);
         assert_eq!(wallets[0].frozen_balance(&asset.code).await, 0);
         assert_eq!(wallets[1].balance(&asset.code).await, 1);
+
+        // Check that the history properly accounts for freezes and unfreezes.
+        let expected_history = vec![
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: asset.code,
+                kind: TransactionKind::<AAPLedger>::mint(),
+                receivers: vec![(wallets[0].address(), 1)],
+                receipt: None,
+            },
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: asset.code,
+                kind: TransactionKind::<AAPLedger>::freeze(),
+                receivers: vec![(wallets[0].address(), 1)],
+                receipt: None,
+            },
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: asset.code,
+                kind: TransactionKind::<AAPLedger>::unfreeze(),
+                receivers: vec![(wallets[0].address(), 1)],
+                receipt: None,
+            },
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: asset.code,
+                kind: TransactionKind::<AAPLedger>::send(),
+                receivers: vec![(wallets[1].address(), 1)],
+                receipt: Some(xfr_receipt),
+            },
+        ]
+        .into_iter()
+        .map(TxnHistoryWithTimeTolerantEq)
+        .collect::<Vec<_>>();
+        let actual_history = wallets[0]
+            .transaction_history()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(TxnHistoryWithTimeTolerantEq)
+            .collect::<Vec<_>>();
+        assert_eq!(actual_history, expected_history);
 
         Ok(())
     }
@@ -3680,7 +4091,7 @@ mod tests {
         let txns = vec![vec![
             (0, 0, 1, 1), // native asset transfer
             (1, 0, 1, 1), // non-native asset transfer with change output
-            (1, 0, 2, 1), // non-native asset transfer with exact change
+            (1, 0, 1, 2), // non-native asset transfer with exact change
         ]];
         let native_grant = (0, 0, 1);
         let non_native_grant = (1, 0, 3);
