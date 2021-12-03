@@ -247,6 +247,7 @@ pub trait QueryService {
         signature: Signature,
     ) -> Result<(), QueryServiceError>;
 
+    // TODO !keyao Return commitments and UIDs as well: https://gitlab.com/translucence/systems/system/-/issues/39.
     /// Get the receiver memos for a transaction, if they have been posted to the bulletin board.
     /// The result includes a signature over the contents of the memos using the signing key for the
     /// requested transaction, as proof that these memos are in fact the ones that the sender

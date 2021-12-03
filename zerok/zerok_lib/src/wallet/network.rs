@@ -7,6 +7,7 @@ use crate::key_set::SizedKey;
 use crate::ledger::AAPLedger;
 use crate::node;
 use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
+use crate::txn_builder::TransactionState;
 use crate::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
 use api::{client::*, BlockId, ClientError, CommittedTransaction, FromError, TransactionId};
 use async_std::sync::{Arc, Mutex, MutexGuard};
@@ -169,16 +170,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
         };
 
         let state = WalletState {
-            validator,
             proving_keys,
-            nullifiers,
-            record_mt: records.0,
-            merkle_leaf_to_forget,
-            now: 0,
-            records: Default::default(),
-            defined_assets: Default::default(),
-            auditable_assets: Default::default(),
-            transactions: Default::default(),
             immutable_keys: Arc::new(WalletImmutableKeySet {
                 key_pair: self
                     .key_pair
@@ -187,6 +179,19 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                 auditor_key_pair: AuditorKeyPair::generate(&mut rng),
                 freezer_key_pair: FreezerKeyPair::generate(&mut rng),
             }),
+            txn_state: TransactionState {
+                validator,
+
+                nullifiers,
+                record_mt: records.0,
+                merkle_leaf_to_forget,
+                now: 0,
+                records: Default::default(),
+
+                transactions: Default::default(),
+            },
+            auditable_assets: Default::default(),
+            defined_assets: Default::default(),
         };
         self.storage().await.create(&state).await?;
 
