@@ -18,6 +18,7 @@ pub mod ledger;
 pub mod lw_persistence;
 pub mod node;
 mod set_merkle_tree;
+pub mod txn_builder;
 mod util;
 pub mod validator_node;
 pub mod wallet;

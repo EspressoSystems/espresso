@@ -785,7 +785,7 @@ fn init_web_server(
     } else {
         PathBuf::from(opt_api_path)
     };
-    println!("API path: {:?}", web_path);
+    println!("Web path: {:?}", web_path);
     let api = disco::load_messages(&api_path);
     let mut web_server = tide::with_state(WebState {
         connections: Default::default(),
