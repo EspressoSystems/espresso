@@ -4647,6 +4647,7 @@ dependencies = [
  "bincode",
  "bitvec",
  "chacha20 0.8.1",
+ "chrono",
  "futures",
  "generic-array",
  "hex",

@@ -176,6 +176,8 @@ pub struct AtomicWalletStorage<'a, L: Ledger, Meta: Serialize + DeserializeOwned
     auditable_assets_dirty: bool,
     defined_assets: AppendLog<EncryptingResourceAdapter<(AssetDefinition, AssetCodeSeed, Vec<u8>)>>,
     defined_assets_dirty: bool,
+    txn_history: AppendLog<EncryptingResourceAdapter<TransactionHistoryEntry<L>>>,
+    txn_history_dirty: bool,
 }
 
 impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStorage<'a, L, Meta> {
@@ -217,6 +219,8 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
         let defined_assets =
             AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_def", 1024)
                 .context(PersistenceError)?;
+        let txn_history = AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_txns", 1024)
+            .context(PersistenceError)?;
         let store = AtomicStore::open(atomic_loader).context(PersistenceError)?;
 
         Ok(Self {
@@ -232,6 +236,8 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
             auditable_assets_dirty: false,
             defined_assets,
             defined_assets_dirty: false,
+            txn_history,
+            txn_history_dirty: false,
         })
     }
 
@@ -339,6 +345,26 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         Ok(())
     }
 
+    async fn store_transaction(
+        &mut self,
+        txn: TransactionHistoryEntry<L>,
+    ) -> Result<(), WalletError> {
+        self.txn_history
+            .store_resource(&txn)
+            .context(PersistenceError)?;
+        self.txn_history_dirty = true;
+        Ok(())
+    }
+
+    async fn transaction_history(
+        &mut self,
+    ) -> Result<Vec<TransactionHistoryEntry<L>>, WalletError> {
+        self.txn_history
+            .iter()
+            .map(|res| res.context(PersistenceError))
+            .collect()
+    }
+
     async fn commit(&mut self) {
         {
             if self.meta_dirty {
@@ -370,6 +396,12 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
             } else {
                 self.defined_assets.skip_version().unwrap();
             }
+
+            if self.txn_history_dirty {
+                self.txn_history.commit_version().unwrap();
+            } else {
+                self.txn_history.skip_version().unwrap();
+            }
         }
 
         self.store.commit_version().unwrap();
@@ -379,6 +411,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         self.dynamic_state_dirty = false;
         self.auditable_assets_dirty = false;
         self.defined_assets_dirty = false;
+        self.txn_history_dirty = false;
     }
 
     async fn revert(&mut self) {

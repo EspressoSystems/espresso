@@ -8,7 +8,7 @@ use crate::ledger::AAPLedger;
 use crate::node;
 use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
 use crate::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
-use api::{client::*, BlockId, ClientError, FromError, TransactionId};
+use api::{client::*, BlockId, ClientError, CommittedTransaction, FromError, TransactionId};
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
@@ -256,6 +256,17 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
             set.remember(nullifier, proof.clone()).unwrap();
             Ok((spent, proof))
         }
+    }
+
+    async fn get_transaction(
+        &self,
+        txn_id: u64,
+        block_id: u64,
+    ) -> Result<ElaboratedTransaction, WalletError> {
+        let txn_id = TransactionId(BlockId(block_id as usize), txn_id as usize);
+        let CommittedTransaction { data, proofs, .. } =
+            self.get(format!("/gettransaction/{}", txn_id)).await?;
+        Ok(ElaboratedTransaction { txn: data, proofs })
     }
 
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {
