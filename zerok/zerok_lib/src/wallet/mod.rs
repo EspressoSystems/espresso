@@ -2996,7 +2996,7 @@ pub mod test_helpers {
 
     impl PartialEq<Self> for TxnHistoryWithTimeTolerantEq {
         fn eq(&self, other: &Self) -> bool {
-            let time_tolerance = Duration::minutes(1);
+            let time_tolerance = Duration::minutes(5);
             let times_eq = if self.0.time < other.0.time {
                 other.0.time - self.0.time < time_tolerance
             } else {
