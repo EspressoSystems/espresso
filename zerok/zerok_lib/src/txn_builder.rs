@@ -1,5 +1,5 @@
 use crate::util::arbitrary_wrappers::*;
-use crate::{ledger, ser_test};
+use crate::{ledger, ser_test, ValidatorState};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use jf_txn::{
@@ -16,6 +16,7 @@ use jf_utils::tagged_blob;
 use ledger::*;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
+use snafu::Snafu;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
@@ -704,6 +705,13 @@ impl From<AssetDefinition> for AssetInfo {
     }
 }
 
+// how long (in number of validator states) a record used as an input to an unconfirmed transaction
+// should be kept on hold before the transaction is considered timed out. This should be the number
+// of validator states after which the transaction's proof can no longer be verified.
+const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
+// (block_id, txn_id, [(uid, remember)])
+pub type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
+
 #[derive(Debug, Clone)]
 pub struct TransactionState<L: Ledger = AAPLedger> {
     // sequence number of the last event processed
@@ -770,11 +778,11 @@ impl<L: Ledger> TransactionState<L> {
         rng: &mut ChaChaRng,
         description: &'b [u8],
         policy: AssetPolicy,
-    ) -> Result<AssetDefinition, TransactionError> {
+    ) -> Result<(AssetCodeSeed, AssetCode, AssetDefinition), TransactionError> {
         let seed = AssetCodeSeed::generate(&mut rng);
         let code = AssetCode::new(seed, description);
         let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
-        Ok(asset_definition)
+        Ok((seed, code, asset_definition))
     }
 
     /// Use `audit_asset` to start auditing transactions with a given asset type, when the asset

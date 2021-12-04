@@ -9,7 +9,7 @@ use crate::api;
 use crate::key_set;
 use crate::node::LedgerEvent;
 use crate::txn_builder::*;
-use crate::{ledger, ser_test, ProverKeySet, ValidationError, ValidatorState, MERKLE_HEIGHT};
+use crate::{ledger, ser_test, ProverKeySet, ValidationError, MERKLE_HEIGHT};
 use arbitrary::{Arbitrary, Unstructured};
 use async_scoped::AsyncScope;
 use async_std::sync::{Mutex, MutexGuard};
@@ -426,12 +426,6 @@ pub struct WalletSession<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
 
 // a never expired target
 const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
-// how long (in number of validator states) a record used as an input to an unconfirmed transaction
-// should be kept on hold before the transaction is considered timed out. This should be the number
-// of validator states after which the transaction's proof can no longer be verified.
-const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
-// (block_id, txn_id, [(uid, remember)])
-type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
 
 // Trait used to indicate that an abstract return type captures a reference with the lifetime 'a.
 // See https://stackoverflow.com/questions/50547766/how-can-i-get-impl-trait-to-use-the-appropriate-lifetime-for-a-mutable-reference
@@ -902,7 +896,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         'a: 'b,
     {
         async move {
-            let asset_definition =
+            let (seed, code, asset_definition) =
                 self.txn_state
                     .define_asset(&mut session.rng, description, policy)?;
             let desc = description.to_vec();
