@@ -36,7 +36,7 @@ use tagged_base64::TaggedBase64;
 use tempdir::TempDir;
 use wallet::{
     encryption, hd::KeyTree, ledger::Ledger, persistence::WalletLoader, AssetInfo, BincodeError,
-    EncryptionError, IoError, KeyError, MintInfo, TransactionReceipt, TransactionState,
+    EncryptionError, IoError, KeyError, MintInfo, TransactionReceipt, TransactionStatus,
     WalletBackend, WalletError,
 };
 
@@ -427,7 +427,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                                 Err(err) => {
                                     println!("Error waiting for transaction to complete: {}", err);
                                 }
-                                Ok(TransactionState::Retired) => {},
+                                Ok(TransactionStatus::Retired) => {},
                                 _ => {
                                     println!("Transaction failed");
                                 }
@@ -479,7 +479,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                                 Err(err) => {
                                     println!("Error waiting for transaction to complete: {}", err);
                                 }
-                                Ok(TransactionState::Retired) => {},
+                                Ok(TransactionStatus::Retired) => {},
                                 _ => {
                                     println!("Transaction failed");
                                 }
@@ -491,6 +491,60 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                     Err(err) => {
                         println!("{}\nAssets were not minted.", err);
                     }
+                }
+            }
+        ),
+        command!(
+            transactions,
+            "list past transactions sent and received by this wallet",
+            C,
+            |wallet| {
+                match wallet.transaction_history().await {
+                    Ok(txns) => {
+                        println!("Submitted Status Asset Type Receiver Amount ...");
+                        for txn in txns {
+                            let status = match &txn.receipt {
+                                Some(receipt) => wallet
+                                    .transaction_status(receipt)
+                                    .await
+                                    .unwrap_or(TransactionStatus::Unknown),
+                                None => {
+                                    // Transaction history entries lack a receipt only if they are
+                                    // received transactions from someone else. We only receive
+                                    // transactions once they have been retired.
+                                    TransactionStatus::Retired
+                                }
+                            };
+                            // Try to get a readable name for the asset.
+                            let asset = if txn.asset == AssetCode::native() {
+                                String::from("Native")
+                            } else if let Some(AssetInfo {
+                                mint_info: Some(mint_info),
+                                ..
+                            }) = wallet.assets().await.get(&txn.asset)
+                            {
+                                // If the description looks like it came from a string, interpret as
+                                // a string. Otherwise, encode the binary blob as tagged base64.
+                                match std::str::from_utf8(&mint_info.desc) {
+                                    Ok(s) => String::from(s),
+                                    Err(_) => TaggedBase64::new("DESC", &mint_info.desc)
+                                        .unwrap()
+                                        .to_string(),
+                                }
+                            } else {
+                                txn.asset.to_string()
+                            };
+                            print!("{} {} {} {} ", txn.time, status, asset, txn.kind);
+                            for (receiver, amount) in txn.receivers {
+                                print!("{} {} ", UserAddress(receiver), amount);
+                            }
+                            if let Some(receipt) = txn.receipt {
+                                print!("{}", receipt);
+                            }
+                            println!();
+                        }
+                    }
+                    Err(err) => println!("Error reading transaction history: {}", err),
                 }
             }
         ),

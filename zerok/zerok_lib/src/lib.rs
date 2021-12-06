@@ -17,6 +17,7 @@ pub mod node;
 mod set_merkle_tree;
 pub mod state;
 pub mod testing;
+pub mod txn_builder;
 pub mod universal_params;
 mod util;
 pub mod validator_node;

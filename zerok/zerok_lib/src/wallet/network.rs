@@ -8,7 +8,8 @@ use crate::node;
 use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
 use crate::state::key_set::SizedKey;
 use crate::state::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
-use api::{client::*, BlockId, ClientError, FromError, TransactionId};
+use crate::txn_builder::TransactionState;
+use api::{client::*, BlockId, ClientError, CommittedTransaction, FromError, TransactionId};
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
@@ -169,16 +170,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
         };
 
         let state = WalletState {
-            validator,
             proving_keys,
-            nullifiers,
-            record_mt: records.0,
-            merkle_leaf_to_forget,
-            now: 0,
-            records: Default::default(),
-            defined_assets: Default::default(),
-            auditable_assets: Default::default(),
-            transactions: Default::default(),
             immutable_keys: Arc::new(WalletImmutableKeySet {
                 key_pair: self
                     .key_pair
@@ -187,6 +179,19 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                 auditor_key_pair: AuditorKeyPair::generate(&mut rng),
                 freezer_key_pair: FreezerKeyPair::generate(&mut rng),
             }),
+            txn_state: TransactionState {
+                validator,
+
+                nullifiers,
+                record_mt: records.0,
+                merkle_leaf_to_forget,
+                now: 0,
+                records: Default::default(),
+
+                transactions: Default::default(),
+            },
+            auditable_assets: Default::default(),
+            defined_assets: Default::default(),
         };
         self.storage().await.create(&state).await?;
 
@@ -256,6 +261,17 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
             set.remember(nullifier, proof.clone()).unwrap();
             Ok((spent, proof))
         }
+    }
+
+    async fn get_transaction(
+        &self,
+        txn_id: u64,
+        block_id: u64,
+    ) -> Result<ElaboratedTransaction, WalletError> {
+        let txn_id = TransactionId(BlockId(block_id as usize), txn_id as usize);
+        let CommittedTransaction { data, proofs, .. } =
+            self.get(format!("/gettransaction/{}", txn_id)).await?;
+        Ok(ElaboratedTransaction { txn: data, proofs })
     }
 
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {

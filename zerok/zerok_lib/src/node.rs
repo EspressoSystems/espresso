@@ -174,8 +174,12 @@ pub enum LedgerEvent<L: Ledger = AAPLedger> {
     /// For each UTXO corresponding to the posted memos, includes the memo, the record commitment,
     /// the unique identifier for the record, and a proof that the record commitment exists in the
     /// current UTXO set.
+    ///
+    /// If these memos correspond to a committed transaction, the (block_id, transaction_id) are
+    /// included in `transaction`.
     Memos {
         outputs: Vec<(ReceiverMemo, RecordCommitment, u64, MerklePath)>,
+        transaction: Option<(u64, u64)>,
     },
 }
 
@@ -245,6 +249,7 @@ pub trait QueryService {
         signature: Signature,
     ) -> Result<(), QueryServiceError>;
 
+    // TODO !keyao Return commitments and UIDs as well: https://gitlab.com/translucence/systems/system/-/issues/39.
     /// Get the receiver memos for a transaction, if they have been posted to the bulletin board.
     /// The result includes a signature over the contents of the memos using the signing key for the
     /// requested transaction, as proof that these memos are in fact the ones that the sender
@@ -653,6 +658,7 @@ impl FullState {
                 merkle_paths
             )
             .collect(),
+            transaction: Some((block_id as u64, txn_id as u64)),
         };
         self.send_event(event);
 
@@ -774,6 +780,7 @@ impl<'a> PhaseLockQueryService<'a> {
                             .collect::<Vec<_>>();
                         state.send_event(LedgerEvent::Memos {
                             outputs: izip!(memos, comms, uids, merkle_paths).collect(),
+                            transaction: None,
                         });
                     }
 
@@ -1269,7 +1276,7 @@ mod tests {
                         .await
                         .unwrap();
                     match events.next().await.unwrap() {
-                        LedgerEvent::Memos { outputs } => {
+                        LedgerEvent::Memos { outputs, .. } => {
                             // After successfully posting memos, we should get a Memos event.
                             for ((memo, comm, uid, merkle_path), (expected_memo, expected_comm)) in
                                 outputs
