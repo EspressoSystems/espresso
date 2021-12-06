@@ -37,7 +37,7 @@ use wallet::hd::KeyTree;
 use wallet::network::{NetworkBackend, Url};
 use wallet::persistence::WalletLoader;
 use wallet::{KeyError, WalletError};
-use zerok_lib::{api::client, wallet, UNIVERSAL_PARAM};
+use zerok_lib::{api::client, universal_params::UNIVERSAL_PARAM, wallet};
 
 type Wallet = wallet::Wallet<'static, NetworkBackend<'static, ()>>;
 

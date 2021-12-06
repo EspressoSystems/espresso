@@ -1,4 +1,4 @@
-use crate::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
+use crate::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
 
 use phaselock::{
     message::Message, networking::NetworkingImplementation, NodeImplementation, Storage, H_256,

@@ -1,4 +1,4 @@
-use crate::{ElaboratedBlock, ValidatorState};
+use crate::state::{ElaboratedBlock, ValidatorState};
 use atomic_store::{
     load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
 };

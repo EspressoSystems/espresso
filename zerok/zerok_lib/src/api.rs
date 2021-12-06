@@ -17,11 +17,11 @@
 // object with the appropriate Serialize implementation.
 //
 
-use crate::util::commit;
-use crate::{
+use crate::state::{
     state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction,
     SetMerkleProof,
 };
+use crate::util::commit;
 use ark_serialize::*;
 use fmt::{Display, Formatter};
 use futures::future::BoxFuture;
@@ -219,7 +219,7 @@ pub enum Error {
         source: crate::node::QueryServiceError,
     },
     ValidationError {
-        source: crate::ValidationError,
+        source: crate::state::ValidationError,
     },
     #[snafu(display("{:?}", source))]
     ConsensusError {
@@ -227,7 +227,7 @@ pub enum Error {
         // will serialize Ok(err) to Err(format(err)), and when we deserialize we will at least
         // preserve the variant ConsensusError and a String representation of the underlying error.
         // Unfortunately, this means we cannot use this variant as a SNAFU error source.
-        #[serde(with = "crate::ser_debug")]
+        #[serde(with = "crate::state::ser_debug")]
         #[snafu(source(false))]
         source: Result<phaselock::error::PhaseLockError, String>,
     },
@@ -263,8 +263,8 @@ impl From<crate::node::QueryServiceError> for Error {
     }
 }
 
-impl From<crate::ValidationError> for Error {
-    fn from(source: crate::ValidationError) -> Self {
+impl From<crate::state::ValidationError> for Error {
+    fn from(source: crate::state::ValidationError) -> Self {
         Self::ValidationError { source }
     }
 }
@@ -318,7 +318,7 @@ pub trait FromError: Sized {
         Self::catch_all(source.to_string())
     }
 
-    fn from_validation_error(source: crate::ValidationError) -> Self {
+    fn from_validation_error(source: crate::state::ValidationError) -> Self {
         Self::catch_all(source.to_string())
     }
 
@@ -377,7 +377,7 @@ impl FromError for Error {
         Self::QueryServiceError { source }
     }
 
-    fn from_validation_error(source: crate::ValidationError) -> Self {
+    fn from_validation_error(source: crate::state::ValidationError) -> Self {
         Self::ValidationError { source }
     }
 
