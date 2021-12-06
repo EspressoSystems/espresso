@@ -1,5 +1,9 @@
 use crate::util::arbitrary_wrappers::*;
-use crate::{ledger, ser_test, ValidatorState};
+use crate::{
+    ledger,
+    ledger::traits::{Transaction as _, Validator as _},
+    ser_test, ValidatorState,
+};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use jf_txn::{
@@ -16,7 +20,7 @@ use jf_utils::tagged_blob;
 use ledger::*;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
-use snafu::Snafu;
+use snafu::{ResultExt, Snafu};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
@@ -53,14 +57,16 @@ pub enum TransactionError {
     // },
     // TimedOut {},
     // Cancelled {},
-    CryptoError { source: TxnApiError },
+    CryptoError {
+        source: TxnApiError,
+    },
     // InvalidAddress {
     //     address: UserAddress,
     // },
-    // InvalidAuditorKey {
-    //     my_key: AuditorPubKey,
-    //     asset_key: AuditorPubKey,
-    // },
+    InvalidAuditorKey {
+        my_key: AuditorPubKey,
+        asset_key: AuditorPubKey,
+    },
     // InvalidFreezerKey {
     //     my_key: FreezerPubKey,
     //     asset_key: FreezerPubKey,
@@ -765,7 +771,7 @@ impl<L: Ledger> TransactionState<L> {
         assets
     }
 
-    fn clear_expired_transactions(&mut self) -> Vec<TransactionUID<L>> {
+    pub fn clear_expired_transactions(&mut self) -> Vec<TransactionUID<L>> {
         self.transactions
             .remove_expired(self.validator.now())
             .into_iter()
@@ -773,7 +779,7 @@ impl<L: Ledger> TransactionState<L> {
             .collect()
     }
 
-    fn define_asset<'b>(
+    pub fn define_asset<'b>(
         &'b mut self,
         rng: &mut ChaChaRng,
         description: &'b [u8],
@@ -798,14 +804,14 @@ impl<L: Ledger> TransactionState<L> {
         let asset_key = asset.policy_ref().auditor_pub_key();
         if auditor_pub_key != *asset_key {
             return Err(TransactionError::InvalidAuditorKey {
-                auditor_pub_key,
+                my_key: auditor_pub_key,
                 asset_key: asset_key.clone(),
             });
         }
         Ok(())
     }
 
-    fn add_pending_transaction(
+    pub fn add_pending_transaction(
         &mut self,
         txn: &Transaction<L>,
         receiver_memos: Vec<ReceiverMemo>,
@@ -846,19 +852,20 @@ impl<L: Ledger> TransactionState<L> {
         }
     }
 
-    async fn clear_pending_transaction<'t>(
+    pub fn clear_pending_transaction<'t>(
         &mut self,
         txn: &Transaction<L>,
-        res: Option<CommittedTxn<'t>>,
+        res: &Option<CommittedTxn<'t>>,
+        freezer_key_pair: &FreezerKeyPair,
     ) -> Option<PendingTransaction<L>> {
-        let now = self.txn_state.validator.now();
+        let now = self.validator.now();
 
         // Remove the transaction from pending transaction data structures.
         let txn_hash = txn.hash();
-        let pending = self.txn_state.transactions.remove_pending(&txn_hash);
+        let pending = self.transactions.remove_pending(&txn_hash);
 
         for nullifier in txn.note().nullifiers() {
-            if let Some(record) = self.txn_state.records.record_with_nullifier_mut(&nullifier) {
+            if let Some(record) = self.records.record_with_nullifier_mut(&nullifier) {
                 if pending.is_some() {
                     // If we started this transaction, all of its inputs should have been on hold,
                     // to preserve the invariant that all input nullifiers of all pending
@@ -884,11 +891,8 @@ impl<L: Ledger> TransactionState<L> {
                 // the first uid corresponds to the fee change output, which is not one of the
                 // `freeze_outputs`, so we skip that one
                 for ((uid, remember), ro) in uids.iter_mut().skip(1).zip(&pending.freeze_outputs) {
-                    self.txn_state.records.insert_freezable(
-                        ro.clone(),
-                        *uid,
-                        &self.immutable_keys.freezer_key_pair,
-                    );
+                    self.records
+                        .insert_freezable(ro.clone(), *uid, freezer_key_pair);
                     *remember = true;
                 }
             }
@@ -968,7 +972,7 @@ impl<L: Ledger> TransactionState<L> {
     //     for n in note.nullifiers() {
     //         let (spent, proof) = session
     //             .backend
-    //             .get_nullifier_proof(&mut self.txn_state.nullifiers, n)
+    //             .get_nullifier_proof(&mut self.nullifiers, n)
     //             .await?;
     //         if spent {
     //             return Err(WalletError::NullifierAlreadyPublished { nullifier: n });
@@ -1413,7 +1417,7 @@ impl<L: Ledger> TransactionState<L> {
     //     amount: u64,
     //     max_records: Option<usize>,
     // ) -> Result<(Vec<(RecordOpening, u64)>, u64), WalletError> {
-    //     let now = self.txn_state.validator.now();
+    //     let now = self.validator.now();
 
     //     // If we have a record with the exact size required, use it to avoid fragmenting big records
     //     // into smaller change records.
@@ -1615,49 +1619,49 @@ impl<L: Ledger> TransactionState<L> {
     // }
 
     // fn forget_merkle_leaf(&mut self, leaf: u64) {
-    //     if leaf < self.txn_state.record_mt.num_leaves() - 1 {
-    //         self.txn_state.record_mt.forget(leaf);
+    //     if leaf < self.record_mt.num_leaves() - 1 {
+    //         self.record_mt.forget(leaf);
     //     } else {
-    //         assert_eq!(leaf, self.txn_state.record_mt.num_leaves() - 1);
+    //         assert_eq!(leaf, self.record_mt.num_leaves() - 1);
     //         // We can't forget the last leaf in a Merkle tree. Instead, we just note that we want to
     //         // forget this leaf, and we'll forget it when we append a new last leaf.
     //         //
     //         // There can only be one `merkle_leaf_to_forget` at a time, because we will forget the
     //         // leaf and clear this field as soon as we append a new leaf.
-    //         assert!(self.txn_state.merkle_leaf_to_forget.is_none());
-    //         self.txn_state.merkle_leaf_to_forget = Some(leaf);
+    //         assert!(self.merkle_leaf_to_forget.is_none());
+    //         self.merkle_leaf_to_forget = Some(leaf);
     //     }
     // }
 
     // #[must_use]
     // fn remember_merkle_leaf(&mut self, leaf: u64, proof: &MerkleLeafProof) -> bool {
     //     // If we were planning to forget this leaf once a new leaf is appended, stop planning that.
-    //     if self.txn_state.merkle_leaf_to_forget == Some(leaf) {
-    //         self.txn_state.merkle_leaf_to_forget = None;
+    //     if self.merkle_leaf_to_forget == Some(leaf) {
+    //         self.merkle_leaf_to_forget = None;
     //         // `merkle_leaf_to_forget` is always represented in the tree, so we don't have to call
     //         // `remember` in this case.
-    //         assert!(self.txn_state.record_mt.get_leaf(leaf).expect_ok().is_ok());
+    //         assert!(self.record_mt.get_leaf(leaf).expect_ok().is_ok());
     //         true
     //     } else {
-    //         self.txn_state.record_mt.remember(leaf, proof).is_ok()
+    //         self.record_mt.remember(leaf, proof).is_ok()
     //     }
     // }
 
     // fn append_merkle_leaf(&mut self, comm: RecordCommitment) {
-    //     self.txn_state.record_mt.push(comm.to_field_element());
+    //     self.record_mt.push(comm.to_field_element());
 
     //     // Now that we have appended a new leaf to the Merkle tree, we can forget the old last leaf,
     //     // if needed.
-    //     if let Some(uid) = self.txn_state.merkle_leaf_to_forget.take() {
-    //         assert!(uid < self.txn_state.record_mt.num_leaves() - 1);
-    //         self.txn_state.record_mt.forget(uid);
+    //     if let Some(uid) = self.merkle_leaf_to_forget.take() {
+    //         assert!(uid < self.record_mt.num_leaves() - 1);
+    //         self.record_mt.forget(uid);
     //     }
     // }
 
     // fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
     //     // The wallet never needs a Merkle proof that isn't guaranteed to already be in the Merkle
     //     // tree, so this unwrap() should never fail.
-    //     AccMemberWitness::lookup_from_tree(&self.txn_state.record_mt, leaf)
+    //     AccMemberWitness::lookup_from_tree(&self.record_mt, leaf)
     //         .expect_ok()
     //         .unwrap()
     //         .1

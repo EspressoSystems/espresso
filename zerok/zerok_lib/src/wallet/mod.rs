@@ -123,6 +123,9 @@ pub enum WalletError {
     KeyError {
         source: argon2::Error,
     },
+    TransactionError {
+        source: crate::txn_builder::TransactionError,
+    },
     #[snafu(display("{}", msg))]
     Failed {
         msg: String,
@@ -144,6 +147,12 @@ impl api::FromError for WalletError {
 
     fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
         Self::ConsensusError { source }
+    }
+}
+
+impl From<crate::txn_builder::TransactionError> for WalletError {
+    fn from(source: crate::txn_builder::TransactionError) -> Self {
+        Self::TransactionError { source }
     }
 }
 
@@ -431,12 +440,6 @@ const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN
 // See https://stackoverflow.com/questions/50547766/how-can-i-get-impl-trait-to-use-the-appropriate-lifetime-for-a-mutable-reference
 pub trait Captures<'a> {}
 impl<'a, T: ?Sized> Captures<'a> for T {}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct AssetInfo {
-    pub asset: AssetDefinition,
-    pub mint_info: Option<MintInfo>,
-}
 
 #[derive(Clone, Debug)]
 struct EventSummary<L: Ledger> {
@@ -752,7 +755,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         txn: &Transaction<L>,
         res: Option<CommittedTxn<'t>>,
     ) -> Option<PendingTransaction<L>> {
-        let pending = self.txn_state.clear_pending_transaction(txn, res);
+        let pending = self.txn_state.clear_pending_transaction(
+            txn,
+            &res,
+            &self.immutable_keys.freezer_key_pair,
+        );
 
         // TODO keyao! Handle memo posting in TransactionState?
         // If this was a successful transaction, post its receiver memos.
@@ -950,7 +957,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         asset: &AssetDefinition,
     ) -> Result<(), WalletError> {
         let auditor_pub_key = self.immutable_keys.auditor_key_pair.pub_key();
-        self.txn_state.audit_asset(auditor_pub_key, asset)?;
+        self.txn_state.audit_asset(auditor_pub_key, asset).await?;
 
         // Store the new asset on disk before adding it to our in-memory data structure. We don't
         // want to update the in-memory structure if the persistent store fails.
