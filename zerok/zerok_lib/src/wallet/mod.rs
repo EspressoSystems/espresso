@@ -156,6 +156,8 @@ impl From<crate::txn_builder::TransactionError> for WalletError {
     }
 }
 
+// TODO keyao! Move immutable keys from WalletState to transaction structure:
+// https://gitlab.com/translucence/systems/system/-/issues/45
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletImmutableKeySet {
     // key pair for building/receiving transactions
@@ -1508,61 +1510,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     ) -> Result<(Vec<(RecordOpening, u64)>, u64), WalletError> {
         let now = self.txn_state.validator.now();
 
-        // If we have a record with the exact size required, use it to avoid fragmenting big records
-        // into smaller change records.
-        if let Some(record) = self
+        Ok(self
             .txn_state
-            .records
-            .input_record_with_amount(asset, owner, frozen, amount, now)
-        {
-            return Ok((vec![(record.ro.clone(), record.uid)], 0));
-        }
-
-        // Take the biggest records we have until they exceed the required amount, as a heuristic to
-        // try and get the biggest possible change record. This is a simple algorithm that
-        // guarantees we will always return the minimum number of blocks, and thus we always succeed
-        // in making a transaction if it is possible to do so within the allowed number of inputs.
-        //
-        // This algorithm is not optimal, though. For instance, it's possible we might be able to
-        // make exact change using combinations of larger and smaller blocks. We can replace this
-        // with something more sophisticated later.
-        let mut result = vec![];
-        let mut current_amount = 0u64;
-        for record in self
-            .txn_state
-            .records
-            .input_records(asset, owner, frozen, now)
-        {
-            if let Some(max_records) = max_records {
-                if result.len() >= max_records {
-                    // Too much fragmentation: we can't make the required amount using few enough
-                    // records. This should be less likely once we implement a better allocation
-                    // strategy (or, any allocation strategy).
-                    //
-                    // In this case, we could either simply return an error, or we could
-                    // automatically generate a merge transaction to defragment our assets.
-                    // Automatically merging assets would implicitly incur extra transaction fees,
-                    // so for now we do the simple, uncontroversial thing and error out.
-                    return Err(WalletError::Fragmentation {
-                        asset: *asset,
-                        amount,
-                        suggested_amount: current_amount,
-                        max_records,
-                    });
-                }
-            }
-            current_amount += record.ro.amount;
-            result.push((record.ro.clone(), record.uid));
-            if current_amount >= amount {
-                return Ok((result, current_amount - amount));
-            }
-        }
-
-        Err(WalletError::InsufficientBalance {
-            asset: *asset,
-            required: amount,
-            actual: current_amount,
-        })
+            .find_records(asset, owner, frozen, amount, now, max_records)?)
     }
 
     /// find a record and corresponding uid on the native asset type with enough
@@ -1748,12 +1698,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     }
 
     fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
-        // The wallet never needs a Merkle proof that isn't guaranteed to already be in the Merkle
-        // tree, so this unwrap() should never fail.
-        AccMemberWitness::lookup_from_tree(&self.txn_state.record_mt, leaf)
-            .expect_ok()
-            .unwrap()
-            .1
+        self.txn_state.get_merkle_proof(leaf)
     }
 }
 

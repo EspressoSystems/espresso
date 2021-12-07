@@ -49,6 +49,8 @@ impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletStaticState<'a> {
     }
 }
 
+// TODO keyao! Replace WalletSnapshot with TransactionState:
+// https://gitlab.com/translucence/systems/system/-/issues/46
 // Serialization intermediate for the dynamic part of a WalletState.
 #[ser_test(arbitrary, types(AAPLedger), ark(false))]
 #[derive(Debug, Deserialize, Serialize)]

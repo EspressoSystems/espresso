@@ -9,14 +9,17 @@ use ark_serialize::*;
 use jf_txn::{
     errors::TxnApiError,
     keys::{AuditorPubKey, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey},
+    proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
     sign_receiver_memos,
     structs::{
         AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FreezeFlag, Nullifier,
         ReceiverMemo, RecordCommitment, RecordOpening,
     },
-    MerkleTree, Signature,
+    transfer::{TransferNote, TransferNoteInput},
+    AccMemberWitness, MerkleTree, Signature,
 };
 use jf_utils::tagged_blob;
+use key_set::KeySet;
 use ledger::*;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
@@ -29,17 +32,17 @@ use std::ops::{Index, IndexMut};
 #[derive(Debug, Snafu)]
 #[snafu(visibility = "pub")]
 pub enum TransactionError {
-    // InsufficientBalance {
-    //     asset: AssetCode,
-    //     required: u64,
-    //     actual: u64,
-    // },
-    // Fragmentation {
-    //     asset: AssetCode,
-    //     amount: u64,
-    //     suggested_amount: u64,
-    //     max_records: usize,
-    // },
+    InsufficientBalance {
+        asset: AssetCode,
+        required: u64,
+        actual: u64,
+    },
+    Fragmentation {
+        asset: AssetCode,
+        amount: u64,
+        suggested_amount: u64,
+        max_records: usize,
+    },
     // TooManyOutputs {
     //     asset: AssetCode,
     //     max_records: usize,
@@ -901,105 +904,177 @@ impl<L: Ledger> TransactionState<L> {
         pending
     }
 
-    // // For reasons that are not clearly understood, the default async desugaring for this function
-    // // loses track of the fact that the result type implements Send, which causes very confusing
-    // // error messages farther up the call stack (apparently at the point where this function is
-    // // monomorphized) which do not point back to this location. This is likely due to a bug in type
-    // // inference, or at least a deficiency around async sugar combined with a bug in diagnostics.
+    #[allow(clippy::type_complexity)]
+    pub fn find_records(
+        &self,
+        asset: &AssetCode,
+        owner: &UserPubKey,
+        frozen: FreezeFlag,
+        amount: u64,
+        now: u64,
+        max_records: Option<usize>,
+    ) -> Result<(Vec<(RecordOpening, u64)>, u64), TransactionError> {
+        // If we have a record with the exact size required, use it to avoid fragmenting big records
+        // into smaller change records.
+        if let Some(record) = self
+            .records
+            .input_record_with_amount(asset, owner, frozen, amount, now)
+        {
+            return Ok((vec![(record.ro.clone(), record.uid)], 0));
+        }
+
+        // Take the biggest records we have until they exceed the required amount, as a heuristic to
+        // try and get the biggest possible change record. This is a simple algorithm that
+        // guarantees we will always return the minimum number of blocks, and thus we always succeed
+        // in making a transaction if it is possible to do so within the allowed number of inputs.
+        //
+        // This algorithm is not optimal, though. For instance, it's possible we might be able to
+        // make exact change using combinations of larger and smaller blocks. We can replace this
+        // with something more sophisticated later.
+        let mut result = vec![];
+        let mut current_amount = 0u64;
+        for record in self.records.input_records(asset, owner, frozen, now) {
+            if let Some(max_records) = max_records {
+                if result.len() >= max_records {
+                    // Too much fragmentation: we can't make the required amount using few enough
+                    // records. This should be less likely once we implement a better allocation
+                    // strategy (or, any allocation strategy).
+                    //
+                    // In this case, we could either simply return an error, or we could
+                    // automatically generate a merge transaction to defragment our assets.
+                    // Automatically merging assets would implicitly incur extra transaction fees,
+                    // so for now we do the simple, uncontroversial thing and error out.
+                    return Err(TransactionError::Fragmentation {
+                        asset: *asset,
+                        amount,
+                        suggested_amount: current_amount,
+                        max_records,
+                    });
+                }
+            }
+            current_amount += record.ro.amount;
+            result.push((record.ro.clone(), record.uid));
+            if current_amount >= amount {
+                return Ok((result, current_amount - amount));
+            }
+        }
+
+        Err(TransactionError::InsufficientBalance {
+            asset: *asset,
+            required: amount,
+            actual: current_amount,
+        })
+    }
+
+    fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
+        // The wallet never needs a Merkle proof that isn't guaranteed to already be in the Merkle
+        // tree, so this unwrap() should never fail.
+        AccMemberWitness::lookup_from_tree(&self.record_mt, leaf)
+            .expect_ok()
+            .unwrap()
+            .1
+    }
+
+    // // Find a proving key large enough to prove the given transaction, returning the number of dummy
+    // // inputs needed to pad the transaction.
     // //
-    // // As a work-around, we do the desugaring manually so that we can explicitly specify that the
-    // // return type implements Send. The return type also captures a reference with lifetime 'a,
-    // // which is different from (but related to) the lifetime 'b of the returned Future, and
-    // // `impl 'a + 'b + ...` does not work, so we use the work-around described at
-    // // https://stackoverflow.com/questions/50547766/how-can-i-get-impl-trait-to-use-the-appropriate-lifetime-for-a-mutable-reference
-    // // to indicate the captured lifetime using the Captures trait.
-    // fn submit_elaborated_transaction<'b>(
-    //     &'b mut self,
-    //     session: &'b mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-    //     txn: Transaction<L>,
-    //     memos: Vec<ReceiverMemo>,
-    //     sig: Signature,
-    //     freeze_outputs: Vec<RecordOpening>,
-    //     uid: Option<TransactionUID<L>>,
-    // ) -> impl 'b + Captures<'a> + Future<Output = Result<TransactionReceipt<L>, WalletError>> + Send
-    // where
-    //     'a: 'b,
-    // {
-    //     async move {
-    //         let receipt = self.add_pending_transaction(&txn, memos, sig, freeze_outputs, uid);
+    // // `proving_keys` should always be `&self.proving_key`. This is a non-member function in order
+    // // to prove to the compiler that the result only borrows from `&self.proving_key`, not all of
+    // // `&self`.
+    // #[allow(clippy::too_many_arguments)]
+    // fn xfr_proving_key<'k>(
+    //     rng: &mut ChaChaRng,
+    //     me: UserPubKey,
+    //     proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
+    //     asset: &AssetDefinition,
+    //     inputs: &mut Vec<TransferNoteInput<'k>>,
+    //     outputs: &mut Vec<RecordOpening>,
+    //     change_record: bool,
+    // ) -> Result<(&'k TransferProvingKey<'a>, usize), TransactionError> {
+    //     let total_output_amount = outputs.iter().map(|ro| ro.amount).sum();
+    //     // non-native transfers have an extra fee input, which is not included in `inputs`.
+    //     let fee_inputs = if *asset == AssetDefinition::native() {
+    //         0
+    //     } else {
+    //         1
+    //     };
+    //     // both native and non-native transfers have an extra fee change output which is
+    //     // automatically generated and not included in `outputs`.
+    //     let fee_outputs = 1;
 
-    //         // Persist the pending transaction.
-    //         if let Err(err) = session
-    //             .backend
-    //             .store(|mut t| {
-    //                 let state = &self;
-    //                 async move {
-    //                     t.store_snapshot(state).await?;
-    //                     Ok(t)
+    //     let num_inputs = inputs.len() + fee_inputs;
+    //     let num_outputs = outputs.len() + fee_outputs;
+    //     let (key_inputs, key_outputs, proving_key) = proving_keys
+    //         .best_fit_key(num_inputs, num_outputs)
+    //         .map_err(|(max_inputs, max_outputs)| {
+    //             if max_outputs >= num_outputs {
+    //                 // If there is a key that can fit the correct number of outputs had we only
+    //                 // managed to find fewer inputs, call this a fragmentation error.
+    //                 TransactionError::Fragmentation {
+    //                     asset: asset.code,
+    //                     amount: total_output_amount,
+    //                     suggested_amount: inputs
+    //                         .iter()
+    //                         .take(max_inputs - fee_inputs)
+    //                         .map(|input| input.ro.amount)
+    //                         .sum(),
+    //                     max_records: max_inputs,
     //                 }
-    //             })
-    //             .await
-    //         {
-    //             // If we failed to persist the pending transaction, we cannot submit it, because if
-    //             // we then exit and reload the process from storage, there will be an in-flight
-    //             // transaction which is not accounted for in our pending transaction data
-    //             // structures. Instead, we remove the pending transaction from our in-memory data
-    //             // structures and return the error.
-    //             self.clear_pending_transaction(session, &txn, None).await;
-    //             return Err(err);
-    //         }
+    //             } else {
+    //                 // Otherwise, we just have too many outputs for any of our available keys. There
+    //                 // is nothing we can do about that on the wallet side.
+    //                 TransactionError::TooManyOutputs {
+    //                     asset: asset.code,
+    //                     max_records: max_outputs,
+    //                     num_receivers: outputs.len() - change_record as usize,
+    //                     num_change_records: 1 + change_record as usize,
+    //                 }
+    //             }
+    //         })?;
+    //     assert!(num_inputs <= key_inputs);
+    //     assert!(num_outputs <= key_outputs);
 
-    //         // If we succeeded in creating and persisting the pending transaction, submit it to the
-    //         // validators.
-    //         if let Err(err) = session.backend.submit(txn.clone()).await {
-    //             self.clear_pending_transaction(session, &txn, None).await;
-    //             return Err(err);
+    //     if num_outputs < key_outputs {
+    //         // pad with dummy (0-amount) outputs,leaving room for the fee change output
+    //         loop {
+    //             outputs.push(RecordOpening::new(
+    //                 rng,
+    //                 0,
+    //                 asset.clone(),
+    //                 me.clone(),
+    //                 FreezeFlag::Unfrozen,
+    //             ));
+    //             if outputs.len() >= key_outputs - fee_outputs {
+    //                 break;
+    //             }
     //         }
-
-    //         Ok(receipt)
-    //     }
-    // }
-
-    // fn submit_transaction(
-    //     &mut self,
-    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-    //     note: TransactionNote,
-    //     memos: Vec<ReceiverMemo>,
-    //     sig: Signature,
-    //     freeze_outputs: Vec<RecordOpening>,
-    // ) -> Result<TransactionReceipt<L>, WalletError> {
-    //     let mut nullifier_pfs = Vec::new();
-    //     for n in note.nullifiers() {
-    //         let (spent, proof) = session
-    //             .backend
-    //             .get_nullifier_proof(&mut self.nullifiers, n)
-    //             .await?;
-    //         if spent {
-    //             return Err(WalletError::NullifierAlreadyPublished { nullifier: n });
-    //         }
-    //         nullifier_pfs.push(proof);
     //     }
 
-    //     let txn = Transaction::<L>::new(note, nullifier_pfs);
-    //     self.submit_elaborated_transaction(session, txn, memos, sig, freeze_outputs, None)
-    //         .await
+    //     // Return the required number of dummy inputs. We can't easily create the dummy inputs here,
+    //     // because it requires creating a new dummy key pair and then borrowing from the key pair to
+    //     // form the transfer input, so the key pair must be owned by the caller.
+    //     let dummy_inputs = key_inputs.saturating_sub(num_inputs);
+    //     Ok((proving_key, dummy_inputs))
     // }
 
     // async fn transfer_native(
     //     &mut self,
-    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+    //     owner_keypair: UserKeyPair,
     //     receivers: &[(UserPubKey, u64)],
     //     fee: u64,
-    // ) -> Result<TransactionReceipt<L>, WalletError> {
+    //     now: u64,
+    //     rng: &mut ChaChaRng,
+    // ) -> Result<TransactionReceipt<L>, TransactionError> {
     //     let total_output_amount: u64 =
     //         receivers.iter().fold(0, |sum, (_, amount)| sum + *amount) + fee;
 
     //     // find input records which account for at least the total amount, and possibly some change.
     //     let (input_records, _change) = self.find_records(
     //         &AssetCode::native(),
-    //         &self.pub_key(),
+    //         &owner_keypair.pub_key(),
     //         FreezeFlag::Unfrozen,
     //         total_output_amount,
+    //         now,
     //         None,
     //     )?;
 
@@ -1010,7 +1085,7 @@ impl<L: Ledger> TransactionState<L> {
     //         inputs.push(TransferNoteInput {
     //             ro,
     //             acc_member_witness,
-    //             owner_keypair: &self.immutable_keys.key_pair,
+    //             owner_keypair,
     //             cred: None,
     //         });
     //     }
@@ -1019,7 +1094,7 @@ impl<L: Ledger> TransactionState<L> {
     //     let mut outputs = vec![];
     //     for (pub_key, amount) in receivers {
     //         outputs.push(RecordOpening::new(
-    //             &mut session.rng,
+    //             &mut rng,
     //             *amount,
     //             AssetDefinition::native(),
     //             pub_key.clone(),
@@ -1029,7 +1104,7 @@ impl<L: Ledger> TransactionState<L> {
 
     //     // find a proving key which can handle this transaction size
     //     let (proving_key, dummy_inputs) = Self::xfr_proving_key(
-    //         &mut session.rng,
+    //         &mut rng,
     //         self.immutable_keys.key_pair.pub_key(),
     //         &self.proving_keys.xfr,
     //         &AssetDefinition::native(),
@@ -1074,14 +1149,7 @@ impl<L: Ledger> TransactionState<L> {
     //         .collect::<Result<Vec<_>, _>>()
     //         .unwrap();
     //     let sig = sign_receiver_memos(&kp, &recv_memos).context(CryptoError)?;
-    //     self.submit_transaction(
-    //         session,
-    //         TransactionNote::Transfer(Box::new(note)),
-    //         recv_memos,
-    //         sig,
-    //         vec![],
-    //     )
-    //     .await
+    //     (note, recv_memos, sig)
     // }
 
     // async fn transfer_non_native(
@@ -1408,74 +1476,6 @@ impl<L: Ledger> TransactionState<L> {
     //     .await
     // }
 
-    // #[allow(clippy::type_complexity)]
-    // fn find_records(
-    //     &self,
-    //     asset: &AssetCode,
-    //     owner: &UserPubKey,
-    //     frozen: FreezeFlag,
-    //     amount: u64,
-    //     max_records: Option<usize>,
-    // ) -> Result<(Vec<(RecordOpening, u64)>, u64), WalletError> {
-    //     let now = self.validator.now();
-
-    //     // If we have a record with the exact size required, use it to avoid fragmenting big records
-    //     // into smaller change records.
-    //     if let Some(record) = self
-    //         .txn_state
-    //         .records
-    //         .input_record_with_amount(asset, owner, frozen, amount, now)
-    //     {
-    //         return Ok((vec![(record.ro.clone(), record.uid)], 0));
-    //     }
-
-    //     // Take the biggest records we have until they exceed the required amount, as a heuristic to
-    //     // try and get the biggest possible change record. This is a simple algorithm that
-    //     // guarantees we will always return the minimum number of blocks, and thus we always succeed
-    //     // in making a transaction if it is possible to do so within the allowed number of inputs.
-    //     //
-    //     // This algorithm is not optimal, though. For instance, it's possible we might be able to
-    //     // make exact change using combinations of larger and smaller blocks. We can replace this
-    //     // with something more sophisticated later.
-    //     let mut result = vec![];
-    //     let mut current_amount = 0u64;
-    //     for record in self
-    //         .txn_state
-    //         .records
-    //         .input_records(asset, owner, frozen, now)
-    //     {
-    //         if let Some(max_records) = max_records {
-    //             if result.len() >= max_records {
-    //                 // Too much fragmentation: we can't make the required amount using few enough
-    //                 // records. This should be less likely once we implement a better allocation
-    //                 // strategy (or, any allocation strategy).
-    //                 //
-    //                 // In this case, we could either simply return an error, or we could
-    //                 // automatically generate a merge transaction to defragment our assets.
-    //                 // Automatically merging assets would implicitly incur extra transaction fees,
-    //                 // so for now we do the simple, uncontroversial thing and error out.
-    //                 return Err(WalletError::Fragmentation {
-    //                     asset: *asset,
-    //                     amount,
-    //                     suggested_amount: current_amount,
-    //                     max_records,
-    //                 });
-    //             }
-    //         }
-    //         current_amount += record.ro.amount;
-    //         result.push((record.ro.clone(), record.uid));
-    //         if current_amount >= amount {
-    //             return Ok((result, current_amount - amount));
-    //         }
-    //     }
-
-    //     Err(WalletError::InsufficientBalance {
-    //         asset: *asset,
-    //         required: amount,
-    //         actual: current_amount,
-    //     })
-    // }
-
     // /// find a record and corresponding uid on the native asset type with enough
     // /// funds to pay transaction fee
     // fn find_native_record_for_fee(&self, fee: u64) -> Result<(RecordOpening, u64), WalletError> {
@@ -1487,88 +1487,6 @@ impl<L: Ledger> TransactionState<L> {
     //         Some(1),
     //     )
     //     .map(|(ros, _change)| ros.into_iter().next().unwrap())
-    // }
-
-    // // Find a proving key large enough to prove the given transaction, returning the number of dummy
-    // // inputs needed to pad the transaction.
-    // //
-    // // `proving_keys` should always be `&self.proving_key`. This is a non-member function in order
-    // // to prove to the compiler that the result only borrows from `&self.proving_key`, not all of
-    // // `&self`.
-    // #[allow(clippy::too_many_arguments)]
-    // fn xfr_proving_key<'k>(
-    //     rng: &mut ChaChaRng,
-    //     me: UserPubKey,
-    //     proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
-    //     asset: &AssetDefinition,
-    //     inputs: &mut Vec<TransferNoteInput<'k>>,
-    //     outputs: &mut Vec<RecordOpening>,
-    //     change_record: bool,
-    // ) -> Result<(&'k TransferProvingKey<'a>, usize), WalletError> {
-    //     let total_output_amount = outputs.iter().map(|ro| ro.amount).sum();
-    //     // non-native transfers have an extra fee input, which is not included in `inputs`.
-    //     let fee_inputs = if *asset == AssetDefinition::native() {
-    //         0
-    //     } else {
-    //         1
-    //     };
-    //     // both native and non-native transfers have an extra fee change output which is
-    //     // automatically generated and not included in `outputs`.
-    //     let fee_outputs = 1;
-
-    //     let num_inputs = inputs.len() + fee_inputs;
-    //     let num_outputs = outputs.len() + fee_outputs;
-    //     let (key_inputs, key_outputs, proving_key) = proving_keys
-    //         .best_fit_key(num_inputs, num_outputs)
-    //         .map_err(|(max_inputs, max_outputs)| {
-    //             if max_outputs >= num_outputs {
-    //                 // If there is a key that can fit the correct number of outputs had we only
-    //                 // managed to find fewer inputs, call this a fragmentation error.
-    //                 WalletError::Fragmentation {
-    //                     asset: asset.code,
-    //                     amount: total_output_amount,
-    //                     suggested_amount: inputs
-    //                         .iter()
-    //                         .take(max_inputs - fee_inputs)
-    //                         .map(|input| input.ro.amount)
-    //                         .sum(),
-    //                     max_records: max_inputs,
-    //                 }
-    //             } else {
-    //                 // Otherwise, we just have too many outputs for any of our available keys. There
-    //                 // is nothing we can do about that on the wallet side.
-    //                 WalletError::TooManyOutputs {
-    //                     asset: asset.code,
-    //                     max_records: max_outputs,
-    //                     num_receivers: outputs.len() - change_record as usize,
-    //                     num_change_records: 1 + change_record as usize,
-    //                 }
-    //             }
-    //         })?;
-    //     assert!(num_inputs <= key_inputs);
-    //     assert!(num_outputs <= key_outputs);
-
-    //     if num_outputs < key_outputs {
-    //         // pad with dummy (0-amount) outputs,leaving room for the fee change output
-    //         loop {
-    //             outputs.push(RecordOpening::new(
-    //                 rng,
-    //                 0,
-    //                 asset.clone(),
-    //                 me.clone(),
-    //                 FreezeFlag::Unfrozen,
-    //             ));
-    //             if outputs.len() >= key_outputs - fee_outputs {
-    //                 break;
-    //             }
-    //         }
-    //     }
-
-    //     // Return the required number of dummy inputs. We can't easily create the dummy inputs here,
-    //     // because it requires creating a new dummy key pair and then borrowing from the key pair to
-    //     // form the transfer input, so the key pair must be owned by the caller.
-    //     let dummy_inputs = key_inputs.saturating_sub(num_inputs);
-    //     Ok((proving_key, dummy_inputs))
     // }
 
     // fn freeze_proving_key<'k>(
