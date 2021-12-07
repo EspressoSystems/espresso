@@ -175,6 +175,8 @@ pub struct AtomicWalletStorage<'a, L: Ledger, Meta: Serialize + DeserializeOwned
     dynamic_state_dirty: bool,
     auditable_assets: AppendLog<EncryptingResourceAdapter<AssetDefinition>>,
     auditable_assets_dirty: bool,
+    audit_keys: AppendLog<EncryptingResourceAdapter<AuditorKeyPair>>,
+    audit_keys_dirty: bool,
     defined_assets: AppendLog<EncryptingResourceAdapter<(AssetDefinition, AssetCodeSeed, Vec<u8>)>>,
     defined_assets_dirty: bool,
     txn_history: AppendLog<EncryptingResourceAdapter<TransactionHistoryEntry<L>>>,
@@ -217,6 +219,9 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
         let auditable_assets =
             AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_aud", 1024)
                 .context(PersistenceError)?;
+        let audit_keys =
+            AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_keys_aud", 1024)
+                .context(PersistenceError)?;
         let defined_assets =
             AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_def", 1024)
                 .context(PersistenceError)?;
@@ -235,6 +240,8 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
             dynamic_state_dirty: false,
             auditable_assets,
             auditable_assets_dirty: false,
+            audit_keys,
+            audit_keys_dirty: false,
             defined_assets,
             defined_assets_dirty: false,
             txn_history,
@@ -308,6 +315,11 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
                 .iter()
                 .filter_map(|res| res.map(|def| (def.code, def)).ok())
                 .collect(),
+            audit_keys: self
+                .audit_keys
+                .iter()
+                .filter_map(|res| res.map(|key| (key.pub_key(), key)).ok())
+                .collect(),
             defined_assets: self
                 .defined_assets
                 .iter()
@@ -332,6 +344,14 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
             .store_resource(asset)
             .context(PersistenceError)?;
         self.auditable_assets_dirty = true;
+        Ok(())
+    }
+
+    async fn store_audit_key(&mut self, audit_key: &AuditorKeyPair) -> Result<(), WalletError> {
+        self.audit_keys
+            .store_resource(audit_key)
+            .context(PersistenceError)?;
+        self.audit_keys_dirty = true;
         Ok(())
     }
 
@@ -394,6 +414,12 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
                 self.auditable_assets.skip_version().unwrap();
             }
 
+            if self.audit_keys_dirty {
+                self.audit_keys.commit_version().unwrap();
+            } else {
+                self.audit_keys.skip_version().unwrap();
+            }
+
             if self.defined_assets_dirty {
                 self.defined_assets.commit_version().unwrap();
             } else {
@@ -413,6 +439,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         self.static_dirty = false;
         self.dynamic_state_dirty = false;
         self.auditable_assets_dirty = false;
+        self.audit_keys_dirty = false;
         self.defined_assets_dirty = false;
         self.txn_history_dirty = false;
     }
@@ -422,7 +449,9 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         self.static_data.revert_version().unwrap();
         self.dynamic_state.revert_version().unwrap();
         self.auditable_assets.revert_version().unwrap();
+        self.audit_keys.revert_version().unwrap();
         self.defined_assets.revert_version().unwrap();
+        self.txn_history.revert_version().unwrap();
     }
 }
 
@@ -549,7 +578,6 @@ mod tests {
             }),
             immutable_keys: Arc::new(WalletImmutableKeySet {
                 key_pair: UserKeyPair::generate(&mut rng),
-                auditor_key_pair: AuditorKeyPair::generate(&mut rng),
                 freezer_key_pair: FreezerKeyPair::generate(&mut rng),
             }),
             txn_state: TransactionState {
@@ -562,6 +590,7 @@ mod tests {
                 transactions: Default::default(),
             },
             auditable_assets: Default::default(),
+            audit_keys: Default::default(),
             defined_assets: Default::default(),
         };
 
@@ -656,10 +685,15 @@ mod tests {
         // Append to monotonic state and then reload.
         let asset =
             AssetDefinition::new(AssetCode::random(&mut rng).0, Default::default()).unwrap();
+        let audit_key = AuditorKeyPair::generate(&mut rng);
         stored.auditable_assets.insert(asset.code, asset.clone());
+        stored
+            .audit_keys
+            .insert(audit_key.pub_key(), audit_key.clone());
         {
             let mut storage = AtomicWalletStorage::<AAPLedger, _>::new(&mut loader).unwrap();
             storage.store_auditable_asset(&asset).await.unwrap();
+            storage.store_audit_key(&audit_key).await.unwrap();
             storage.commit().await;
         }
         let loaded = {
@@ -727,9 +761,22 @@ mod tests {
                 .records
                 .insert(ro, 0, &stored.immutable_keys.key_pair);
             storage.store_snapshot(&stored).await.unwrap();
-            storage.store_auditable_asset(&asset).await.unwrap();
             storage
                 .store_defined_asset(&asset, seed, &[])
+                .await
+                .unwrap();
+            storage
+                .store_audit_key(&AuditorKeyPair::generate(&mut rng))
+                .await
+                .unwrap();
+            storage
+                .store_transaction(TransactionHistoryEntry {
+                    time: Local::now(),
+                    asset: asset.code,
+                    kind: TransactionKind::<AAPLedger>::send(),
+                    receivers: vec![],
+                    receipt: None,
+                })
                 .await
                 .unwrap();
             // Revert the changes.

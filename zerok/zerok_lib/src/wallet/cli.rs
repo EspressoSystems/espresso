@@ -278,6 +278,9 @@ impl<'a, C: CLI<'a>> Listable<'a, C> for AssetCode {
         // stable.
         assets.sort_by_key(|info| info.asset.code.to_string());
 
+        // Get our auditor keys so we can check if the asset types are auditable.
+        let audit_keys = wallet.auditor_pub_keys().await;
+
         // Convert to ListItems and prepend the native asset code.
         once(AssetInfo::from(AssetDefinition::native()))
             .chain(assets)
@@ -292,9 +295,8 @@ impl<'a, C: CLI<'a>> Listable<'a, C> for AssetCode {
                     // auditable, freezable, and mintable by us.
                     let mut attributes = String::new();
                     let policy = info.asset.policy_ref();
-                    let auditor_pub_key = wallet.auditor_pub_key();
                     let freezer_pub_key = wallet.freezer_pub_key();
-                    if *policy.auditor_pub_key() == auditor_pub_key {
+                    if audit_keys.contains(policy.auditor_pub_key()) {
                         attributes.push('a');
                     }
                     if *policy.freezer_pub_key() == freezer_pub_key {
@@ -373,7 +375,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                 let policy = info.asset.policy_ref();
                 if policy.is_auditor_pub_key_set() {
                     let auditor_key = policy.auditor_pub_key();
-                    if *auditor_key == wallet.auditor_pub_key() {
+                    if wallet.auditor_pub_keys().await.contains(auditor_key) {
                         println!("Auditor: me");
                     } else {
                         println!("Auditor: {}", *auditor_key);
@@ -570,18 +572,54 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                 }
             }
         ),
+        command!(keys, "list keys tracked by this wallet", C, |wallet| {
+            print_keys::<C>(wallet).await;
+        }),
+        command!(
+            keygen,
+            "generate new keys",
+            C,
+            |wallet, key_type: KeyType| {
+                match key_type {
+                    KeyType::Audit => match wallet.generate_audit_key().await {
+                        Ok(pub_key) => println!("{}", pub_key),
+                        Err(err) => println!("Error generating audit key: {}", err),
+                    },
+                }
+            }
+        ),
         command!(
             info,
             "print general information about this wallet",
             C,
             |wallet| {
                 println!("Address: {}", api::UserAddress(wallet.address()));
-                println!("Public key: {}", wallet.pub_key());
-                println!("Audit key: {}", wallet.auditor_pub_key());
-                println!("Freeze key: {}", wallet.freezer_pub_key());
+                print_keys::<C>(wallet).await;
             }
         ),
     ]
+}
+
+async fn print_keys<'a, C: CLI<'a>>(wallet: &Wallet<'a, C>) {
+    println!("Public key: {}", wallet.pub_key());
+    println!("Audit keys:");
+    for key in wallet.auditor_pub_keys().await {
+        println!("  {}", key);
+    }
+    println!("Freeze key: {}", wallet.freezer_pub_key());
+}
+
+enum KeyType {
+    Audit,
+}
+
+impl<'a, C: CLI<'a>> CLIInput<'a, C> for KeyType {
+    fn parse_for_wallet(_wallet: &mut Wallet<'a, C>, s: &str) -> Option<Self> {
+        match s {
+            "audit" => Some(Self::Audit),
+            _ => None,
+        }
+    }
 }
 
 enum Reader {
