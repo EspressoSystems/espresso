@@ -175,12 +175,12 @@ pub struct AtomicWalletStorage<'a, L: Ledger, Meta: Serialize + DeserializeOwned
     dynamic_state_dirty: bool,
     auditable_assets: AppendLog<EncryptingResourceAdapter<AssetDefinition>>,
     auditable_assets_dirty: bool,
-    audit_keys: AppendLog<EncryptingResourceAdapter<AuditorKeyPair>>,
-    audit_keys_dirty: bool,
     defined_assets: AppendLog<EncryptingResourceAdapter<(AssetDefinition, AssetCodeSeed, Vec<u8>)>>,
     defined_assets_dirty: bool,
     txn_history: AppendLog<EncryptingResourceAdapter<TransactionHistoryEntry<L>>>,
     txn_history_dirty: bool,
+    keys: AppendLog<EncryptingResourceAdapter<RoleKeyPair>>,
+    keys_dirty: bool,
 }
 
 impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStorage<'a, L, Meta> {
@@ -219,13 +219,12 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
         let auditable_assets =
             AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_aud", 1024)
                 .context(PersistenceError)?;
-        let audit_keys =
-            AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_keys_aud", 1024)
-                .context(PersistenceError)?;
         let defined_assets =
             AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_def", 1024)
                 .context(PersistenceError)?;
         let txn_history = AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_txns", 1024)
+            .context(PersistenceError)?;
+        let keys = AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_keys", 1024)
             .context(PersistenceError)?;
         let store = AtomicStore::open(atomic_loader).context(PersistenceError)?;
 
@@ -240,12 +239,12 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
             dynamic_state_dirty: false,
             auditable_assets,
             auditable_assets_dirty: false,
-            audit_keys,
-            audit_keys_dirty: false,
             defined_assets,
             defined_assets_dirty: false,
             txn_history,
             txn_history_dirty: false,
+            keys,
+            keys_dirty: false,
         })
     }
 
@@ -278,6 +277,20 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
                 Err(err)
             }
         }
+    }
+
+    fn load_keys<K: KeyPair>(&self) -> HashMap<K::PubKey, K> {
+        self.keys
+            .iter()
+            .filter_map(|res| {
+                res.ok()
+                    // Convert from type-erased RoleKey to strongly typed key, filtering out
+                    // RoleKeys of the wrong type.
+                    .and_then(|role_key| K::try_from(role_key).ok())
+                    // Convert to (pub_key, key_pair) mapping.
+                    .map(|key| (key.pub_key(), key))
+            })
+            .collect()
     }
 }
 
@@ -315,11 +328,8 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
                 .iter()
                 .filter_map(|res| res.map(|def| (def.code, def)).ok())
                 .collect(),
-            audit_keys: self
-                .audit_keys
-                .iter()
-                .filter_map(|res| res.map(|key| (key.pub_key(), key)).ok())
-                .collect(),
+            audit_keys: self.load_keys(),
+            freeze_keys: self.load_keys(),
             defined_assets: self
                 .defined_assets
                 .iter()
@@ -347,11 +357,9 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         Ok(())
     }
 
-    async fn store_audit_key(&mut self, audit_key: &AuditorKeyPair) -> Result<(), WalletError> {
-        self.audit_keys
-            .store_resource(audit_key)
-            .context(PersistenceError)?;
-        self.audit_keys_dirty = true;
+    async fn store_key(&mut self, key: &RoleKeyPair) -> Result<(), WalletError> {
+        self.keys.store_resource(key).context(PersistenceError)?;
+        self.keys_dirty = true;
         Ok(())
     }
 
@@ -414,12 +422,6 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
                 self.auditable_assets.skip_version().unwrap();
             }
 
-            if self.audit_keys_dirty {
-                self.audit_keys.commit_version().unwrap();
-            } else {
-                self.audit_keys.skip_version().unwrap();
-            }
-
             if self.defined_assets_dirty {
                 self.defined_assets.commit_version().unwrap();
             } else {
@@ -431,6 +433,12 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
             } else {
                 self.txn_history.skip_version().unwrap();
             }
+
+            if self.keys_dirty {
+                self.keys.commit_version().unwrap();
+            } else {
+                self.keys.skip_version().unwrap();
+            }
         }
 
         self.store.commit_version().unwrap();
@@ -439,9 +447,9 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         self.static_dirty = false;
         self.dynamic_state_dirty = false;
         self.auditable_assets_dirty = false;
-        self.audit_keys_dirty = false;
         self.defined_assets_dirty = false;
         self.txn_history_dirty = false;
+        self.keys_dirty = false;
     }
 
     async fn revert(&mut self) {
@@ -449,7 +457,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         self.static_data.revert_version().unwrap();
         self.dynamic_state.revert_version().unwrap();
         self.auditable_assets.revert_version().unwrap();
-        self.audit_keys.revert_version().unwrap();
+        self.keys.revert_version().unwrap();
         self.defined_assets.revert_version().unwrap();
         self.txn_history.revert_version().unwrap();
     }
@@ -575,7 +583,6 @@ mod tests {
             }),
             immutable_keys: Arc::new(WalletImmutableKeySet {
                 key_pair: UserKeyPair::generate(&mut rng),
-                freezer_key_pair: FreezerKeyPair::generate(&mut rng),
             }),
             txn_state: TransactionState {
                 validator,
@@ -588,6 +595,7 @@ mod tests {
             },
             auditable_assets: Default::default(),
             audit_keys: Default::default(),
+            freeze_keys: Default::default(),
             defined_assets: Default::default(),
         };
 
@@ -683,14 +691,25 @@ mod tests {
         let asset =
             AssetDefinition::new(AssetCode::random(&mut rng).0, Default::default()).unwrap();
         let audit_key = AuditorKeyPair::generate(&mut rng);
+        let freeze_key = FreezerKeyPair::generate(&mut rng);
         stored.auditable_assets.insert(asset.code, asset.clone());
         stored
             .audit_keys
             .insert(audit_key.pub_key(), audit_key.clone());
+        stored
+            .freeze_keys
+            .insert(freeze_key.pub_key(), freeze_key.clone());
         {
             let mut storage = AtomicWalletStorage::<AAPLedger, _>::new(&mut loader).unwrap();
             storage.store_auditable_asset(&asset).await.unwrap();
-            storage.store_audit_key(&audit_key).await.unwrap();
+            storage
+                .store_key(&RoleKeyPair::Auditor(audit_key))
+                .await
+                .unwrap();
+            storage
+                .store_key(&RoleKeyPair::Freezer(freeze_key))
+                .await
+                .unwrap();
             storage.commit().await;
         }
         let loaded = {
@@ -763,7 +782,11 @@ mod tests {
                 .await
                 .unwrap();
             storage
-                .store_audit_key(&AuditorKeyPair::generate(&mut rng))
+                .store_key(&RoleKeyPair::Auditor(AuditorKeyPair::generate(&mut rng)))
+                .await
+                .unwrap();
+            storage
+                .store_key(&RoleKeyPair::Freezer(FreezerKeyPair::generate(&mut rng)))
                 .await
                 .unwrap();
             storage

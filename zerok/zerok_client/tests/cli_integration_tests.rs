@@ -32,8 +32,6 @@ fn cli_basic_info(t: &mut CliClient) -> Result<(), String> {
         .command(0, "info")?
         .output("Address: (?P<addr>ADDR~.*)")?
         .output("Public key: (?P<pubkey>USERPUBKEY~.*)")?
-        .output("Audit keys:")?
-        .output("Freeze key: (?P<freezekey>FREEZEPUBKEY~.*)")?
         // `address`
         .command(0, "address")?
         .output("$addr")?
@@ -44,9 +42,13 @@ fn cli_basic_info(t: &mut CliClient) -> Result<(), String> {
     // add keys and check that they are reported
     t.command(0, "keygen audit")?
         .output("(?P<audkey>AUDPUBKEY~.*)")?
+        .command(0, "keygen freeze")?
+        .output("(?P<freezekey>FREEZEPUBKEY~.*)")?
         .command(0, "keys")?
         .output("Audit keys:")?
-        .output("$audkey")?;
+        .output("$audkey")?
+        .output("Freeze keys:")?
+        .output("$freezekey")?;
 
     // native asset info, specified two ways
     for command in &["asset 0", "asset $native"] {
@@ -132,8 +134,8 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         // Do it again, this time specifiying audit and freeze keys
         .command(0, "keygen audit")?
         .output("(?P<audkey0>AUDPUBKEY~.*)")?
-        .command(1, "keys")?
-        .output("Freeze key: (?P<freezekey1>FREEZEPUBKEY~.*)")?
+        .command(1, "keygen freeze")?
+        .output("(?P<freezekey1>FREEZEPUBKEY~.*)")?
         .command(0, "issue asset2 auditor=$audkey0 freezer=$freezekey1")?
         .output("(?P<asset2>ASSETCODE~.*)")?
         // Once there is more than 1 custom asset, we have to refer to it by code, not index,
