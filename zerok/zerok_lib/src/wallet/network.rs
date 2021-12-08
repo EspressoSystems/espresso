@@ -16,7 +16,7 @@ use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
 use futures::future::ready;
 use futures::prelude::*;
-use jf_txn::keys::{FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey};
+use jf_txn::keys::{UserAddress, UserKeyPair, UserPubKey};
 use jf_txn::proof::UniversalParam;
 use jf_txn::structs::{Nullifier, ReceiverMemo};
 use jf_txn::Signature;
@@ -176,7 +176,6 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                     .key_pair
                     .clone()
                     .unwrap_or_else(|| UserKeyPair::generate(&mut rng)),
-                freezer_key_pair: FreezerKeyPair::generate(&mut rng),
             }),
             txn_state: TransactionState {
                 validator,
@@ -191,6 +190,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
             },
             auditable_assets: Default::default(),
             audit_keys: Default::default(),
+            freeze_keys: Default::default(),
             defined_assets: Default::default(),
         };
         self.storage().await.create(&state).await?;

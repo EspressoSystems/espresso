@@ -93,13 +93,11 @@ pub enum WalletError {
     InvalidAddress {
         address: UserAddress,
     },
-    InvalidAuditorKey {
-        my_key: AuditorPubKey,
-        asset_key: AuditorPubKey,
+    AssetNotAuditable {
+        asset: AssetDefinition,
     },
-    InvalidFreezerKey {
-        my_key: FreezerPubKey,
-        asset_key: FreezerPubKey,
+    AssetNotFreezable {
+        asset: AssetDefinition,
     },
     NetworkError {
         source: phaselock::networking::NetworkError,
@@ -157,9 +155,6 @@ impl api::FromError for WalletError {
 pub struct WalletImmutableKeySet {
     // key pair for building/receiving transactions
     pub(crate) key_pair: UserKeyPair,
-    // key pair for computing nullifiers of records owned by someone else but which we can freeze or
-    // unfreeze
-    pub(crate) freezer_key_pair: FreezerKeyPair,
 }
 
 #[derive(Debug, Clone)]
@@ -196,6 +191,8 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
     // policy contained in  auditable_assets`, but it may also contain additional keys that the user
     // has generated or imported but not yet attached to a particular asset type.
     pub(crate) audit_keys: HashMap<AuditorPubKey, AuditorKeyPair>,
+    // freeze keys.
+    pub(crate) freeze_keys: HashMap<FreezerPubKey, FreezerKeyPair>,
     // maps defined asset code to asset definition, seed and description of the asset
     pub(crate) defined_assets: HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
 }
@@ -219,6 +216,66 @@ impl<L: Ledger> PartialEq<Self> for TransactionHistoryEntry<L> {
             && self.kind == other.kind
             && self.receivers == other.receivers
             && self.receipt == other.receipt
+    }
+}
+
+// Type erasure for key pairs so that backend components like storage that don't care about the
+// detailed properties of different kinds of keys can just implement a single heterogeneous key
+// store.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum RoleKeyPair {
+    Auditor(AuditorKeyPair),
+    Freezer(FreezerKeyPair),
+}
+
+impl From<AuditorKeyPair> for RoleKeyPair {
+    fn from(key: AuditorKeyPair) -> Self {
+        Self::Auditor(key)
+    }
+}
+
+impl From<FreezerKeyPair> for RoleKeyPair {
+    fn from(key: FreezerKeyPair) -> Self {
+        Self::Freezer(key)
+    }
+}
+
+trait KeyPair: Clone + Into<RoleKeyPair> + TryFrom<RoleKeyPair> + Send + Sync {
+    type PubKey: std::hash::Hash + Eq;
+    fn pub_key(&self) -> Self::PubKey;
+}
+
+impl TryFrom<RoleKeyPair> for AuditorKeyPair {
+    type Error = ();
+    fn try_from(key: RoleKeyPair) -> Result<Self, ()> {
+        match key {
+            RoleKeyPair::Auditor(key) => Ok(key),
+            _ => Err(()),
+        }
+    }
+}
+
+impl KeyPair for AuditorKeyPair {
+    type PubKey = AuditorPubKey;
+    fn pub_key(&self) -> Self::PubKey {
+        self.pub_key()
+    }
+}
+
+impl TryFrom<RoleKeyPair> for FreezerKeyPair {
+    type Error = ();
+    fn try_from(key: RoleKeyPair) -> Result<Self, ()> {
+        match key {
+            RoleKeyPair::Freezer(key) => Ok(key),
+            _ => Err(()),
+        }
+    }
+}
+
+impl KeyPair for FreezerKeyPair {
+    type PubKey = FreezerPubKey;
+    fn pub_key(&self) -> Self::PubKey {
+        self.pub_key()
     }
 }
 
@@ -269,8 +326,8 @@ pub trait WalletStorage<'a, L: Ledger> {
     /// Append a new auditable asset to the growing set.
     async fn store_auditable_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError>;
 
-    /// Add an auditor key to the wallet's key set.
-    async fn store_audit_key(&mut self, audit_key: &AuditorKeyPair) -> Result<(), WalletError>;
+    /// Add a key to the wallet's key set.
+    async fn store_key(&mut self, key: &RoleKeyPair) -> Result<(), WalletError>;
 
     /// Append a new defined asset to the growing set.
     async fn store_defined_asset(
@@ -344,9 +401,9 @@ impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> StorageTransaction<'a, 'l
         }
     }
 
-    async fn store_audit_key(&mut self, audit_key: &AuditorKeyPair) -> Result<(), WalletError> {
+    async fn store_key<K: KeyPair>(&mut self, key: &K) -> Result<(), WalletError> {
         if !self.cancelled {
-            let res = self.storage.store_audit_key(audit_key).await;
+            let res = self.storage.store_key(&key.clone().into()).await;
             if res.is_err() {
                 self.cancel().await;
             }
@@ -1029,7 +1086,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     self.txn_state.records.insert_freezable(
                         ro.clone(),
                         *uid,
-                        &self.immutable_keys.freezer_key_pair,
+                        &self.freeze_keys[ro.asset_def.policy_ref().freezer_pub_key()],
                     );
                     *remember = true;
                 }
@@ -1097,8 +1154,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 {
                     // If the audit memo contains all the information we need to potentially freeze
                     // this record, save it in our database for later freezing.
-                    if *asset_def.policy_ref().freezer_pub_key()
-                        == self.immutable_keys.freezer_key_pair.pub_key()
+                    if let Some(freeze_key) = self
+                        .freeze_keys
+                        .get(asset_def.policy_ref().freezer_pub_key())
                     {
                         let record_opening = RecordOpening {
                             amount,
@@ -1107,11 +1165,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                             freeze_flag: FreezeFlag::Unfrozen,
                             blind,
                         };
-                        self.txn_state.records.insert_freezable(
-                            record_opening,
-                            *uid,
-                            &self.immutable_keys.freezer_key_pair,
-                        );
+                        self.txn_state
+                            .records
+                            .insert_freezable(record_opening, *uid, freeze_key);
                         *remember = true;
                     }
                 }
@@ -1194,7 +1250,8 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     }
 
     /// Use `audit_asset` to start auditing transactions with a given asset type, when the asset
-    /// type was defined by someone else and sent to us out of band.
+    /// type was defined by someone else and sent to us out of band. The audit key for `asset` must
+    /// already be in this wallet's key set.
     ///
     /// Auditing of assets created by this user with an appropriate asset policy begins
     /// automatically. Calling this function is unnecessary.
@@ -1202,19 +1259,18 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         asset: &AssetDefinition,
-        audit_key: &AuditorKeyPair,
     ) -> Result<(), WalletError> {
-        let asset_key = asset.policy_ref().auditor_pub_key();
-        if audit_key.pub_key() != *asset_key {
-            return Err(WalletError::InvalidAuditorKey {
-                my_key: audit_key.pub_key(),
-                asset_key: asset_key.clone(),
-            });
-        }
-
         if self.auditable_assets.contains_key(&asset.code) {
             // Don't add the same asset twice.
             return Ok(());
+        }
+        if !self
+            .audit_keys
+            .contains_key(asset.policy_ref().auditor_pub_key())
+        {
+            return Err(WalletError::AssetNotAuditable {
+                asset: asset.clone(),
+            });
         }
 
         // Store the new asset on disk before adding it to our in-memory data structure. We don't
@@ -1223,18 +1279,10 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             .backend
             .store(|mut t| async {
                 t.store_auditable_asset(asset).await?;
-
-                // If we haven't already saved this as one of our auditor keys, save it.
-                if !self.audit_keys.contains_key(&audit_key.pub_key()) {
-                    t.store_audit_key(audit_key).await?;
-                }
-
                 Ok(t)
             })
             .await?;
         self.auditable_assets.insert(asset.code, asset.clone());
-        self.audit_keys
-            .insert(audit_key.pub_key(), audit_key.clone());
         Ok(())
     }
 
@@ -1243,18 +1291,34 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         audit_key: AuditorKeyPair,
     ) -> Result<(), WalletError> {
-        if self.audit_keys.contains_key(&audit_key.pub_key()) {
+        Self::add_key(session, &mut self.audit_keys, audit_key).await
+    }
+
+    pub async fn add_freeze_key(
+        &mut self,
+        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        freeze_key: FreezerKeyPair,
+    ) -> Result<(), WalletError> {
+        Self::add_key(session, &mut self.freeze_keys, freeze_key).await
+    }
+
+    async fn add_key<K: KeyPair>(
+        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        keys: &mut HashMap<K::PubKey, K>,
+        key: K,
+    ) -> Result<(), WalletError> {
+        if keys.contains_key(&key.pub_key()) {
             return Ok(());
         }
 
         session
             .backend
             .store(|mut t| async {
-                t.store_audit_key(&audit_key).await?;
+                t.store_key(&key).await?;
                 Ok(t)
             })
             .await?;
-        self.audit_keys.insert(audit_key.pub_key(), audit_key);
+        keys.insert(key.pub_key(), key);
         Ok(())
     }
 
@@ -1400,14 +1464,14 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         owner: UserAddress,
         outputs_frozen: FreezeFlag,
     ) -> Result<TransactionReceipt<L>, WalletError> {
-        let my_key = self.immutable_keys.freezer_key_pair.pub_key();
-        let asset_key = asset.policy_ref().freezer_pub_key();
-        if my_key != *asset_key {
-            return Err(WalletError::InvalidFreezerKey {
-                my_key,
-                asset_key: asset_key.clone(),
-            });
-        }
+        let freeze_key = match self.freeze_keys.get(asset.policy_ref().freezer_pub_key()) {
+            Some(key) => key,
+            None => {
+                return Err(WalletError::AssetNotFreezable {
+                    asset: asset.clone(),
+                });
+            }
+        };
 
         let owner = session.backend.get_public_key(&owner).await?;
 
@@ -1426,7 +1490,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             inputs.push(FreezeNoteInput {
                 ro,
                 acc_member_witness: witness,
-                keypair: &self.immutable_keys.freezer_key_pair,
+                keypair: freeze_key,
             })
         }
 
@@ -1443,7 +1507,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             &self.proving_keys.freeze,
             asset,
             &mut inputs,
-            &self.immutable_keys.freezer_key_pair,
+            freeze_key,
         )?;
 
         // generate transfer note and receiver memos
@@ -2276,8 +2340,9 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         state.audit_keys.keys().cloned().collect()
     }
 
-    pub fn freezer_pub_key(&self) -> FreezerPubKey {
-        self.immutable_keys.freezer_key_pair.pub_key()
+    pub async fn freezer_pub_keys(&self) -> Vec<FreezerPubKey> {
+        let WalletSharedState { state, .. } = &*self.mutex.lock().await;
+        state.freeze_keys.keys().cloned().collect()
     }
 
     pub fn address(&self) -> UserAddress {
@@ -2328,13 +2393,9 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     }
 
     /// start auditing transactions with a given asset type
-    pub async fn audit_asset(
-        &mut self,
-        asset: &AssetDefinition,
-        audit_key: &AuditorKeyPair,
-    ) -> Result<(), WalletError> {
+    pub async fn audit_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        state.audit_asset(session, asset, audit_key).await
+        state.audit_asset(session, asset).await
     }
 
     /// add an auditor key to the wallet's key set
@@ -2349,6 +2410,20 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         let audit_key = AuditorKeyPair::generate(&mut session.rng);
         state.add_audit_key(session, audit_key.clone()).await?;
         Ok(audit_key.pub_key())
+    }
+
+    /// add a freezer key to the wallet's key set
+    pub async fn add_freeze_key(&mut self, freeze_key: FreezerKeyPair) -> Result<(), WalletError> {
+        let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+        state.add_freeze_key(session, freeze_key).await
+    }
+
+    /// generate a new freezer key and add it to the wallet's key set
+    pub async fn generate_freeze_key(&mut self) -> Result<FreezerPubKey, WalletError> {
+        let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+        let freeze_key = FreezerKeyPair::generate(&mut session.rng);
+        state.add_freeze_key(session, freeze_key.clone()).await?;
+        Ok(freeze_key.pub_key())
     }
 
     /// create a mint note that assign asset to an owner
@@ -2500,8 +2575,8 @@ pub mod test_helpers {
             w2.audit_keys.keys().collect::<Vec<_>>()
         );
         assert_eq!(
-            w1.immutable_keys.freezer_key_pair,
-            w2.immutable_keys.freezer_key_pair
+            w1.freeze_keys.keys().collect::<Vec<_>>(),
+            w2.freeze_keys.keys().collect::<Vec<_>>()
         );
         assert_eq!(
             w1.txn_state.nullifiers.hash(),
@@ -2573,11 +2648,16 @@ pub mod test_helpers {
             Ok(())
         }
 
-        async fn store_audit_key(&mut self, audit_key: &AuditorKeyPair) -> Result<(), WalletError> {
+        async fn store_key(&mut self, key: &RoleKeyPair) -> Result<(), WalletError> {
             if let Some(working) = &mut self.working {
-                working
-                    .audit_keys
-                    .insert(audit_key.pub_key(), audit_key.clone());
+                match key {
+                    RoleKeyPair::Auditor(key) => {
+                        working.audit_keys.insert(key.pub_key(), key.clone());
+                    }
+                    RoleKeyPair::Freezer(key) => {
+                        working.freeze_keys.insert(key.pub_key(), key.clone());
+                    }
+                }
             }
             Ok(())
         }
@@ -2831,13 +2911,11 @@ pub mod test_helpers {
         async fn create(&mut self) -> Result<WalletState<'a>, WalletError> {
             let state = {
                 let ledger = self.ledger.lock().unwrap();
-                let mut rng = ChaChaRng::from_seed(self.seed);
 
                 WalletState {
                     proving_keys: ledger.proving_keys.clone(),
                     immutable_keys: Arc::new(WalletImmutableKeySet {
                         key_pair: self.key_pair.clone(),
-                        freezer_key_pair: FreezerKeyPair::generate(&mut rng),
                     }),
                     txn_state: TransactionState {
                         validator: ledger.validator.clone(),
@@ -2858,6 +2936,7 @@ pub mod test_helpers {
                     },
                     auditable_assets: Default::default(),
                     audit_keys: Default::default(),
+                    freeze_keys: Default::default(),
                     defined_assets: HashMap::new(),
                 }
             };
@@ -3726,12 +3805,14 @@ mod tests {
         } else {
             let mut rng = ChaChaRng::from_seed([42u8; 32]);
             let audit_key = AuditorKeyPair::generate(&mut rng);
+            let freeze_key = FreezerKeyPair::generate(&mut rng);
             let policy = AssetPolicy::default()
                 .set_auditor_pub_key(audit_key.pub_key())
-                .set_freezer_pub_key(wallets[0].freezer_pub_key())
+                .set_freezer_pub_key(freeze_key.pub_key())
                 .reveal_record_opening()
                 .unwrap();
             wallets[0].add_audit_key(audit_key).await.unwrap();
+            wallets[0].add_freeze_key(freeze_key).await.unwrap();
             let asset = wallets[0]
                 .define_asset("test asset".as_bytes(), policy)
                 .await
@@ -4019,12 +4100,14 @@ mod tests {
         let asset = {
             let mut rng = ChaChaRng::from_seed([42u8; 32]);
             let audit_key = AuditorKeyPair::generate(&mut rng);
+            let freeze_key = FreezerKeyPair::generate(&mut rng);
             let policy = AssetPolicy::default()
                 .set_auditor_pub_key(audit_key.pub_key())
-                .set_freezer_pub_key(wallets[2].freezer_pub_key())
+                .set_freezer_pub_key(freeze_key.pub_key())
                 .reveal_record_opening()
                 .unwrap();
             wallets[2].add_audit_key(audit_key).await.unwrap();
+            wallets[2].add_freeze_key(freeze_key).await.unwrap();
             let asset = wallets[2]
                 .define_asset("test asset".as_bytes(), policy)
                 .await
