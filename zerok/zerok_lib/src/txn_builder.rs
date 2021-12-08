@@ -298,6 +298,8 @@ where
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(bound = "")]
 pub struct PendingTransaction<L: Ledger> {
+    // The account from which this transaction was submitted, in case we need to resubmit it.
+    pub account: UserAddress,
     pub receiver_memos: Vec<ReceiverMemo>,
     pub signature: Signature,
     pub freeze_outputs: Vec<RecordOpening>,
@@ -329,6 +331,7 @@ where
         let key = u.arbitrary::<ArbitraryKeyPair>()?.into();
         let signature = sign_receiver_memos(&key, &memos).unwrap();
         Ok(Self {
+            account: u.arbitrary::<ArbitraryUserAddress>()?.into(),
             receiver_memos: memos,
             signature,
             freeze_outputs: u

@@ -61,6 +61,9 @@ pub enum WalletError {
         required: u64,
         actual: u64,
     },
+    NoSuchAccount {
+        address: UserAddress,
+    },
     Fragmentation {
         asset: AssetCode,
         amount: u64,
@@ -148,12 +151,6 @@ impl api::FromError for WalletError {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WalletImmutableKeySet {
-    // key pair for building/receiving transactions
-    pub(crate) key_pair: UserKeyPair,
-}
-
 #[derive(Debug, Clone)]
 pub struct WalletState<'a, L: Ledger = AAPLedger> {
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -173,8 +170,6 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
     // for real applications, but it is very important for tests and costs little.
     pub(crate) proving_keys: Arc<ProverKeySet<'a, key_set::OrderByOutputs>>,
 
-    pub(crate) immutable_keys: Arc<WalletImmutableKeySet>,
-
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Dynamic state
     pub(crate) txn_state: TransactionState<L>,
@@ -190,6 +185,8 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
     pub(crate) audit_keys: HashMap<AuditorPubKey, AuditorKeyPair>,
     // freeze keys.
     pub(crate) freeze_keys: HashMap<FreezerPubKey, FreezerKeyPair>,
+    // user keys, for spending owned records
+    pub(crate) user_keys: HashMap<UserAddress, UserKeyPair>,
     // maps defined asset code to asset definition, seed and description of the asset
     pub(crate) defined_assets: HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
 }
@@ -200,6 +197,10 @@ pub struct TransactionHistoryEntry<L: Ledger> {
     time: DateTime<Local>,
     asset: AssetCode,
     kind: TransactionKind<L>,
+    // If we sent this transaction, `sender` records the address of the spending key used to submit
+    // it. If we received this transaction from someone else, we may not know who the sender is and
+    // this field may be None.
+    sender: Option<UserAddress>,
     // Receivers and corresponding amounts.
     receivers: Vec<(UserAddress, u64)>,
     // If we sent this transaction, a receipt to track its progress.
@@ -223,6 +224,7 @@ impl<L: Ledger> PartialEq<Self> for TransactionHistoryEntry<L> {
 pub enum RoleKeyPair {
     Auditor(AuditorKeyPair),
     Freezer(FreezerKeyPair),
+    User(UserKeyPair),
 }
 
 impl From<AuditorKeyPair> for RoleKeyPair {
@@ -234,6 +236,12 @@ impl From<AuditorKeyPair> for RoleKeyPair {
 impl From<FreezerKeyPair> for RoleKeyPair {
     fn from(key: FreezerKeyPair) -> Self {
         Self::Freezer(key)
+    }
+}
+
+impl From<UserKeyPair> for RoleKeyPair {
+    fn from(key: UserKeyPair) -> Self {
+        Self::User(key)
     }
 }
 
@@ -273,6 +281,26 @@ impl KeyPair for FreezerKeyPair {
     type PubKey = FreezerPubKey;
     fn pub_key(&self) -> Self::PubKey {
         self.pub_key()
+    }
+}
+
+impl TryFrom<RoleKeyPair> for UserKeyPair {
+    type Error = ();
+    fn try_from(key: RoleKeyPair) -> Result<Self, ()> {
+        match key {
+            RoleKeyPair::User(key) => Ok(key),
+            _ => Err(()),
+        }
+    }
+}
+
+impl KeyPair for UserKeyPair {
+    // The PubKey here is supposed to be a conceptual "primary key" for looking up UserKeyPairs. We
+    // typically want to look up UserKeyPairs by Address, not PubKey, because if we have a PubKey we
+    // can always get and Address to do the lookup.
+    type PubKey = UserAddress;
+    fn pub_key(&self) -> Self::PubKey {
+        self.address()
     }
 }
 
@@ -531,6 +559,7 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
         block_id: u64,
         txn_id: u64,
     ) -> Result<Transaction<L>, WalletError>;
+    async fn register_user_key(&mut self, pub_key: &UserPubKey) -> Result<(), WalletError>;
 
     // Submit a transaction to a validator.
     async fn submit(&mut self, txn: Transaction<L>) -> Result<(), WalletError>;
@@ -620,29 +649,28 @@ impl<L: Ledger> Default for EventSummary<L> {
 }
 
 impl<'a, L: Ledger> WalletState<'a, L> {
-    pub fn pub_key(
+    pub fn pub_keys(
         &self,
         _session: &WalletSession<'a, L, impl WalletBackend<'a, L>>,
-    ) -> UserPubKey {
-        self.immutable_keys.key_pair.pub_key()
+    ) -> Vec<UserPubKey> {
+        self.user_keys.values().map(|key| key.pub_key()).collect()
     }
 
-    pub fn balance(
-        &self,
-        session: &WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        asset: &AssetCode,
-        frozen: FreezeFlag,
-    ) -> u64 {
-        self.txn_state
-            .records
-            .input_records(
-                asset,
-                &self.pub_key(session),
-                frozen,
-                self.txn_state.validator.now(),
-            )
-            .map(|record| record.ro.amount)
-            .sum()
+    pub fn balance(&self, account: &UserAddress, asset: &AssetCode, frozen: FreezeFlag) -> u64 {
+        match self.user_keys.get(account) {
+            Some(key) => self
+                .txn_state
+                .records
+                .input_records(
+                    asset,
+                    &key.pub_key(),
+                    frozen,
+                    self.txn_state.validator.now(),
+                )
+                .map(|record| record.ro.amount)
+                .sum(),
+            None => 0,
+        }
     }
 
     pub fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
@@ -688,7 +716,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     // If the transaction isn't in our pending data structures, but its fee record
                     // has not been spent, then either it was rejected, or it's someone else's
                     // transaction that we haven't been tracking through the lifecycle.
-                    if receipt.submitter == self.immutable_keys.key_pair.address() {
+                    if self.user_keys.contains_key(&receipt.submitter) {
                         Ok(TransactionStatus::Rejected)
                     } else {
                         Ok(TransactionStatus::Unknown)
@@ -853,39 +881,33 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                         .collect::<Vec<_>>(),
                 );
 
-                let mut received_assets = Vec::new();
+                let mut received_ros = Vec::new();
                 for (memo, comm, uid, proof) in outputs {
                     summary.received_memos.push((memo.clone(), uid));
-                    if let Ok(record_opening) =
-                        memo.decrypt(&self.immutable_keys.key_pair, &comm, &[])
-                    {
-                        if !record_opening.is_dummy() {
-                            // If this record is for us (i.e. its corresponding memo decrypts under
-                            // our key) and not a dummy, then add it to our owned records.
-                            received_assets.push((
-                                record_opening.asset_def.code,
-                                record_opening.amount,
-                                record_opening.freeze_flag,
-                            ));
-                            self.txn_state.records.insert(
-                                record_opening,
-                                uid,
-                                &self.immutable_keys.key_pair,
-                            );
-                            if !self.remember_merkle_leaf(
-                                uid,
-                                &MerkleLeafProof::new(comm.to_field_element(), proof),
-                            ) {
-                                println!(
-                                    "error: got bad merkle proof from backend for commitment {:?}",
-                                    comm
-                                );
+                    for key_pair in self.user_keys.values() {
+                        if let Ok(record_opening) = memo.decrypt(key_pair, &comm, &[]) {
+                            if !record_opening.is_dummy() {
+                                // If this record is for us (i.e. its corresponding memo decrypts under
+                                // our key) and not a dummy, then add it to our owned records.
+                                received_ros.push(record_opening.clone());
+                                self.txn_state.records.insert(record_opening, uid, key_pair);
+                                if !self.remember_merkle_leaf(
+                                    uid,
+                                    &MerkleLeafProof::new(comm.to_field_element(), proof),
+                                ) {
+                                    println!(
+                                        "error: got bad merkle proof from backend for commitment {:?}",
+                                        comm
+                                    );
+                                }
                             }
+
+                            break;
                         }
                     }
                 }
 
-                if !self_published && !received_assets.is_empty() {
+                if !self_published && !received_ros.is_empty() {
                     if let Some((block_id, txn_id)) = transaction {
                         // If this batch of memos didn't complete one of our own transactions (i.e.
                         // it wasn't published by us) but it was _for_ us, then we will add a
@@ -900,7 +922,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                                 if kind == TransactionKind::<L>::send() {
                                     TransactionKind::<L>::receive()
                                 } else if kind == TransactionKind::<L>::freeze()
-                                    && received_assets[0].2 == FreezeFlag::Unfrozen
+                                    && received_ros[0].freeze_flag == FreezeFlag::Unfrozen
                                 {
                                     TransactionKind::<L>::unfreeze()
                                 } else {
@@ -917,17 +939,19 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                             }
                         };
 
-                        let txn_asset = received_assets[0].0;
+                        let txn_asset = received_ros[0].asset_def.code;
                         let history = TransactionHistoryEntry {
                             time: Local::now(),
                             asset: txn_asset,
                             kind,
-                            receivers: received_assets
-                                .clone()
+                            sender: None,
+                            // When we receive transactions, we can't tell from the protocol
+                            // who sent it to us.
+                            receivers: received_ros
                                 .into_iter()
-                                .filter_map(|(asset, amount, _)| {
-                                    if asset == txn_asset {
-                                        Some((self.immutable_keys.key_pair.address(), amount))
+                                .filter_map(|ro| {
+                                    if ro.asset_def.code == txn_asset {
+                                        Some((ro.pub_key.address(), ro.amount))
                                     } else {
                                         println!(
                                             "Received transaction ({}, {}) contains outputs with \
@@ -974,6 +998,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                                 && self
                                     .submit_elaborated_transaction(
                                         session,
+                                        &pending.account,
                                         txn,
                                         pending.receiver_memos,
                                         pending.signature,
@@ -1283,6 +1308,15 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         Ok(())
     }
 
+    pub async fn add_user_key(
+        &mut self,
+        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        user_key: UserKeyPair,
+    ) -> Result<(), WalletError> {
+        Self::add_key(session, &mut self.user_keys, user_key.clone()).await?;
+        session.backend.register_user_key(&user_key.pub_key()).await
+    }
+
     pub async fn add_audit_key(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -1322,6 +1356,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     pub async fn transfer(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        account: &UserAddress,
         asset: &AssetCode,
         receivers: &[(UserAddress, u64)],
         fee: u64,
@@ -1335,9 +1370,10 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             .await?;
 
         if *asset == AssetCode::native() {
-            self.transfer_native(session, &receivers, fee).await
+            self.transfer_native(session, account, &receivers, fee)
+                .await
         } else {
-            self.transfer_non_native(session, asset, &receivers, fee)
+            self.transfer_non_native(session, account, asset, &receivers, fee)
                 .await
         }
     }
@@ -1345,13 +1381,12 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     pub async fn mint(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        account: &UserAddress,
         fee: u64,
         asset_code: &AssetCode,
         amount: u64,
         owner: UserAddress,
     ) -> Result<TransactionReceipt<L>, WalletError> {
-        let (fee_ro, uid) = self.find_native_record_for_fee(session, fee)?;
-        let acc_member_witness = self.get_merkle_proof(uid);
         let (asset_def, seed, asset_description) = self
             .defined_assets
             .get(asset_code)
@@ -1364,11 +1399,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             blind: BlindFactor::rand(&mut session.rng),
         };
 
-        let fee_input = FeeInput {
-            ro: fee_ro,
-            acc_member_witness,
-            owner_keypair: &self.immutable_keys.key_pair,
-        };
+        let fee_input = self.find_fee_input(account, fee)?;
         let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut session.rng, fee_input, fee).unwrap();
         let rng = &mut session.rng;
         let recv_memos = vec![&fee_out_rec, &mint_record]
@@ -1388,6 +1419,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let signature = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
         self.submit_transaction(
             session,
+            account,
             TransactionNote::Mint(Box::new(mint_note)),
             recv_memos,
             signature,
@@ -1396,6 +1428,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 time: Local::now(),
                 asset: *asset_code,
                 kind: TransactionKind::<L>::mint(),
+                sender: Some(account.clone()),
                 receivers: vec![(owner, amount)],
                 receipt: None,
             },
@@ -1425,13 +1458,22 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     pub async fn freeze(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        account: &UserAddress,
         fee: u64,
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
     ) -> Result<TransactionReceipt<L>, WalletError> {
-        self.freeze_or_unfreeze(session, fee, asset, amount, owner, FreezeFlag::Frozen)
-            .await
+        self.freeze_or_unfreeze(
+            session,
+            account,
+            fee,
+            asset,
+            amount,
+            owner,
+            FreezeFlag::Frozen,
+        )
+        .await
     }
 
     /// Unfreeze at least `amount` of a particular asset owned by a given user.
@@ -1443,18 +1485,29 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     pub async fn unfreeze(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        account: &UserAddress,
         fee: u64,
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
     ) -> Result<TransactionReceipt<L>, WalletError> {
-        self.freeze_or_unfreeze(session, fee, asset, amount, owner, FreezeFlag::Unfrozen)
-            .await
+        self.freeze_or_unfreeze(
+            session,
+            account,
+            fee,
+            asset,
+            amount,
+            owner,
+            FreezeFlag::Unfrozen,
+        )
+        .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn freeze_or_unfreeze(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        account: &UserAddress,
         fee: u64,
         asset: &AssetDefinition,
         amount: u64,
@@ -1490,13 +1543,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 keypair: freeze_key,
             })
         }
-
-        let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
-        let fee_input = FeeInput {
-            ro: fee_ro,
-            acc_member_witness: self.get_merkle_proof(fee_uid),
-            owner_keypair: &self.immutable_keys.key_pair,
-        };
+        let fee_input = self.find_fee_input(account, fee)?;
 
         // find a proving key which can handle this transaction size
         let proving_key = Self::freeze_proving_key(
@@ -1521,6 +1568,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
         self.submit_transaction(
             session,
+            account,
             TransactionNote::Freeze(Box::new(note)),
             recv_memos,
             sig,
@@ -1532,6 +1580,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     FreezeFlag::Frozen => TransactionKind::<L>::freeze(),
                     FreezeFlag::Unfrozen => TransactionKind::<L>::unfreeze(),
                 },
+                sender: Some(account.clone()),
                 receivers: vec![(owner.address(), amount)],
                 receipt: None,
             },
@@ -1542,16 +1591,25 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     async fn transfer_native(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        account: &UserAddress,
         receivers: &[(UserPubKey, u64)],
         fee: u64,
     ) -> Result<TransactionReceipt<L>, WalletError> {
         let total_output_amount: u64 =
             receivers.iter().fold(0, |sum, (_, amount)| sum + *amount) + fee;
+        let key_pair = match self.user_keys.get(account) {
+            Some(key_pair) => key_pair,
+            None => {
+                return Err(WalletError::NoSuchAccount {
+                    address: account.clone(),
+                })
+            }
+        };
 
         // find input records which account for at least the total amount, and possibly some change.
         let (input_records, _change) = self.find_records(
             &AssetCode::native(),
-            &self.pub_key(session),
+            &key_pair.pub_key(),
             FreezeFlag::Unfrozen,
             total_output_amount,
             None,
@@ -1564,7 +1622,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             inputs.push(TransferNoteInput {
                 ro,
                 acc_member_witness,
-                owner_keypair: &self.immutable_keys.key_pair,
+                owner_keypair: key_pair,
                 cred: None,
             });
         }
@@ -1584,7 +1642,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         // find a proving key which can handle this transaction size
         let (proving_key, dummy_inputs) = Self::xfr_proving_key(
             &mut session.rng,
-            self.immutable_keys.key_pair.pub_key(),
+            key_pair.pub_key(),
             &self.proving_keys.xfr,
             &AssetDefinition::native(),
             &mut inputs,
@@ -1630,6 +1688,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let sig = sign_receiver_memos(&kp, &recv_memos).context(CryptoError)?;
         self.submit_transaction(
             session,
+            account,
             TransactionNote::Transfer(Box::new(note)),
             recv_memos,
             sig,
@@ -1638,6 +1697,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 time: Local::now(),
                 asset: AssetCode::native(),
                 kind: TransactionKind::<L>::send(),
+                sender: Some(account.clone()),
                 receivers: receivers
                     .iter()
                     .map(|(pub_key, amount)| (pub_key.address(), *amount))
@@ -1651,6 +1711,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     async fn transfer_non_native(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        account: &UserAddress,
         asset: &AssetCode,
         receivers: &[(UserPubKey, u64)],
         fee: u64,
@@ -1661,11 +1722,19 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             "call `transfer_native()` instead"
         );
         let total_output_amount: u64 = receivers.iter().fold(0, |sum, (_, amount)| sum + *amount);
+        let key_pair = match self.user_keys.get(account) {
+            Some(key_pair) => key_pair,
+            None => {
+                return Err(WalletError::NoSuchAccount {
+                    address: account.clone(),
+                })
+            }
+        };
 
         // find input records of the asset type to spend (this does not include the fee input)
         let (input_records, change) = self.find_records(
             asset,
-            &self.pub_key(session),
+            &key_pair.pub_key(),
             FreezeFlag::Unfrozen,
             total_output_amount,
             None,
@@ -1679,10 +1748,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             inputs.push(TransferNoteInput {
                 ro,
                 acc_member_witness: witness,
-                owner_keypair: &self.immutable_keys.key_pair,
+                owner_keypair: key_pair,
                 cred: None, // TODO support credentials
             })
         }
+        let fee_input = self.find_fee_input(account, fee)?;
 
         // prepare outputs, excluding fee change (which will be automatically generated)
         let mut outputs = vec![];
@@ -1697,28 +1767,20 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
         // change in the asset type being transfered (not fee change)
         if change > 0 {
-            let me = self.pub_key(session);
             let change_ro = RecordOpening::new(
                 &mut session.rng,
                 change,
                 asset.clone(),
-                me,
+                key_pair.pub_key(),
                 FreezeFlag::Unfrozen,
             );
             outputs.push(change_ro);
         }
 
-        let (fee_ro, fee_uid) = self.find_native_record_for_fee(session, fee)?;
-        let fee_input = FeeInput {
-            ro: fee_ro,
-            acc_member_witness: self.get_merkle_proof(fee_uid),
-            owner_keypair: &self.immutable_keys.key_pair,
-        };
-
         // find a proving key which can handle this transaction size
         let (proving_key, dummy_inputs) = Self::xfr_proving_key(
             &mut session.rng,
-            self.immutable_keys.key_pair.pub_key(),
+            key_pair.pub_key(),
             &self.proving_keys.xfr,
             &asset,
             &mut inputs,
@@ -1761,6 +1823,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
         self.submit_transaction(
             session,
+            account,
             TransactionNote::Transfer(Box::new(note)),
             recv_memos,
             sig,
@@ -1769,6 +1832,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 time: Local::now(),
                 asset: asset.code,
                 kind: TransactionKind::<L>::send(),
+                sender: Some(account.clone()),
                 receivers: receivers
                     .iter()
                     .map(|(pub_key, amount)| (pub_key.address(), *amount))
@@ -1779,9 +1843,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn submit_transaction(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        account: &UserAddress,
         note: TransactionNote,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
@@ -1803,6 +1869,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let txn = Transaction::<L>::new(note, nullifier_pfs);
         self.submit_elaborated_transaction(
             session,
+            account,
             txn,
             memos,
             sig,
@@ -1829,6 +1896,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     fn submit_elaborated_transaction<'b>(
         &'b mut self,
         session: &'b mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        account: &'b UserAddress,
         txn: Transaction<L>,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
@@ -1840,7 +1908,8 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         'a: 'b,
     {
         async move {
-            let receipt = self.add_pending_transaction(&txn, memos, sig, freeze_outputs, uid);
+            let receipt =
+                self.add_pending_transaction(account, &txn, memos, sig, freeze_outputs, uid);
 
             // Persist the pending transaction.
             if let Err(err) = session
@@ -1881,6 +1950,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     fn add_pending_transaction(
         &mut self,
+        account: &UserAddress,
         txn: &Transaction<L>,
         receiver_memos: Vec<ReceiverMemo>,
         signature: Signature,
@@ -1903,6 +1973,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
         // Add the transaction to `transactions`.
         let pending = PendingTransaction {
+            account: account.clone(),
             receiver_memos,
             signature,
             timeout,
@@ -1915,7 +1986,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         TransactionReceipt {
             uid,
             fee_nullifier: txn.note().nullifiers()[0],
-            submitter: self.immutable_keys.key_pair.address(),
+            submitter: account.clone(),
         }
     }
 
@@ -1987,21 +2058,35 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         })
     }
 
-    /// find a record and corresponding uid on the native asset type with enough
-    /// funds to pay transaction fee
-    fn find_native_record_for_fee(
-        &self,
-        session: &WalletSession<'a, L, impl WalletBackend<'a, L>>,
+    /// find a record of the native asset type with enough funds to pay a transaction fee
+    fn find_fee_input(
+        &'_ self,
+        account: &UserAddress,
         fee: u64,
-    ) -> Result<(RecordOpening, u64), WalletError> {
-        self.find_records(
-            &AssetCode::native(),
-            &self.pub_key(session),
-            FreezeFlag::Unfrozen,
-            fee,
-            Some(1),
-        )
-        .map(|(ros, _change)| ros.into_iter().next().unwrap())
+    ) -> Result<FeeInput<'_>, WalletError> {
+        let key_pair = match self.user_keys.get(account) {
+            Some(key_pair) => key_pair,
+            None => {
+                return Err(WalletError::NoSuchAccount {
+                    address: account.clone(),
+                })
+            }
+        };
+        let (ro, uid) = self
+            .find_records(
+                &AssetCode::native(),
+                &key_pair.pub_key(),
+                FreezeFlag::Unfrozen,
+                fee,
+                Some(1),
+            )
+            .map(|(ros, _change)| ros.into_iter().next().unwrap())?;
+
+        Ok(FeeInput {
+            ro,
+            acc_member_witness: self.get_merkle_proof(uid),
+            owner_keypair: key_pair,
+        })
     }
 
     // Find a proving key large enough to prove the given transaction, returning the number of dummy
@@ -2198,8 +2283,6 @@ pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = AAPLedger> {
     // the task, so this field is never read, it exists solely to live as long as this struct and
     // then be dropped.
     _event_task: AsyncScope<'a, ()>,
-    //keep a copy of the keys for referential access after they are generated
-    immutable_keys: Arc<WalletImmutableKeySet>,
 }
 
 struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
@@ -2215,8 +2298,6 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
 {
     pub async fn new(mut backend: Backend) -> Result<Wallet<'a, Backend, L>, WalletError> {
         let state = backend.load().await?;
-        //add keys to Wallet
-        let immutable_keys = state.immutable_keys.clone();
         let mut events = backend.subscribe(state.txn_state.now).await;
         let session = WalletSession {
             backend,
@@ -2324,12 +2405,12 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         Ok(Self {
             mutex,
             _event_task: event_task,
-            immutable_keys,
         })
     }
 
-    pub fn pub_key(&self) -> UserPubKey {
-        self.immutable_keys.key_pair.pub_key()
+    pub async fn pub_keys(&self) -> Vec<UserPubKey> {
+        let WalletSharedState { state, session, .. } = &*self.mutex.lock().await;
+        state.pub_keys(session)
     }
 
     pub async fn auditor_pub_keys(&self) -> Vec<AuditorPubKey> {
@@ -2342,18 +2423,14 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         state.freeze_keys.keys().cloned().collect()
     }
 
-    pub fn address(&self) -> UserAddress {
-        self.pub_key().address()
+    pub async fn balance(&self, account: &UserAddress, asset: &AssetCode) -> u64 {
+        let WalletSharedState { state, .. } = &*self.mutex.lock().await;
+        state.balance(account, asset, FreezeFlag::Unfrozen)
     }
 
-    pub async fn balance(&self, asset: &AssetCode) -> u64 {
-        let WalletSharedState { state, session, .. } = &*self.mutex.lock().await;
-        state.balance(session, asset, FreezeFlag::Unfrozen)
-    }
-
-    pub async fn frozen_balance(&self, asset: &AssetCode) -> u64 {
-        let WalletSharedState { state, session, .. } = &*self.mutex.lock().await;
-        state.balance(session, asset, FreezeFlag::Frozen)
+    pub async fn frozen_balance(&self, account: &UserAddress, asset: &AssetCode) -> u64 {
+        let WalletSharedState { state, .. } = &*self.mutex.lock().await;
+        state.balance(account, asset, FreezeFlag::Frozen)
     }
 
     pub async fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
@@ -2371,12 +2448,15 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
 
     pub async fn transfer(
         &mut self,
+        account: &UserAddress,
         asset: &AssetCode,
         receivers: &[(UserAddress, u64)],
         fee: u64,
     ) -> Result<TransactionReceipt<L>, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        state.transfer(session, asset, receivers, fee).await
+        state
+            .transfer(session, account, asset, receivers, fee)
+            .await
     }
 
     /// define a new asset and store secret info for minting
@@ -2423,38 +2503,61 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         Ok(freeze_key.pub_key())
     }
 
+    /// add a user/spender key to the wallet's key set
+    pub async fn add_user_key(&mut self, user_key: UserKeyPair) -> Result<(), WalletError> {
+        let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+        state.add_user_key(session, user_key).await
+    }
+
+    /// generate a new freezer key and add it to the wallet's key set
+    pub async fn generate_user_key(&mut self) -> Result<UserPubKey, WalletError> {
+        let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+        let user_key = UserKeyPair::generate(&mut session.rng);
+        state.add_user_key(session, user_key.clone()).await?;
+        Ok(user_key.pub_key())
+    }
+
     /// create a mint note that assign asset to an owner
     pub async fn mint(
         &mut self,
+        account: &UserAddress,
         fee: u64,
         asset_code: &AssetCode,
         amount: u64,
         owner: UserAddress,
     ) -> Result<TransactionReceipt<L>, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        state.mint(session, fee, asset_code, amount, owner).await
+        state
+            .mint(session, account, fee, asset_code, amount, owner)
+            .await
     }
 
     pub async fn freeze(
         &mut self,
+        account: &UserAddress,
         fee: u64,
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
     ) -> Result<TransactionReceipt<L>, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        state.freeze(session, fee, asset, amount, owner).await
+        state
+            .freeze(session, account, fee, asset, amount, owner)
+            .await
     }
 
     pub async fn unfreeze(
         &mut self,
+        account: &UserAddress,
         fee: u64,
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
     ) -> Result<TransactionReceipt<L>, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        state.unfreeze(session, fee, asset, amount, owner).await
+        state
+            .unfreeze(session, account, fee, asset, amount, owner)
+            .await
     }
 
     pub async fn transaction_status(
@@ -2484,7 +2587,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         } else {
             let (sender, receiver) = oneshot::channel();
 
-            if receipt.submitter == state.immutable_keys.key_pair.address() {
+            if state.user_keys.contains_key(&receipt.submitter) {
                 // If we submitted this transaction, we have all the information we need to track it
                 // through the lifecycle based on its uid alone.
                 txn_subscribers
@@ -2647,6 +2750,9 @@ pub mod test_helpers {
                     }
                     RoleKeyPair::Freezer(key) => {
                         working.freeze_keys.insert(key.pub_key(), key.clone());
+                    }
+                    RoleKeyPair::User(key) => {
+                        working.user_keys.insert(key.address(), key.clone());
                     }
                 }
             }
@@ -2848,7 +2954,10 @@ pub mod test_helpers {
 
     pub async fn sync<'a>(
         ledger: &Arc<SyncMutex<MockLedger<'a>>>,
-        wallets: &[Wallet<'a, impl 'a + WalletBackend<'a, AAPLedger> + Send + Sync>],
+        wallets: &[(
+            Wallet<'a, impl 'a + WalletBackend<'a, AAPLedger> + Send + Sync>,
+            UserAddress,
+        )],
     ) {
         let t = {
             let mut ledger = ledger.lock().unwrap();
@@ -2867,18 +2976,21 @@ pub mod test_helpers {
         // be in a stable state once they have processed up to that event. Check that each wallet
         // has persisted all of its in-memory state at this point.
         let ledger = ledger.lock().unwrap();
-        for (wallet, storage) in wallets.iter().zip(&ledger.storage) {
+        for ((wallet, _), storage) in wallets.iter().zip(&ledger.storage) {
             let WalletSharedState { state, .. } = &*wallet.mutex.lock().await;
             assert_wallet_states_eq(state, storage.lock().await.committed.as_ref().unwrap());
         }
     }
 
     pub async fn sync_with<'a>(
-        wallets: &[Wallet<'a, impl 'a + WalletBackend<'a, AAPLedger> + Send + Sync>],
+        wallets: &[(
+            Wallet<'a, impl 'a + WalletBackend<'a, AAPLedger> + Send + Sync>,
+            UserAddress,
+        )],
         t: u64,
     ) {
         println!("waiting for sync point {}", t);
-        future::join_all(wallets.iter().map(|wallet| wallet.sync(t))).await;
+        future::join_all(wallets.iter().map(|(wallet, _)| wallet.sync(t))).await;
     }
 
     #[derive(Clone)]
@@ -2905,9 +3017,6 @@ pub mod test_helpers {
 
                 WalletState {
                     proving_keys: ledger.proving_keys.clone(),
-                    immutable_keys: Arc::new(WalletImmutableKeySet {
-                        key_pair: self.key_pair.clone(),
-                    }),
                     txn_state: TransactionState {
                         validator: ledger.validator.clone(),
 
@@ -2928,6 +3037,7 @@ pub mod test_helpers {
                     auditable_assets: Default::default(),
                     audit_keys: Default::default(),
                     freeze_keys: Default::default(),
+                    user_keys: Default::default(),
                     defined_assets: HashMap::new(),
                 }
             };
@@ -3012,6 +3122,14 @@ pub mod test_helpers {
             Ok(ElaboratedTransaction { txn, proofs })
         }
 
+        async fn register_user_key(&mut self, pub_key: &UserPubKey) -> Result<(), WalletError> {
+            let mut ledger = self.ledger.lock().unwrap();
+            ledger
+                .address_map
+                .insert(pub_key.address(), pub_key.clone());
+            Ok(())
+        }
+
         async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {
             self.ledger.lock().unwrap().submit(txn);
             Ok(())
@@ -3037,7 +3155,7 @@ pub mod test_helpers {
         now: &mut Instant,
     ) -> (
         Arc<SyncMutex<MockLedger<'a>>>,
-        Vec<Wallet<'a, MockWalletBackend<'a>>>,
+        Vec<(Wallet<'a, MockWalletBackend<'a>>, UserAddress)>,
     ) {
         let mut rng = ChaChaRng::from_seed([42u8; 32]);
 
@@ -3147,15 +3265,17 @@ pub mod test_helpers {
                 async move {
                     let mut seed = [0u8; 32];
                     rng.fill_bytes(&mut seed);
-                    Wallet::new(MockWalletBackend {
+                    let mut wallet = Wallet::new(MockWalletBackend {
                         ledger,
                         initial_grants,
                         seed,
                         storage,
-                        key_pair,
+                        key_pair: key_pair.clone(),
                     })
                     .await
-                    .unwrap()
+                    .unwrap();
+                    wallet.add_user_key(key_pair.clone()).await.unwrap();
+                    (wallet, key_pair.address())
                 }
             })
             .collect()
@@ -3290,6 +3410,7 @@ pub mod test_helpers {
         for i in 0..ndefs {
             assets.push(
                 wallets[0]
+                    .0
                     .define_asset(format!("Asset {}", i).as_bytes(), Default::default())
                     .await
                     .unwrap(),
@@ -3301,10 +3422,12 @@ pub mod test_helpers {
                 // can't mint native assets
                 continue;
             }
-            let address = wallets[(owner % nkeys) as usize + 1].address();
+            let minter = wallets[0].1.clone();
+            let address = wallets[(owner % nkeys) as usize + 1].1.clone();
             balances[(owner % nkeys) as usize][asset] += amount;
             wallets[0]
-                .mint(1, &assets[asset - 1].code, amount, address.clone())
+                .0
+                .mint(&minter, 1, &assets[asset - 1].code, amount, address.clone())
                 .await
                 .unwrap();
             push_history(
@@ -3314,6 +3437,7 @@ pub mod test_helpers {
                     time: Local::now(),
                     asset: assets[asset - 1].code,
                     kind: TransactionKind::<AAPLedger>::mint(),
+                    sender: None,
                     receivers: vec![(address, amount)],
                     receipt: None,
                 },
@@ -3329,28 +3453,31 @@ pub mod test_helpers {
         // for the references (it tries to use 'a, which is longer than we want to borrow `wallets`
         // for).
         async fn check_balances<'a>(
-            wallets: &[Wallet<'a, MockWalletBackend<'a>>],
+            wallets: &[(Wallet<'a, MockWalletBackend<'a>>, UserAddress)],
             balances: &[Vec<u64>],
             assets: &[AssetDefinition],
         ) {
             for (i, balance) in balances.iter().enumerate() {
-                let wallet = &wallets[i + 1];
+                let (wallet, address) = &wallets[i + 1];
 
                 // Check native asset balance.
-                assert_eq!(wallet.balance(&AssetCode::native()).await, balance[0]);
+                assert_eq!(
+                    wallet.balance(address, &AssetCode::native()).await,
+                    balance[0]
+                );
                 for (j, asset) in assets.iter().enumerate() {
-                    assert_eq!(wallet.balance(&asset.code).await, balance[j + 1]);
+                    assert_eq!(wallet.balance(address, &asset.code).await, balance[j + 1]);
                 }
             }
         }
         check_balances(&wallets, &balances, &assets).await;
 
         async fn check_histories<'a>(
-            wallets: &[Wallet<'a, MockWalletBackend<'a>>],
+            wallets: &[(Wallet<'a, MockWalletBackend<'a>>, UserAddress)],
             histories: &[Vec<Vec<TransactionHistoryEntry<AAPLedger>>>],
         ) {
             assert_eq!(wallets.len(), histories.len() + 1);
-            for (wallet, history) in wallets.iter().skip(1).zip(histories) {
+            for ((wallet, _), history) in wallets.iter().skip(1).zip(histories) {
                 let mut wallet_history = wallet.transaction_history().await.unwrap();
                 assert_eq!(
                     wallet_history.len(),
@@ -3415,8 +3542,8 @@ pub mod test_helpers {
                 } else {
                     &assets[asset_ix - 1]
                 };
-                let receiver = wallets[receiver_ix + 1].address();
-                let sender_address = wallets[sender_ix + 1].address();
+                let receiver = wallets[receiver_ix + 1].1.clone();
+                let sender_address = wallets[sender_ix + 1].1.clone();
                 let sender_balance = balances[sender_ix][asset_ix];
 
                 let mut amount = if *amount <= sender_balance {
@@ -3443,8 +3570,15 @@ pub mod test_helpers {
                         now.elapsed().as_secs_f32()
                     );
                     now = Instant::now();
-                    wallets[0]
-                        .mint(1, &asset.code, 2 * amount, sender_address.clone())
+                    let (minter, minter_address) = &mut wallets[0];
+                    minter
+                        .mint(
+                            minter_address,
+                            1,
+                            &asset.code,
+                            2 * amount,
+                            sender_address.clone(),
+                        )
                         .await
                         .unwrap();
                     sync(&ledger, &wallets).await;
@@ -3456,7 +3590,8 @@ pub mod test_helpers {
                             time: Local::now(),
                             asset: asset.code,
                             kind: TransactionKind::<AAPLedger>::mint(),
-                            receivers: vec![(sender_address, 2 * amount)],
+                            sender: None,
+                            receivers: vec![(sender_address.clone(), 2 * amount)],
                             receipt: None,
                         },
                     );
@@ -3467,9 +3602,14 @@ pub mod test_helpers {
                 };
 
                 ledger.lock().unwrap().hold_next_transaction();
-                let sender = &mut wallets[sender_ix + 1];
+                let sender = &mut wallets[sender_ix + 1].0;
                 let receipt = match sender
-                    .transfer(&asset.code, &[(receiver.clone(), amount)], 1)
+                    .transfer(
+                        &sender_address,
+                        &asset.code,
+                        &[(receiver.clone(), amount)],
+                        1,
+                    )
                     .await
                 {
                     Ok(receipt) => receipt,
@@ -3493,7 +3633,12 @@ pub mod test_helpers {
 
                             amount = suggested_amount;
                             sender
-                                .transfer(&asset.code, &[(receiver.clone(), amount)], 1)
+                                .transfer(
+                                    &sender_address,
+                                    &asset.code,
+                                    &[(receiver.clone(), amount)],
+                                    1,
+                                )
                                 .await
                                 .unwrap()
                         } else {
@@ -3518,8 +3663,14 @@ pub mod test_helpers {
                         println!("flushing pending blocks to retrieve change");
                         ledger.lock().unwrap().flush();
                         sync(&ledger, &wallets).await;
-                        wallets[sender_ix + 1]
-                            .transfer(&asset.code, &[(receiver.clone(), amount)], 1)
+                        let sender = &mut wallets[sender_ix + 1].0;
+                        sender
+                            .transfer(
+                                &sender_address,
+                                &asset.code,
+                                &[(receiver.clone(), amount)],
+                                1,
+                            )
                             .await
                             .unwrap()
                     }
@@ -3547,6 +3698,7 @@ pub mod test_helpers {
                         time: Local::now(),
                         asset: asset.code,
                         kind: TransactionKind::<AAPLedger>::send(),
+                        sender: Some(sender_address),
                         receivers: vec![(receiver.clone(), amount)],
                         receipt: Some(receipt),
                     },
@@ -3559,6 +3711,7 @@ pub mod test_helpers {
                             time: Local::now(),
                             asset: asset.code,
                             kind: TransactionKind::<AAPLedger>::receive(),
+                            sender: None,
                             receivers: vec![(receiver, amount)],
                             receipt: None,
                         },
@@ -3628,42 +3781,63 @@ mod tests {
             &mut now,
         )
         .await;
-        let alice_address = wallets[0].address();
-        let bob_address = wallets[1].address();
+        let alice_address = wallets[0].1.clone();
+        let bob_address = wallets[1].1.clone();
 
         // Verify initial wallet state.
         assert_ne!(alice_address, bob_address);
-        assert_eq!(wallets[0].balance(&AssetCode::native()).await, alice_grant);
-        assert_eq!(wallets[1].balance(&AssetCode::native()).await, bob_grant);
+        assert_eq!(
+            wallets[0]
+                .0
+                .balance(&alice_address, &AssetCode::native())
+                .await,
+            alice_grant
+        );
+        assert_eq!(
+            wallets[1]
+                .0
+                .balance(&bob_address, &AssetCode::native())
+                .await,
+            bob_grant
+        );
 
         let coin = if native {
             AssetDefinition::native()
         } else {
             let coin = wallets[0]
+                .0
                 .define_asset("Alice's asset".as_bytes(), Default::default())
                 .await
                 .unwrap();
             // Alice gives herself an initial grant of 5 coins.
             wallets[0]
-                .mint(1, &coin.code, 5, alice_address.clone())
+                .0
+                .mint(&alice_address, 1, &coin.code, 5, alice_address.clone())
                 .await
                 .unwrap();
             sync(&ledger, &wallets).await;
             println!("Asset minted: {}s", now.elapsed().as_secs_f32());
             now = Instant::now();
 
-            assert_eq!(wallets[0].balance(&coin.code).await, 5);
-            assert_eq!(wallets[1].balance(&coin.code).await, 0);
+            assert_eq!(wallets[0].0.balance(&alice_address, &coin.code).await, 5);
+            assert_eq!(wallets[1].0.balance(&bob_address, &coin.code).await, 0);
 
             coin
         };
 
-        let alice_initial_native_balance = wallets[0].balance(&AssetCode::native()).await;
-        let bob_initial_native_balance = wallets[1].balance(&AssetCode::native()).await;
+        let alice_initial_native_balance = wallets[0]
+            .0
+            .balance(&alice_address, &AssetCode::native())
+            .await;
+        let bob_initial_native_balance = wallets[1]
+            .0
+            .balance(&bob_address, &AssetCode::native())
+            .await;
 
         // Construct a transaction to transfer some coins from Alice to Bob.
         wallets[0]
-            .transfer(&coin.code, &[(bob_address, 3)], 1)
+            .0
+            .transfer(&alice_address, &coin.code, &[(bob_address.clone(), 3)], 1)
             .await
             .unwrap();
         sync(&ledger, &wallets).await;
@@ -3674,7 +3848,7 @@ mod tests {
         // closure because rust infers the wrong lifetime for the references (it tries to use 'a,
         // which is longer than we want to borrow `wallets` for).
         async fn check_balance<'a>(
-            wallet: &Wallet<'a, MockWalletBackend<'a>>,
+            wallet: &(Wallet<'a, MockWalletBackend<'a>>, UserAddress),
             expected_coin_balance: u64,
             starting_native_balance: u64,
             fees_paid: u64,
@@ -3683,13 +3857,16 @@ mod tests {
         ) {
             if native {
                 assert_eq!(
-                    wallet.balance(&coin.code).await,
+                    wallet.0.balance(&wallet.1, &coin.code).await,
                     expected_coin_balance - fees_paid
                 );
             } else {
-                assert_eq!(wallet.balance(&coin.code).await, expected_coin_balance);
                 assert_eq!(
-                    wallet.balance(&AssetCode::native()).await,
+                    wallet.0.balance(&wallet.1, &coin.code).await,
+                    expected_coin_balance
+                );
+                assert_eq!(
+                    wallet.0.balance(&wallet.1, &AssetCode::native()).await,
                     starting_native_balance - fees_paid
                 );
             }
@@ -3712,7 +3889,8 @@ mod tests {
         // transferred back to Bob, since Bob's only sufficient record has an amount of 3 coins, but
         // the sum of the outputs and fee of this transaction is only 2.
         wallets[1]
-            .transfer(&coin.code, &[(alice_address, 1)], 1)
+            .0
+            .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1)
             .await
             .unwrap();
         sync(&ledger, &wallets).await;
@@ -3802,9 +3980,10 @@ mod tests {
                 .set_freezer_pub_key(freeze_key.pub_key())
                 .reveal_record_opening()
                 .unwrap();
-            wallets[0].add_audit_key(audit_key).await.unwrap();
-            wallets[0].add_freeze_key(freeze_key).await.unwrap();
+            wallets[0].0.add_audit_key(audit_key).await.unwrap();
+            wallets[0].0.add_freeze_key(freeze_key).await.unwrap();
             let asset = wallets[0]
+                .0
                 .define_asset("test asset".as_bytes(), policy)
                 .await
                 .unwrap();
@@ -3815,11 +3994,16 @@ mod tests {
                 // is transferring balance from wallets[0] to wallets[1], so  wallets[0] gets 1
                 // coin. We only need this if the test itself is not minting the asset later on.
                 let dst = if freeze {
-                    wallets[1].address()
+                    wallets[1].1.clone()
                 } else {
-                    wallets[0].address()
+                    wallets[0].1.clone()
                 };
-                wallets[0].mint(1, &asset.code, 1, dst).await.unwrap();
+                let src = wallets[0].1.clone();
+                wallets[0]
+                    .0
+                    .mint(&src, 1, &asset.code, 1, dst)
+                    .await
+                    .unwrap();
                 sync(&ledger, &wallets).await;
             }
 
@@ -3827,9 +4011,11 @@ mod tests {
                 // If doing a timeout test, wallets[2] (the sender that will generate enough
                 // transactions to cause wallets[0]'s transaction to timeout) gets RECORD_HOLD_TIME
                 // coins.
-                let dst = wallets[2].address();
+                let src = wallets[0].1.clone();
+                let dst = wallets[2].1.clone();
                 wallets[0]
-                    .mint(1, &asset.code, RECORD_HOLD_TIME, dst)
+                    .0
+                    .mint(&src, 1, &asset.code, RECORD_HOLD_TIME, dst)
                     .await
                     .unwrap();
                 sync(&ledger, &wallets).await;
@@ -3845,20 +4031,24 @@ mod tests {
         );
         now = Instant::now();
         ledger.lock().unwrap().hold_next_transaction();
-        let receiver = wallets[1].address();
+        let receiver = wallets[1].1.clone();
+        let sender = wallets[0].1.clone();
         if mint {
             wallets[0]
-                .mint(1, &asset.code, 1, receiver.clone())
+                .0
+                .mint(&sender, 1, &asset.code, 1, receiver.clone())
                 .await
                 .unwrap();
         } else if freeze {
             wallets[0]
-                .freeze(1, &asset, 1, receiver.clone())
+                .0
+                .freeze(&sender, 1, &asset, 1, receiver.clone())
                 .await
                 .unwrap();
         } else {
             wallets[0]
-                .transfer(&asset.code, &[(receiver.clone(), 1)], 1)
+                .0
+                .transfer(&sender, &asset.code, &[(receiver.clone(), 1)], 1)
                 .await
                 .unwrap();
         }
@@ -3866,9 +4056,15 @@ mod tests {
         now = Instant::now();
 
         // Check that the sender's balance is on hold (for the fee and the payment).
-        assert_eq!(wallets[0].balance(&AssetCode::native()).await, 0);
+        assert_eq!(
+            wallets[0]
+                .0
+                .balance(&wallets[0].1, &AssetCode::native())
+                .await,
+            0
+        );
         if !freeze {
-            assert_eq!(wallets[0].balance(&asset.code).await, 0);
+            assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 0);
         }
 
         // Now do something that causes the sender's transaction to not go through
@@ -3882,13 +4078,21 @@ mod tests {
             now = Instant::now();
             for _ in 0..RECORD_HOLD_TIME {
                 // Check that the sender's balance is still on hold.
-                assert_eq!(wallets[0].balance(&AssetCode::native()).await, 0);
+                assert_eq!(
+                    wallets[0]
+                        .0
+                        .balance(&wallets[0].1, &AssetCode::native())
+                        .await,
+                    0
+                );
                 if !freeze {
-                    assert_eq!(wallets[0].balance(&asset.code).await, 0);
+                    assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 0);
                 }
 
+                let sender = wallets[2].1.clone();
                 wallets[2]
-                    .transfer(&asset.code, &[(receiver.clone(), 1)], 1)
+                    .0
+                    .transfer(&sender, &asset.code, &[(receiver.clone(), 1)], 1)
                     .await
                     .unwrap();
                 sync(&ledger, &wallets).await;
@@ -3920,16 +4124,28 @@ mod tests {
 
         // Check that the sender got their balance back.
         if native {
-            assert_eq!(wallets[0].balance(&AssetCode::native()).await, 2);
+            assert_eq!(
+                wallets[0]
+                    .0
+                    .balance(&wallets[0].1, &AssetCode::native())
+                    .await,
+                2
+            );
         } else {
-            assert_eq!(wallets[0].balance(&AssetCode::native()).await, 1);
+            assert_eq!(
+                wallets[0]
+                    .0
+                    .balance(&wallets[0].1, &AssetCode::native())
+                    .await,
+                1
+            );
             if !(mint || freeze) {
                 // in the mint and freeze cases, we never had a non-native balance to start with
-                assert_eq!(wallets[0].balance(&asset.code).await, 1);
+                assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 1);
             }
         }
         assert_eq!(
-            wallets[1].balance(&asset.code).await,
+            wallets[1].0.balance(&wallets[1].1, &asset.code).await,
             (if timeout { RECORD_HOLD_TIME } else { 0 }) + (if freeze { 1 } else { 0 })
         );
 
@@ -3940,20 +4156,35 @@ mod tests {
             now.elapsed().as_secs_f32()
         );
         if mint {
-            wallets[0].mint(1, &asset.code, 1, receiver).await.unwrap();
+            wallets[0]
+                .0
+                .mint(&sender, 1, &asset.code, 1, receiver)
+                .await
+                .unwrap();
         } else if freeze {
-            wallets[0].freeze(1, &asset, 1, receiver).await.unwrap();
+            wallets[0]
+                .0
+                .freeze(&sender, 1, &asset, 1, receiver)
+                .await
+                .unwrap();
         } else {
             wallets[0]
-                .transfer(&asset.code, &[(receiver, 1)], 1)
+                .0
+                .transfer(&sender, &asset.code, &[(receiver, 1)], 1)
                 .await
                 .unwrap();
         }
         sync(&ledger, &wallets).await;
-        assert_eq!(wallets[0].balance(&AssetCode::native()).await, 0);
-        assert_eq!(wallets[0].balance(&asset.code).await, 0);
         assert_eq!(
-            wallets[1].balance(&asset.code).await,
+            wallets[0]
+                .0
+                .balance(&wallets[0].1, &AssetCode::native())
+                .await,
+            0
+        );
+        assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 0);
+        assert_eq!(
+            wallets[1].0.balance(&wallets[1].1, &asset.code).await,
             (if timeout { RECORD_HOLD_TIME } else { 0 }) + (if freeze { 0 } else { 1 })
         );
     }
@@ -4029,9 +4260,11 @@ mod tests {
         println!("generating transaction: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
         ledger.lock().unwrap().hold_next_transaction();
-        let receiver = wallets[1].address();
+        let sender = wallets[0].1.clone();
+        let receiver = wallets[1].1.clone();
         wallets[0]
-            .transfer(&AssetCode::native(), &[(receiver.clone(), 1)], 1)
+            .0
+            .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
             .await
             .unwrap();
         println!("transfer generated: {}s", now.elapsed().as_secs_f32());
@@ -4045,8 +4278,10 @@ mod tests {
         );
         now = Instant::now();
         for _ in 0..ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1 {
+            let sender = wallets[2].1.clone();
             wallets[2]
-                .transfer(&AssetCode::native(), &[(receiver.clone(), 1)], 1)
+                .0
+                .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
                 .await
                 .unwrap();
             sync(&ledger, &wallets).await;
@@ -4066,9 +4301,18 @@ mod tests {
         // Wait for the Commit and Memos events after the wallet resubmits.
         ledger.lock().unwrap().flush();
         sync_with(&wallets, ledger_time + 3).await;
-        assert_eq!(wallets[0].balance(&AssetCode::native()).await, 0);
         assert_eq!(
-            wallets[1].balance(&AssetCode::native()).await,
+            wallets[0]
+                .0
+                .balance(&wallets[0].1, &AssetCode::native())
+                .await,
+            0
+        );
+        assert_eq!(
+            wallets[1]
+                .0
+                .balance(&wallets[1].1, &AssetCode::native())
+                .await,
             1 + (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64
         );
 
@@ -4097,22 +4341,34 @@ mod tests {
                 .set_freezer_pub_key(freeze_key.pub_key())
                 .reveal_record_opening()
                 .unwrap();
-            wallets[2].add_audit_key(audit_key).await.unwrap();
-            wallets[2].add_freeze_key(freeze_key).await.unwrap();
+            wallets[2].0.add_audit_key(audit_key).await.unwrap();
+            wallets[2].0.add_freeze_key(freeze_key).await.unwrap();
             let asset = wallets[2]
+                .0
                 .define_asset("test asset".as_bytes(), policy)
                 .await
                 .unwrap();
 
             // wallets[0] gets 1 coin to transfer to wallets[1].
-            let dst = wallets[0].address();
-            wallets[2].mint(1, &asset.code, 1, dst).await.unwrap();
+            let src = wallets[2].1.clone();
+            let dst = wallets[0].1.clone();
+            wallets[2]
+                .0
+                .mint(&src, 1, &asset.code, 1, dst)
+                .await
+                .unwrap();
             sync(&ledger, &wallets).await;
 
             asset
         };
-        assert_eq!(wallets[0].balance(&asset.code).await, 1);
-        assert_eq!(wallets[0].frozen_balance(&asset.code).await, 0);
+        assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 1);
+        assert_eq!(
+            wallets[0]
+                .0
+                .frozen_balance(&wallets[0].1, &asset.code)
+                .await,
+            0
+        );
 
         // Now freeze wallets[0]'s record.
         println!(
@@ -4120,13 +4376,18 @@ mod tests {
             now.elapsed().as_secs_f32()
         );
         now = Instant::now();
-        let dst = wallets[0].address();
+        let src = wallets[2].1.clone();
+        let dst = wallets[0].1.clone();
         ledger.lock().unwrap().hold_next_transaction();
-        wallets[2].freeze(1, &asset, 1, dst.clone()).await.unwrap();
+        wallets[2]
+            .0
+            .freeze(&src, 1, &asset, 1, dst.clone())
+            .await
+            .unwrap();
 
         // Check that, like transfer inputs, freeze inputs are placed on hold and unusable while a
         // freeze that uses them is pending.
-        match wallets[2].freeze(1, &asset, 1, dst).await {
+        match wallets[2].0.freeze(&src, 1, &asset, 1, dst).await {
             Err(WalletError::InsufficientBalance { .. }) => {}
             ret => panic!("expected InsufficientBalance, got {:?}", ret.map(|_| ())),
         }
@@ -4134,14 +4395,25 @@ mod tests {
         // Now go ahead with the original freeze.
         ledger.lock().unwrap().release_held_transaction();
         sync(&ledger, &wallets).await;
-        assert_eq!(wallets[0].balance(&asset.code).await, 0);
-        assert_eq!(wallets[0].frozen_balance(&asset.code).await, 1);
+        assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 0);
+        assert_eq!(
+            wallets[0]
+                .0
+                .frozen_balance(&wallets[0].1, &asset.code)
+                .await,
+            1
+        );
 
         // Check that trying to transfer fails due to frozen balance.
         println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
-        let dst = wallets[1].address();
-        match wallets[0].transfer(&asset.code, &[(dst, 1)], 1).await {
+        let src = wallets[0].1.clone();
+        let dst = wallets[1].1.clone();
+        match wallets[0]
+            .0
+            .transfer(&src, &asset.code, &[(dst, 1)], 1)
+            .await
+        {
             Err(WalletError::InsufficientBalance { .. }) => {
                 println!(
                     "transfer correctly failed due to frozen balance: {}s",
@@ -4158,22 +4430,41 @@ mod tests {
             now.elapsed().as_secs_f32()
         );
         now = Instant::now();
-        let dst = wallets[0].address();
-        wallets[2].unfreeze(1, &asset, 1, dst).await.unwrap();
-        sync(&ledger, &wallets).await;
-        assert_eq!(wallets[0].balance(&asset.code).await, 1);
-        assert_eq!(wallets[0].frozen_balance(&asset.code).await, 0);
-
-        println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
-        let dst = wallets[1].address();
-        let xfr_receipt = wallets[0]
-            .transfer(&asset.code, &[(dst, 1)], 1)
+        let src = wallets[2].1.clone();
+        let dst = wallets[0].1.clone();
+        wallets[2]
+            .0
+            .unfreeze(&src, 1, &asset, 1, dst)
             .await
             .unwrap();
         sync(&ledger, &wallets).await;
-        assert_eq!(wallets[0].balance(&asset.code).await, 0);
-        assert_eq!(wallets[0].frozen_balance(&asset.code).await, 0);
-        assert_eq!(wallets[1].balance(&asset.code).await, 1);
+        assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 1);
+        assert_eq!(
+            wallets[0]
+                .0
+                .frozen_balance(&wallets[0].1, &asset.code)
+                .await,
+            0
+        );
+
+        println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
+        let src = wallets[0].1.clone();
+        let dst = wallets[1].1.clone();
+        let xfr_receipt = wallets[0]
+            .0
+            .transfer(&src, &asset.code, &[(dst, 1)], 1)
+            .await
+            .unwrap();
+        sync(&ledger, &wallets).await;
+        assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 0);
+        assert_eq!(
+            wallets[0]
+                .0
+                .frozen_balance(&wallets[0].1, &asset.code)
+                .await,
+            0
+        );
+        assert_eq!(wallets[1].0.balance(&wallets[1].1, &asset.code).await, 1);
 
         // Check that the history properly accounts for freezes and unfreezes.
         let expected_history = vec![
@@ -4181,28 +4472,32 @@ mod tests {
                 time: Local::now(),
                 asset: asset.code,
                 kind: TransactionKind::<AAPLedger>::mint(),
-                receivers: vec![(wallets[0].address(), 1)],
+                sender: None,
+                receivers: vec![(wallets[0].1.clone(), 1)],
                 receipt: None,
             },
             TransactionHistoryEntry {
                 time: Local::now(),
                 asset: asset.code,
                 kind: TransactionKind::<AAPLedger>::freeze(),
-                receivers: vec![(wallets[0].address(), 1)],
+                sender: None,
+                receivers: vec![(wallets[0].1.clone(), 1)],
                 receipt: None,
             },
             TransactionHistoryEntry {
                 time: Local::now(),
                 asset: asset.code,
                 kind: TransactionKind::<AAPLedger>::unfreeze(),
-                receivers: vec![(wallets[0].address(), 1)],
+                sender: None,
+                receivers: vec![(wallets[0].1.clone(), 1)],
                 receipt: None,
             },
             TransactionHistoryEntry {
                 time: Local::now(),
                 asset: asset.code,
                 kind: TransactionKind::<AAPLedger>::send(),
-                receivers: vec![(wallets[1].address(), 1)],
+                sender: Some(wallets[0].1.clone()),
+                receivers: vec![(wallets[1].1.clone(), 1)],
                 receipt: Some(xfr_receipt),
             },
         ]
@@ -4210,6 +4505,7 @@ mod tests {
         .map(TxnHistoryWithTimeTolerantEq)
         .collect::<Vec<_>>();
         let actual_history = wallets[0]
+            .0
             .transaction_history()
             .await
             .unwrap()

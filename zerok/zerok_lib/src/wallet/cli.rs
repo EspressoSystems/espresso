@@ -13,7 +13,7 @@ use encryption::{Cipher, CipherText};
 use fmt::{Display, Formatter};
 use futures::future::BoxFuture;
 use jf_txn::{
-    keys::{AuditorPubKey, FreezerPubKey, UserKeyPair},
+    keys::{AuditorKeyPair, AuditorPubKey, FreezerKeyPair, FreezerPubKey, UserKeyPair},
     proof::UniversalParam,
     structs::{AssetCode, AssetDefinition, AssetPolicy},
 };
@@ -55,7 +55,6 @@ pub trait CLI<'a> {
 pub trait CLIArgs {
     fn key_gen_path(&self) -> Option<PathBuf>;
     fn storage_path(&self) -> Option<PathBuf>;
-    fn key_path(&self) -> Option<PathBuf>;
     fn interactive(&self) -> bool;
     fn encrypted(&self) -> bool;
     fn use_tmp_storage(&self) -> bool;
@@ -115,7 +114,7 @@ macro_rules! cli_input_from_str {
 }
 
 cli_input_from_str! {
-    bool, u64, String, AssetCode, AuditorPubKey, FreezerPubKey, UserAddress
+    bool, u64, String, AssetCode, AuditorPubKey, FreezerPubKey, UserAddress, PathBuf
 }
 
 impl<'a, C: CLI<'a>, L: Ledger> CLIInput<'a, C> for TransactionReceipt<L> {
@@ -320,15 +319,24 @@ impl<'a, C: CLI<'a>> Listable<'a, C> for AssetCode {
 
 fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
     vec![
-        command!(address, "print the address of this wallet", C, |wallet| {
-            println!("{}", api::UserAddress(wallet.address()));
-        }),
         command!(
-            pub_key,
-            "print the public key of this wallet",
+            address,
+            "print all public addresses of this wallet",
             C,
             |wallet| {
-                println!("{:?}", wallet.pub_key());
+                for pub_key in wallet.pub_keys().await {
+                    println!("{}", api::UserAddress(pub_key.address()));
+                }
+            }
+        ),
+        command!(
+            pub_key,
+            "print all of the public keys of this wallet",
+            C,
+            |wallet| {
+                for pub_key in wallet.pub_keys().await {
+                    println!("{:?}", pub_key);
+                }
             }
         ),
         command!(assets, "list assets known to the wallet", C, |wallet| {
@@ -409,19 +417,26 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
         ),
         command!(
             balance,
-            "print owned balance of asset",
+            "print owned balances of asset",
             C,
             |wallet, asset: ListItem<AssetCode>| {
-                println!("{}", wallet.balance(&asset.item).await);
+                println!("Address Balance");
+                for pub_key in wallet.pub_keys().await {
+                    println!(
+                        "{} {}",
+                        UserAddress(pub_key.address()),
+                        wallet.balance(&pub_key.address(), &asset.item).await
+                    );
+                }
             }
         ),
         command!(
             transfer,
             "transfer some owned assets to another user",
             C,
-            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64; wait: Option<bool>| {
+            |wallet, asset: ListItem<AssetCode>, from: UserAddress, to: UserAddress, amount: u64, fee: u64; wait: Option<bool>| {
                 match wallet
-                    .transfer(&asset.item, &[(address.0, amount)], fee)
+                    .transfer(&from.0, &asset.item, &[(to.0, amount)], fee)
                     .await
                 {
                     Ok(receipt) => {
@@ -471,9 +486,9 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
             mint,
             "mint an asset",
             C,
-            |wallet, asset: ListItem<AssetCode>, address: UserAddress, amount: u64, fee: u64; wait: Option<bool>| {
+            |wallet, asset: ListItem<AssetCode>, from: UserAddress, to: UserAddress, amount: u64, fee: u64; wait: Option<bool>| {
                 match wallet
-                    .mint(fee, &asset.item, amount, address.0)
+                    .mint(&from.0, fee, &asset.item, amount, to.0)
                     .await
                 {
                     Ok(receipt) => {
@@ -504,7 +519,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
             |wallet| {
                 match wallet.transaction_history().await {
                     Ok(txns) => {
-                        println!("Submitted Status Asset Type Receiver Amount ...");
+                        println!("Submitted Status Asset Type Sender Receiver Amount ...");
                         for txn in txns {
                             let status = match &txn.receipt {
                                 Some(receipt) => wallet
@@ -537,7 +552,11 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                             } else {
                                 txn.asset.to_string()
                             };
-                            print!("{} {} {} {} ", txn.time, status, asset, txn.kind);
+                            let sender = match txn.sender {
+                                Some(sender) => UserAddress(sender).to_string(),
+                                None => String::from("unknown"),
+                            };
+                            print!("{} {} {} {} {} ", txn.time, status, asset, txn.kind, sender);
                             for (receiver, amount) in txn.receivers {
                                 print!("{} {} ", UserAddress(receiver), amount);
                             }
@@ -577,7 +596,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
             print_keys::<C>(wallet).await;
         }),
         command!(
-            keygen,
+            gen_key,
             "generate new keys",
             C,
             |wallet, key_type: KeyType| {
@@ -590,7 +609,60 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                         Ok(pub_key) => println!("{}", pub_key),
                         Err(err) => println!("Error generating freeze key: {}", err),
                     },
+                    KeyType::Spend => match wallet.generate_user_key().await {
+                        Ok(pub_key) => println!("{}", UserAddress(pub_key.address())),
+                        Err(err) => println!("Error generating spending key: {}", err),
+                    },
                 }
+            }
+        ),
+        command!(
+            load_key,
+            "load a key from a file",
+            C,
+            |wallet, key_type: KeyType, path: PathBuf| {
+                let mut file = match File::open(path.clone()).context(IoError) {
+                    Ok(file) => file,
+                    Err(err) => {
+                        println!("Error opening file {:?}: {}", path, err);
+                        return;
+                    }
+                };
+                let mut bytes = Vec::new();
+                if let Err(err) = file.read_to_end(&mut bytes).context(IoError) {
+                    println!("Error reading file: {}", err);
+                    return;
+                }
+
+                match key_type {
+                    KeyType::Audit => match bincode::deserialize::<AuditorKeyPair>(&bytes) {
+                        Ok(key) => match wallet.add_audit_key(key.clone()).await {
+                            Ok(()) => println!("{}", key.pub_key()),
+                            Err(err) => println!("Error saving audit key: {}", err),
+                        },
+                        Err(err) => {
+                            println!("Error loading audit key: {}", err);
+                        }
+                    },
+                    KeyType::Freeze => match bincode::deserialize::<FreezerKeyPair>(&bytes) {
+                        Ok(key) => match wallet.add_freeze_key(key.clone()).await {
+                            Ok(()) => println!("{}", key.pub_key()),
+                            Err(err) => println!("Error saving freeze key: {}", err),
+                        },
+                        Err(err) => {
+                            println!("Error loading freeze key: {}", err);
+                        }
+                    },
+                    KeyType::Spend => match bincode::deserialize::<UserKeyPair>(&bytes) {
+                        Ok(key) => match wallet.add_user_key(key.clone()).await {
+                            Ok(()) => println!("{}", UserAddress(key.address())),
+                            Err(err) => println!("Error saving spending key: {}", err),
+                        },
+                        Err(err) => {
+                            println!("Error loading spending key: {}", err);
+                        }
+                    },
+                };
             }
         ),
         command!(
@@ -598,7 +670,10 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
             "print general information about this wallet",
             C,
             |wallet| {
-                println!("Address: {}", api::UserAddress(wallet.address()));
+                println!("Addresses:");
+                for pub_key in wallet.pub_keys().await {
+                    println!("  {}", UserAddress(pub_key.address()));
+                }
                 print_keys::<C>(wallet).await;
             }
         ),
@@ -606,7 +681,10 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
 }
 
 async fn print_keys<'a, C: CLI<'a>>(wallet: &Wallet<'a, C>) {
-    println!("Public key: {}", wallet.pub_key());
+    println!("Public keys:");
+    for key in wallet.pub_keys().await {
+        println!("  {}", key);
+    }
     println!("Audit keys:");
     for key in wallet.auditor_pub_keys().await {
         println!("  {}", key);
@@ -620,6 +698,7 @@ async fn print_keys<'a, C: CLI<'a>>(wallet: &Wallet<'a, C>) {
 enum KeyType {
     Audit,
     Freeze,
+    Spend,
 }
 
 impl<'a, C: CLI<'a>> CLIInput<'a, C> for KeyType {
@@ -627,6 +706,7 @@ impl<'a, C: CLI<'a>> CLIInput<'a, C> for KeyType {
         match s {
             "audit" => Some(Self::Audit),
             "freeze" => Some(Self::Freeze),
+            "spend" => Some(Self::Spend),
             _ => None,
         }
     }
@@ -703,7 +783,6 @@ struct PasswordLoader {
     encrypted: bool,
     dir: PathBuf,
     rng: ChaChaRng,
-    key_pair: Option<UserKeyPair>,
     reader: Reader,
 }
 
@@ -787,10 +866,6 @@ impl WalletLoader for PasswordLoader {
 
         Ok(key)
     }
-
-    fn key_pair(&self) -> Option<UserKeyPair> {
-        self.key_pair.clone()
-    }
 }
 
 pub async fn cli_main<'a, C: CLI<'a>>(args: &'a C::Args) -> Result<(), WalletError> {
@@ -842,21 +917,11 @@ async fn repl<'a, C: CLI<'a>>(args: &'a C::Args) -> Result<(), WalletError> {
     );
     println!("(c) 2021 Translucence Research, Inc.");
 
-    let key_pair = if let Some(path) = args.key_path() {
-        let mut file = File::open(path).context(IoError)?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).context(IoError)?;
-        Some(bincode::deserialize(&bytes).context(BincodeError)?)
-    } else {
-        None
-    };
-
     let reader = Reader::new(args);
     let mut loader = PasswordLoader {
         dir: storage,
         encrypted: args.encrypted(),
         rng: ChaChaRng::from_entropy(),
-        key_pair,
         reader,
     };
     let backend = C::init_backend(&*UNIVERSAL_PARAM, args, &mut loader)?;
