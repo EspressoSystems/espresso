@@ -1,25 +1,28 @@
 use crate::util::arbitrary_wrappers::*;
 use crate::{
+    // key_set::KeySet,
     ledger,
     ledger::traits::{Transaction as _, Validator as _},
-    ser_test, ValidatorState,
+    ser_test,
+    ValidatorState,
 };
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use jf_txn::{
     errors::TxnApiError,
     keys::{AuditorPubKey, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey},
-    proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
+    // proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
     sign_receiver_memos,
     structs::{
         AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FreezeFlag, Nullifier,
         ReceiverMemo, RecordCommitment, RecordOpening,
     },
-    transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness, MerkleTree, Signature,
+    // transfer::{TransferNote, TransferNoteInput},
+    AccMemberWitness,
+    MerkleTree,
+    Signature,
 };
 use jf_utils::tagged_blob;
-use key_set::KeySet;
 use ledger::*;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
@@ -788,7 +791,7 @@ impl<L: Ledger> TransactionState<L> {
         description: &'b [u8],
         policy: AssetPolicy,
     ) -> Result<(AssetCodeSeed, AssetCode, AssetDefinition), TransactionError> {
-        let seed = AssetCodeSeed::generate(&mut rng);
+        let seed = AssetCodeSeed::generate(rng);
         let code = AssetCode::new(seed, description);
         let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
         Ok((seed, code, asset_definition))
@@ -859,7 +862,6 @@ impl<L: Ledger> TransactionState<L> {
         &mut self,
         txn: &Transaction<L>,
         res: &Option<CommittedTxn<'t>>,
-        freezer_key_pair: &FreezerKeyPair,
     ) -> Option<PendingTransaction<L>> {
         let now = self.validator.now();
 
@@ -883,20 +885,6 @@ impl<L: Ledger> TransactionState<L> {
                 } else {
                     // This isn't even our transaction.
                     assert!(!record.on_hold(now));
-                }
-            }
-        }
-
-        // If this was a successful transaction, add all of its frozen/unfrozen outputs to our
-        // freezable database (for freeze/unfreeze transactions).
-        if let Some((block_id, txn_id, uids)) = res {
-            if let Some(pending) = &pending {
-                // the first uid corresponds to the fee change output, which is not one of the
-                // `freeze_outputs`, so we skip that one
-                for ((uid, remember), ro) in uids.iter_mut().skip(1).zip(&pending.freeze_outputs) {
-                    self.records
-                        .insert_freezable(ro.clone(), *uid, freezer_key_pair);
-                    *remember = true;
                 }
             }
         }
@@ -966,7 +954,7 @@ impl<L: Ledger> TransactionState<L> {
         })
     }
 
-    fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
+    pub fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
         // The wallet never needs a Merkle proof that isn't guaranteed to already be in the Merkle
         // tree, so this unwrap() should never fail.
         AccMemberWitness::lookup_from_tree(&self.record_mt, leaf)

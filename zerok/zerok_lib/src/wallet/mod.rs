@@ -757,16 +757,23 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         txn: &Transaction<L>,
         res: Option<CommittedTxn<'t>>,
     ) -> Option<PendingTransaction<L>> {
-        let pending = self.txn_state.clear_pending_transaction(
-            txn,
-            &res,
-            &self.immutable_keys.freezer_key_pair,
-        );
+        let pending = self.txn_state.clear_pending_transaction(txn, &res);
 
-        // TODO keyao! Handle memo posting in TransactionState?
-        // If this was a successful transaction, post its receiver memos.
+        // TODO keyao! Handle database update and memo posting in TransactionState?
+        // If this was a successful transaction, add all of its frozen/unfrozen outputs to our
+        // freezable database (for freeze/unfreeze transactions) and post its receiver memos.
         if let Some((block_id, txn_id, uids)) = res {
             if let Some(pending) = &pending {
+                // the first uid corresponds to the fee change output, which is not one of the
+                // `freeze_outputs`, so we skip that one
+                for ((uid, remember), ro) in uids.iter_mut().skip(1).zip(&pending.freeze_outputs) {
+                    self.txn_state.records.insert_freezable(
+                        ro.clone(),
+                        *uid,
+                        &self.immutable_keys.freezer_key_pair,
+                    );
+                    *remember = true;
+                }
                 if let Err(err) = session
                     .backend
                     .post_memos(
@@ -984,7 +991,12 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let receivers = iter(receivers)
             .then(|(addr, amt)| {
                 let session = &session;
-                async move { Ok((session.backend.get_public_key(addr).await?, *amt)) }
+                async move {
+                    Ok::<(UserPubKey, u64), WalletError>((
+                        session.backend.get_public_key(addr).await?,
+                        *amt,
+                    ))
+                }
             })
             .try_collect::<Vec<_>>()
             .await?;
