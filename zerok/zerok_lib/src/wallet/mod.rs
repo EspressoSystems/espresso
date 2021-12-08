@@ -2026,13 +2026,13 @@ pub mod test_helpers {
     use super::*;
     use crate::{
         node, Block, ElaboratedBlock, ElaboratedTransaction, SetMerkleProof, SetMerkleTree,
-        TransactionVerifyingKey, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
+        TransactionVerifyingKey, ValidatorState, VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
     };
     use futures::channel::mpsc as channel;
     use futures::future;
     use itertools::izip;
     use jf_txn::MerkleTree;
-    use phaselock::traits::state::State;
+    use phaselock::traits::State;
     use phaselock::BlockContents;
     use rand_chacha::rand_core::RngCore;
     use std::iter::once;
@@ -2889,6 +2889,7 @@ pub mod test_helpers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ValidatorState;
     use async_std::task::block_on;
     use jf_txn::NodeValue;
     use proptest::collection::vec;

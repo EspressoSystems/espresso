@@ -398,10 +398,10 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::txn_builder::{PendingTransaction, TransactionUID};
     use crate::{
-        ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, VerifierKeySet,
-        MERKLE_HEIGHT, UNIVERSAL_PARAM,
+        txn_builder::{PendingTransaction, TransactionUID},
+        ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, ValidatorState,
+        VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
     };
     use jf_txn::{KeyPair, MerkleTree, TransactionVerifyingKey};
     use phaselock::H_256;

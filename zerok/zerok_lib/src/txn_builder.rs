@@ -720,7 +720,7 @@ impl From<AssetDefinition> for AssetInfo {
 // how long (in number of validator states) a record used as an input to an unconfirmed transaction
 // should be kept on hold before the transaction is considered timed out. This should be the number
 // of validator states after which the transaction's proof can no longer be verified.
-const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
+pub const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
 // (block_id, txn_id, [(uid, remember)])
 pub type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
 
