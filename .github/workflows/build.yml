@@ -36,3 +36,4 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --release
+        timeout-minutes: 30
