@@ -13,8 +13,8 @@ use jf_txn::{
     proof::transfer::TransferProvingKey,
     sign_receiver_memos,
     structs::{
-        AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FreezeFlag, Nullifier,
-        ReceiverMemo, RecordCommitment, RecordOpening,
+        AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FeeInput, FreezeFlag, Nullifier,
+        ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
     AccMemberWitness, MerkleTree, Signature,
@@ -935,6 +935,23 @@ impl<L: Ledger> TransactionState<L> {
         })
     }
 
+    /// find a record and corresponding uid on the native asset type with enough
+    /// funds to pay transaction fee
+    pub fn find_native_record_for_fee(
+        &self,
+        owner: &UserPubKey,
+        fee: u64,
+    ) -> Result<(RecordOpening, u64), TransactionError> {
+        self.find_records(
+            &AssetCode::native(),
+            owner,
+            FreezeFlag::Unfrozen,
+            fee,
+            Some(1),
+        )
+        .map(|(ros, _change)| ros.into_iter().next().unwrap())
+    }
+
     pub fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
         // The wallet never needs a Merkle proof that isn't guaranteed to already be in the Merkle
         // tree, so this unwrap() should never fail.
@@ -944,7 +961,7 @@ impl<L: Ledger> TransactionState<L> {
             .1
     }
 
-    pub async fn transfer_native<'a, 'k>(
+    pub fn transfer_native<'a, 'k>(
         &mut self,
         owner_keypair: &UserKeyPair,
         proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
@@ -1037,6 +1054,117 @@ impl<L: Ledger> TransactionState<L> {
         Ok((note, recv_memos, sig))
     }
 
+    pub fn transfer_non_native<'a, 'k>(
+        &mut self,
+        asset: &AssetCode,
+        owner_keypair: &UserKeyPair,
+        proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
+        receivers: &[(UserPubKey, u64)],
+        fee: u64,
+        rng: &mut ChaChaRng,
+    ) -> Result<(TransferNote, Vec<ReceiverMemo>, Signature), TransactionError> {
+        assert_ne!(
+            *asset,
+            AssetCode::native(),
+            "call `transfer_native()` instead"
+        );
+        let total_output_amount: u64 = receivers.iter().fold(0, |sum, (_, amount)| sum + *amount);
+
+        // find input records of the asset type to spend (this does not include the fee input)
+        let (input_records, change) = self.find_records(
+            asset,
+            &owner_keypair.pub_key(),
+            FreezeFlag::Unfrozen,
+            total_output_amount,
+            None,
+        )?;
+        let asset = input_records[0].0.asset_def.clone();
+
+        // prepare inputs
+        let mut inputs = vec![];
+        for (ro, uid) in input_records.into_iter() {
+            let witness = self.get_merkle_proof(uid);
+            inputs.push(TransferNoteInput {
+                ro,
+                acc_member_witness: witness,
+                owner_keypair,
+                cred: None, // TODO support credentials
+            })
+        }
+
+        // prepare outputs, excluding fee change (which will be automatically generated)
+        let mut outputs = vec![];
+        for (pub_key, amount) in receivers {
+            outputs.push(RecordOpening::new(
+                rng,
+                *amount,
+                asset.clone(),
+                pub_key.clone(),
+                FreezeFlag::Unfrozen,
+            ));
+        }
+        // change in the asset type being transfered (not fee change)
+        if change > 0 {
+            let me = owner_keypair.pub_key();
+            let change_ro =
+                RecordOpening::new(rng, change, asset.clone(), me, FreezeFlag::Unfrozen);
+            outputs.push(change_ro);
+        }
+
+        let (fee_ro, fee_uid) = self.find_native_record_for_fee(&owner_keypair.pub_key(), fee)?;
+        let fee_input = FeeInput {
+            ro: fee_ro,
+            acc_member_witness: self.get_merkle_proof(fee_uid),
+            owner_keypair,
+        };
+
+        // find a proving key which can handle this transaction size
+        let (proving_key, dummy_inputs) = Self::xfr_proving_key(
+            rng,
+            owner_keypair.pub_key(),
+            proving_keys,
+            &asset,
+            &mut inputs,
+            &mut outputs,
+            change > 0,
+        )?;
+        // pad with dummy inputs if necessary
+        let rng = rng;
+        let dummy_inputs = (0..dummy_inputs)
+            .map(|_| RecordOpening::dummy(rng, FreezeFlag::Unfrozen))
+            .collect::<Vec<_>>();
+        for (ro, owner_keypair) in &dummy_inputs {
+            let dummy_input = TransferNoteInput {
+                ro: ro.clone(),
+                acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
+                owner_keypair,
+                cred: None,
+            };
+            inputs.push(dummy_input);
+        }
+
+        // generate transfer note and receiver memos
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(rng, fee_input, fee).unwrap();
+        let (note, sig_key) = TransferNote::generate_non_native(
+            rng,
+            inputs,
+            &outputs,
+            fee_info,
+            UNEXPIRED_VALID_UNTIL,
+            proving_key,
+            vec![],
+        )
+        .context(CryptoError)?;
+        let recv_memos = vec![&fee_out_rec]
+            .into_iter()
+            .chain(outputs.iter())
+            .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
+        Ok((note, recv_memos, sig))
+    }
+
     // Find a proving key large enough to prove the given transaction, returning the number of dummy
     // inputs needed to pad the transaction.
     //
@@ -1118,150 +1246,6 @@ impl<L: Ledger> TransactionState<L> {
         let dummy_inputs = key_inputs.saturating_sub(num_inputs);
         Ok((proving_key, dummy_inputs))
     }
-
-    // async fn transfer_non_native(
-    //     &mut self,
-    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-    //     asset: &AssetCode,
-    //     receivers: &[(UserPubKey, u64)],
-    //     fee: u64,
-    // ) -> Result<TransactionReceipt<L>, WalletError> {
-    //     assert_ne!(
-    //         *asset,
-    //         AssetCode::native(),
-    //         "call `transfer_native()` instead"
-    //     );
-    //     let total_output_amount: u64 = receivers.iter().fold(0, |sum, (_, amount)| sum + *amount);
-
-    //     // find input records of the asset type to spend (this does not include the fee input)
-    //     let (input_records, change) = self.find_records(
-    //         asset,
-    //         &self.pub_key(),
-    //         FreezeFlag::Unfrozen,
-    //         total_output_amount,
-    //         None,
-    //     )?;
-    //     let asset = input_records[0].0.asset_def.clone();
-
-    //     // prepare inputs
-    //     let mut inputs = vec![];
-    //     for (ro, uid) in input_records.into_iter() {
-    //         let witness = self.get_merkle_proof(uid);
-    //         inputs.push(TransferNoteInput {
-    //             ro,
-    //             acc_member_witness: witness,
-    //             owner_keypair: &self.immutable_keys.key_pair,
-    //             cred: None, // TODO support credentials
-    //         })
-    //     }
-
-    //     // prepare outputs, excluding fee change (which will be automatically generated)
-    //     let mut outputs = vec![];
-    //     for (pub_key, amount) in receivers {
-    //         outputs.push(RecordOpening::new(
-    //             &mut session.rng,
-    //             *amount,
-    //             asset.clone(),
-    //             pub_key.clone(),
-    //             FreezeFlag::Unfrozen,
-    //         ));
-    //     }
-    //     // change in the asset type being transfered (not fee change)
-    //     if change > 0 {
-    //         let me = self.pub_key();
-    //         let change_ro = RecordOpening::new(
-    //             &mut session.rng,
-    //             change,
-    //             asset.clone(),
-    //             me,
-    //             FreezeFlag::Unfrozen,
-    //         );
-    //         outputs.push(change_ro);
-    //     }
-
-    //     let (fee_ro, fee_uid) = self.find_native_record_for_fee(fee)?;
-    //     let fee_input = FeeInput {
-    //         ro: fee_ro,
-    //         acc_member_witness: self.get_merkle_proof(fee_uid),
-    //         owner_keypair: &self.immutable_keys.key_pair,
-    //     };
-
-    //     // find a proving key which can handle this transaction size
-    //     let (proving_key, dummy_inputs) = Self::xfr_proving_key(
-    //         &mut session.rng,
-    //         self.immutable_keys.key_pair.pub_key(),
-    //         &self.proving_keys.xfr,
-    //         &asset,
-    //         &mut inputs,
-    //         &mut outputs,
-    //         change > 0,
-    //     )?;
-    //     // pad with dummy inputs if necessary
-    //     let rng = &mut session.rng;
-    //     let dummy_inputs = (0..dummy_inputs)
-    //         .map(|_| RecordOpening::dummy(rng, FreezeFlag::Unfrozen))
-    //         .collect::<Vec<_>>();
-    //     for (ro, owner_keypair) in &dummy_inputs {
-    //         let dummy_input = TransferNoteInput {
-    //             ro: ro.clone(),
-    //             acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
-    //             owner_keypair,
-    //             cred: None,
-    //         };
-    //         inputs.push(dummy_input);
-    //     }
-
-    //     // generate transfer note and receiver memos
-    //     let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut session.rng, fee_input, fee).unwrap();
-    //     let (note, sig_key) = TransferNote::generate_non_native(
-    //         &mut session.rng,
-    //         inputs,
-    //         &outputs,
-    //         fee_info,
-    //         UNEXPIRED_VALID_UNTIL,
-    //         proving_key,
-    //         vec![],
-    //     )
-    //     .context(CryptoError)?;
-    //     let recv_memos = vec![&fee_out_rec]
-    //         .into_iter()
-    //         .chain(outputs.iter())
-    //         .map(|r| ReceiverMemo::from_ro(&mut session.rng, r, &[]))
-    //         .collect::<Result<Vec<_>, _>>()
-    //         .unwrap();
-    //     let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
-    //     self.submit_transaction(
-    //         session,
-    //         TransactionNote::Transfer(Box::new(note)),
-    //         recv_memos,
-    //         sig,
-    //         vec![],
-    //     )
-    //     .await
-    // }
-
-    // pub async fn transfer(
-    //     &mut self,
-    //     session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-    //     asset: &AssetCode,
-    //     receivers: &[(UserAddress, u64)],
-    //     fee: u64,
-    // ) -> Result<TransactionReceipt<L>, WalletError> {
-    //     let receivers = iter(receivers)
-    //         .then(|(addr, amt)| {
-    //             let session = &session;
-    //             async move { Ok((session.backend.get_public_key(addr).await?, *amt)) }
-    //         })
-    //         .try_collect::<Vec<_>>()
-    //         .await?;
-
-    //     if *asset == AssetCode::native() {
-    //         self.transfer_native(session, &receivers, fee).await
-    //     } else {
-    //         self.transfer_non_native(session, asset, &receivers, fee)
-    //             .await
-    //     }
-    // }
 
     // pub async fn mint(
     //     &mut self,
@@ -1441,19 +1425,6 @@ impl<L: Ledger> TransactionState<L> {
     //         outputs,
     //     )
     //     .await
-    // }
-
-    // /// find a record and corresponding uid on the native asset type with enough
-    // /// funds to pay transaction fee
-    // fn find_native_record_for_fee(&self, fee: u64) -> Result<(RecordOpening, u64), WalletError> {
-    //     self.find_records(
-    //         &AssetCode::native(),
-    //         &self.pub_key(),
-    //         FreezeFlag::Unfrozen,
-    //         fee,
-    //         Some(1),
-    //     )
-    //     .map(|(ros, _change)| ros.into_iter().next().unwrap())
     // }
 
     // fn freeze_proving_key<'k>(
