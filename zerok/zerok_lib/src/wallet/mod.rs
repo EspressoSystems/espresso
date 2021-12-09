@@ -59,22 +59,11 @@ use std::sync::Arc;
 #[derive(Debug, Snafu)]
 #[snafu(visibility = "pub")]
 pub enum WalletError {
-    InsufficientBalance {
-        asset: AssetCode,
-        required: u64,
-        actual: u64,
-    },
     Fragmentation {
         asset: AssetCode,
         amount: u64,
         suggested_amount: u64,
         max_records: usize,
-    },
-    TooManyOutputs {
-        asset: AssetCode,
-        max_records: usize,
-        num_receivers: usize,
-        num_change_records: usize,
     },
     UndefinedAsset {
         asset: AssetCode,
@@ -3189,7 +3178,9 @@ pub mod test_helpers {
                             continue;
                         }
                     }
-                    Err(WalletError::InsufficientBalance { .. }) => {
+                    Err(WalletError::TransactionError {
+                        source: TransactionError::InsufficientBalance { .. },
+                    }) => {
                         // We should always have enough balance to make the transaction, because we
                         // adjusted the transaction amount (and potentially minted more of the
                         // asset) above, so that the transaction is covered by our most up-to-date
