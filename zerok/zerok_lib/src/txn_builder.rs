@@ -4,7 +4,7 @@ use crate::{
     ledger,
     ledger::traits::{Transaction as _, Validator as _},
     ser_test,
-    ValidatorState,
+    state::ValidatorState,
 };
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
@@ -795,26 +795,6 @@ impl<L: Ledger> TransactionState<L> {
         let code = AssetCode::new(seed, description);
         let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
         Ok((seed, code, asset_definition))
-    }
-
-    /// Use `audit_asset` to start auditing transactions with a given asset type, when the asset
-    /// type was defined by someone else and sent to us out of band.
-    ///
-    /// Auditing of assets created by this user with an appropriate asset policy begins
-    /// automatically. Calling this function is unnecessary.
-    pub async fn audit_asset(
-        &mut self,
-        auditor_pub_key: AuditorPubKey,
-        asset: &AssetDefinition,
-    ) -> Result<(), TransactionError> {
-        let asset_key = asset.policy_ref().auditor_pub_key();
-        if auditor_pub_key != *asset_key {
-            return Err(TransactionError::InvalidAuditorKey {
-                my_key: auditor_pub_key,
-                asset_key: asset_key.clone(),
-            });
-        }
-        Ok(())
     }
 
     pub fn add_pending_transaction(

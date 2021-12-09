@@ -1,9 +1,11 @@
 use crate::full_persistence::FullPersistence;
-pub use crate::state_comm::LedgerStateCommitment;
+pub use crate::state::state_comm::LedgerStateCommitment;
 use crate::util::arbitrary_wrappers::*;
 use crate::{
-    ledger, ser_test, set_merkle_tree::*, validator_node::*, ElaboratedBlock,
-    ElaboratedTransaction, ValidationError, ValidatorState,
+    ledger, ser_test,
+    set_merkle_tree::*,
+    state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
+    validator_node::*,
 };
 use arbitrary::Arbitrary;
 use async_executors::exec::AsyncStd;
@@ -172,8 +174,12 @@ pub enum LedgerEvent<L: Ledger = AAPLedger> {
     /// For each UTXO corresponding to the posted memos, includes the memo, the record commitment,
     /// the unique identifier for the record, and a proof that the record commitment exists in the
     /// current UTXO set.
+    ///
+    /// If these memos correspond to a committed transaction, the (block_id, transaction_id) are
+    /// included in `transaction`.
     Memos {
         outputs: Vec<(ReceiverMemo, RecordCommitment, u64, MerklePath)>,
+        transaction: Option<(u64, u64)>,
     },
 }
 
@@ -652,6 +658,7 @@ impl FullState {
                 merkle_paths
             )
             .collect(),
+            transaction: Some((block_id as u64, txn_id as u64)),
         };
         self.send_event(event);
 
@@ -773,6 +780,7 @@ impl<'a> PhaseLockQueryService<'a> {
                             .collect::<Vec<_>>();
                         state.send_event(LedgerEvent::Memos {
                             outputs: izip!(memos, comms, uids, merkle_paths).collect(),
+                            transaction: None,
                         });
                     }
 
@@ -1029,7 +1037,10 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo, UNIVERSAL_PARAM};
+    use crate::{
+        testing::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo},
+        universal_params::UNIVERSAL_PARAM,
+    };
     use async_std::task::block_on;
     use jf_primitives::jubjub_dsa::KeyPair;
     use jf_txn::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
@@ -1265,7 +1276,7 @@ mod tests {
                         .await
                         .unwrap();
                     match events.next().await.unwrap() {
-                        LedgerEvent::Memos { outputs } => {
+                        LedgerEvent::Memos { outputs, .. } => {
                             // After successfully posting memos, we should get a Memos event.
                             for ((memo, comm, uid, merkle_path), (expected_memo, expected_comm)) in
                                 outputs

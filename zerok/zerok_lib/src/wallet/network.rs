@@ -3,20 +3,20 @@ use super::{
     ClientConfigError, CryptoError, WalletBackend, WalletError, WalletImmutableKeySet, WalletState,
 };
 use crate::api;
-use crate::key_set::SizedKey;
 use crate::ledger::AAPLedger;
 use crate::node;
 use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
+use crate::state::key_set::SizedKey;
+use crate::state::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
 use crate::txn_builder::TransactionState;
-use crate::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
-use api::{client::*, BlockId, ClientError, FromError, TransactionId};
+use api::{client::*, BlockId, ClientError, CommittedTransaction, FromError, TransactionId};
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
 use futures::future::ready;
 use futures::prelude::*;
-use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey};
+use jf_txn::keys::{UserAddress, UserKeyPair, UserPubKey};
 use jf_txn::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
 use jf_txn::structs::{Nullifier, ReceiverMemo};
 use jf_txn::Signature;
@@ -179,8 +179,6 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                     .key_pair
                     .clone()
                     .unwrap_or_else(|| UserKeyPair::generate(&mut rng)),
-                auditor_key_pair: AuditorKeyPair::generate(&mut rng),
-                freezer_key_pair: FreezerKeyPair::generate(&mut rng),
             }),
             txn_state: TransactionState {
                 validator,
@@ -194,6 +192,8 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                 transactions: Default::default(),
             },
             auditable_assets: Default::default(),
+            audit_keys: Default::default(),
+            freeze_keys: Default::default(),
             defined_assets: Default::default(),
         };
         self.storage().await.create(&state).await?;
@@ -264,6 +264,17 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
             set.remember(nullifier, proof.clone()).unwrap();
             Ok((spent, proof))
         }
+    }
+
+    async fn get_transaction(
+        &self,
+        txn_id: u64,
+        block_id: u64,
+    ) -> Result<ElaboratedTransaction, WalletError> {
+        let txn_id = TransactionId(BlockId(block_id as usize), txn_id as usize);
+        let CommittedTransaction { data, proofs, .. } =
+            self.get(format!("/gettransaction/{}", txn_id)).await?;
+        Ok(ElaboratedTransaction { txn: data, proofs })
     }
 
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {

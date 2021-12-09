@@ -1,11 +1,11 @@
-use crate::{
+use crate::state::{
     state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction,
     ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use jf_txn::{structs::Nullifier, TransactionNote};
-use serde::{de::DeserializeOwned, Serialize};
-use std::fmt::Debug;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
 pub mod traits {
@@ -25,6 +25,17 @@ pub mod traits {
         ) -> Result<(), Self::Proof>;
     }
 
+    pub trait TransactionKind:
+        Clone + Debug + Display + PartialEq + Eq + Hash + Serialize + DeserializeOwned + Send + Sync
+    {
+        fn send() -> Self;
+        fn receive() -> Self;
+        fn mint() -> Self;
+        fn freeze() -> Self;
+        fn unfreeze() -> Self;
+        fn unknown() -> Self;
+    }
+
     pub trait Transaction: Clone + Debug + Serialize + DeserializeOwned + Send + Sync {
         type NullifierSet: NullifierSet;
         type Hash: Clone
@@ -37,6 +48,7 @@ pub mod traits {
             + DeserializeOwned
             + CanonicalSerialize
             + CanonicalDeserialize;
+        type Kind: TransactionKind;
         fn new(
             note: TransactionNote,
             proofs: Vec<<Self::NullifierSet as NullifierSet>::Proof>,
@@ -44,6 +56,7 @@ pub mod traits {
         fn note(&self) -> &TransactionNote;
         fn proofs(&self) -> Vec<<Self::NullifierSet as NullifierSet>::Proof>;
         fn hash(&self) -> Self::Hash;
+        fn kind(&self) -> Self::Kind;
 
         fn set_proofs(&mut self, proofs: Vec<<Self::NullifierSet as NullifierSet>::Proof>) {
             *self = Self::new(self.note().clone(), proofs);
@@ -79,6 +92,7 @@ pub type StateCommitment<L> = <Validator<L> as traits::Validator>::StateCommitme
 pub type Block<L> = <Validator<L> as traits::Validator>::Block;
 pub type Transaction<L> = <Block<L> as traits::Block>::Transaction;
 pub type TransactionHash<L> = <Transaction<L> as traits::Transaction>::Hash;
+pub type TransactionKind<L> = <Transaction<L> as traits::Transaction>::Kind;
 pub type NullifierSet<L> = <Transaction<L> as traits::Transaction>::NullifierSet;
 pub type NullifierProof<L> = <NullifierSet<L> as traits::NullifierSet>::Proof;
 
@@ -117,9 +131,46 @@ impl traits::NullifierSet for SetMerkleTree {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum_macros::Display)]
+pub enum AAPTransactionKind {
+    Mint,
+    Freeze,
+    Unfreeze,
+    Send,
+    Receive,
+    Unknown,
+}
+
+impl traits::TransactionKind for AAPTransactionKind {
+    fn send() -> Self {
+        Self::Send
+    }
+
+    fn receive() -> Self {
+        Self::Receive
+    }
+
+    fn mint() -> Self {
+        Self::Mint
+    }
+
+    fn freeze() -> Self {
+        Self::Freeze
+    }
+
+    fn unfreeze() -> Self {
+        Self::Unfreeze
+    }
+
+    fn unknown() -> Self {
+        Self::Unknown
+    }
+}
+
 impl traits::Transaction for ElaboratedTransaction {
     type NullifierSet = SetMerkleTree;
     type Hash = ElaboratedTransactionHash;
+    type Kind = AAPTransactionKind;
 
     fn new(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
         Self { txn: note, proofs }
@@ -134,7 +185,15 @@ impl traits::Transaction for ElaboratedTransaction {
     }
 
     fn hash(&self) -> Self::Hash {
-        self.hash()
+        self.etxn_hash()
+    }
+
+    fn kind(&self) -> Self::Kind {
+        match &self.txn {
+            TransactionNote::Mint(_) => AAPTransactionKind::Mint,
+            TransactionNote::Transfer(_) => AAPTransactionKind::Send,
+            TransactionNote::Freeze(_) => AAPTransactionKind::Freeze,
+        }
     }
 
     fn set_proofs(&mut self, proofs: Vec<SetMerkleProof>) {
@@ -149,7 +208,7 @@ impl traits::Block for ElaboratedBlock {
         let (txns, proofs): (Vec<TransactionNote>, Vec<_>) =
             txns.into_iter().map(|txn| (txn.txn, txn.proofs)).unzip();
         Self {
-            block: crate::Block(txns),
+            block: crate::state::Block(txns),
             proofs,
         }
     }

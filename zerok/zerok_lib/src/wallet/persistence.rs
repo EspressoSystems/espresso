@@ -1,9 +1,9 @@
-use crate::key_set::OrderByOutputs;
 use crate::ledger::*;
 use crate::node::MerkleTreeWithArbitrary;
+use crate::state::key_set::OrderByOutputs;
+use crate::state::ProverKeySet;
 use crate::txn_builder::TransactionState;
 use crate::wallet::*;
-use crate::ProverKeySet;
 use async_std::sync::Arc;
 use atomic_store::{
     error::PersistenceError,
@@ -179,6 +179,10 @@ pub struct AtomicWalletStorage<'a, L: Ledger, Meta: Serialize + DeserializeOwned
     auditable_assets_dirty: bool,
     defined_assets: AppendLog<EncryptingResourceAdapter<(AssetDefinition, AssetCodeSeed, Vec<u8>)>>,
     defined_assets_dirty: bool,
+    txn_history: AppendLog<EncryptingResourceAdapter<TransactionHistoryEntry<L>>>,
+    txn_history_dirty: bool,
+    keys: AppendLog<EncryptingResourceAdapter<RoleKeyPair>>,
+    keys_dirty: bool,
 }
 
 impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStorage<'a, L, Meta> {
@@ -220,6 +224,10 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
         let defined_assets =
             AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_def", 1024)
                 .context(PersistenceError)?;
+        let txn_history = AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_txns", 1024)
+            .context(PersistenceError)?;
+        let keys = AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_keys", 1024)
+            .context(PersistenceError)?;
         let store = AtomicStore::open(atomic_loader).context(PersistenceError)?;
 
         Ok(Self {
@@ -235,6 +243,10 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
             auditable_assets_dirty: false,
             defined_assets,
             defined_assets_dirty: false,
+            txn_history,
+            txn_history_dirty: false,
+            keys,
+            keys_dirty: false,
         })
     }
 
@@ -267,6 +279,20 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
                 Err(err)
             }
         }
+    }
+
+    fn load_keys<K: KeyPair>(&self) -> HashMap<K::PubKey, K> {
+        self.keys
+            .iter()
+            .filter_map(|res| {
+                res.ok()
+                    // Convert from type-erased RoleKey to strongly typed key, filtering out
+                    // RoleKeys of the wrong type.
+                    .and_then(|role_key| K::try_from(role_key).ok())
+                    // Convert to (pub_key, key_pair) mapping.
+                    .map(|key| (key.pub_key(), key))
+            })
+            .collect()
     }
 }
 
@@ -304,6 +330,8 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
                 .iter()
                 .filter_map(|res| res.map(|def| (def.code, def)).ok())
                 .collect(),
+            audit_keys: self.load_keys(),
+            freeze_keys: self.load_keys(),
             defined_assets: self
                 .defined_assets
                 .iter()
@@ -331,6 +359,12 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         Ok(())
     }
 
+    async fn store_key(&mut self, key: &RoleKeyPair) -> Result<(), WalletError> {
+        self.keys.store_resource(key).context(PersistenceError)?;
+        self.keys_dirty = true;
+        Ok(())
+    }
+
     async fn store_defined_asset(
         &mut self,
         asset: &AssetDefinition,
@@ -342,6 +376,26 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
             .context(PersistenceError)?;
         self.defined_assets_dirty = true;
         Ok(())
+    }
+
+    async fn store_transaction(
+        &mut self,
+        txn: TransactionHistoryEntry<L>,
+    ) -> Result<(), WalletError> {
+        self.txn_history
+            .store_resource(&txn)
+            .context(PersistenceError)?;
+        self.txn_history_dirty = true;
+        Ok(())
+    }
+
+    async fn transaction_history(
+        &mut self,
+    ) -> Result<Vec<TransactionHistoryEntry<L>>, WalletError> {
+        self.txn_history
+            .iter()
+            .map(|res| res.context(PersistenceError))
+            .collect()
     }
 
     async fn commit(&mut self) {
@@ -375,6 +429,18 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
             } else {
                 self.defined_assets.skip_version().unwrap();
             }
+
+            if self.txn_history_dirty {
+                self.txn_history.commit_version().unwrap();
+            } else {
+                self.txn_history.skip_version().unwrap();
+            }
+
+            if self.keys_dirty {
+                self.keys.commit_version().unwrap();
+            } else {
+                self.keys.skip_version().unwrap();
+            }
         }
 
         self.store.commit_version().unwrap();
@@ -384,6 +450,8 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         self.dynamic_state_dirty = false;
         self.auditable_assets_dirty = false;
         self.defined_assets_dirty = false;
+        self.txn_history_dirty = false;
+        self.keys_dirty = false;
     }
 
     async fn revert(&mut self) {
@@ -391,7 +459,9 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         self.static_data.revert_version().unwrap();
         self.dynamic_state.revert_version().unwrap();
         self.auditable_assets.revert_version().unwrap();
+        self.keys.revert_version().unwrap();
         self.defined_assets.revert_version().unwrap();
+        self.txn_history.revert_version().unwrap();
     }
 }
 
@@ -399,9 +469,12 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
 mod tests {
     use super::*;
     use crate::{
+        state::{
+            ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, ValidatorState,
+            VerifierKeySet, MERKLE_HEIGHT,
+        },
         txn_builder::{PendingTransaction, TransactionUID},
-        ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, ValidatorState,
-        VerifierKeySet, MERKLE_HEIGHT, UNIVERSAL_PARAM,
+        universal_params::UNIVERSAL_PARAM,
     };
     use jf_txn::{KeyPair, MerkleTree, TransactionVerifyingKey};
     use phaselock::H_256;
@@ -515,8 +588,6 @@ mod tests {
             }),
             immutable_keys: Arc::new(WalletImmutableKeySet {
                 key_pair: UserKeyPair::generate(&mut rng),
-                auditor_key_pair: AuditorKeyPair::generate(&mut rng),
-                freezer_key_pair: FreezerKeyPair::generate(&mut rng),
             }),
             txn_state: TransactionState {
                 validator,
@@ -528,6 +599,8 @@ mod tests {
                 transactions: Default::default(),
             },
             auditable_assets: Default::default(),
+            audit_keys: Default::default(),
+            freeze_keys: Default::default(),
             defined_assets: Default::default(),
         };
 
@@ -622,10 +695,26 @@ mod tests {
         // Append to monotonic state and then reload.
         let asset =
             AssetDefinition::new(AssetCode::random(&mut rng).0, Default::default()).unwrap();
+        let audit_key = AuditorKeyPair::generate(&mut rng);
+        let freeze_key = FreezerKeyPair::generate(&mut rng);
         stored.auditable_assets.insert(asset.code, asset.clone());
+        stored
+            .audit_keys
+            .insert(audit_key.pub_key(), audit_key.clone());
+        stored
+            .freeze_keys
+            .insert(freeze_key.pub_key(), freeze_key.clone());
         {
             let mut storage = AtomicWalletStorage::<AAPLedger, _>::new(&mut loader).unwrap();
             storage.store_auditable_asset(&asset).await.unwrap();
+            storage
+                .store_key(&RoleKeyPair::Auditor(audit_key))
+                .await
+                .unwrap();
+            storage
+                .store_key(&RoleKeyPair::Freezer(freeze_key))
+                .await
+                .unwrap();
             storage.commit().await;
         }
         let loaded = {
@@ -693,9 +782,26 @@ mod tests {
                 .records
                 .insert(ro, 0, &stored.immutable_keys.key_pair);
             storage.store_snapshot(&stored).await.unwrap();
-            storage.store_auditable_asset(&asset).await.unwrap();
             storage
                 .store_defined_asset(&asset, seed, &[])
+                .await
+                .unwrap();
+            storage
+                .store_key(&RoleKeyPair::Auditor(AuditorKeyPair::generate(&mut rng)))
+                .await
+                .unwrap();
+            storage
+                .store_key(&RoleKeyPair::Freezer(FreezerKeyPair::generate(&mut rng)))
+                .await
+                .unwrap();
+            storage
+                .store_transaction(TransactionHistoryEntry {
+                    time: Local::now(),
+                    asset: asset.code,
+                    kind: TransactionKind::<AAPLedger>::send(),
+                    receivers: vec![],
+                    receipt: None,
+                })
                 .await
                 .unwrap();
             // Revert the changes.
