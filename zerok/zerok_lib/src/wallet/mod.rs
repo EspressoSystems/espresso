@@ -32,7 +32,7 @@ use jf_txn::{
         AuditorKeyPair, AuditorPubKey, FreezerKeyPair, FreezerPubKey, UserAddress, UserKeyPair,
         UserPubKey,
     },
-    proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
+    proof::freeze::FreezeProvingKey,
     sign_receiver_memos,
     structs::{
         AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, BlindFactor, FeeInput, FreezeFlag,
@@ -160,7 +160,7 @@ impl From<crate::txn_builder::TransactionError> for WalletError {
     }
 }
 
-// TODO keyao! Move immutable keys from WalletState to transaction structure:
+// TODO !keyao Move immutable keys from WalletState to transaction structure:
 // https://gitlab.com/translucence/systems/system/-/issues/45
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletImmutableKeySet {
@@ -564,9 +564,6 @@ pub struct WalletSession<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
     _marker2: std::marker::PhantomData<L>,
 }
 
-// a never expired target
-const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
-
 // Trait used to indicate that an abstract return type captures a reference with the lifetime 'a.
 // See https://stackoverflow.com/questions/50547766/how-can-i-get-impl-trait-to-use-the-appropriate-lifetime-for-a-mutable-reference
 pub trait Captures<'a> {}
@@ -605,7 +602,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             .assets(&self.auditable_assets, &self.defined_assets)
     }
 
-    // TODO: add to TransactionState?
     pub async fn transaction_status(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -639,7 +635,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
     }
 
-    // TODO: add to TransactionState?
+    // TODO !keyao Add to TransactionState?
     async fn handle_event(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -968,7 +964,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     ) -> Option<PendingTransaction<L>> {
         let pending = self.txn_state.clear_pending_transaction(txn, &res);
 
-        // TODO keyao! Handle database update and memo posting in TransactionState?
         // If this was a successful transaction, add all of its frozen/unfrozen outputs to our
         // freezable database (for freeze/unfreeze transactions) and post its receiver memos.
         if let Some((block_id, txn_id, uids)) = res {
@@ -1085,7 +1080,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
     }
 
-    // TODO: add to TransactionState?
     async fn update_nullifier_proofs(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -1160,7 +1154,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
     }
 
-    // TODO keyao! Add to txn_builder.rs.
     /// Use `audit_asset` to start auditing transactions with a given asset type, when the asset
     /// type was defined by someone else and sent to us out of band. The audit key for `asset` must
     /// already be in this wallet's key set.
@@ -1234,6 +1227,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         Ok(())
     }
 
+    // TODO !keyao Add to txn_builder.rs.
     pub async fn transfer(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -1262,6 +1256,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
     }
 
+    // TODO !keyao Add to txn_builder.rs.
     pub async fn mint(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -1323,6 +1318,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         .await
     }
 
+    // TODO !keyao Add to txn_builder.rs.
     /// Freeze at least `amount` of a particular asset owned by a given user.
     ///
     /// In order to freeze an asset, this wallet must be an auditor of that asset type, and it must
@@ -1354,6 +1350,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             .await
     }
 
+    // TODO !keyao Add to txn_builder.rs.
     /// Unfreeze at least `amount` of a particular asset owned by a given user.
     ///
     /// This wallet must have previously been used to freeze (without an intervening `unfreeze`) at
@@ -1372,6 +1369,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             .await
     }
 
+    // TODO !keyao Add to txn_builder.rs.
     async fn freeze_or_unfreeze(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -1465,89 +1463,16 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         receivers: &[(UserPubKey, u64)],
         fee: u64,
     ) -> Result<TransactionReceipt<L>, WalletError> {
-        let total_output_amount: u64 =
-            receivers.iter().fold(0, |sum, (_, amount)| sum + *amount) + fee;
-
-        // find input records which account for at least the total amount, and possibly some change.
-        let (input_records, _change) = self.find_records(
-            &AssetCode::native(),
-            &self.pub_key(),
-            FreezeFlag::Unfrozen,
-            total_output_amount,
-            None,
-        )?;
-
-        // prepare inputs
-        let mut inputs = vec![];
-        for (ro, uid) in input_records {
-            let acc_member_witness = self.get_merkle_proof(uid);
-            inputs.push(TransferNoteInput {
-                ro,
-                acc_member_witness,
-                owner_keypair: &self.immutable_keys.key_pair,
-                cred: None,
-            });
-        }
-
-        // prepare outputs, excluding fee change (which will be automatically generated)
-        let mut outputs = vec![];
-        for (pub_key, amount) in receivers {
-            outputs.push(RecordOpening::new(
+        let (note, recv_memos, sig) = self
+            .txn_state
+            .transfer_native(
+                &self.immutable_keys.key_pair,
+                &self.proving_keys.xfr,
+                receivers,
+                fee,
                 &mut session.rng,
-                *amount,
-                AssetDefinition::native(),
-                pub_key.clone(),
-                FreezeFlag::Unfrozen,
-            ));
-        }
-
-        // find a proving key which can handle this transaction size
-        let (proving_key, dummy_inputs) = Self::xfr_proving_key(
-            &mut session.rng,
-            self.immutable_keys.key_pair.pub_key(),
-            &self.proving_keys.xfr,
-            &AssetDefinition::native(),
-            &mut inputs,
-            &mut outputs,
-            false,
-        )?;
-        // pad with dummy inputs if necessary
-        let rng = &mut session.rng;
-        let dummy_inputs = (0..dummy_inputs)
-            .map(|_| RecordOpening::dummy(rng, FreezeFlag::Unfrozen))
-            .collect::<Vec<_>>();
-        for (ro, owner_keypair) in &dummy_inputs {
-            let dummy_input = TransferNoteInput {
-                ro: ro.clone(),
-                acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
-                owner_keypair,
-                cred: None,
-            };
-            inputs.push(dummy_input);
-        }
-
-        // generate transfer note and receiver memos
-        let (note, kp, fee_change_ro) = TransferNote::generate_native(
-            &mut session.rng,
-            inputs,
-            &outputs,
-            fee,
-            UNEXPIRED_VALID_UNTIL,
-            proving_key,
-        )
-        .context(CryptoError)?;
-
-        let outputs: Vec<_> = vec![fee_change_ro]
-            .into_iter()
-            .chain(outputs.into_iter())
-            .collect();
-
-        let recv_memos: Vec<_> = outputs
-            .iter()
-            .map(|ro| ReceiverMemo::from_ro(&mut session.rng, ro, &[]))
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        let sig = sign_receiver_memos(&kp, &recv_memos).context(CryptoError)?;
+            )
+            .await?;
         self.submit_transaction(
             session,
             TransactionNote::Transfer(Box::new(note)),
@@ -1636,7 +1561,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         };
 
         // find a proving key which can handle this transaction size
-        let (proving_key, dummy_inputs) = Self::xfr_proving_key(
+        let (proving_key, dummy_inputs) = TransactionState::<L>::xfr_proving_key(
             &mut session.rng,
             self.immutable_keys.key_pair.pub_key(),
             &self.proving_keys.xfr,
@@ -1826,11 +1751,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         amount: u64,
         max_records: Option<usize>,
     ) -> Result<(Vec<(RecordOpening, u64)>, u64), WalletError> {
-        let now = self.txn_state.validator.now();
-
         Ok(self
             .txn_state
-            .find_records(asset, owner, frozen, amount, now, max_records)?)
+            .find_records(asset, owner, frozen, amount, max_records)?)
     }
 
     /// find a record and corresponding uid on the native asset type with enough
@@ -1844,88 +1767,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             Some(1),
         )
         .map(|(ros, _change)| ros.into_iter().next().unwrap())
-    }
-
-    // Find a proving key large enough to prove the given transaction, returning the number of dummy
-    // inputs needed to pad the transaction.
-    //
-    // `proving_keys` should always be `&self.proving_key`. This is a non-member function in order
-    // to prove to the compiler that the result only borrows from `&self.proving_key`, not all of
-    // `&self`.
-    #[allow(clippy::too_many_arguments)]
-    fn xfr_proving_key<'k>(
-        rng: &mut ChaChaRng,
-        me: UserPubKey,
-        proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
-        asset: &AssetDefinition,
-        inputs: &mut Vec<TransferNoteInput<'k>>,
-        outputs: &mut Vec<RecordOpening>,
-        change_record: bool,
-    ) -> Result<(&'k TransferProvingKey<'a>, usize), WalletError> {
-        let total_output_amount = outputs.iter().map(|ro| ro.amount).sum();
-        // non-native transfers have an extra fee input, which is not included in `inputs`.
-        let fee_inputs = if *asset == AssetDefinition::native() {
-            0
-        } else {
-            1
-        };
-        // both native and non-native transfers have an extra fee change output which is
-        // automatically generated and not included in `outputs`.
-        let fee_outputs = 1;
-
-        let num_inputs = inputs.len() + fee_inputs;
-        let num_outputs = outputs.len() + fee_outputs;
-        let (key_inputs, key_outputs, proving_key) = proving_keys
-            .best_fit_key(num_inputs, num_outputs)
-            .map_err(|(max_inputs, max_outputs)| {
-                if max_outputs >= num_outputs {
-                    // If there is a key that can fit the correct number of outputs had we only
-                    // managed to find fewer inputs, call this a fragmentation error.
-                    WalletError::Fragmentation {
-                        asset: asset.code,
-                        amount: total_output_amount,
-                        suggested_amount: inputs
-                            .iter()
-                            .take(max_inputs - fee_inputs)
-                            .map(|input| input.ro.amount)
-                            .sum(),
-                        max_records: max_inputs,
-                    }
-                } else {
-                    // Otherwise, we just have too many outputs for any of our available keys. There
-                    // is nothing we can do about that on the wallet side.
-                    WalletError::TooManyOutputs {
-                        asset: asset.code,
-                        max_records: max_outputs,
-                        num_receivers: outputs.len() - change_record as usize,
-                        num_change_records: 1 + change_record as usize,
-                    }
-                }
-            })?;
-        assert!(num_inputs <= key_inputs);
-        assert!(num_outputs <= key_outputs);
-
-        if num_outputs < key_outputs {
-            // pad with dummy (0-amount) outputs,leaving room for the fee change output
-            loop {
-                outputs.push(RecordOpening::new(
-                    rng,
-                    0,
-                    asset.clone(),
-                    me.clone(),
-                    FreezeFlag::Unfrozen,
-                ));
-                if outputs.len() >= key_outputs - fee_outputs {
-                    break;
-                }
-            }
-        }
-
-        // Return the required number of dummy inputs. We can't easily create the dummy inputs here,
-        // because it requires creating a new dummy key pair and then borrowing from the key pair to
-        // form the transfer input, so the key pair must be owned by the caller.
-        let dummy_inputs = key_inputs.saturating_sub(num_inputs);
-        Ok((proving_key, dummy_inputs))
     }
 
     fn freeze_proving_key<'k>(

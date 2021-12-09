@@ -1,28 +1,26 @@
 use crate::util::arbitrary_wrappers::*;
 use crate::{
-    // key_set::KeySet,
     ledger,
     ledger::traits::{Transaction as _, Validator as _},
     ser_test,
-    state::ValidatorState,
+    state::{key_set, ValidatorState, MERKLE_HEIGHT},
 };
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use jf_txn::{
     errors::TxnApiError,
     keys::{AuditorPubKey, FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey},
-    // proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
+    proof::transfer::TransferProvingKey,
     sign_receiver_memos,
     structs::{
         AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FreezeFlag, Nullifier,
         ReceiverMemo, RecordCommitment, RecordOpening,
     },
-    // transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness,
-    MerkleTree,
-    Signature,
+    transfer::{TransferNote, TransferNoteInput},
+    AccMemberWitness, MerkleTree, Signature,
 };
 use jf_utils::tagged_blob;
+use key_set::KeySet;
 use ledger::*;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
@@ -46,12 +44,12 @@ pub enum TransactionError {
         suggested_amount: u64,
         max_records: usize,
     },
-    // TooManyOutputs {
-    //     asset: AssetCode,
-    //     max_records: usize,
-    //     num_receivers: usize,
-    //     num_change_records: usize,
-    // },
+    TooManyOutputs {
+        asset: AssetCode,
+        max_records: usize,
+        num_receivers: usize,
+        num_change_records: usize,
+    },
     // UndefinedAsset {
     //     asset: AssetCode,
     // },
@@ -723,6 +721,8 @@ impl From<AssetDefinition> for AssetInfo {
 pub const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
 // (block_id, txn_id, [(uid, remember)])
 pub type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
+// a never expired target
+pub const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
 
 #[derive(Debug, Clone)]
 pub struct TransactionState<L: Ledger = AAPLedger> {
@@ -879,9 +879,10 @@ impl<L: Ledger> TransactionState<L> {
         owner: &UserPubKey,
         frozen: FreezeFlag,
         amount: u64,
-        now: u64,
         max_records: Option<usize>,
     ) -> Result<(Vec<(RecordOpening, u64)>, u64), TransactionError> {
+        let now = self.validator.now();
+
         // If we have a record with the exact size required, use it to avoid fragmenting big records
         // into smaller change records.
         if let Some(record) = self
@@ -943,182 +944,180 @@ impl<L: Ledger> TransactionState<L> {
             .1
     }
 
-    // // Find a proving key large enough to prove the given transaction, returning the number of dummy
-    // // inputs needed to pad the transaction.
-    // //
-    // // `proving_keys` should always be `&self.proving_key`. This is a non-member function in order
-    // // to prove to the compiler that the result only borrows from `&self.proving_key`, not all of
-    // // `&self`.
-    // #[allow(clippy::too_many_arguments)]
-    // fn xfr_proving_key<'k>(
-    //     rng: &mut ChaChaRng,
-    //     me: UserPubKey,
-    //     proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
-    //     asset: &AssetDefinition,
-    //     inputs: &mut Vec<TransferNoteInput<'k>>,
-    //     outputs: &mut Vec<RecordOpening>,
-    //     change_record: bool,
-    // ) -> Result<(&'k TransferProvingKey<'a>, usize), TransactionError> {
-    //     let total_output_amount = outputs.iter().map(|ro| ro.amount).sum();
-    //     // non-native transfers have an extra fee input, which is not included in `inputs`.
-    //     let fee_inputs = if *asset == AssetDefinition::native() {
-    //         0
-    //     } else {
-    //         1
-    //     };
-    //     // both native and non-native transfers have an extra fee change output which is
-    //     // automatically generated and not included in `outputs`.
-    //     let fee_outputs = 1;
+    pub async fn transfer_native<'a, 'k>(
+        &mut self,
+        owner_keypair: &UserKeyPair,
+        proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
+        receivers: &[(UserPubKey, u64)],
+        fee: u64,
+        rng: &mut ChaChaRng,
+    ) -> Result<(TransferNote, Vec<ReceiverMemo>, Signature), TransactionError> {
+        let total_output_amount: u64 =
+            receivers.iter().fold(0, |sum, (_, amount)| sum + *amount) + fee;
 
-    //     let num_inputs = inputs.len() + fee_inputs;
-    //     let num_outputs = outputs.len() + fee_outputs;
-    //     let (key_inputs, key_outputs, proving_key) = proving_keys
-    //         .best_fit_key(num_inputs, num_outputs)
-    //         .map_err(|(max_inputs, max_outputs)| {
-    //             if max_outputs >= num_outputs {
-    //                 // If there is a key that can fit the correct number of outputs had we only
-    //                 // managed to find fewer inputs, call this a fragmentation error.
-    //                 TransactionError::Fragmentation {
-    //                     asset: asset.code,
-    //                     amount: total_output_amount,
-    //                     suggested_amount: inputs
-    //                         .iter()
-    //                         .take(max_inputs - fee_inputs)
-    //                         .map(|input| input.ro.amount)
-    //                         .sum(),
-    //                     max_records: max_inputs,
-    //                 }
-    //             } else {
-    //                 // Otherwise, we just have too many outputs for any of our available keys. There
-    //                 // is nothing we can do about that on the wallet side.
-    //                 TransactionError::TooManyOutputs {
-    //                     asset: asset.code,
-    //                     max_records: max_outputs,
-    //                     num_receivers: outputs.len() - change_record as usize,
-    //                     num_change_records: 1 + change_record as usize,
-    //                 }
-    //             }
-    //         })?;
-    //     assert!(num_inputs <= key_inputs);
-    //     assert!(num_outputs <= key_outputs);
+        // find input records which account for at least the total amount, and possibly some change.
+        let (input_records, _change) = self.find_records(
+            &AssetCode::native(),
+            &owner_keypair.pub_key(),
+            FreezeFlag::Unfrozen,
+            total_output_amount,
+            None,
+        )?;
 
-    //     if num_outputs < key_outputs {
-    //         // pad with dummy (0-amount) outputs,leaving room for the fee change output
-    //         loop {
-    //             outputs.push(RecordOpening::new(
-    //                 rng,
-    //                 0,
-    //                 asset.clone(),
-    //                 me.clone(),
-    //                 FreezeFlag::Unfrozen,
-    //             ));
-    //             if outputs.len() >= key_outputs - fee_outputs {
-    //                 break;
-    //             }
-    //         }
-    //     }
+        // prepare inputs
+        let mut inputs = vec![];
+        for (ro, uid) in input_records {
+            let acc_member_witness = self.get_merkle_proof(uid);
+            inputs.push(TransferNoteInput {
+                ro,
+                acc_member_witness,
+                owner_keypair,
+                cred: None,
+            });
+        }
 
-    //     // Return the required number of dummy inputs. We can't easily create the dummy inputs here,
-    //     // because it requires creating a new dummy key pair and then borrowing from the key pair to
-    //     // form the transfer input, so the key pair must be owned by the caller.
-    //     let dummy_inputs = key_inputs.saturating_sub(num_inputs);
-    //     Ok((proving_key, dummy_inputs))
-    // }
+        // prepare outputs, excluding fee change (which will be automatically generated)
+        let mut outputs = vec![];
+        for (pub_key, amount) in receivers {
+            outputs.push(RecordOpening::new(
+                rng,
+                *amount,
+                AssetDefinition::native(),
+                pub_key.clone(),
+                FreezeFlag::Unfrozen,
+            ));
+        }
 
-    // async fn transfer_native(
-    //     &mut self,
-    //     owner_keypair: UserKeyPair,
-    //     receivers: &[(UserPubKey, u64)],
-    //     fee: u64,
-    //     now: u64,
-    //     rng: &mut ChaChaRng,
-    // ) -> Result<TransactionReceipt<L>, TransactionError> {
-    //     let total_output_amount: u64 =
-    //         receivers.iter().fold(0, |sum, (_, amount)| sum + *amount) + fee;
+        // find a proving key which can handle this transaction size
+        let (proving_key, dummy_inputs) = Self::xfr_proving_key(
+            rng,
+            owner_keypair.pub_key(),
+            proving_keys,
+            &AssetDefinition::native(),
+            &mut inputs,
+            &mut outputs,
+            false,
+        )?;
+        // pad with dummy inputs if necessary
+        let dummy_inputs = (0..dummy_inputs)
+            .map(|_| RecordOpening::dummy(rng, FreezeFlag::Unfrozen))
+            .collect::<Vec<_>>();
+        for (ro, owner_keypair) in &dummy_inputs {
+            let dummy_input = TransferNoteInput {
+                ro: ro.clone(),
+                acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
+                owner_keypair,
+                cred: None,
+            };
+            inputs.push(dummy_input);
+        }
 
-    //     // find input records which account for at least the total amount, and possibly some change.
-    //     let (input_records, _change) = self.find_records(
-    //         &AssetCode::native(),
-    //         &owner_keypair.pub_key(),
-    //         FreezeFlag::Unfrozen,
-    //         total_output_amount,
-    //         now,
-    //         None,
-    //     )?;
+        // generate transfer note and receiver memos
+        let (note, kp, fee_change_ro) = TransferNote::generate_native(
+            rng,
+            inputs,
+            &outputs,
+            fee,
+            UNEXPIRED_VALID_UNTIL,
+            proving_key,
+        )
+        .context(CryptoError)?;
 
-    //     // prepare inputs
-    //     let mut inputs = vec![];
-    //     for (ro, uid) in input_records {
-    //         let acc_member_witness = self.get_merkle_proof(uid);
-    //         inputs.push(TransferNoteInput {
-    //             ro,
-    //             acc_member_witness,
-    //             owner_keypair,
-    //             cred: None,
-    //         });
-    //     }
+        let outputs: Vec<_> = vec![fee_change_ro]
+            .into_iter()
+            .chain(outputs.into_iter())
+            .collect();
 
-    //     // prepare outputs, excluding fee change (which will be automatically generated)
-    //     let mut outputs = vec![];
-    //     for (pub_key, amount) in receivers {
-    //         outputs.push(RecordOpening::new(
-    //             &mut rng,
-    //             *amount,
-    //             AssetDefinition::native(),
-    //             pub_key.clone(),
-    //             FreezeFlag::Unfrozen,
-    //         ));
-    //     }
+        let recv_memos: Vec<_> = outputs
+            .iter()
+            .map(|ro| ReceiverMemo::from_ro(rng, ro, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let sig = sign_receiver_memos(&kp, &recv_memos).context(CryptoError)?;
+        Ok((note, recv_memos, sig))
+    }
 
-    //     // find a proving key which can handle this transaction size
-    //     let (proving_key, dummy_inputs) = Self::xfr_proving_key(
-    //         &mut rng,
-    //         self.immutable_keys.key_pair.pub_key(),
-    //         &self.proving_keys.xfr,
-    //         &AssetDefinition::native(),
-    //         &mut inputs,
-    //         &mut outputs,
-    //         false,
-    //     )?;
-    //     // pad with dummy inputs if necessary
-    //     let rng = &mut session.rng;
-    //     let dummy_inputs = (0..dummy_inputs)
-    //         .map(|_| RecordOpening::dummy(rng, FreezeFlag::Unfrozen))
-    //         .collect::<Vec<_>>();
-    //     for (ro, owner_keypair) in &dummy_inputs {
-    //         let dummy_input = TransferNoteInput {
-    //             ro: ro.clone(),
-    //             acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
-    //             owner_keypair,
-    //             cred: None,
-    //         };
-    //         inputs.push(dummy_input);
-    //     }
+    // Find a proving key large enough to prove the given transaction, returning the number of dummy
+    // inputs needed to pad the transaction.
+    //
+    // `proving_keys` should always be `&self.proving_key`. This is a non-member function in order
+    // to prove to the compiler that the result only borrows from `&self.proving_key`, not all of
+    // `&self`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn xfr_proving_key<'a, 'k>(
+        rng: &mut ChaChaRng,
+        me: UserPubKey,
+        proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
+        asset: &AssetDefinition,
+        inputs: &mut Vec<TransferNoteInput<'k>>,
+        outputs: &mut Vec<RecordOpening>,
+        change_record: bool,
+    ) -> Result<(&'k TransferProvingKey<'a>, usize), TransactionError> {
+        let total_output_amount = outputs.iter().map(|ro| ro.amount).sum();
+        // non-native transfers have an extra fee input, which is not included in `inputs`.
+        let fee_inputs = if *asset == AssetDefinition::native() {
+            0
+        } else {
+            1
+        };
+        // both native and non-native transfers have an extra fee change output which is
+        // automatically generated and not included in `outputs`.
+        let fee_outputs = 1;
 
-    //     // generate transfer note and receiver memos
-    //     let (note, kp, fee_change_ro) = TransferNote::generate_native(
-    //         &mut session.rng,
-    //         inputs,
-    //         &outputs,
-    //         fee,
-    //         UNEXPIRED_VALID_UNTIL,
-    //         proving_key,
-    //     )
-    //     .context(CryptoError)?;
+        let num_inputs = inputs.len() + fee_inputs;
+        let num_outputs = outputs.len() + fee_outputs;
+        let (key_inputs, key_outputs, proving_key) = proving_keys
+            .best_fit_key(num_inputs, num_outputs)
+            .map_err(|(max_inputs, max_outputs)| {
+                if max_outputs >= num_outputs {
+                    // If there is a key that can fit the correct number of outputs had we only
+                    // managed to find fewer inputs, call this a fragmentation error.
+                    TransactionError::Fragmentation {
+                        asset: asset.code,
+                        amount: total_output_amount,
+                        suggested_amount: inputs
+                            .iter()
+                            .take(max_inputs - fee_inputs)
+                            .map(|input| input.ro.amount)
+                            .sum(),
+                        max_records: max_inputs,
+                    }
+                } else {
+                    // Otherwise, we just have too many outputs for any of our available keys. There
+                    // is nothing we can do about that on the wallet side.
+                    TransactionError::TooManyOutputs {
+                        asset: asset.code,
+                        max_records: max_outputs,
+                        num_receivers: outputs.len() - change_record as usize,
+                        num_change_records: 1 + change_record as usize,
+                    }
+                }
+            })?;
+        assert!(num_inputs <= key_inputs);
+        assert!(num_outputs <= key_outputs);
 
-    //     let outputs: Vec<_> = vec![fee_change_ro]
-    //         .into_iter()
-    //         .chain(outputs.into_iter())
-    //         .collect();
+        if num_outputs < key_outputs {
+            // pad with dummy (0-amount) outputs,leaving room for the fee change output
+            loop {
+                outputs.push(RecordOpening::new(
+                    rng,
+                    0,
+                    asset.clone(),
+                    me.clone(),
+                    FreezeFlag::Unfrozen,
+                ));
+                if outputs.len() >= key_outputs - fee_outputs {
+                    break;
+                }
+            }
+        }
 
-    //     let recv_memos: Vec<_> = outputs
-    //         .iter()
-    //         .map(|ro| ReceiverMemo::from_ro(&mut session.rng, ro, &[]))
-    //         .collect::<Result<Vec<_>, _>>()
-    //         .unwrap();
-    //     let sig = sign_receiver_memos(&kp, &recv_memos).context(CryptoError)?;
-    //     (note, recv_memos, sig)
-    // }
+        // Return the required number of dummy inputs. We can't easily create the dummy inputs here,
+        // because it requires creating a new dummy key pair and then borrowing from the key pair to
+        // form the transfer input, so the key pair must be owned by the caller.
+        let dummy_inputs = key_inputs.saturating_sub(num_inputs);
+        Ok((proving_key, dummy_inputs))
+    }
 
     // async fn transfer_non_native(
     //     &mut self,
