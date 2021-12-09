@@ -3971,7 +3971,9 @@ mod tests {
         // Check that, like transfer inputs, freeze inputs are placed on hold and unusable while a
         // freeze that uses them is pending.
         match wallets[2].freeze(1, &asset, 1, dst).await {
-            Err(WalletError::InsufficientBalance { .. }) => {}
+            Err(WalletError::TransactionError {
+                source: TransactionError::InsufficientBalance { .. },
+            }) => {}
             ret => panic!("expected InsufficientBalance, got {:?}", ret.map(|_| ())),
         }
 
@@ -3986,7 +3988,9 @@ mod tests {
         now = Instant::now();
         let dst = wallets[1].address();
         match wallets[0].transfer(&asset.code, &[(dst, 1)], 1).await {
-            Err(WalletError::InsufficientBalance { .. }) => {
+            Err(WalletError::TransactionError {
+                source: TransactionError::InsufficientBalance { .. },
+            }) => {
                 println!(
                     "transfer correctly failed due to frozen balance: {}s",
                     now.elapsed().as_secs_f32()
