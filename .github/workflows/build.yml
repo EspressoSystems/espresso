@@ -35,5 +35,7 @@ jobs:
         run: cargo audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071
 
       - name: Test
-        run: cargo test --workspace --release
+        run: |
+          cargo test --workspace --release --no-run
+          cargo test --workspace --release --verbose -- --test-threads 2
         timeout-minutes: 30
