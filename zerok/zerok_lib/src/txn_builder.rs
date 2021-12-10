@@ -53,23 +53,9 @@ pub enum TransactionError {
         num_receivers: usize,
         num_change_records: usize,
     },
-    // UndefinedAsset {
-    //     asset: AssetCode,
-    // },
-    // InvalidBlock {
-    //     source: ValidationError,
-    // },
-    // NullifierAlreadyPublished {
-    //     nullifier: Nullifier,
-    // },
-    // TimedOut {},
-    // Cancelled {},
     CryptoError {
         source: TxnApiError,
     },
-    // InvalidAddress {
-    //     address: UserAddress,
-    // },
     InvalidAuditorKey {
         my_key: AuditorPubKey,
         asset_key: AuditorPubKey,
@@ -78,38 +64,6 @@ pub enum TransactionError {
         my_key: FreezerPubKey,
         asset_key: FreezerPubKey,
     },
-    // NetworkError {
-    //     source: phaselock::networking::NetworkError,
-    // },
-    // QueryServiceError {
-    //     source: crate::node::QueryServiceError,
-    // },
-    // ClientConfigError {
-    //     source: <surf::Client as TryFrom<surf::Config>>::Error,
-    // },
-    // ConsensusError {
-    //     #[snafu(source(false))]
-    //     source: Result<phaselock::error::PhaseLockError, String>,
-    // },
-    // PersistenceError {
-    //     source: atomic_store::error::PersistenceError,
-    // },
-    // IoError {
-    //     source: std::io::Error,
-    // },
-    // BincodeError {
-    //     source: bincode::Error,
-    // },
-    // EncryptionError {
-    //     source: encryption::Error,
-    // },
-    // KeyError {
-    //     source: argon2::Error,
-    // },
-    // #[snafu(display("{}", msg))]
-    // Failed {
-    //     msg: String,
-    // },
 }
 
 #[ser_test(arbitrary, ark(false))]
