@@ -941,8 +941,8 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     ) -> Option<PendingTransaction<L>> {
         let pending = self.txn_state.clear_pending_transaction(txn, &res);
 
-        // If this was a successful transaction, add all of its frozen/unfrozen outputs to our
-        // freezable database (for freeze/unfreeze transactions) and post its receiver memos.
+        // If this was a successful transaction, post its receiver memos and add all of its
+        // frozen/unfrozen outputs to our freezable database (for freeze/unfreeze transactions).
         if let Some((block_id, txn_id, uids)) = res {
             if let Some(pending) = &pending {
                 // Post receiver memos.
@@ -986,7 +986,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         self.txn_state.clear_expired_transactions()
     }
 
-    // TODO: add to TransactionState?
     async fn audit_transaction(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
