@@ -113,9 +113,12 @@ async fn main() {
                 panic!("error reading private key file: {}", err);
             });
             wallet
-                .add_user_key(bincode::deserialize(&bytes).unwrap_or_else(|err| {
-                    panic!("invalid private key file: {}", err);
-                }))
+                .add_user_key(
+                    bincode::deserialize(&bytes).unwrap_or_else(|err| {
+                        panic!("invalid private key file: {}", err);
+                    }),
+                    0,
+                )
                 .await
                 .unwrap_or_else(|err| {
                     panic!("error loading key: {}", err);

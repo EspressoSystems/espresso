@@ -6,7 +6,7 @@
 //
 
 use crate::{api, wallet, UNIVERSAL_PARAM};
-use api::UserAddress;
+use api::{MerklePath, UserAddress};
 use async_std::task::block_on;
 use async_trait::async_trait;
 use encryption::{Cipher, CipherText};
@@ -15,7 +15,7 @@ use futures::future::BoxFuture;
 use jf_txn::{
     keys::{AuditorKeyPair, AuditorPubKey, FreezerKeyPair, FreezerPubKey, UserKeyPair},
     proof::UniversalParam,
-    structs::{AssetCode, AssetDefinition, AssetPolicy},
+    structs::{AssetCode, AssetDefinition, AssetPolicy, ReceiverMemo, RecordCommitment},
 };
 use rand_chacha::{
     rand_core::{RngCore, SeedableRng},
@@ -114,7 +114,8 @@ macro_rules! cli_input_from_str {
 }
 
 cli_input_from_str! {
-    bool, u64, String, AssetCode, AuditorPubKey, FreezerPubKey, UserAddress, PathBuf
+    bool, u64, String, AssetCode, AuditorPubKey, FreezerPubKey, UserAddress, PathBuf, ReceiverMemo,
+    RecordCommitment, MerklePath
 }
 
 impl<'a, C: CLI<'a>, L: Ledger> CLIInput<'a, C> for TransactionReceipt<L> {
@@ -620,7 +621,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
             load_key,
             "load a key from a file",
             C,
-            |wallet, key_type: KeyType, path: PathBuf| {
+            |wallet, key_type: KeyType, path: PathBuf; scan_from: Option<u64>| {
                 let mut file = match File::open(path.clone()).context(IoError) {
                     Ok(file) => file,
                     Err(err) => {
@@ -654,8 +655,15 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                         }
                     },
                     KeyType::Spend => match bincode::deserialize::<UserKeyPair>(&bytes) {
-                        Ok(key) => match wallet.add_user_key(key.clone()).await {
-                            Ok(()) => println!("{}", UserAddress(key.address())),
+                        Ok(key) => match wallet.add_user_key(key.clone(), scan_from.unwrap_or(0)).await {
+                            Ok(()) => {
+                                println!(
+                                    "Note: assets belonging to this key will become available after\
+                                     a scan of the ledger. This may take a long time. If you have\
+                                     the owner memo for a record you want to use immediately, use\
+                                     import_memo.");
+                                println!("{}", UserAddress(key.address()));
+                            }
                             Err(err) => println!("Error saving spending key: {}", err),
                         },
                         Err(err) => {
@@ -663,6 +671,16 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                         }
                     },
                 };
+            }
+        ),
+        command!(
+            import_memo,
+            "import an owner memo belonging to this wallet",
+            C,
+            |wallet, memo: ReceiverMemo, comm: RecordCommitment, uid: u64, proof: MerklePath| {
+                if let Err(err) = wallet.import_memo(memo, comm, uid, proof.0).await {
+                    println!("{}", err);
+                }
             }
         ),
         command!(

@@ -1,6 +1,5 @@
 use crate::key_set::OrderByOutputs;
 use crate::ledger::*;
-use crate::node::MerkleTreeWithArbitrary;
 use crate::txn_builder::TransactionState;
 use crate::wallet::*;
 use crate::ProverKeySet;
@@ -44,55 +43,33 @@ impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletStaticState<'a> {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(bound = "")]
 struct WalletSnapshot<L: Ledger> {
-    now: u64,
-    validator: Validator<L>,
-    records: RecordDatabase,
-    nullifiers: NullifierSet<L>,
-    record_mt: MerkleTreeWithArbitrary,
-    merkle_leaf_to_forget: Option<u64>,
-    transactions: TransactionDatabase<L>,
+    txn_state: TransactionState<L>,
+    key_scans: Vec<BackgroundKeyScan>,
 }
 
 impl<L: Ledger> PartialEq<Self> for WalletSnapshot<L> {
     fn eq(&self, other: &Self) -> bool {
-        self.now == other.now
-            && self.validator == other.validator
-            && self.records == other.records
-            && self.nullifiers == other.nullifiers
-            && self.record_mt == other.record_mt
-            && self.transactions == other.transactions
+        self.txn_state == other.txn_state && self.key_scans == other.key_scans
     }
 }
 
 impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletSnapshot<L> {
     fn from(w: &WalletState<'a, L>) -> Self {
         Self {
-            now: w.txn_state.now,
-            validator: w.txn_state.validator.clone(),
-            records: w.txn_state.records.clone(),
-            nullifiers: w.txn_state.nullifiers.clone(),
-            record_mt: MerkleTreeWithArbitrary(w.txn_state.record_mt.clone()),
-            merkle_leaf_to_forget: w.txn_state.merkle_leaf_to_forget,
-            transactions: w.txn_state.transactions.clone(),
+            txn_state: w.txn_state.clone(),
+            key_scans: w.key_scans.values().cloned().collect(),
         }
     }
 }
 
 impl<'a, L: Ledger> Arbitrary<'a> for WalletSnapshot<L>
 where
-    Validator<L>: Arbitrary<'a>,
-    NullifierSet<L>: Arbitrary<'a>,
-    TransactionHash<L>: Arbitrary<'a>,
+    TransactionState<L>: Arbitrary<'a>,
 {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Self {
-            now: u.arbitrary()?,
-            validator: u.arbitrary()?,
-            records: u.arbitrary()?,
-            nullifiers: u.arbitrary()?,
-            record_mt: u.arbitrary()?,
-            merkle_leaf_to_forget: None,
-            transactions: u.arbitrary()?,
+            txn_state: u.arbitrary()?,
+            key_scans: u.arbitrary()?,
         })
     }
 }
@@ -301,15 +278,12 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
             proving_keys: static_state.proving_keys,
 
             // Dynamic state
-            txn_state: TransactionState {
-                validator: dynamic_state.validator,
-                now: dynamic_state.now,
-                records: dynamic_state.records,
-                nullifiers: dynamic_state.nullifiers,
-                record_mt: dynamic_state.record_mt.0,
-                merkle_leaf_to_forget: dynamic_state.merkle_leaf_to_forget,
-                transactions: dynamic_state.transactions,
-            },
+            txn_state: dynamic_state.txn_state,
+            key_scans: dynamic_state
+                .key_scans
+                .into_iter()
+                .map(|scan| (scan.key.address(), scan))
+                .collect(),
 
             // Monotonic state
             auditable_assets: self
@@ -580,6 +554,7 @@ mod tests {
                 merkle_leaf_to_forget: None,
                 transactions: Default::default(),
             },
+            key_scans: Default::default(),
             auditable_assets: Default::default(),
             audit_keys: Default::default(),
             freeze_keys: Default::default(),

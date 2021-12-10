@@ -9,6 +9,7 @@ use crate::api;
 use crate::key_set;
 use crate::node::LedgerEvent;
 use crate::txn_builder::*;
+use crate::util::arbitrary_wrappers::{ArbitraryNullifier, ArbitraryUserKeyPair};
 use crate::{ledger, ser_test, ProverKeySet, ValidationError, ValidatorState, MERKLE_HEIGHT};
 use arbitrary::{Arbitrary, Unstructured};
 use async_scoped::AsyncScope;
@@ -36,7 +37,7 @@ use jf_txn::{
         Nullifier, ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness, MerkleLeafProof, Signature, TransactionNote,
+    AccMemberWitness, MerkleLeafProof, MerklePath, Signature, TransactionNote,
 };
 use key_set::KeySet;
 use ledger::{
@@ -49,7 +50,7 @@ use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::sync::Arc;
 
@@ -127,6 +128,7 @@ pub enum WalletError {
     KeyError {
         source: argon2::Error,
     },
+    CannotDecryptMemo {},
     #[snafu(display("{}", msg))]
     Failed {
         msg: String,
@@ -148,6 +150,81 @@ impl api::FromError for WalletError {
 
     fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
         Self::ConsensusError { source }
+    }
+}
+
+#[ser_test(arbitrary, ark(false))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct BackgroundKeyScan {
+    key: UserKeyPair,
+    next_event: u64,
+    to_event: u64,
+    // Record openings we have discovered which belong to these key. These records are kept in a
+    // separate pool until the scan is complete so that if the scan encounters an event which spends
+    // some of these records, we can remove the spent records without ever reflecting them in the
+    // wallet's balance.
+    records: HashMap<Nullifier, (RecordOpening, u64, MerklePath)>,
+    // Nullifiers which have been published since we started the scan. Since we don't add records to
+    // the wallet until the scan is complete, records we add here will not be invalidated by the
+    // normal event handling loop. Thus, we must take care not to add records which have been
+    // invalidated since the scan started.
+    //
+    // This means that retroactive scans only need to scan up to the latest event as of the start of
+    // the scan, not until the scan catches up with the current event, which guarantees the scan
+    // will complete in a finite amount of time.
+    new_nullifiers: HashSet<Nullifier>,
+}
+
+impl PartialEq<Self> for BackgroundKeyScan {
+    fn eq(&self, other: &Self) -> bool {
+        self.key.pub_key() == other.key.pub_key()
+            && self.next_event == other.next_event
+            && self.to_event == other.to_event
+            && self.records == other.records
+            && self.new_nullifiers == other.new_nullifiers
+    }
+}
+
+impl<'a> Arbitrary<'a> for BackgroundKeyScan {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            key: u.arbitrary::<ArbitraryUserKeyPair>()?.into(),
+            next_event: u.arbitrary()?,
+            to_event: u.arbitrary()?,
+            records: Default::default(),
+            new_nullifiers: u
+                .arbitrary_iter::<ArbitraryNullifier>()?
+                .map(|n| Ok(n?.into()))
+                .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
+impl BackgroundKeyScan {
+    fn process_nullifiers(&mut self, nullifiers: &[Nullifier], new: bool) {
+        for n in nullifiers {
+            if self.records.remove(n).is_none() && new {
+                // If this nullifier is new since we started the scan and the record corresponding
+                // to this nullifier was not already in our records, add this nullifier to the set
+                // of new nullifiers in case we encounter the corresponding record later.
+                self.new_nullifiers.insert(*n);
+            }
+        }
+    }
+
+    fn add_records(&mut self, records: Vec<(RecordOpening, u64, MerklePath)>) {
+        for (ro, uid, proof) in records {
+            let nullifier = self.key.nullify(
+                ro.asset_def.policy_ref().freezer_pub_key(),
+                uid,
+                &RecordCommitment::from(&ro),
+            );
+            if !self.new_nullifiers.remove(&nullifier) {
+                // Add the record as long as its nullifier has not been invalidated since we started
+                // the scan.
+                self.records.insert(nullifier, (ro, uid, proof));
+            }
+        }
     }
 }
 
@@ -173,6 +250,8 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Dynamic state
     pub(crate) txn_state: TransactionState<L>,
+    // background scans triggered by the addition of new keys.
+    pub(crate) key_scans: HashMap<UserAddress, BackgroundKeyScan>,
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Monotonic data
@@ -773,15 +852,20 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 // Update our full copies of sparse validator data structures to be consistent with
                 // the validator state.
                 for txn in block.txns() {
+                    let nullifiers = txn.note().nullifiers();
                     // Remove spent records.
-                    for n in txn.note().nullifiers() {
-                        if let Some(record) = self.txn_state.records.remove_by_nullifier(n) {
+                    for n in &nullifiers {
+                        if let Some(record) = self.txn_state.records.remove_by_nullifier(*n) {
                             self.forget_merkle_leaf(record.uid);
                         }
                     }
                     // Insert new records.
                     for o in txn.note().output_commitments() {
                         self.append_merkle_leaf(o);
+                    }
+                    // Update background scans with newly published nullifiers.
+                    for scan in self.key_scans.values_mut() {
+                        scan.process_nullifiers(&nullifiers, true);
                     }
                 }
                 // Update nullifier set
@@ -881,104 +965,14 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                         .collect::<Vec<_>>(),
                 );
 
-                let mut received_ros = Vec::new();
-                for (memo, comm, uid, proof) in outputs {
-                    summary.received_memos.push((memo.clone(), uid));
-                    for key_pair in self.user_keys.values() {
-                        if let Ok(record_opening) = memo.decrypt(key_pair, &comm, &[]) {
-                            if !record_opening.is_dummy() {
-                                // If this record is for us (i.e. its corresponding memo decrypts under
-                                // our key) and not a dummy, then add it to our owned records.
-                                received_ros.push(record_opening.clone());
-                                self.txn_state.records.insert(record_opening, uid, key_pair);
-                                if !self.remember_merkle_leaf(
-                                    uid,
-                                    &MerkleLeafProof::new(comm.to_field_element(), proof),
-                                ) {
-                                    println!(
-                                        "error: got bad merkle proof from backend for commitment {:?}",
-                                        comm
-                                    );
-                                }
-                            }
-
-                            break;
-                        }
-                    }
-                }
-
-                if !self_published && !received_ros.is_empty() {
-                    if let Some((block_id, txn_id)) = transaction {
-                        // If this batch of memos didn't complete one of our own transactions (i.e.
-                        // it wasn't published by us) but it was _for_ us, then we will add a
-                        // transaction history entry for the received transaction using the
-                        // information decrypted from the memos.
-                        //
-                        // First we need to fetch the actual transaction for these memos to figure
-                        // out what type it was.
-                        let kind = match session.backend.get_transaction(block_id, txn_id).await {
-                            Ok(txn) => {
-                                let kind = txn.kind();
-                                if kind == TransactionKind::<L>::send() {
-                                    TransactionKind::<L>::receive()
-                                } else if kind == TransactionKind::<L>::freeze()
-                                    && received_ros[0].freeze_flag == FreezeFlag::Unfrozen
-                                {
-                                    TransactionKind::<L>::unfreeze()
-                                } else {
-                                    kind
-                                }
-                            }
-                            Err(err) => {
-                                println!(
-                                    "Error fetching received transaction ({}, {}) from network: {}. \
-                                        Transaction will be recorded with unknown type.",
-                                    block_id, txn_id, err
-                                );
-                                TransactionKind::<L>::unknown()
-                            }
-                        };
-
-                        let txn_asset = received_ros[0].asset_def.code;
-                        let history = TransactionHistoryEntry {
-                            time: Local::now(),
-                            asset: txn_asset,
-                            kind,
-                            sender: None,
-                            // When we receive transactions, we can't tell from the protocol
-                            // who sent it to us.
-                            receivers: received_ros
-                                .into_iter()
-                                .filter_map(|ro| {
-                                    if ro.asset_def.code == txn_asset {
-                                        Some((ro.pub_key.address(), ro.amount))
-                                    } else {
-                                        println!(
-                                            "Received transaction ({}, {}) contains outputs with \
-                                            multiple asset types. Ignoring some of them.",
-                                            block_id, txn_id
-                                        );
-                                        None
-                                    }
-                                })
-                                .collect(),
-                            receipt: None,
-                        };
-
-                        if let Err(err) = session
-                            .backend
-                            .store(|mut t| async move {
-                                t.store_transaction(history).await?;
-                                Ok(t)
-                            })
-                            .await
-                        {
-                            println!(
-                                "Failed to store transaction history for ({}, {}): {}.",
-                                block_id, txn_id, err
-                            );
-                        }
-                    }
+                summary
+                    .received_memos
+                    .extend(outputs.iter().map(|(memo, _, uid, _)| (memo.clone(), *uid)));
+                for key_pair in self.user_keys.values().cloned().collect::<Vec<_>>() {
+                    let records = self
+                        .try_open_memos(session, &key_pair, &outputs, transaction, !self_published)
+                        .await;
+                    self.add_records(&key_pair, records);
                 }
             }
 
@@ -1043,6 +1037,194 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
 
         summary
+    }
+
+    async fn handle_retroactive_event(
+        &mut self,
+        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        key: &UserKeyPair,
+        event: LedgerEvent<L>,
+    ) {
+        let scan = match event {
+            LedgerEvent::Memos {
+                outputs,
+                transaction,
+                ..
+            } => {
+                let records = self
+                    .try_open_memos(session, key, &outputs, transaction, true)
+                    .await;
+                let scan = self.key_scans.get_mut(&key.address()).unwrap();
+                scan.add_records(records);
+                scan
+            }
+
+            LedgerEvent::Commit { block, .. } => {
+                let nullifiers = block
+                    .txns()
+                    .into_iter()
+                    .flat_map(|txn| txn.note().nullifiers())
+                    .collect::<Vec<_>>();
+                let scan = self.key_scans.get_mut(&key.address()).unwrap();
+                scan.process_nullifiers(&nullifiers, false);
+                scan
+            }
+
+            _ => self.key_scans.get_mut(&key.address()).unwrap(),
+        };
+
+        scan.next_event += 1;
+        if let Err(err) = session
+            .backend
+            .store(|mut t| async {
+                t.store_snapshot(self).await?;
+                Ok(t)
+            })
+            .await
+        {
+            println!(
+                "warning: failed to save background scan state to disk: {}",
+                err
+            );
+        }
+    }
+
+    async fn try_open_memos(
+        &mut self,
+        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        key_pair: &UserKeyPair,
+        memos: &[(ReceiverMemo, RecordCommitment, u64, MerklePath)],
+        transaction: Option<(u64, u64)>,
+        add_to_history: bool,
+    ) -> Vec<(RecordOpening, u64, MerklePath)> {
+        let mut records = Vec::new();
+        for (memo, comm, uid, proof) in memos {
+            if let Ok(record_opening) = memo.decrypt(key_pair, comm, &[]) {
+                if !record_opening.is_dummy() {
+                    // If this record is for us (i.e. its corresponding memo decrypts under
+                    // our key) and not a dummy, then add it to our owned records.
+                    records.push((record_opening, *uid, proof.clone()));
+                }
+            }
+        }
+
+        if add_to_history && !records.is_empty() {
+            if let Some((block_id, txn_id)) = transaction {
+                // To add a transaction history entry, we need to fetch the actual transaction to
+                // figure out what type it was.
+                let kind = match session.backend.get_transaction(block_id, txn_id).await {
+                    Ok(txn) => {
+                        let kind = txn.kind();
+                        if kind == TransactionKind::<L>::send() {
+                            TransactionKind::<L>::receive()
+                        } else if kind == TransactionKind::<L>::freeze()
+                            && records[0].0.freeze_flag == FreezeFlag::Unfrozen
+                        {
+                            TransactionKind::<L>::unfreeze()
+                        } else {
+                            kind
+                        }
+                    }
+                    Err(err) => {
+                        println!(
+                            "Error fetching received transaction ({}, {}) from network: {}. \
+                                Transaction will be recorded with unknown type.",
+                            block_id, txn_id, err
+                        );
+                        TransactionKind::<L>::unknown()
+                    }
+                };
+
+                let txn_asset = records[0].0.asset_def.code;
+                let history = TransactionHistoryEntry {
+                    time: Local::now(),
+                    asset: txn_asset,
+                    kind,
+                    sender: None,
+                    // When we receive transactions, we can't tell from the protocol
+                    // who sent it to us.
+                    receivers: records
+                        .iter()
+                        .filter_map(|(ro, _, _)| {
+                            if ro.asset_def.code == txn_asset {
+                                Some((ro.pub_key.address(), ro.amount))
+                            } else {
+                                println!(
+                                    "Received transaction ({}, {}) contains outputs with \
+                                    multiple asset types. Ignoring some of them.",
+                                    block_id, txn_id
+                                );
+                                None
+                            }
+                        })
+                        .collect(),
+                    receipt: None,
+                };
+
+                if let Err(err) = session
+                    .backend
+                    .store(|mut t| async move {
+                        t.store_transaction(history).await?;
+                        Ok(t)
+                    })
+                    .await
+                {
+                    println!(
+                        "Failed to store transaction history for ({}, {}): {}.",
+                        block_id, txn_id, err
+                    );
+                }
+            }
+        }
+
+        records
+    }
+
+    fn add_records(
+        &mut self,
+        key_pair: &UserKeyPair,
+        records: Vec<(RecordOpening, u64, MerklePath)>,
+    ) {
+        for (record, uid, proof) in records {
+            let comm = RecordCommitment::from(&record);
+            if !self
+                .remember_merkle_leaf(uid, &MerkleLeafProof::new(comm.to_field_element(), proof))
+            {
+                println!(
+                    "error: got bad merkle proof from backend for commitment {:?}",
+                    comm
+                );
+            }
+
+            self.txn_state.records.insert(record, uid, key_pair);
+        }
+    }
+
+    async fn import_memo(
+        &mut self,
+        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        memo: ReceiverMemo,
+        comm: RecordCommitment,
+        uid: u64,
+        proof: MerklePath,
+    ) -> Result<(), WalletError> {
+        for key in self.user_keys.values().cloned().collect::<Vec<_>>() {
+            let records = self
+                .try_open_memos(
+                    session,
+                    &key,
+                    &[(memo.clone(), comm, uid, proof.clone())],
+                    None,
+                    false,
+                )
+                .await;
+            if !records.is_empty() {
+                self.add_records(&key, records);
+                return Ok(());
+            }
+        }
+
+        Err(WalletError::CannotDecryptMemo {})
     }
 
     async fn clear_pending_transaction<'t>(
@@ -1312,9 +1494,34 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         user_key: UserKeyPair,
+        scan_from: Option<u64>,
     ) -> Result<(), WalletError> {
         Self::add_key(session, &mut self.user_keys, user_key.clone()).await?;
-        session.backend.register_user_key(&user_key.pub_key()).await
+
+        // Register the new public key with the public address->key mapping.
+        session
+            .backend
+            .register_user_key(&user_key.pub_key())
+            .await?;
+
+        if let Some(scan_from) = scan_from {
+            // Register a background scan of the ledger to import records belonging to this key.
+            // Note that the caller is responsible for actually starting the task which processes
+            // this scan, since the Wallet (not the WalletState) has the data structures needed to
+            // manage tasks (the AsyncScope, mutexes, etc.).
+            self.key_scans.insert(
+                user_key.address(),
+                BackgroundKeyScan {
+                    key: user_key.clone(),
+                    next_event: scan_from,
+                    to_event: self.txn_state.now,
+                    records: Default::default(),
+                    new_nullifiers: Default::default(),
+                },
+            );
+        }
+
+        Ok(())
     }
 
     pub async fn add_audit_key(
@@ -2279,10 +2486,9 @@ pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = AAPLedger> {
     //    which the corresponding future is supposed to complete. Handles are added in sync() (main
     //    thread) and removed and completed in the event thread
     mutex: Arc<Mutex<WalletSharedState<'a, L, Backend>>>,
-    // Handle for the task running the event handling loop. When dropped, this handle will cancel
-    // the task, so this field is never read, it exists solely to live as long as this struct and
-    // then be dropped.
-    _event_task: AsyncScope<'a, ()>,
+    // Handle for the background tasks running the event handling loop and retroactive ledger scans.
+    // When dropped, this handle will cancel the tasks.
+    task_scope: AsyncScope<'a, ()>,
 }
 
 struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
@@ -2299,6 +2505,17 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     pub async fn new(mut backend: Backend) -> Result<Wallet<'a, Backend, L>, WalletError> {
         let state = backend.load().await?;
         let mut events = backend.subscribe(state.txn_state.now).await;
+        let mut key_scans = vec![];
+        for scan in state.key_scans.values() {
+            assert!(scan.next_event < scan.to_event);
+            key_scans.push((
+                scan.key.clone(),
+                backend
+                    .subscribe(scan.next_event)
+                    .await
+                    .take((scan.to_event - scan.next_event) as usize),
+            ));
+        }
         let session = WalletSession {
             backend,
             rng: ChaChaRng::from_entropy(),
@@ -2316,22 +2533,23 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
             pending_foreign_txns,
         }));
 
+        let mut scope = unsafe {
+            // Creating an AsyncScope is considered unsafe because `std::mem::forget` is allowed
+            // in safe code, and forgetting an AsyncScope can allow its inner futures to
+            // continue to be scheduled to run after the lifetime of the scope ends, since
+            // normally the destructor of the scope ensures that its futures are driven to
+            // completion before its lifetime ends.
+            //
+            // Since we are immediately going to store `scope` in the resulting `Wallet`, its
+            // lifetime will be the same as the `Wallet`, and its destructor will run as long as
+            // no one calls `forget` on the `Wallet` -- which no one should ever have any reason
+            // to.
+            AsyncScope::create()
+        };
+
         // Start the event loop.
-        let event_task = {
+        {
             let mutex = mutex.clone();
-            let mut scope = unsafe {
-                // Creating an AsyncScope is considered unsafe because `std::mem::forget` is allowed
-                // in safe code, and forgetting an AsyncScope can allow its inner futures to
-                // continue to be scheduled to run after the lifetime of the scope ends, since
-                // normally the destructor of the scope ensures that its futures are driven to
-                // completion before its lifetime ends.
-                //
-                // Since we are immediately going to store `scope` in the resulting `Wallet`, its
-                // lifetime will be the same as the `Wallet`, and its destructor will run as long as
-                // no one calls `forget` on the `Wallet` -- which no one should ever have any reason
-                // to.
-                AsyncScope::create()
-            };
             scope.spawn_cancellable(
                 async move {
                     let mut foreign_txns_awaiting_memos = HashMap::new();
@@ -2399,13 +2617,20 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
                 },
                 || (),
             );
-            scope
         };
 
-        Ok(Self {
+        let mut wallet = Self {
             mutex,
-            _event_task: event_task,
-        })
+            task_scope: scope,
+        };
+
+        // Spawn background tasks for any scans which were in progress when the wallet was last shut
+        // down.
+        for (key, events) in key_scans {
+            wallet.spawn_key_scan(key, events);
+        }
+
+        Ok(wallet)
     }
 
     pub async fn pub_keys(&self) -> Vec<UserPubKey> {
@@ -2504,17 +2729,45 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     }
 
     /// add a user/spender key to the wallet's key set
-    pub async fn add_user_key(&mut self, user_key: UserKeyPair) -> Result<(), WalletError> {
-        let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        state.add_user_key(session, user_key).await
+    pub async fn add_user_key(
+        &mut self,
+        user_key: UserKeyPair,
+        scan_from: u64,
+    ) -> Result<(), WalletError> {
+        let mut guard = self.mutex.lock().await;
+        let WalletSharedState { state, session, .. } = &mut *guard;
+        state
+            .add_user_key(session, user_key.clone(), Some(scan_from))
+            .await?;
+
+        // Start a background task to scan for records belonging to the new key.
+        let events = session
+            .backend
+            .subscribe(scan_from)
+            .await
+            .take((state.txn_state.now - scan_from) as usize);
+        drop(guard);
+        self.spawn_key_scan(user_key, events);
+        Ok(())
     }
 
     /// generate a new freezer key and add it to the wallet's key set
     pub async fn generate_user_key(&mut self) -> Result<UserPubKey, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         let user_key = UserKeyPair::generate(&mut session.rng);
-        state.add_user_key(session, user_key.clone()).await?;
+        state.add_user_key(session, user_key.clone(), None).await?;
         Ok(user_key.pub_key())
+    }
+
+    pub async fn import_memo(
+        &mut self,
+        memo: ReceiverMemo,
+        comm: RecordCommitment,
+        uid: u64,
+        proof: MerklePath,
+    ) -> Result<(), WalletError> {
+        let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+        state.import_memo(session, memo, comm, uid, proof).await
     }
 
     /// create a mint note that assign asset to an owner
@@ -2625,6 +2878,35 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
             Ok(())
         }
     }
+
+    fn spawn_key_scan(
+        &mut self,
+        key: UserKeyPair,
+        mut events: impl 'a + Stream<Item = LedgerEvent<L>> + Unpin + Send,
+    ) {
+        let mutex = self.mutex.clone();
+        self.task_scope.spawn_cancellable(
+            async move {
+                while let Some(event) = events.next().await {
+                    let WalletSharedState { state, session, .. } = &mut *mutex.lock().await;
+                    state.handle_retroactive_event(session, &key, event).await;
+                }
+
+                let WalletSharedState { state, session, .. } = &mut *mutex.lock().await;
+                let scan = state.key_scans.remove(&key.address()).unwrap();
+                state.add_records(&key, scan.records.into_values().collect());
+                session
+                    .backend
+                    .store(|mut t| async {
+                        t.store_snapshot(state).await?;
+                        Ok(t)
+                    })
+                    .await
+                    .ok();
+            },
+            || (),
+        );
+    }
 }
 
 pub fn new_key_pair() -> UserKeyPair {
@@ -2682,6 +2964,7 @@ pub mod test_helpers {
         );
         assert_eq!(w1.defined_assets, w2.defined_assets);
         assert_eq!(w1.txn_state.transactions, w2.txn_state.transactions);
+        assert_eq!(w1.key_scans, w2.key_scans);
     }
 
     #[derive(Clone, Debug)]
@@ -2722,12 +3005,8 @@ pub mod test_helpers {
 
         async fn store_snapshot(&mut self, state: &WalletState<'a>) -> Result<(), WalletError> {
             if let Some(working) = &mut self.working {
-                working.txn_state.now = state.txn_state.now;
-                working.txn_state.validator = state.txn_state.validator.clone();
-                working.txn_state.records = state.txn_state.records.clone();
-                working.txn_state.nullifiers = state.txn_state.nullifiers.clone();
-                working.txn_state.record_mt = state.txn_state.record_mt.clone();
-                working.txn_state.transactions = state.txn_state.transactions.clone();
+                working.txn_state = state.txn_state.clone();
+                working.key_scans = state.key_scans.clone();
             }
             Ok(())
         }
@@ -2828,9 +3107,18 @@ pub mod test_helpers {
                 }
             );
             self.events.push(e.clone());
-            for s in self.subscribers.iter_mut() {
-                s.start_send(e.clone()).unwrap();
-            }
+            self.subscribers = std::mem::take(&mut self.subscribers)
+                .into_iter()
+                .filter_map(|mut s| {
+                    if s.start_send(e.clone()).is_ok() {
+                        // Errors indicate that the subscriber has disconnected, so we only want to
+                        // retain the subscriber if the send is successful.
+                        Some(s)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
         }
 
         pub fn flush(&mut self) {
@@ -3034,6 +3322,7 @@ pub mod test_helpers {
                         now: 0,
                         transactions: Default::default(),
                     },
+                    key_scans: Default::default(),
                     auditable_assets: Default::default(),
                     audit_keys: Default::default(),
                     freeze_keys: Default::default(),
@@ -3274,7 +3563,7 @@ pub mod test_helpers {
                     })
                     .await
                     .unwrap();
-                    wallet.add_user_key(key_pair.clone()).await.unwrap();
+                    wallet.add_user_key(key_pair.clone(), 0).await.unwrap();
                     (wallet, key_pair.address())
                 }
             })

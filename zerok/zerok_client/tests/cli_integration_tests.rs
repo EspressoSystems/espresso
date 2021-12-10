@@ -4,7 +4,10 @@ use zerok_client::cli_client::{cli_test, CliClient};
 fn create_wallet(t: &mut CliClient, wallet: usize) -> Result<&mut CliClient, String> {
     let key_path = t.wallet_key_path(wallet)?;
     let key_path = key_path.as_os_str().to_str().ok_or_else(|| {
-        format!("failed to convert key path {:?} for wallet {} to string", key_path, wallet)
+        format!(
+            "failed to convert key path {:?} for wallet {} to string",
+            key_path, wallet
+        )
     })?;
     t.open(wallet)?
         .output("Create password:")?
@@ -24,7 +27,8 @@ fn create_wallet(t: &mut CliClient, wallet: usize) -> Result<&mut CliClient, Str
 
 fn wait_for_starting_balance(t: &mut CliClient) -> Result<usize, String> {
     loop {
-        t.command(0, "balance 0")?.output("$default_addr0 (?P<balance>\\d+)")?;
+        t.command(0, "balance 0")?
+            .output("$default_addr0 (?P<balance>\\d+)")?;
         let balance = t.var("balance").unwrap().parse().unwrap();
         if balance > 0 {
             break Ok(balance);

@@ -1,3 +1,4 @@
+use crate::node::MerkleTreeWithArbitrary;
 use crate::util::arbitrary_wrappers::*;
 use crate::{ledger, ser_test};
 use arbitrary::{Arbitrary, Unstructured};
@@ -592,7 +593,9 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct TransactionState<L: Ledger = AAPLedger> {
     // sequence number of the last event processed
     pub now: u64,
@@ -610,4 +613,35 @@ pub struct TransactionState<L: Ledger = AAPLedger> {
     pub merkle_leaf_to_forget: Option<u64>,
     // set of pending transactions
     pub transactions: TransactionDatabase<L>,
+}
+
+impl<L: Ledger> PartialEq<Self> for TransactionState<L> {
+    fn eq(&self, other: &Self) -> bool {
+        self.now == other.now
+            && self.validator == other.validator
+            && self.records == other.records
+            && self.nullifiers == other.nullifiers
+            && self.record_mt == other.record_mt
+            && self.merkle_leaf_to_forget == other.merkle_leaf_to_forget
+            && self.transactions == other.transactions
+    }
+}
+
+impl<'a, L: Ledger> Arbitrary<'a> for TransactionState<L>
+where
+    Validator<L>: Arbitrary<'a>,
+    NullifierSet<L>: Arbitrary<'a>,
+    TransactionHash<L>: Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            now: u.arbitrary()?,
+            validator: u.arbitrary()?,
+            records: u.arbitrary()?,
+            nullifiers: u.arbitrary()?,
+            record_mt: u.arbitrary::<MerkleTreeWithArbitrary>()?.0,
+            merkle_leaf_to_forget: None,
+            transactions: u.arbitrary()?,
+        })
+    }
 }
