@@ -1079,6 +1079,7 @@ impl<L: Ledger> TransactionState<L> {
         Ok((note, recv_memos, sig))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn mint<'a>(
         &mut self,
         owner_keypair: &UserKeyPair,
@@ -1125,6 +1126,7 @@ impl<L: Ledger> TransactionState<L> {
         Ok((mint_note, recv_memos, signature))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn freeze_or_unfreeze<'a>(
         &mut self,
         fee_keypair: &UserKeyPair,
