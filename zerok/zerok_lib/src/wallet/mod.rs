@@ -10,10 +10,9 @@ use crate::node::LedgerEvent;
 use crate::state::key_set;
 use crate::txn_builder::*;
 use crate::{
-    ledger, ser_test,
+    ledger,
     state::{ProverKeySet, ValidationError},
 };
-use arbitrary::{Arbitrary, Unstructured};
 use async_scoped::AsyncScope;
 use async_std::sync::{Mutex, MutexGuard};
 use async_std::task::block_on;
@@ -1906,6 +1905,7 @@ pub mod test_helpers {
     use crate::{
         api::FromError,
         node,
+        node::MerkleTreeWithArbitrary,
         state::{
             Block, ElaboratedBlock, ElaboratedTransaction, SetMerkleProof, SetMerkleTree,
             ValidatorState, VerifierKeySet, MERKLE_HEIGHT,
@@ -1953,8 +1953,8 @@ pub mod test_helpers {
             w2.txn_state.nullifiers.hash()
         );
         assert_eq!(
-            w1.txn_state.record_mt.commitment(),
-            w2.txn_state.record_mt.commitment()
+            w1.txn_state.record_mt.0.commitment(),
+            w2.txn_state.record_mt.0.commitment()
         );
         assert_eq!(w1.defined_assets, w2.defined_assets);
         assert_eq!(w1.txn_state.transactions, w2.txn_state.transactions);
@@ -2298,7 +2298,7 @@ pub mod test_helpers {
                             db
                         },
                         nullifiers: ledger.nullifiers.clone(),
-                        record_mt: ledger.records.clone(),
+                        record_mt: MerkleTreeWithArbitrary(ledger.records.clone()),
                         merkle_leaf_to_forget: None,
 
                         now: 0,

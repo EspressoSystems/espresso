@@ -2,6 +2,7 @@ use crate::util::arbitrary_wrappers::*;
 use crate::{
     ledger,
     ledger::traits::{Transaction as _, Validator as _},
+    node::MerkleTreeWithArbitrary,
     ser_test,
     state::{key_set, ValidatorState, MERKLE_HEIGHT},
 };
@@ -20,7 +21,7 @@ use jf_txn::{
         Nullifier, ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness, MerkleLeafProof, MerkleTree, Signature,
+    AccMemberWitness, MerkleLeafProof, Signature,
 };
 use jf_utils::tagged_blob;
 use key_set::KeySet;
@@ -681,7 +682,9 @@ pub type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
 // a never expired target
 pub const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
 
-#[derive(Debug, Clone)]
+#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(bound = "")]
 pub struct TransactionState<L: Ledger = AAPLedger> {
     // sequence number of the last event processed
     pub now: u64,
@@ -693,12 +696,42 @@ pub struct TransactionState<L: Ledger = AAPLedger> {
     // sparse nullifier set Merkle tree mirrored from validators
     pub nullifiers: NullifierSet<L>,
     // sparse record Merkle tree mirrored from validators
-    pub record_mt: MerkleTree,
+    pub record_mt: MerkleTreeWithArbitrary,
     // when forgetting the last leaf in the tree, the forget operation will be deferred until a new
     // leaf is appended, using this field, because MerkleTree doesn't allow forgetting the last leaf.
     pub merkle_leaf_to_forget: Option<u64>,
     // set of pending transactions
     pub transactions: TransactionDatabase<L>,
+}
+
+impl<L: Ledger> PartialEq<Self> for TransactionState<L> {
+    fn eq(&self, other: &Self) -> bool {
+        self.now == other.now
+            && self.validator == other.validator
+            && self.records == other.records
+            && self.nullifiers == other.nullifiers
+            && self.record_mt == other.record_mt
+            && self.transactions == other.transactions
+    }
+}
+
+impl<'a, L: Ledger> Arbitrary<'a> for TransactionState<L>
+where
+    Validator<L>: Arbitrary<'a>,
+    NullifierSet<L>: Arbitrary<'a>,
+    TransactionHash<L>: Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            now: u.arbitrary()?,
+            validator: u.arbitrary()?,
+            records: u.arbitrary()?,
+            nullifiers: u.arbitrary()?,
+            record_mt: u.arbitrary()?,
+            merkle_leaf_to_forget: None,
+            transactions: u.arbitrary()?,
+        })
+    }
 }
 
 impl<L: Ledger> TransactionState<L> {
@@ -1139,10 +1172,10 @@ impl<L: Ledger> TransactionState<L> {
     }
 
     pub fn forget_merkle_leaf(&mut self, leaf: u64) {
-        if leaf < self.record_mt.num_leaves() - 1 {
-            self.record_mt.forget(leaf);
+        if leaf < self.record_mt.0.num_leaves() - 1 {
+            self.record_mt.0.forget(leaf);
         } else {
-            assert_eq!(leaf, self.record_mt.num_leaves() - 1);
+            assert_eq!(leaf, self.record_mt.0.num_leaves() - 1);
             // We can't forget the last leaf in a Merkle tree. Instead, we just note that we want to
             // forget this leaf, and we'll forget it when we append a new last leaf.
             //
@@ -1160,21 +1193,21 @@ impl<L: Ledger> TransactionState<L> {
             self.merkle_leaf_to_forget = None;
             // `merkle_leaf_to_forget` is always represented in the tree, so we don't have to call
             // `remember` in this case.
-            assert!(self.record_mt.get_leaf(leaf).expect_ok().is_ok());
+            assert!(self.record_mt.0.get_leaf(leaf).expect_ok().is_ok());
             true
         } else {
-            self.record_mt.remember(leaf, proof).is_ok()
+            self.record_mt.0.remember(leaf, proof).is_ok()
         }
     }
 
     pub fn append_merkle_leaf(&mut self, comm: RecordCommitment) {
-        self.record_mt.push(comm.to_field_element());
+        self.record_mt.0.push(comm.to_field_element());
 
         // Now that we have appended a new leaf to the Merkle tree, we can forget the old last leaf,
         // if needed.
         if let Some(uid) = self.merkle_leaf_to_forget.take() {
-            assert!(uid < self.record_mt.num_leaves() - 1);
-            self.record_mt.forget(uid);
+            assert!(uid < self.record_mt.0.num_leaves() - 1);
+            self.record_mt.0.forget(uid);
         }
     }
 
@@ -1261,7 +1294,7 @@ impl<L: Ledger> TransactionState<L> {
     fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
         // The transaction builder never needs a Merkle proof that isn't guaranteed to already be in the Merkle
         // tree, so this unwrap() should never fail.
-        AccMemberWitness::lookup_from_tree(&self.record_mt, leaf)
+        AccMemberWitness::lookup_from_tree(&self.record_mt.0, leaf)
             .expect_ok()
             .unwrap()
             .1

@@ -4,11 +4,11 @@ use super::{
 };
 use crate::api;
 use crate::ledger::AAPLedger;
-use crate::node;
 use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
 use crate::state::key_set::SizedKey;
 use crate::state::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
 use crate::txn_builder::TransactionState;
+use crate::{node, node::MerkleTreeWithArbitrary};
 use api::{client::*, BlockId, ClientError, CommittedTransaction, FromError, TransactionId};
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
@@ -184,7 +184,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                 validator,
 
                 nullifiers,
-                record_mt: records.0,
+                record_mt: MerkleTreeWithArbitrary(records.0),
                 merkle_leaf_to_forget,
                 now: 0,
                 records: Default::default(),

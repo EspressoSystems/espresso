@@ -1,5 +1,4 @@
 use crate::ledger::*;
-use crate::node::MerkleTreeWithArbitrary;
 use crate::state::key_set::OrderByOutputs;
 use crate::state::ProverKeySet;
 use crate::txn_builder::TransactionState;
@@ -46,66 +45,6 @@ impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletStaticState<'a> {
             proving_keys: w.proving_keys.clone(),
             immutable_keys: w.immutable_keys.clone(),
         }
-    }
-}
-
-// TODO !keyao Replace WalletSnapshot with TransactionState:
-// https://gitlab.com/translucence/systems/system/-/issues/46
-// Serialization intermediate for the dynamic part of a WalletState.
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(bound = "")]
-struct WalletSnapshot<L: Ledger> {
-    now: u64,
-    validator: Validator<L>,
-    records: RecordDatabase,
-    nullifiers: NullifierSet<L>,
-    record_mt: MerkleTreeWithArbitrary,
-    merkle_leaf_to_forget: Option<u64>,
-    transactions: TransactionDatabase<L>,
-}
-
-impl<L: Ledger> PartialEq<Self> for WalletSnapshot<L> {
-    fn eq(&self, other: &Self) -> bool {
-        self.now == other.now
-            && self.validator == other.validator
-            && self.records == other.records
-            && self.nullifiers == other.nullifiers
-            && self.record_mt == other.record_mt
-            && self.transactions == other.transactions
-    }
-}
-
-impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletSnapshot<L> {
-    fn from(w: &WalletState<'a, L>) -> Self {
-        Self {
-            now: w.txn_state.now,
-            validator: w.txn_state.validator.clone(),
-            records: w.txn_state.records.clone(),
-            nullifiers: w.txn_state.nullifiers.clone(),
-            record_mt: MerkleTreeWithArbitrary(w.txn_state.record_mt.clone()),
-            merkle_leaf_to_forget: w.txn_state.merkle_leaf_to_forget,
-            transactions: w.txn_state.transactions.clone(),
-        }
-    }
-}
-
-impl<'a, L: Ledger> Arbitrary<'a> for WalletSnapshot<L>
-where
-    Validator<L>: Arbitrary<'a>,
-    NullifierSet<L>: Arbitrary<'a>,
-    TransactionHash<L>: Arbitrary<'a>,
-{
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            now: u.arbitrary()?,
-            validator: u.arbitrary()?,
-            records: u.arbitrary()?,
-            nullifiers: u.arbitrary()?,
-            record_mt: u.arbitrary()?,
-            merkle_leaf_to_forget: None,
-            transactions: u.arbitrary()?,
-        })
     }
 }
 
@@ -173,7 +112,7 @@ pub struct AtomicWalletStorage<'a, L: Ledger, Meta: Serialize + DeserializeOwned
     // Snapshot log with a single entry containing the static data.
     static_data: RollingLog<EncryptingResourceAdapter<WalletStaticState<'a>>>,
     static_dirty: bool,
-    dynamic_state: RollingLog<EncryptingResourceAdapter<WalletSnapshot<L>>>,
+    dynamic_state: RollingLog<EncryptingResourceAdapter<TransactionState<L>>>,
     dynamic_state_dirty: bool,
     auditable_assets: AppendLog<EncryptingResourceAdapter<AssetDefinition>>,
     auditable_assets_dirty: bool,
@@ -314,15 +253,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
             immutable_keys: static_state.immutable_keys,
 
             // Dynamic state
-            txn_state: TransactionState {
-                validator: dynamic_state.validator,
-                now: dynamic_state.now,
-                records: dynamic_state.records,
-                nullifiers: dynamic_state.nullifiers,
-                record_mt: dynamic_state.record_mt.0,
-                merkle_leaf_to_forget: dynamic_state.merkle_leaf_to_forget,
-                transactions: dynamic_state.transactions,
-            },
+            txn_state: dynamic_state,
 
             // Monotonic state
             auditable_assets: self
@@ -345,7 +276,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
 
     async fn store_snapshot(&mut self, w: &WalletState<'a, L>) -> Result<(), WalletError> {
         self.dynamic_state
-            .store_resource(&WalletSnapshot::from(w))
+            .store_resource(&w.txn_state)
             .context(PersistenceError)?;
         self.dynamic_state_dirty = true;
         Ok(())
@@ -469,6 +400,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
 mod tests {
     use super::*;
     use crate::{
+        node::MerkleTreeWithArbitrary,
         state::{
             ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, ValidatorState,
             VerifierKeySet, MERKLE_HEIGHT,
@@ -598,7 +530,7 @@ mod tests {
                 now: 0,
                 records: Default::default(),
                 nullifiers: Default::default(),
-                record_mt: record_merkle_tree,
+                record_mt: MerkleTreeWithArbitrary(record_merkle_tree),
                 merkle_leaf_to_forget: None,
                 transactions: Default::default(),
             },
@@ -638,7 +570,7 @@ mod tests {
         // Modify some dynamic state and load the wallet again.
         let ro = random_ro(&mut rng, &stored.immutable_keys.key_pair);
         let comm = RecordCommitment::from(&ro);
-        stored.txn_state.record_mt.push(comm.to_field_element());
+        stored.txn_state.record_mt.0.push(comm.to_field_element());
         stored
             .txn_state
             .validator
@@ -652,8 +584,8 @@ mod tests {
                     .root_value,
             );
         stored.txn_state.validator.record_merkle_commitment =
-            stored.txn_state.record_mt.commitment();
-        stored.txn_state.validator.record_merkle_frontier = stored.txn_state.record_mt.frontier();
+            stored.txn_state.record_mt.0.commitment();
+        stored.txn_state.validator.record_merkle_frontier = stored.txn_state.record_mt.0.frontier();
         let mut nullifiers = SetMerkleTree::default();
         nullifiers.insert(Nullifier::random_for_test(&mut rng));
         stored.txn_state.validator.nullifiers_root = nullifiers.hash();
