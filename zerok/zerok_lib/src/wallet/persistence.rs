@@ -476,7 +476,11 @@ mod tests {
         txn_builder::{PendingTransaction, TransactionUID},
         universal_params::UNIVERSAL_PARAM,
     };
-    use jf_txn::{KeyPair, MerkleTree, TransactionVerifyingKey};
+    use jf_txn::{
+        sign_receiver_memos, structs::RecordCommitment, KeyPair, MerkleTree,
+        TransactionVerifyingKey,
+    };
+    use key_set::KeySet;
     use phaselock::H_256;
     use rand_chacha::{
         rand_core::{RngCore, SeedableRng},
