@@ -1,8 +1,8 @@
-use crate::key_set::OrderByOutputs;
 use crate::ledger::*;
+use crate::state::key_set::OrderByOutputs;
+use crate::state::ProverKeySet;
 use crate::txn_builder::TransactionState;
 use crate::wallet::*;
-use crate::ProverKeySet;
 use async_std::sync::Arc;
 use atomic_store::{
     error::PersistenceError,
@@ -432,8 +432,11 @@ mod tests {
     use super::*;
     use crate::txn_builder::{PendingTransaction, TransactionUID};
     use crate::{
-        ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, VerifierKeySet,
-        MERKLE_HEIGHT, UNIVERSAL_PARAM,
+        state::{
+            ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, VerifierKeySet,
+            MERKLE_HEIGHT,
+        },
+        universal_params::UNIVERSAL_PARAM,
     };
     use jf_txn::{KeyPair, MerkleTree, TransactionVerifyingKey};
     use phaselock::H_256;

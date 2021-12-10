@@ -5,7 +5,7 @@
 // allows the user to enter commands for a wallet interactively.
 //
 
-use crate::{api, wallet, UNIVERSAL_PARAM};
+use crate::{api, universal_params::UNIVERSAL_PARAM, wallet};
 use api::{MerklePath, UserAddress};
 use async_std::task::block_on;
 use async_trait::async_trait;

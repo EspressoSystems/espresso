@@ -1,12 +1,12 @@
 use super::persistence::{AtomicWalletStorage, WalletLoader};
 use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
 use crate::api;
-use crate::key_set::SizedKey;
 use crate::ledger::AAPLedger;
 use crate::node;
 use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
+use crate::state::key_set::SizedKey;
+use crate::state::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
 use crate::txn_builder::TransactionState;
-use crate::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
 use api::{client::*, BlockId, ClientError, CommittedTransaction, FromError, TransactionId};
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;

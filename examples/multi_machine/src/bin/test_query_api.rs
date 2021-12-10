@@ -41,7 +41,7 @@ use wallet::{
 use zerok_lib::api::*;
 use zerok_lib::node::{LedgerEvent, LedgerSummary, QueryServiceError};
 use zerok_lib::wallet;
-use zerok_lib::{ElaboratedBlock, UNIVERSAL_PARAM};
+use zerok_lib::{state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM};
 
 #[derive(StructOpt)]
 struct Args {
