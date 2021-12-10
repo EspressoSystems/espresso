@@ -138,8 +138,6 @@ impl From<crate::txn_builder::TransactionError> for WalletError {
     }
 }
 
-// TODO !keyao Move immutable keys from WalletState to transaction structure:
-// https://gitlab.com/translucence/systems/system/-/issues/45
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletImmutableKeySet {
     // key pair for building/receiving transactions
@@ -148,6 +146,8 @@ pub struct WalletImmutableKeySet {
 
 #[derive(Debug, Clone)]
 pub struct WalletState<'a, L: Ledger = AAPLedger> {
+    // TODO: Move the mutable keys to the txn state.
+    // https://github.com/spectrum-eco/spectrum/issues/6.
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Static data
     //
@@ -576,8 +576,20 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     }
 
     pub fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
-        self.txn_state
-            .assets(&self.auditable_assets, &self.defined_assets)
+        // Get the asset definitions of each record we own.
+        let mut assets = self.txn_state.assets();
+        // Add any assets that we know about through auditing.
+        for (code, def) in &self.auditable_assets {
+            assets.insert(*code, AssetInfo::from(def.clone()));
+        }
+        // Add the minting information (seed and description) for each asset we've defined.
+        for (code, (def, seed, desc)) in &self.defined_assets {
+            assets.insert(
+                *code,
+                AssetInfo::new(def.clone(), MintInfo::new(*seed, desc.clone())),
+            );
+        }
+        assets
     }
 
     pub async fn transaction_status(
@@ -743,7 +755,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 // This maintains the invariant that everything in `pending_transactions` must
                 // correspond to an on-hold record, because everything which corresponds to a record
                 // whose hold just expired will be removed from the set now.
-                for txn_uid in self.clear_expired_transactions() {
+                for txn_uid in self.txn_state.clear_expired_transactions() {
                     summary
                         .updated_txns
                         .push((txn_uid, TransactionStatus::Rejected));
@@ -980,10 +992,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
 
         pending
-    }
-
-    fn clear_expired_transactions(&mut self) -> Vec<TransactionUID<L>> {
-        self.txn_state.clear_expired_transactions()
     }
 
     async fn audit_transaction(

@@ -709,29 +709,11 @@ impl<L: Ledger> TransactionState<L> {
             .sum()
     }
 
-    pub fn assets(
-        &self,
-        auditable_assets: &HashMap<AssetCode, AssetDefinition>,
-        defined_assets: &HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
-    ) -> HashMap<AssetCode, AssetInfo> {
-        // Get the asset definitions of each record we own.
-        let mut assets: HashMap<AssetCode, AssetInfo> = self
-            .records
+    pub fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
+        self.records
             .assets()
             .map(|def| (def.code, AssetInfo::from(def)))
-            .collect();
-        // Add any assets that we know about through auditing.
-        for (code, def) in auditable_assets {
-            assets.insert(*code, AssetInfo::from(def.clone()));
-        }
-        // Add the minting information (seed and description) for each asset we've defined.
-        for (code, (def, seed, desc)) in defined_assets {
-            assets.insert(
-                *code,
-                AssetInfo::new(def.clone(), MintInfo::new(*seed, desc.clone())),
-            );
-        }
-        assets
+            .collect()
     }
 
     pub fn clear_expired_transactions(&mut self) -> Vec<TransactionUID<L>> {
