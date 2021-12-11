@@ -86,17 +86,13 @@ fn cli_basic_info(t: &mut CliClient) -> Result<(), String> {
 fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
     let balance = wait_for_starting_balance(t)?;
     t
-        // Get the address and balance of both wallets.
-        .command(0, "address")?
-        .output("(?P<addr0>ADDR~.*)")?
+        // Get the balance of both wallets.
         .command(0, "balance 0")?
-        .output(format!("{}", balance))?
-        .command(1, "address")?
-        .output("(?P<addr1>ADDR~.*)")?
+        .output(format!("$default_addr0 {}", balance))?
         .command(1, "balance 0")?
-        .output("0")?
+        .output("$default_addr1 0")?
         // Transfer some native coins from the primary wallet to the secondary.
-        .command(0, "transfer 0 $default_addr0 $addr1 500 1")?
+        .command(0, "transfer 0 $default_addr0 $default_addr1 500 1")?
         .output("Transaction (?P<txn>TXN~.*)")?
         // Wait for the transaction to complete in both wallets (just because one wallet has
         // received and processed the completed transaction doesn't mean the other has).
@@ -105,31 +101,26 @@ fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
         .command(1, "wait $txn")?
         .output("accepted")?
         .command(0, "balance 0")?
-        .output(format!("{}", balance - 501))?
+        .output(format!("$default_addr0 {}", balance - 501))?
         .command(1, "balance 0")?
-        .output("500")?
+        .output("$default_addr1 500")?
         // Transfer part of the money back
-        .command(1, "transfer 0 $default_addr1 $addr0 200 2")?
+        .command(1, "transfer 0 $default_addr1 $default_addr0 200 2")?
         .output("Transaction (?P<txn>TXN~.*)")?
         .command(0, "wait $txn")?
         .output("accepted")?
         .command(1, "wait $txn")?
         .output("accepted")?
         .command(1, "balance 0")?
-        .output("298")?
+        .output("$default_addr1 298")?
         .command(0, "balance 0")?
-        .output(format!("{}", balance - 301))?;
+        .output(format!("$default_addr0 {}", balance - 301))?;
     Ok(())
 }
 
 fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
     wait_for_starting_balance(t)?;
     t
-        // Get the address of the receiving wallet.
-        .command(0, "address")?
-        .output("(?P<addr0>ADDR~.*)")?
-        .command(1, "address")?
-        .output("(?P<addr1>ADDR~.*)")?
         // Define a new asset and mint some for the receiver.
         .command(0, "issue asset1")?
         .output("(?P<asset1>ASSETCODE~.*)")?
@@ -138,7 +129,7 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         .output("Not auditable")?
         .output("Not freezeable")?
         .output("Minter: me")?
-        .command(0, "mint 1 $default_addr0 $addr1 100 1")?
+        .command(0, "mint 1 $default_addr0 $default_addr1 100 1")?
         .output("Transaction (?P<txn>TXN~.*)")?
         .command(0, "wait $txn")?
         .output("accepted")?
@@ -153,7 +144,7 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         .output("Not freezeable")?
         .output("Minter: unknown")? // Receiver doesn't know who minted the asset for them
         .command(1, "balance 1")?
-        .output("100")?
+        .output("$default_addr1 100")?
         // Do it again, this time specifiying audit and freeze keys
         .command(0, "gen_key audit")?
         .output("(?P<audkey0>AUDPUBKEY~.*)")?
@@ -168,7 +159,7 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         .output("Auditor: me")?
         .output("Freezer: $freezekey1")?
         .output("Minter: me")?
-        .command(0, "mint $asset2 $default_addr0 $addr1 200 1")?
+        .command(0, "mint $asset2 $default_addr0 $default_addr1 200 1")?
         .output("Transaction (?P<txn>TXN~.*)")?
         .command(0, "wait $txn")?
         .output("accepted")?
@@ -181,7 +172,7 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         .output("Freezer: me")?
         .output("Minter: unknown")?
         .command(1, "balance $asset2")?
-        .output("200")?;
+        .output("$default_addr1 200")?;
     Ok(())
 }
 
