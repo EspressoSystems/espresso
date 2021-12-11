@@ -36,6 +36,7 @@ pub trait WalletLoader {
 // Serialization intermediate for the static part of a WalletState.
 #[derive(Deserialize, Serialize)]
 struct WalletStaticState<'a> {
+    #[serde(with = "serde_ark_unchecked")]
     proving_keys: Arc<ProverKeySet<'a, OrderByOutputs>>,
     immutable_keys: Arc<WalletImmutableKeySet>,
 }
@@ -46,6 +47,31 @@ impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletStaticState<'a> {
             proving_keys: w.proving_keys.clone(),
             immutable_keys: w.immutable_keys.clone(),
         }
+    }
+}
+
+mod serde_ark_unchecked {
+    use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+    use serde::{
+        de::{Deserialize, Deserializer},
+        ser::{Serialize, Serializer},
+    };
+    use std::sync::Arc;
+
+    pub fn serialize<S: Serializer, T: CanonicalSerialize>(
+        t: &Arc<T>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut bytes = Vec::new();
+        t.serialize_unchecked(&mut bytes).unwrap();
+        Serialize::serialize(&bytes, s)
+    }
+
+    pub fn deserialize<'a, D: Deserializer<'a>, T: CanonicalDeserialize>(
+        d: D,
+    ) -> Result<Arc<T>, D::Error> {
+        let bytes = <Vec<u8> as Deserialize<'a>>::deserialize(d)?;
+        Ok(Arc::new(T::deserialize_unchecked(&*bytes).unwrap()))
     }
 }
 

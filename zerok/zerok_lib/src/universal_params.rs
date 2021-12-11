@@ -45,7 +45,7 @@ pub fn set_universal_param(prng: &mut ChaChaRng) {
         prng,
     )
     .unwrap_or_else(|err| panic!("Error while setting up the universal parameter: {}", err));
-    let param_bytes = canonical::serialize(&universal_param)
+    let param_bytes = canonical::serialize_unchecked(&universal_param)
         .unwrap_or_else(|err| panic!("Error while serializing the universal parameter: {}", err));
     let path = UNIVERSAL_PARAM_PATH
         .clone()
@@ -86,7 +86,7 @@ pub fn get_universal_param(prng: &mut ChaChaRng) -> jf_txn::proof::UniversalPara
     let mut param_bytes = Vec::new();
     file.read_to_end(&mut param_bytes)
         .unwrap_or_else(|err| panic!("Error while reading the universal parameter file: {}", err));
-    canonical::deserialize(&param_bytes[..])
+    canonical::deserialize_unchecked(&param_bytes[..])
         .unwrap_or_else(|err| panic!("Error while deserializing the universal parameter: {}", err))
 }
 
