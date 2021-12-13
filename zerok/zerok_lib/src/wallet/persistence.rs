@@ -49,6 +49,8 @@ impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletStaticState<'a> {
     }
 }
 
+// TODO !keyao Replace WalletSnapshot with TransactionState:
+// https://gitlab.com/translucence/systems/system/-/issues/46
 // Serialization intermediate for the dynamic part of a WalletState.
 #[ser_test(arbitrary, types(AAPLedger), ark(false))]
 #[derive(Debug, Deserialize, Serialize)]
@@ -466,15 +468,19 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::txn_builder::{PendingTransaction, TransactionUID};
     use crate::{
         state::{
-            ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, VerifierKeySet,
-            MERKLE_HEIGHT,
+            ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, ValidatorState,
+            VerifierKeySet, MERKLE_HEIGHT,
         },
+        txn_builder::{PendingTransaction, TransactionUID},
         universal_params::UNIVERSAL_PARAM,
     };
-    use jf_txn::{KeyPair, MerkleTree, TransactionVerifyingKey};
+    use jf_txn::{
+        sign_receiver_memos, structs::RecordCommitment, KeyPair, MerkleTree,
+        TransactionVerifyingKey,
+    };
+    use key_set::KeySet;
     use phaselock::H_256;
     use rand_chacha::{
         rand_core::{RngCore, SeedableRng},
