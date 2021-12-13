@@ -29,7 +29,11 @@
 // `id`.
 
 use super::secret::Secret;
+use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserKeyPair};
+use mnemonic::decode;
+use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::rand_core::{CryptoRng, RngCore};
+use rand_chacha::ChaChaRng;
 use sha3::{Digest, Sha3_256, Sha3_512};
 use std::convert::TryInto;
 use zeroize::Zeroize;
@@ -54,14 +58,24 @@ pub struct KeyTree {
     depth: usize,
 }
 
+macro_rules! derive_keypair {
+    ($self: expr, $label:expr, $id: expr, $tar:ident) => {{
+        let id = [$label.as_bytes(), $id].concat();
+        let derived_seed = $self.derive_key_internal(&id);
+        let mut rng = ChaChaRng::from_seed(*derived_seed.as_bytes().open_secret());
+        $tar::generate(&mut rng)
+    }};
+}
+
 impl KeyTree {
-    pub fn random(rng: &mut (impl CryptoRng + RngCore)) -> Self {
-        let mut key = Secret::<[u8; 64]>::build();
-        rng.fill_bytes(key.as_mut());
-        Self {
-            state: key.finalize(),
-            depth: 0,
-        }
+    /// Build a new KeyTree from prng; also returns a 24-word mnemonic
+    /// that can be used to recover this KeyTree
+    pub fn random(rng: &mut (impl CryptoRng + RngCore)) -> Result<(Self, String), argon2::Error> {
+        let mut seed = [0u8; 32];
+        rng.fill_bytes(&mut seed);
+        let mnemonic = mnemonic::to_string(seed.as_ref());
+        let key_tree = Self::from_mnemonic(mnemonic.as_bytes())?;
+        Ok((key_tree, mnemonic))
     }
 
     pub fn from_password(
@@ -89,6 +103,17 @@ impl KeyTree {
         })
     }
 
+    /// Input a mnemonic phrase, in the form of bytes,
+    /// i.e., "digital-apollo-aroma--rival-artist-rebel"
+    /// initializing a key tree.
+    pub fn from_mnemonic(mnemonic: &[u8]) -> Result<Self, argon2::Error> {
+        let mut decoded_seed = Vec::<u8>::new();
+        decode(mnemonic, &mut decoded_seed).map_err(|_| argon2::Error::DecodingFail)?;
+        // 32 bytes of salt
+        let salt = "This is a salt to seed a KeyTree";
+        Self::from_password_and_salt(decoded_seed.as_ref(), salt.as_bytes())
+    }
+
     pub fn derive_sub_tree(&self, id: &[u8]) -> KeyTree {
         // Note that the hash for deriving a new sub-tree does not need to include a commitment to
         // the role of the key (sub-tree vs key) because sub-trees and keys are different sizes and
@@ -108,7 +133,8 @@ impl KeyTree {
         }
     }
 
-    pub fn derive_key(&self, id: &[u8]) -> Key {
+    // The internal API that derive a Key
+    fn derive_key_internal(&self, id: &[u8]) -> Key {
         // Note that the hash for deriving a new key does not need to include a commitment to the
         // role of the key (key vs sub-tree) because keys and sub-trees are different sizes and thus
         // cannot suffer from domain confusion.
@@ -121,6 +147,27 @@ impl KeyTree {
             .finalize();
         Key(Secret::new(digest.as_mut()))
     }
+
+    /// derive a generic key from the KeyTree with certain id
+    pub fn derive_key(&self, id: &[u8]) -> Key {
+        let id = ["default key".as_ref(), id].concat();
+        self.derive_key_internal(id.as_ref())
+    }
+
+    /// derive a user key pair from the KeyTree with certain id
+    pub fn derive_user_keypair(&self, id: &[u8]) -> UserKeyPair {
+        derive_keypair!(self, "user keypair", id, UserKeyPair)
+    }
+
+    /// derive an auditor key pair from the KeyTree with certain id
+    pub fn derive_auditor_keypair(&self, id: &[u8]) -> AuditorKeyPair {
+        derive_keypair!(self, "auditor keypair", id, AuditorKeyPair)
+    }
+
+    /// derive a freezer key pair from the KeyTree with certain id
+    pub fn derive_freezer_keypair(&self, id: &[u8]) -> FreezerKeyPair {
+        derive_keypair!(self, "freezer keypair", id, FreezerKeyPair)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -130,4 +177,18 @@ impl Key {
     pub fn as_bytes(&self) -> &Secret<[u8; 32]> {
         &self.0
     }
+}
+
+#[test]
+fn test_key_tree_gen() {
+    use ark_std::rand::thread_rng;
+
+    let mut rng = thread_rng();
+    let (key_tree, mnemonic) = KeyTree::random(&mut rng).unwrap();
+    let key_tree_recovered = KeyTree::from_mnemonic(mnemonic.as_bytes()).unwrap();
+
+    assert_eq!(
+        key_tree.state.open_secret(),
+        key_tree_recovered.state.open_secret()
+    )
 }
