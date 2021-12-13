@@ -372,6 +372,7 @@ impl CapeContractState {
                     }
 
                     new_state.erc20_deposits.push(RecordCommitment::from(ro));
+                    *new_state.erc20_deposited.entry(erc20Code).or_insert(0) += ro.amount;
                     effects.push(ReceiveErc20 {
                         erc20Code,
                         amount: ro.amount,
@@ -443,6 +444,7 @@ impl CapeContractState {
                                 }.unwrap_or_else(|| IncorrectBurnField { xfr })?;
 
                                 effects.push(SendErc20 { erc20Code, ro.amount, dst_addr });
+                                *new_state.erc20_deposited.get_mut(erc20Code).unwrap().checked_sub(ro.amount).unwrap();
 
                                 let verif_key = verif_crs
                                     .xfr
