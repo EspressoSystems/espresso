@@ -15,7 +15,7 @@ use async_tungstenite::tungstenite::Message;
 use futures::future::ready;
 use futures::prelude::*;
 use jf_txn::keys::{UserAddress, UserPubKey};
-use jf_txn::proof::UniversalParam;
+use jf_txn::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
 use jf_txn::structs::{Nullifier, ReceiverMemo};
 use jf_txn::Signature;
 use node::{LedgerEvent, LedgerSnapshot};
@@ -69,7 +69,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context(ClientError)?;
+            .context::<_, WalletError>(ClientError)?;
         response_body(&mut res).await.context(ClientError)
     }
 
@@ -84,7 +84,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context(ClientError)?;
+            .context::<_, WalletError>(ClientError)?;
         Ok(())
     }
 
@@ -118,41 +118,44 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
 
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = self.univ_param;
-        let proving_keys =
-            Arc::new(ProverKeySet {
-                mint: jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
-                    .context(CryptoError)?
-                    .0,
-                freeze: validator
-                    .verif_crs
-                    .freeze
-                    .iter()
-                    .map(|k| {
-                        Ok(jf_txn::proof::freeze::preprocess(
+        let proving_keys = Arc::new(ProverKeySet {
+            mint: jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
+                .context(CryptoError)?
+                .0,
+            freeze: validator
+                .verif_crs
+                .freeze
+                .iter()
+                .map(|k| {
+                    Ok::<FreezeProvingKey, WalletError>(
+                        jf_txn::proof::freeze::preprocess(
                             univ_param,
                             k.num_inputs(),
                             MERKLE_HEIGHT,
                         )
                         .context(CryptoError)?
-                        .0)
-                    })
-                    .collect::<Result<_, _>>()?,
-                xfr: validator
-                    .verif_crs
-                    .xfr
-                    .iter()
-                    .map(|k| {
-                        Ok(jf_txn::proof::transfer::preprocess(
+                        .0,
+                    )
+                })
+                .collect::<Result<_, _>>()?,
+            xfr: validator
+                .verif_crs
+                .xfr
+                .iter()
+                .map(|k| {
+                    Ok::<TransferProvingKey, WalletError>(
+                        jf_txn::proof::transfer::preprocess(
                             univ_param,
                             k.num_inputs(),
                             k.num_outputs(),
                             MERKLE_HEIGHT,
                         )
                         .context(CryptoError)?
-                        .0)
-                    })
-                    .collect::<Result<_, _>>()?,
-            });
+                        .0,
+                    )
+                })
+                .collect::<Result<_, _>>()?,
+        });
 
         // `records` should be _almost_ completely sparse. However, even a fully pruned Merkle tree
         // contains the last leaf appended, but as a new wallet, we don't care about _any_ of the
