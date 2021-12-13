@@ -1,131 +1,110 @@
 #![deny(warnings)]
 
-use zerok_macros::*;
-
-use crate::commit;
-pub use crate::full_persistence::FullPersistence;
-pub use crate::lw_persistence::LWPersistence;
-pub use crate::set_merkle_tree::*;
-pub use crate::util::canonical;
-use arbitrary::{Arbitrary, Unstructured};
-use ark_serialize::*;
-use canonical::deserialize_canonical_bytes;
-use commit::{Commitment, Committable};
+use crate::state::VerifierKeySet;
+use core::convert::TryFrom;
 use core::fmt::Debug;
+use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_txn::{
     errors::TxnApiError,
-    proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
-    structs::{Nullifier, RecordCommitment},
-    txn_batch_verify, MerkleCommitment, MerkleFrontier, MerkleLeafProof, MerkleTree, NodeValue,
-    TransactionNote, TransactionVerifyingKey,
+    structs::{AssetDefinition, Nullifier, RecordCommitment, RecordOpening},
+    transfer::TransferNote,
+    txn_batch_verify, MerkleCommitment, MerkleFrontier, MerkleTree, NodeValue, TransactionNote,
 };
-use jf_utils::tagged_blob;
-use phaselock::{traits::state::State, BlockContents, H_256};
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 use snafu::Snafu;
-use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::hash::{Hash, Hasher};
-use std::io::Read;
-use std::iter::FromIterator;
-use std::ops::Bound::*;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::Hash;
+use std::sync::Arc;
 
 pub const CAPE_MERKLE_HEIGHT: u8 = 20 /*H*/;
 pub const CAPE_BURN_MAGIC_BYTES: &str = "TRICAPE burn";
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CapeTransaction {
     AAP(TransactionNote),
     Burn {
-        xfr: TransferNote,
-        ro: RecordOpening,
+        xfr: Box<TransferNote>,
+        ro: Box<RecordOpening>,
     },
 }
 
 impl CapeTransaction {
     fn nullifiers(&self) -> Vec<Nullifier> {
         match self {
-            CapeTransaction::Burn {
-                xfr, ..
-            } => {
-                xfr.inputs_nullifiers.clone()
-            },
+            CapeTransaction::Burn { xfr, .. } => xfr.inputs_nullifiers.clone(),
 
-            CapeTransaction::AAP(TransactionNote::Transfer(xfr)) => {
-                xfr.inputs_nullifiers.clone()
-            },
+            CapeTransaction::AAP(TransactionNote::Transfer(xfr)) => xfr.inputs_nullifiers.clone(),
 
             CapeTransaction::AAP(TransactionNote::Mint(mint)) => {
-                vec![mint.input_nullifier.clone()]
-            },
+                vec![mint.input_nullifier]
+            }
 
-            CapeTransaction::AAP(TransactionNote::Freeze(frz)) => {
+            CapeTransaction::AAP(TransactionNote::Freeze(freeze)) => {
                 freeze.input_nullifiers.clone()
-            },
+            }
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Erc20Code([u8; 32]);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EthereumAddr([u8; 20]);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CapeOperation {
     SubmitBlock(Vec<CapeTransaction>),
     RegisterErc20 {
-        asset_def: AssetDefinition,
-        erc20Code: Erc20Code,
+        asset_def: Box<AssetDefinition>,
+        erc20_code: Erc20Code,
         sponsor_addr: EthereumAddr,
     },
-    WrapERC20 {
-        erc20Code: Erc20Code,
+    WrapErc20 {
+        erc20_code: Erc20Code,
         src_addr: EthereumAddr,
-        ro: RecordOpening,
+        ro: Box<RecordOpening>,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum CapeEthEffects {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CapeEthEffect {
     ReceiveErc20 {
-        erc20Code: Erc20Code,
+        erc20_code: Erc20Code,
         amount: u64,
         src_addr: EthereumAddr,
     },
     CheckErc20Exists {
-        erc20Code: Erc20Code,
+        erc20_code: Erc20Code,
     },
     SendErc20 {
-        erc20Code: Erc20Code,
+        erc20_code: Erc20Code,
         amount: u64,
         dst_addr: EthereumAddr,
     },
 }
 
-// TODO details
-#[derive(Debug, Snafu, Serialize, Deserialize)]
+#[derive(Debug, Snafu, Serialize, Deserialize, Clone)]
 #[snafu(visibility = "pub(crate)")]
 pub enum CapeValidationError {
     InvalidErc20Def {
-        asset_def: AssetDefinition,
-        erc20Code: Erc20Code,
+        asset_def: Box<AssetDefinition>,
+        erc20_code: Erc20Code,
         sponsor: EthereumAddr,
     },
     InvalidAAPDef {
-        asset_def: AssetDefinition,
+        asset_def: Box<AssetDefinition>,
     },
     UnregisteredErc20 {
-        asset_def: AssetDefinition,
+        asset_def: Box<AssetDefinition>,
     },
     IncorrectErc20 {
-        asset_def: AssetDefinition,
-        erc20Code: Erc20Code,
-        expected_erc20Code: Erc20Code,
+        asset_def: Box<AssetDefinition>,
+        erc20_code: Erc20Code,
+        expected_erc20_code: Erc20Code,
     },
     Erc20AlreadyRegistered {
-        asset_def: AssetDefinition,
+        asset_def: Box<AssetDefinition>,
     },
 
     NullifierAlreadyExists {
@@ -134,11 +113,11 @@ pub enum CapeValidationError {
 
     IncorrectBurnOpening {
         expected_comm: RecordCommitment,
-        ro: RecordOpening,
+        ro: Box<RecordOpening>,
     },
 
     IncorrectBurnField {
-        xfr: TransferNote,
+        xfr: Box<TransferNote>,
     },
 
     UnsupportedBurnSize {
@@ -154,6 +133,7 @@ pub enum CapeValidationError {
     },
 
     BadMerkleRoot {},
+    BadMerklePath {},
 
     CryptoError {
         // TxnApiError cannot be serialized, and, since it depends on many foreign error types which
@@ -161,96 +141,19 @@ pub enum CapeValidationError {
         // serialize this variant, we will serialize Ok(err) to Err(format(err)), and when we
         // deserialize we will at least preserve the variant CryptoError and a String representation
         // of the underlying error.
-        #[serde(with = "ser_display")]
-        err: Result<TxnApiError, String>,
+        #[serde(with = "crate::state::ser_display")]
+        err: Result<Arc<TxnApiError>, String>,
     },
 }
 
-// TxnApiError doesn't implement Clone :/
-impl Clone for ValidationError {
-    fn clone(&self) -> Self {
-        use ValidationError::*;
-        match self {
-            NullifierAlreadyExists { nullifier } => NullifierAlreadyExists {
-                nullifier: *nullifier,
-            },
-            BadNullifierProof {} => BadNullifierProof {},
-            MissingNullifierProof {} => MissingNullifierProof {},
-            ConflictingNullifiers {} => ConflictingNullifiers {},
-            Failed {} => Failed {},
-            BadMerkleLength {} => BadMerkleLength {},
-            BadMerkleLeaf {} => BadMerkleLeaf {},
-            BadMerkleRoot {} => BadMerkleRoot {},
-            BadMerklePath {} => BadMerklePath {},
-            CryptoError { .. } => Failed {},
-            UnsupportedTransferSize {
-                num_inputs,
-                num_outputs,
-            } => UnsupportedTransferSize {
-                num_inputs: *num_inputs,
-                num_outputs: *num_outputs,
-            },
-            UnsupportedFreezeSize { num_inputs } => UnsupportedFreezeSize {
-                num_inputs: *num_inputs,
-            },
-        }
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RecordMerkleHistory(pub VecDeque<NodeValue>);
-
-impl Committable for RecordMerkleHistory {
-    fn commit(&self) -> commit::Commitment<Self> {
-        let mut ret = commit::RawCommitmentBuilder::new("Hist Comm")
-            .constant_str("roots")
-            .u64(self.0.len() as u64);
-        for n in self.0.iter() {
-            ret = ret.var_size_bytes(&canonical::serialize(n).unwrap())
-        }
-        ret.finalize()
-    }
-}
+pub struct CapeRecordMerkleHistory(pub VecDeque<NodeValue>);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecordMerkleCommitment(pub MerkleCommitment);
 
-impl Committable for RecordMerkleCommitment {
-    fn commit(&self) -> commit::Commitment<Self> {
-        commit::RawCommitmentBuilder::new("RMT Comm")
-            .constant_str("height")
-            .u64(self.0.height as u64)
-            .constant_str("num_leaves")
-            .u64(self.0.num_leaves)
-            .constant_str("root_value")
-            .var_size_bytes(&canonical::serialize(&self.0.root_value).unwrap())
-            .finalize()
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecordMerkleFrontier(pub MerkleFrontier);
-
-impl Committable for RecordMerkleFrontier {
-    fn commit(&self) -> commit::Commitment<Self> {
-        let mut ret = commit::RawCommitmentBuilder::new("RMFrontier");
-        match &self.0 {
-            MerkleFrontier::Empty { height } => {
-                ret = ret.constant_str("empty height").u64(*height as u64);
-            }
-            MerkleFrontier::Proof(MerkleLeafProof { leaf, path }) => {
-                ret = ret
-                    .constant_str("leaf")
-                    .var_size_bytes(&canonical::serialize(&leaf.0).unwrap())
-                    .constant_str("path");
-                for step in path.nodes.iter() {
-                    ret = ret.var_size_bytes(&canonical::serialize(step).unwrap())
-                }
-            }
-        }
-        ret.finalize()
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CapeLedgerState {
@@ -260,27 +163,33 @@ pub struct CapeLedgerState {
     // The current frontier of the record Merkle tree
     pub record_merkle_frontier: MerkleFrontier,
     // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
-    pub past_record_merkle_roots: RecordMerkleHistory,
-
+    pub past_record_merkle_roots: CapeRecordMerkleHistory,
     // TODO: should we include these?
     // pub prev_state: Option<StateCommitment>,
     // pub prev_block: BlockCommitment,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CapeContractState {
     pub ledger: CapeLedgerState,
     pub verif_crs: VerifierKeySet, // hard-coded
     pub nullifiers: HashSet<Nullifier>,
-    pub erc20_registrar: HashMap<AssetDefinition, (Erc20Code,EthereumAddr)>,
-    pub erc20_deposited: HashMap<Erc20Code,u128>,
+    pub erc20_registrar: HashMap<AssetDefinition, (Erc20Code, EthereumAddr)>,
+    pub erc20_deposited: HashMap<Erc20Code, u128>,
     pub erc20_deposits: Vec<RecordCommitment>,
 }
 
-fn is_erc20_asset_def_valid(def: &AssetDefinition, erc20Code: &Erc20Code, sponsor: &EthereumAddr) -> bool {
+#[allow(unused_variables)]
+fn is_erc20_asset_def_valid(
+    def: &AssetDefinition,
+    erc20_code: &Erc20Code,
+    sponsor: &EthereumAddr,
+) -> bool {
     // TODO
     true
 }
 
+#[allow(unused_variables)]
 fn is_aap_asset_def_valid(def: &AssetDefinition) -> bool {
     // TODO
     true
@@ -289,7 +198,7 @@ fn is_aap_asset_def_valid(def: &AssetDefinition) -> bool {
 /// None => invalid field, should always be rejected
 /// Some(None) => Valid field, not a burn
 /// Some(Some(addr)) => Valid field, a burn sending to `addr`
-fn extract_burn_dst(xfr: &TransferNote) -> Option<EthereumAddr> {
+fn extract_burn_dst(xfr: &TransferNote) -> Option<Option<EthereumAddr>> {
     let magic_bytes = CAPE_BURN_MAGIC_BYTES.as_bytes().to_vec();
     assert_eq!(magic_bytes.len(), 12);
     assert_eq!(EthereumAddr::default().0.len(), 20);
@@ -302,9 +211,11 @@ fn extract_burn_dst(xfr: &TransferNote) -> Option<EthereumAddr> {
             if field_data[..12] != magic_bytes[..] {
                 None
             } else {
-                Some(field_data[12..32].as_vec())
+                Some(Some(EthereumAddr(
+                    <[u8; 20]>::try_from(&field_data[12..32]).unwrap(),
+                )))
             }
-        },
+        }
         _ => None,
     }
 }
@@ -319,7 +230,7 @@ impl CapeContractState {
                 state_number: 0u64,
                 record_merkle_commitment: record_merkle_frontier.commitment(),
                 record_merkle_frontier: record_merkle_frontier.frontier(),
-                past_record_merkle_roots: RecordMerkleHistory(VecDeque::with_capacity(
+                past_record_merkle_roots: CapeRecordMerkleHistory(VecDeque::with_capacity(
                     Self::RECORD_ROOT_HISTORY_SIZE,
                 )),
             },
@@ -331,8 +242,11 @@ impl CapeContractState {
         }
     }
 
-    pub fn submit_operations(&self, ops: Vec<CapeOperation>) -> Result<(Self,Vec<CapeEthEffects>),CapeValidationError> {
-        let mut new_state = self.clone();
+    pub fn submit_operations(
+        &self,
+        ops: Vec<CapeOperation>,
+    ) -> Result<(Self, Vec<CapeEthEffect>), CapeValidationError> {
+        let mut new_state: CapeContractState = self.clone();
         let mut effects = vec![];
 
         new_state.ledger.state_number += 1;
@@ -340,41 +254,55 @@ impl CapeContractState {
         for o in ops {
             match o {
                 CapeOperation::RegisterErc20 {
-                    asset_def, erc20Code, sponsor_addr
+                    asset_def,
+                    erc20_code,
+                    sponsor_addr,
                 } => {
-                    if !is_erc20_asset_def_valid(asset_def,erc20Code,sponsor) {
-                        return Err(InvalidErc20Def { 
-                            asset_def
+                    if !is_erc20_asset_def_valid(&asset_def, &erc20_code, &sponsor_addr) {
+                        return Err(CapeValidationError::InvalidErc20Def {
+                            asset_def,
+                            erc20_code,
+                            sponsor: sponsor_addr,
                         });
                     }
 
-                    if new_state.erc20_registrar.contains_key(asset_def) {
-                        return Err(Erc20AlreadyRegistered {
-                            asset_def
-                        });
+                    if new_state.erc20_registrar.contains_key(&asset_def) {
+                        return Err(CapeValidationError::Erc20AlreadyRegistered { asset_def });
                     }
-                    new_state.erc20_registrar.insert(asset_def,(erc20Code,sponsor));
-                    effects.push(CheckErc20Exists { erc20Code });
+                    new_state
+                        .erc20_registrar
+                        .insert(*asset_def, (erc20_code.clone(), sponsor_addr));
+                    effects.push(CapeEthEffect::CheckErc20Exists { erc20_code });
                 }
                 CapeOperation::WrapErc20 {
-                    erc20Code, src_addr, ro
+                    erc20_code,
+                    src_addr,
+                    ro,
                 } => {
-                    let asset_def = ro.asset_def;
-                    let (expected_erc20Code,_sponsor) = new_state.erc20_registrar.get(asset_def)
-                        .ok_or_else(|| UnregisteredErc20 { asset_def })?;
-                    if expected_erc20Code != erc20Code {
-                        return Err(
-                            IncorrectErc20 {
-                                asset_def,
-                                erc20Code,
-                                expected_erc20Code,
-                            });
+                    let asset_def = ro.asset_def.clone();
+                    let (expected_erc20_code, _sponsor) = new_state
+                        .erc20_registrar
+                        .get(&asset_def)
+                        .ok_or_else(|| CapeValidationError::UnregisteredErc20 {
+                            asset_def: Box::new(asset_def.clone()),
+                        })?;
+                    if expected_erc20_code != &erc20_code {
+                        return Err(CapeValidationError::IncorrectErc20 {
+                            asset_def: Box::new(asset_def),
+                            erc20_code,
+                            expected_erc20_code: expected_erc20_code.clone(),
+                        });
                     }
 
-                    new_state.erc20_deposits.push(RecordCommitment::from(ro));
-                    *new_state.erc20_deposited.entry(erc20Code).or_insert(0) += ro.amount;
-                    effects.push(ReceiveErc20 {
-                        erc20Code,
+                    new_state
+                        .erc20_deposits
+                        .push(RecordCommitment::from(ro.as_ref()));
+                    *new_state
+                        .erc20_deposited
+                        .entry(erc20_code.clone())
+                        .or_insert(0) += ro.amount as u128;
+                    effects.push(CapeEthEffect::ReceiveErc20 {
+                        erc20_code,
                         amount: ro.amount,
                         src_addr,
                     });
@@ -382,12 +310,20 @@ impl CapeContractState {
                 CapeOperation::SubmitBlock(txns) => {
                     // Step 1: filter txns for those with nullifiers that
                     // aren't already published
-                    let filtered_txns = txns.iter().filter(|t| t.nullifiers().into_iter().all(|x| !new_state.nullifiers.contains(x))).cloned().collect();
+                    let filtered_txns = txns
+                        .iter()
+                        .filter(|t| {
+                            t.nullifiers()
+                                .into_iter()
+                                .all(|x| !new_state.nullifiers.contains(&x))
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>();
 
                     let mut records_to_insert = vec![];
                     // TODO: the workflow code puts these after the things
-                    // in the transactions -- which thing is correct?
-                    records_to_insert.extend(new_state.erc20_deposits.drain(..));
+                    // in the transactions -- which choice is correct?
+                    records_to_insert.append(&mut new_state.erc20_deposits);
 
                     // past this point, if any validation error occurs the
                     // entire evm transaction rolls back, so we can mutate
@@ -396,143 +332,210 @@ impl CapeContractState {
                     // check everything except the plonk proofs, build up
                     // verif_keys
 
+                    let mut notes = vec![];
                     let mut verif_keys = vec![];
                     let mut merkle_roots = vec![];
                     for t in filtered_txns.iter() {
                         // insert nullifiers
-                        for n in t.nullifiers() { if new_state.nullifiers.insert(n).is_some() {
-                                return Err(NullifierAlreadyExists{nullifier: n})
+                        for n in t.nullifiers() {
+                            if new_state.nullifiers.contains(&n) {
+                                return Err(CapeValidationError::NullifierAlreadyExists {
+                                    nullifier: n,
+                                });
                             }
+                            new_state.nullifiers.insert(n);
                         }
 
                         // TODO: fee-collection records
-                        let (vkey,merkle_root,new_records) = match txn {
+                        let (vkey, merkle_root, new_records, note) = match t {
                             CapeTransaction::AAP(TransactionNote::Mint(mint)) => {
                                 if !is_aap_asset_def_valid(&mint.mint_asset_def) {
-                                    return Err(InvalidAAPDef { asset_def: mint.mint_asset_def });
-                                }
-
-                                (&new_state.verif_crs.mint,mint.aux_info.merkle_root,mint.output_commitments())
-                            },
-
-                            CapeTransaction::Burn{ xfr, ro }) => {
-                                let num_inputs = note.inputs_nullifiers.len();
-                                let num_outputs = note.output_commitments.len();
-
-                                // TODO: is this correct?
-                                if (num_inputs,num_outputs) != (2,2) {
-                                    return Err(UnsupportedBurnSize { num_inputs,num_outputs });
-                                }
-
-                                let expected_comm = xfr.outputs_commitments[1];
-                                let actual_comm   = RecordCommitment::from(ro);
-                                if expected_comm != actual_comm {
-                                    return Err(IncorrectBurnOpening {
-                                        expected_comm, ro
+                                    return Err(CapeValidationError::InvalidAAPDef {
+                                        asset_def: Box::new(mint.mint_asset_def.clone()),
                                     });
                                 }
 
-                                let asset_def = ro.asset_def;
+                                (
+                                    &new_state.verif_crs.mint,
+                                    mint.aux_info.merkle_root,
+                                    vec![mint.chg_comm, mint.mint_comm],
+                                    TransactionNote::Mint(mint.clone()),
+                                )
+                            }
 
-                                let (erc20Code,_sponsor) = new_state.erc20_registrar.get(asset_def)
-                                    .ok_or_else(|| UnregisteredErc20 { asset_def })?;
+                            CapeTransaction::Burn { xfr, ro } => {
+                                let num_inputs = xfr.inputs_nullifiers.len();
+                                let num_outputs = xfr.output_commitments.len();
 
-                                let dst_addr = if let Some(Some(dst) = extract_burn_dst(&xfr) {
+                                // TODO: is this correct?
+                                if (num_inputs, num_outputs) != (2, 2) {
+                                    return Err(CapeValidationError::UnsupportedBurnSize {
+                                        num_inputs,
+                                        num_outputs,
+                                    });
+                                }
+
+                                let expected_comm = xfr.output_commitments[1];
+                                let actual_comm = RecordCommitment::from(ro.as_ref());
+                                if expected_comm != actual_comm {
+                                    return Err(CapeValidationError::IncorrectBurnOpening {
+                                        expected_comm,
+                                        ro: ro.clone(),
+                                    });
+                                }
+
+                                let asset_def = ro.asset_def.clone();
+
+                                let (erc20_code, _sponsor) = new_state
+                                    .erc20_registrar
+                                    .get(&asset_def)
+                                    .ok_or_else(|| CapeValidationError::UnregisteredErc20 {
+                                        asset_def: Box::new(asset_def),
+                                    })?;
+
+                                let dst_addr = if let Some(Some(dst)) = extract_burn_dst(xfr) {
                                     Some(dst)
                                 } else {
                                     None
-                                }.unwrap_or_else(|| IncorrectBurnField { xfr })?;
+                                }
+                                .ok_or_else(|| {
+                                    CapeValidationError::IncorrectBurnField { xfr: xfr.clone() }
+                                })?;
 
-                                effects.push(SendErc20 { erc20Code, ro.amount, dst_addr });
-                                *new_state.erc20_deposited.get_mut(erc20Code).unwrap().checked_sub(ro.amount).unwrap();
+                                effects.push(CapeEthEffect::SendErc20 {
+                                    erc20_code: erc20_code.clone(),
+                                    amount: ro.amount,
+                                    dst_addr,
+                                });
+                                new_state
+                                    .erc20_deposited
+                                    .get_mut(erc20_code)
+                                    .unwrap()
+                                    .checked_sub(ro.amount as u128)
+                                    .unwrap();
 
-                                let verif_key = verif_crs
+                                let verif_key = new_state
+                                    .verif_crs
                                     .xfr
                                     .key_for_size(num_inputs, num_outputs)
-                                    .ok_or(UnsupportedBurnSize {
+                                    .ok_or(CapeValidationError::UnsupportedBurnSize {
                                         num_inputs,
                                         num_outputs,
                                     })?;
 
-                                (verif_key,xfr.aux_info.merkle_root,vec![xfr.outputs_commitments[0]])
+                                (
+                                    verif_key,
+                                    xfr.aux_info.merkle_root,
+                                    vec![xfr.output_commitments[0]],
+                                    TransactionNote::Transfer(xfr.clone()),
+                                )
                             }
 
                             CapeTransaction::AAP(TransactionNote::Transfer(note)) => {
-
                                 let num_inputs = note.inputs_nullifiers.len();
                                 let num_outputs = note.output_commitments.len();
 
-                                if Some(None) != extract_burn_dst(&note) {
-                                    return Err(IncorrectBurnField { xfr: note });
+                                if Some(None) != extract_burn_dst(note) {
+                                    return Err(CapeValidationError::IncorrectBurnField {
+                                        xfr: note.clone(),
+                                    });
                                 }
 
-                                let verif_key = verif_crs
+                                let verif_key = new_state
+                                    .verif_crs
                                     .xfr
                                     .key_for_size(num_inputs, num_outputs)
-                                    .ok_or(UnsupportedBurnSize {
+                                    .ok_or(CapeValidationError::UnsupportedBurnSize {
                                         num_inputs,
                                         num_outputs,
                                     })?;
 
-                                (verify_key,note.aux_info.merkle_root,note.output_commitments())
+                                (
+                                    verif_key,
+                                    note.aux_info.merkle_root,
+                                    note.output_commitments.clone(),
+                                    TransactionNote::Transfer(note.clone()),
+                                )
                             }
 
                             CapeTransaction::AAP(TransactionNote::Freeze(note)) => {
-                                let num_inputs = note.inputs_nullifiers.len();
+                                let num_inputs = note.input_nullifiers.len();
                                 let num_outputs = note.output_commitments.len();
 
-                                let verif_key = verif_crs
+                                let verif_key = new_state
+                                    .verif_crs
                                     .freeze
                                     .key_for_size(num_inputs, num_outputs)
-                                    .ok_or(UnsupportedBurnSize {
+                                    .ok_or(CapeValidationError::UnsupportedBurnSize {
                                         num_inputs,
                                         num_outputs,
                                     })?;
 
-                                (verify_key,note.aux_info.merkle_root,note.output_commitments())
+                                (
+                                    verif_key,
+                                    note.aux_info.merkle_root,
+                                    note.output_commitments.clone(),
+                                    TransactionNote::Freeze(note.clone()),
+                                )
                             }
-                        }
+                        };
 
                         verif_keys.push(vkey);
-                        if !new_state.ledger.past_merkle_roots.0.contains(merkle_root) {
-                            return Err(BadMerkleRoot {});
+                        if !new_state
+                            .ledger
+                            .past_record_merkle_roots
+                            .0
+                            .contains(&merkle_root)
+                        {
+                            return Err(CapeValidationError::BadMerkleRoot {});
                         }
                         merkle_roots.push(merkle_root);
                         records_to_insert.extend(new_records.into_iter());
+                        notes.push(note);
                     }
 
                     // Batch PLONK verify
                     if !filtered_txns.is_empty() {
-                        assert_eq!(filtered_txns.len(),verif_keys.len());
-                        assert_eq!(filtered_txns.len(),merkle_roots.len());
+                        assert_eq!(filtered_txns.len(), notes.len());
+                        assert_eq!(filtered_txns.len(), verif_keys.len());
+                        assert_eq!(filtered_txns.len(), merkle_roots.len());
 
                         txn_batch_verify(
-                            &filtered_txns,
+                            notes.as_slice(),
                             &merkle_roots,
-                            new_state.state_number,
-                            &verif_keys).map_err(|err| CryptoError { err: Ok(err) })?;
+                            new_state.ledger.state_number,
+                            &verif_keys,
+                        )
+                        .map_err(|err| {
+                            CapeValidationError::CryptoError {
+                                err: Ok(Arc::new(err)),
+                            }
+                        })?;
                     }
 
-
                     // update the record tree
-                    let (record_merkle_frontier,record_merkle_commitment) = {
+                    let (record_merkle_frontier, record_merkle_commitment) = {
                         let mut builder = FilledMTBuilder::from_frontier(
-                            new_state.ledger.record_merkle_commitment,
+                            &new_state.ledger.record_merkle_commitment,
                             &new_state.ledger.record_merkle_frontier,
                         )
-                        .ok_or(ValidationError::BadMerklePath {})?;
+                        .ok_or(CapeValidationError::BadMerklePath {})?;
 
                         for rc in records_to_insert {
-                            builder.push(rc);
+                            builder.push(rc.to_field_element());
                         }
 
                         builder.into_frontier_and_commitment()
                     };
 
-                    if new_state.ledger.past_record_merkle_roots.0.len() >= Self::RECORD_ROOT_HISTORY_SIZE {
+                    if new_state.ledger.past_record_merkle_roots.0.len()
+                        >= Self::RECORD_ROOT_HISTORY_SIZE
+                    {
                         new_state.ledger.past_record_merkle_roots.0.pop_back();
                     }
-                    new_state.ledger.past_record_merkle_roots
+                    new_state
+                        .ledger
+                        .past_record_merkle_roots
                         .0
                         .push_front(new_state.ledger.record_merkle_commitment.root_value);
                     new_state.ledger.record_merkle_commitment = record_merkle_commitment;
@@ -541,8 +544,6 @@ impl CapeContractState {
             }
         }
 
-        Ok((new_state,))
+        Ok((new_state, effects))
     }
-
 }
-

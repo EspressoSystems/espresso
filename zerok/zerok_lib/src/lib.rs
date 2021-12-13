@@ -9,6 +9,7 @@ extern crate proptest;
 extern crate quickcheck_macros;
 
 pub mod api;
+pub mod cape_state;
 pub mod committee;
 pub mod full_persistence;
 pub mod ledger;
