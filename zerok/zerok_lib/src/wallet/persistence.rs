@@ -604,7 +604,7 @@ mod tests {
 
         let mut loader = MockWalletLoader {
             dir: TempDir::new(name).unwrap(),
-            key: KeyTree::random(&mut rng),
+            key: KeyTree::random(&mut rng).unwrap().0,
         };
         {
             let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();
