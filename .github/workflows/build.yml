@@ -33,8 +33,11 @@ jobs:
       - name: Format Check
         run: cargo fmt -- --check
 
-      - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+      - uses: actions-rs/clippy-check@v1
+        name: Clippy
+        with:
+          token: ${{ github.token }}
+          args: --workspace -- -D warnings
 
       - name: Audit
         run: cargo audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071
