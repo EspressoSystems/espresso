@@ -1,7 +1,5 @@
 use super::persistence::{AtomicWalletStorage, WalletLoader};
-use super::{
-    ClientConfigError, CryptoError, WalletBackend, WalletError, WalletImmutableKeySet, WalletState,
-};
+use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
 use crate::api;
 use crate::ledger::AAPLedger;
 use crate::node;
@@ -16,12 +14,11 @@ use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
 use futures::future::ready;
 use futures::prelude::*;
-use jf_txn::keys::{UserAddress, UserKeyPair, UserPubKey};
+use jf_txn::keys::{UserAddress, UserPubKey};
 use jf_txn::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
 use jf_txn::structs::{Nullifier, ReceiverMemo};
 use jf_txn::Signature;
 use node::{LedgerEvent, LedgerSnapshot};
-use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;
 use std::convert::TryInto;
@@ -35,7 +32,6 @@ pub struct NetworkBackend<'a, Meta: Serialize + DeserializeOwned> {
     bulletin_client: surf::Client,
     validator_client: surf::Client,
     storage: Arc<Mutex<AtomicWalletStorage<'a, AAPLedger, Meta>>>,
-    key_pair: Option<UserKeyPair>,
 }
 
 impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
@@ -52,7 +48,6 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
             validator_client: Self::client(validator_url)?,
             univ_param,
             storage: Arc::new(Mutex::new(AtomicWalletStorage::new(loader)?)),
-            key_pair: loader.key_pair(),
         })
     }
 
@@ -114,7 +109,6 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
     type Storage = AtomicWalletStorage<'a, AAPLedger, Meta>;
 
     async fn create(&mut self) -> Result<WalletState<'a>, WalletError> {
-        let mut rng = ChaChaRng::from_entropy();
         let LedgerSnapshot {
             state: validator,
             nullifiers,
@@ -174,12 +168,6 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
 
         let state = WalletState {
             proving_keys,
-            immutable_keys: Arc::new(WalletImmutableKeySet {
-                key_pair: self
-                    .key_pair
-                    .clone()
-                    .unwrap_or_else(|| UserKeyPair::generate(&mut rng)),
-            }),
             txn_state: TransactionState {
                 validator,
 
@@ -191,20 +179,14 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
 
                 transactions: Default::default(),
             },
+            key_scans: Default::default(),
             auditable_assets: Default::default(),
             audit_keys: Default::default(),
             freeze_keys: Default::default(),
+            user_keys: Default::default(),
             defined_assets: Default::default(),
         };
         self.storage().await.create(&state).await?;
-
-        // Publish the address of the new wallet.
-        Self::post(
-            &self.bulletin_client,
-            "/users",
-            &state.immutable_keys.key_pair.pub_key(),
-        )
-        .await?;
 
         Ok(state)
     }
@@ -275,6 +257,10 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
         let CommittedTransaction { data, proofs, .. } =
             self.get(format!("/gettransaction/{}", txn_id)).await?;
         Ok(ElaboratedTransaction { txn: data, proofs })
+    }
+
+    async fn register_user_key(&mut self, pub_key: &UserPubKey) -> Result<(), WalletError> {
+        Self::post(&self.bulletin_client, "/users", pub_key).await
     }
 
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {

@@ -78,6 +78,13 @@ impl CliClient {
         Ok(self)
     }
 
+    pub fn wallet_key_path(&mut self, wallet: usize) -> Result<PathBuf, String> {
+        while wallet >= self.wallets.len() {
+            self.load(None)?;
+        }
+        Ok(self.wallets[wallet].key_path.clone())
+    }
+
     pub fn open_validator(&mut self, v: usize) -> Result<&mut Self, String> {
         block_on(
             self.validators
@@ -112,6 +119,7 @@ impl CliClient {
             .wallets
             .get_mut(id)
             .ok_or_else(|| format!("wallet {} is not open", id))?;
+        println!("{}> {}", id, command);
         self.prev_output = wallet.command(&command)?;
         Ok(self)
     }
@@ -331,12 +339,6 @@ impl Wallet {
             return Err(String::from("wallet is already open"));
         }
         let mut child = cargo_run("zerok_client")?
-            .args([
-                "-k",
-                self.key_path.as_os_str().to_str().ok_or_else(|| {
-                    format!("failed to convert key_path {:?} to string", self.key_path)
-                })?,
-            ])
             .args([
                 "--storage",
                 self.storage.path().as_os_str().to_str().ok_or_else(|| {
