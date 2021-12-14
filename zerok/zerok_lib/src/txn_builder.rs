@@ -1,23 +1,71 @@
+use crate::node::MerkleTreeWithArbitrary;
 use crate::util::arbitrary_wrappers::*;
-use crate::{ledger, ser_test};
+use crate::{
+    ledger,
+    ledger::traits::{Transaction as _, Validator as _},
+    ser_test,
+    state::{key_set, ValidatorState, MERKLE_HEIGHT},
+};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use jf_txn::{
-    keys::{FreezerKeyPair, UserAddress, UserKeyPair, UserPubKey},
+    errors::TxnApiError,
+    freeze::{FreezeNote, FreezeNoteInput},
+    keys::{AuditorPubKey, FreezerKeyPair, FreezerPubKey, UserAddress, UserKeyPair, UserPubKey},
+    mint::MintNote,
+    proof::freeze::FreezeProvingKey,
+    proof::{mint::MintProvingKey, transfer::TransferProvingKey},
     sign_receiver_memos,
     structs::{
-        AssetCode, AssetDefinition, FreezeFlag, Nullifier, ReceiverMemo, RecordCommitment,
-        RecordOpening,
+        AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, BlindFactor, FeeInput, FreezeFlag,
+        Nullifier, ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
     },
-    MerkleTree, Signature,
+    transfer::{TransferNote, TransferNoteInput},
+    AccMemberWitness, MerkleLeafProof, MerkleTree, Signature,
 };
 use jf_utils::tagged_blob;
+use key_set::KeySet;
 use ledger::*;
+use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
+use snafu::{ResultExt, Snafu};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
 use std::ops::{Index, IndexMut};
+
+#[derive(Debug, Snafu)]
+#[snafu(visibility = "pub")]
+pub enum TransactionError {
+    InsufficientBalance {
+        asset: AssetCode,
+        required: u64,
+        actual: u64,
+    },
+    Fragmentation {
+        asset: AssetCode,
+        amount: u64,
+        suggested_amount: u64,
+        max_records: usize,
+    },
+    TooManyOutputs {
+        asset: AssetCode,
+        max_records: usize,
+        num_receivers: usize,
+        num_change_records: usize,
+    },
+    CryptoError {
+        source: TxnApiError,
+    },
+    InvalidAuditorKey {
+        my_key: AuditorPubKey,
+        asset_key: AuditorPubKey,
+    },
+    InvalidFreezerKey {
+        my_key: FreezerPubKey,
+        asset_key: FreezerPubKey,
+    },
+}
 
 #[ser_test(arbitrary, ark(false))]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -298,6 +346,8 @@ where
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(bound = "")]
 pub struct PendingTransaction<L: Ledger> {
+    // The account from which this transaction was submitted, in case we need to resubmit it.
+    pub account: UserAddress,
     pub receiver_memos: Vec<ReceiverMemo>,
     pub signature: Signature,
     pub freeze_outputs: Vec<RecordOpening>,
@@ -329,6 +379,7 @@ where
         let key = u.arbitrary::<ArbitraryKeyPair>()?.into();
         let signature = sign_receiver_memos(&key, &memos).unwrap();
         Ok(Self {
+            account: u.arbitrary::<ArbitraryUserAddress>()?.into(),
             receiver_memos: memos,
             signature,
             freeze_outputs: u
@@ -589,7 +640,54 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct MintInfo {
+    pub seed: AssetCodeSeed,
+    pub desc: Vec<u8>,
+}
+
+impl MintInfo {
+    pub fn new(seed: AssetCodeSeed, desc: Vec<u8>) -> Self {
+        Self { seed, desc }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssetInfo {
+    pub asset: AssetDefinition,
+    pub mint_info: Option<MintInfo>,
+}
+
+impl AssetInfo {
+    pub fn new(asset: AssetDefinition, mint_info: MintInfo) -> Self {
+        Self {
+            asset,
+            mint_info: Some(mint_info),
+        }
+    }
+}
+
+impl From<AssetDefinition> for AssetInfo {
+    fn from(asset: AssetDefinition) -> Self {
+        Self {
+            asset,
+            mint_info: None,
+        }
+    }
+}
+
+// how long (in number of validator states) a record used as an input to an unconfirmed transaction
+// should be kept on hold before the transaction is considered timed out. This should be the number
+// of validator states after which the transaction's proof can no longer be verified.
+pub const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u64;
+// (block_id, txn_id, [(uid, remember)])
+pub type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
+// a never expired target
+pub const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
+
+#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct TransactionState<L: Ledger = AAPLedger> {
     // sequence number of the last event processed
     pub now: u64,
@@ -607,4 +705,702 @@ pub struct TransactionState<L: Ledger = AAPLedger> {
     pub merkle_leaf_to_forget: Option<u64>,
     // set of pending transactions
     pub transactions: TransactionDatabase<L>,
+}
+
+impl<L: Ledger> PartialEq<Self> for TransactionState<L> {
+    fn eq(&self, other: &Self) -> bool {
+        self.now == other.now
+            && self.validator == other.validator
+            && self.records == other.records
+            && self.nullifiers == other.nullifiers
+            && self.record_mt == other.record_mt
+            && self.merkle_leaf_to_forget == other.merkle_leaf_to_forget
+            && self.transactions == other.transactions
+    }
+}
+
+impl<'a, L: Ledger> Arbitrary<'a> for TransactionState<L>
+where
+    Validator<L>: Arbitrary<'a>,
+    NullifierSet<L>: Arbitrary<'a>,
+    TransactionHash<L>: Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            now: u.arbitrary()?,
+            validator: u.arbitrary()?,
+            records: u.arbitrary()?,
+            nullifiers: u.arbitrary()?,
+            record_mt: u.arbitrary::<MerkleTreeWithArbitrary>()?.0,
+            merkle_leaf_to_forget: None,
+            transactions: u.arbitrary()?,
+        })
+    }
+}
+
+impl<L: Ledger> TransactionState<L> {
+    pub fn balance(&self, asset: &AssetCode, pub_key: &UserPubKey, frozen: FreezeFlag) -> u64 {
+        self.records
+            .input_records(asset, pub_key, frozen, self.validator.now())
+            .map(|record| record.ro.amount)
+            .sum()
+    }
+
+    pub fn assets(&self) -> HashMap<AssetCode, AssetInfo> {
+        self.records
+            .assets()
+            .map(|def| (def.code, AssetInfo::from(def)))
+            .collect()
+    }
+
+    pub fn clear_expired_transactions(&mut self) -> Vec<TransactionUID<L>> {
+        self.transactions
+            .remove_expired(self.validator.now())
+            .into_iter()
+            .map(|txn| txn.uid)
+            .collect()
+    }
+
+    pub fn define_asset<'b>(
+        &'b mut self,
+        rng: &mut ChaChaRng,
+        description: &'b [u8],
+        policy: AssetPolicy,
+    ) -> Result<(AssetCodeSeed, AssetCode, AssetDefinition), TransactionError> {
+        let seed = AssetCodeSeed::generate(rng);
+        let code = AssetCode::new(seed, description);
+        let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
+        Ok((seed, code, asset_definition))
+    }
+
+    pub fn add_pending_transaction(
+        &mut self,
+        txn: &Transaction<L>,
+        receiver_memos: Vec<ReceiverMemo>,
+        signature: Signature,
+        freeze_outputs: Vec<RecordOpening>,
+        uid: Option<TransactionUID<L>>,
+        user_address: UserAddress,
+    ) -> TransactionReceipt<L> {
+        let now = self.validator.now();
+        let timeout = now + RECORD_HOLD_TIME;
+        let hash = txn.hash();
+        let uid = uid.unwrap_or_else(|| TransactionUID(hash.clone()));
+
+        for nullifier in txn.note().nullifiers() {
+            // hold the record corresponding to this nullifier until the transaction is committed,
+            // rejected, or expired.
+            if let Some(record) = self.records.record_with_nullifier_mut(&nullifier) {
+                assert!(!record.on_hold(now));
+                record.hold_until(timeout);
+            }
+        }
+
+        // Add the transaction to `transactions`.
+        let pending = PendingTransaction {
+            account: user_address.clone(),
+            receiver_memos,
+            signature,
+            timeout,
+            freeze_outputs,
+            uid: uid.clone(),
+            hash,
+        };
+        self.transactions.insert_pending(pending);
+
+        TransactionReceipt {
+            uid,
+            fee_nullifier: txn.note().nullifiers()[0],
+            submitter: user_address,
+        }
+    }
+
+    pub fn clear_pending_transaction<'t>(
+        &mut self,
+        txn: &Transaction<L>,
+        res: &Option<CommittedTxn<'t>>,
+    ) -> Option<PendingTransaction<L>> {
+        let now = self.validator.now();
+
+        // Remove the transaction from pending transaction data structures.
+        let txn_hash = txn.hash();
+        let pending = self.transactions.remove_pending(&txn_hash);
+
+        for nullifier in txn.note().nullifiers() {
+            if let Some(record) = self.records.record_with_nullifier_mut(&nullifier) {
+                if pending.is_some() {
+                    // If we started this transaction, all of its inputs should have been on hold,
+                    // to preserve the invariant that all input nullifiers of all pending
+                    // transactions are on hold.
+                    assert!(record.on_hold(now));
+
+                    if res.is_none() {
+                        // If the transaction was not accepted for any reason, its nullifiers have
+                        // not been spent, so remove the hold we placed on them.
+                        record.unhold();
+                    }
+                } else {
+                    // This isn't even our transaction.
+                    assert!(!record.on_hold(now));
+                }
+            }
+        }
+
+        pending
+    }
+
+    pub fn transfer_native<'a, 'k>(
+        &mut self,
+        owner_keypair: &UserKeyPair,
+        proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
+        receivers: &[(UserPubKey, u64)],
+        fee: u64,
+        rng: &mut ChaChaRng,
+    ) -> Result<(TransferNote, Vec<ReceiverMemo>, Signature), TransactionError> {
+        let total_output_amount: u64 =
+            receivers.iter().fold(0, |sum, (_, amount)| sum + *amount) + fee;
+
+        // find input records which account for at least the total amount, and possibly some change.
+        let (input_records, _change) = self.find_records(
+            &AssetCode::native(),
+            &owner_keypair.pub_key(),
+            FreezeFlag::Unfrozen,
+            total_output_amount,
+            None,
+        )?;
+
+        // prepare inputs
+        let mut inputs = vec![];
+        for (ro, uid) in input_records {
+            let acc_member_witness = self.get_merkle_proof(uid);
+            inputs.push(TransferNoteInput {
+                ro,
+                acc_member_witness,
+                owner_keypair,
+                cred: None,
+            });
+        }
+
+        // prepare outputs, excluding fee change (which will be automatically generated)
+        let mut outputs = vec![];
+        for (pub_key, amount) in receivers {
+            outputs.push(RecordOpening::new(
+                rng,
+                *amount,
+                AssetDefinition::native(),
+                pub_key.clone(),
+                FreezeFlag::Unfrozen,
+            ));
+        }
+
+        // find a proving key which can handle this transaction size
+        let (proving_key, dummy_inputs) = Self::xfr_proving_key(
+            rng,
+            owner_keypair.pub_key(),
+            proving_keys,
+            &AssetDefinition::native(),
+            &mut inputs,
+            &mut outputs,
+            false,
+        )?;
+        // pad with dummy inputs if necessary
+        let dummy_inputs = (0..dummy_inputs)
+            .map(|_| RecordOpening::dummy(rng, FreezeFlag::Unfrozen))
+            .collect::<Vec<_>>();
+        for (ro, owner_keypair) in &dummy_inputs {
+            let dummy_input = TransferNoteInput {
+                ro: ro.clone(),
+                acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
+                owner_keypair,
+                cred: None,
+            };
+            inputs.push(dummy_input);
+        }
+
+        // generate transfer note and receiver memos
+        let (note, kp, fee_change_ro) = TransferNote::generate_native(
+            rng,
+            inputs,
+            &outputs,
+            fee,
+            UNEXPIRED_VALID_UNTIL,
+            proving_key,
+        )
+        .context(CryptoError)?;
+
+        let outputs: Vec<_> = vec![fee_change_ro]
+            .into_iter()
+            .chain(outputs.into_iter())
+            .collect();
+
+        let recv_memos: Vec<_> = outputs
+            .iter()
+            .map(|ro| ReceiverMemo::from_ro(rng, ro, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let sig = sign_receiver_memos(&kp, &recv_memos).context(CryptoError)?;
+        Ok((note, recv_memos, sig))
+    }
+
+    pub fn transfer_non_native<'a, 'k>(
+        &mut self,
+        owner_keypair: &UserKeyPair,
+        proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
+        asset: &AssetCode,
+        receivers: &[(UserPubKey, u64)],
+        fee: u64,
+        rng: &mut ChaChaRng,
+    ) -> Result<(TransferNote, Vec<ReceiverMemo>, Signature), TransactionError> {
+        assert_ne!(
+            *asset,
+            AssetCode::native(),
+            "call `transfer_native()` instead"
+        );
+        let total_output_amount: u64 = receivers.iter().fold(0, |sum, (_, amount)| sum + *amount);
+
+        // find input records of the asset type to spend (this does not include the fee input)
+        let (input_records, change) = self.find_records(
+            asset,
+            &owner_keypair.pub_key(),
+            FreezeFlag::Unfrozen,
+            total_output_amount,
+            None,
+        )?;
+        let asset = input_records[0].0.asset_def.clone();
+
+        // prepare inputs
+        let mut inputs = vec![];
+        for (ro, uid) in input_records.into_iter() {
+            let witness = self.get_merkle_proof(uid);
+            inputs.push(TransferNoteInput {
+                ro,
+                acc_member_witness: witness,
+                owner_keypair,
+                cred: None, // TODO support credentials
+            })
+        }
+        let fee_input = self.find_fee_input(owner_keypair, fee)?;
+
+        // prepare outputs, excluding fee change (which will be automatically generated)
+        let mut outputs = vec![];
+        for (pub_key, amount) in receivers {
+            outputs.push(RecordOpening::new(
+                rng,
+                *amount,
+                asset.clone(),
+                pub_key.clone(),
+                FreezeFlag::Unfrozen,
+            ));
+        }
+        // change in the asset type being transfered (not fee change)
+        if change > 0 {
+            let me = owner_keypair.pub_key();
+            let change_ro =
+                RecordOpening::new(rng, change, asset.clone(), me, FreezeFlag::Unfrozen);
+            outputs.push(change_ro);
+        }
+
+        // find a proving key which can handle this transaction size
+        let (proving_key, dummy_inputs) = Self::xfr_proving_key(
+            rng,
+            owner_keypair.pub_key(),
+            proving_keys,
+            &asset,
+            &mut inputs,
+            &mut outputs,
+            change > 0,
+        )?;
+        // pad with dummy inputs if necessary
+        let rng = rng;
+        let dummy_inputs = (0..dummy_inputs)
+            .map(|_| RecordOpening::dummy(rng, FreezeFlag::Unfrozen))
+            .collect::<Vec<_>>();
+        for (ro, owner_keypair) in &dummy_inputs {
+            let dummy_input = TransferNoteInput {
+                ro: ro.clone(),
+                acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
+                owner_keypair,
+                cred: None,
+            };
+            inputs.push(dummy_input);
+        }
+
+        // generate transfer note and receiver memos
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(rng, fee_input, fee).unwrap();
+        let (note, sig_key) = TransferNote::generate_non_native(
+            rng,
+            inputs,
+            &outputs,
+            fee_info,
+            UNEXPIRED_VALID_UNTIL,
+            proving_key,
+            vec![],
+        )
+        .context(CryptoError)?;
+        let recv_memos = vec![&fee_out_rec]
+            .into_iter()
+            .chain(outputs.iter())
+            .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
+        Ok((note, recv_memos, sig))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn mint<'a>(
+        &mut self,
+        owner_keypair: &UserKeyPair,
+        proving_key: &MintProvingKey<'a>,
+        fee: u64,
+        asset: &(AssetDefinition, AssetCodeSeed, Vec<u8>),
+        amount: u64,
+        receiver: UserPubKey,
+        rng: &mut ChaChaRng,
+    ) -> Result<(MintNote, Vec<ReceiverMemo>, Signature), TransactionError> {
+        let (asset_def, seed, asset_description) = asset;
+        let mint_record = RecordOpening {
+            amount,
+            asset_def: asset_def.clone(),
+            pub_key: receiver,
+            freeze_flag: FreezeFlag::Unfrozen,
+            blind: BlindFactor::rand(rng),
+        };
+
+        let fee_input = self.find_fee_input(owner_keypair, fee)?;
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(rng, fee_input, fee).unwrap();
+        let rng = rng;
+        let recv_memos = vec![&fee_out_rec, &mint_record]
+            .into_iter()
+            .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let (mint_note, sig_key) = jf_txn::mint::MintNote::generate(
+            rng,
+            mint_record,
+            *seed,
+            asset_description.as_slice(),
+            fee_info,
+            proving_key,
+        )
+        .context(CryptoError)?;
+        let signature = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
+        Ok((mint_note, recv_memos, signature))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn freeze_or_unfreeze<'a>(
+        &mut self,
+        fee_keypair: &UserKeyPair,
+        freezer_keypair: &FreezerKeyPair,
+        proving_keys: &KeySet<FreezeProvingKey<'a>, key_set::OrderByOutputs>,
+        fee: u64,
+        asset: &AssetDefinition,
+        amount: u64,
+        owner: UserPubKey,
+        outputs_frozen: FreezeFlag,
+        rng: &mut ChaChaRng,
+    ) -> Result<(FreezeNote, Vec<ReceiverMemo>, Signature, Vec<RecordOpening>), TransactionError>
+    {
+        // find input records of the asset type to freeze (this does not include the fee input)
+        let inputs_frozen = match outputs_frozen {
+            FreezeFlag::Frozen => FreezeFlag::Unfrozen,
+            FreezeFlag::Unfrozen => FreezeFlag::Frozen,
+        };
+        let (input_records, _) =
+            self.find_records(&asset.code, &owner, inputs_frozen, amount, None)?;
+
+        // prepare inputs
+        let mut inputs = vec![];
+        for (ro, uid) in input_records.into_iter() {
+            let witness = self.get_merkle_proof(uid);
+            inputs.push(FreezeNoteInput {
+                ro,
+                acc_member_witness: witness,
+                keypair: freezer_keypair,
+            })
+        }
+        let fee_input = self.find_fee_input(fee_keypair, fee)?;
+
+        // find a proving key which can handle this transaction size
+        let proving_key =
+            Self::freeze_proving_key(rng, proving_keys, asset, &mut inputs, freezer_keypair)?;
+
+        // generate transfer note and receiver memos
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(rng, fee_input, fee).unwrap();
+        let (note, sig_key, outputs) =
+            FreezeNote::generate(rng, inputs, fee_info, proving_key).context(CryptoError)?;
+        let recv_memos = vec![&fee_out_rec]
+            .into_iter()
+            .chain(outputs.iter())
+            .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let sig = sign_receiver_memos(&sig_key, &recv_memos).unwrap();
+        Ok((note, recv_memos, sig, outputs))
+    }
+
+    pub fn forget_merkle_leaf(&mut self, leaf: u64) {
+        if leaf < self.record_mt.num_leaves() - 1 {
+            self.record_mt.forget(leaf);
+        } else {
+            assert_eq!(leaf, self.record_mt.num_leaves() - 1);
+            // We can't forget the last leaf in a Merkle tree. Instead, we just note that we want to
+            // forget this leaf, and we'll forget it when we append a new last leaf.
+            //
+            // There can only be one `merkle_leaf_to_forget` at a time, because we will forget the
+            // leaf and clear this field as soon as we append a new leaf.
+            assert!(self.merkle_leaf_to_forget.is_none());
+            self.merkle_leaf_to_forget = Some(leaf);
+        }
+    }
+
+    #[must_use]
+    pub fn remember_merkle_leaf(&mut self, leaf: u64, proof: &MerkleLeafProof) -> bool {
+        // If we were planning to forget this leaf once a new leaf is appended, stop planning that.
+        if self.merkle_leaf_to_forget == Some(leaf) {
+            self.merkle_leaf_to_forget = None;
+            // `merkle_leaf_to_forget` is always represented in the tree, so we don't have to call
+            // `remember` in this case.
+            assert!(self.record_mt.get_leaf(leaf).expect_ok().is_ok());
+            true
+        } else {
+            self.record_mt.remember(leaf, proof).is_ok()
+        }
+    }
+
+    pub fn append_merkle_leaf(&mut self, comm: RecordCommitment) {
+        self.record_mt.push(comm.to_field_element());
+
+        // Now that we have appended a new leaf to the Merkle tree, we can forget the old last leaf,
+        // if needed.
+        if let Some(uid) = self.merkle_leaf_to_forget.take() {
+            assert!(uid < self.record_mt.num_leaves() - 1);
+            self.record_mt.forget(uid);
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn find_records(
+        &self,
+        asset: &AssetCode,
+        owner: &UserPubKey,
+        frozen: FreezeFlag,
+        amount: u64,
+        max_records: Option<usize>,
+    ) -> Result<(Vec<(RecordOpening, u64)>, u64), TransactionError> {
+        let now = self.validator.now();
+
+        // If we have a record with the exact size required, use it to avoid fragmenting big records
+        // into smaller change records.
+        if let Some(record) = self
+            .records
+            .input_record_with_amount(asset, owner, frozen, amount, now)
+        {
+            return Ok((vec![(record.ro.clone(), record.uid)], 0));
+        }
+
+        // Take the biggest records we have until they exceed the required amount, as a heuristic to
+        // try and get the biggest possible change record. This is a simple algorithm that
+        // guarantees we will always return the minimum number of blocks, and thus we always succeed
+        // in making a transaction if it is possible to do so within the allowed number of inputs.
+        //
+        // This algorithm is not optimal, though. For instance, it's possible we might be able to
+        // make exact change using combinations of larger and smaller blocks. We can replace this
+        // with something more sophisticated later.
+        let mut result = vec![];
+        let mut current_amount = 0u64;
+        for record in self.records.input_records(asset, owner, frozen, now) {
+            if let Some(max_records) = max_records {
+                if result.len() >= max_records {
+                    // Too much fragmentation: we can't make the required amount using few enough
+                    // records. This should be less likely once we implement a better allocation
+                    // strategy (or, any allocation strategy).
+                    //
+                    // In this case, we could either simply return an error, or we could
+                    // automatically generate a merge transaction to defragment our assets.
+                    // Automatically merging assets would implicitly incur extra transaction fees,
+                    // so for now we do the simple, uncontroversial thing and error out.
+                    return Err(TransactionError::Fragmentation {
+                        asset: *asset,
+                        amount,
+                        suggested_amount: current_amount,
+                        max_records,
+                    });
+                }
+            }
+            current_amount += record.ro.amount;
+            result.push((record.ro.clone(), record.uid));
+            if current_amount >= amount {
+                return Ok((result, current_amount - amount));
+            }
+        }
+
+        Err(TransactionError::InsufficientBalance {
+            asset: *asset,
+            required: amount,
+            actual: current_amount,
+        })
+    }
+
+    /// find a record of the native asset type with enough funds to pay a transaction fee
+    fn find_fee_input<'l>(
+        &self,
+        owner_keypair: &'l UserKeyPair,
+        fee: u64,
+    ) -> Result<FeeInput<'l>, TransactionError> {
+        let (ro, uid) = self
+            .find_records(
+                &AssetCode::native(),
+                &owner_keypair.pub_key(),
+                FreezeFlag::Unfrozen,
+                fee,
+                Some(1),
+            )
+            .map(|(ros, _change)| ros.into_iter().next().unwrap())?;
+
+        Ok(FeeInput {
+            ro,
+            acc_member_witness: self.get_merkle_proof(uid),
+            owner_keypair,
+        })
+    }
+
+    fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
+        // The transaction builder never needs a Merkle proof that isn't guaranteed to already be in the Merkle
+        // tree, so this unwrap() should never fail.
+        AccMemberWitness::lookup_from_tree(&self.record_mt, leaf)
+            .expect_ok()
+            .unwrap()
+            .1
+    }
+
+    // Find a proving key large enough to prove the given transaction, returning the number of dummy
+    // inputs needed to pad the transaction.
+    //
+    // `proving_keys` should always be `&self.proving_key`. This is a non-member function in order
+    // to prove to the compiler that the result only borrows from `&self.proving_key`, not all of
+    // `&self`.
+    #[allow(clippy::too_many_arguments)]
+    fn xfr_proving_key<'a, 'k>(
+        rng: &mut ChaChaRng,
+        me: UserPubKey,
+        proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
+        asset: &AssetDefinition,
+        inputs: &mut Vec<TransferNoteInput<'k>>,
+        outputs: &mut Vec<RecordOpening>,
+        change_record: bool,
+    ) -> Result<(&'k TransferProvingKey<'a>, usize), TransactionError> {
+        let total_output_amount = outputs.iter().map(|ro| ro.amount).sum();
+        // non-native transfers have an extra fee input, which is not included in `inputs`.
+        let fee_inputs = if *asset == AssetDefinition::native() {
+            0
+        } else {
+            1
+        };
+        // both native and non-native transfers have an extra fee change output which is
+        // automatically generated and not included in `outputs`.
+        let fee_outputs = 1;
+
+        let num_inputs = inputs.len() + fee_inputs;
+        let num_outputs = outputs.len() + fee_outputs;
+        let (key_inputs, key_outputs, proving_key) = proving_keys
+            .best_fit_key(num_inputs, num_outputs)
+            .map_err(|(max_inputs, max_outputs)| {
+                if max_outputs >= num_outputs {
+                    // If there is a key that can fit the correct number of outputs had we only
+                    // managed to find fewer inputs, call this a fragmentation error.
+                    TransactionError::Fragmentation {
+                        asset: asset.code,
+                        amount: total_output_amount,
+                        suggested_amount: inputs
+                            .iter()
+                            .take(max_inputs - fee_inputs)
+                            .map(|input| input.ro.amount)
+                            .sum(),
+                        max_records: max_inputs,
+                    }
+                } else {
+                    // Otherwise, we just have too many outputs for any of our available keys. There
+                    // is nothing we can do about that on the transaction builder side.
+                    TransactionError::TooManyOutputs {
+                        asset: asset.code,
+                        max_records: max_outputs,
+                        num_receivers: outputs.len() - change_record as usize,
+                        num_change_records: 1 + change_record as usize,
+                    }
+                }
+            })?;
+        assert!(num_inputs <= key_inputs);
+        assert!(num_outputs <= key_outputs);
+
+        if num_outputs < key_outputs {
+            // pad with dummy (0-amount) outputs,leaving room for the fee change output
+            loop {
+                outputs.push(RecordOpening::new(
+                    rng,
+                    0,
+                    asset.clone(),
+                    me.clone(),
+                    FreezeFlag::Unfrozen,
+                ));
+                if outputs.len() >= key_outputs - fee_outputs {
+                    break;
+                }
+            }
+        }
+
+        // Return the required number of dummy inputs. We can't easily create the dummy inputs here,
+        // because it requires creating a new dummy key pair and then borrowing from the key pair to
+        // form the transfer input, so the key pair must be owned by the caller.
+        let dummy_inputs = key_inputs.saturating_sub(num_inputs);
+        Ok((proving_key, dummy_inputs))
+    }
+
+    fn freeze_proving_key<'a, 'k>(
+        rng: &mut ChaChaRng,
+        proving_keys: &'k KeySet<FreezeProvingKey<'a>, key_set::OrderByOutputs>,
+        asset: &AssetDefinition,
+        inputs: &mut Vec<FreezeNoteInput<'k>>,
+        keypair: &'k FreezerKeyPair,
+    ) -> Result<&'k FreezeProvingKey<'a>, TransactionError> {
+        let total_output_amount = inputs.iter().map(|input| input.ro.amount).sum();
+
+        let num_inputs = inputs.len() + 1; // make sure to include fee input
+        let num_outputs = num_inputs; // freeze transactions always have equal outputs and inputs
+        let (key_inputs, key_outputs, proving_key) = proving_keys
+            .best_fit_key(num_inputs, num_outputs)
+            .map_err(|(max_inputs, _)| {
+                TransactionError::Fragmentation {
+                    asset: asset.code,
+                    amount: total_output_amount,
+                    suggested_amount: inputs
+                        .iter()
+                        .take(max_inputs - 1) // leave room for fee input
+                        .map(|input| input.ro.amount)
+                        .sum(),
+                    max_records: max_inputs,
+                }
+            })?;
+        assert!(num_inputs <= key_inputs);
+        assert!(num_outputs <= key_outputs);
+
+        if num_inputs < key_inputs {
+            // pad with dummy inputs, leaving room for the fee input
+
+            loop {
+                let (ro, _) = RecordOpening::dummy(rng, FreezeFlag::Unfrozen);
+                inputs.push(FreezeNoteInput {
+                    ro,
+                    acc_member_witness: AccMemberWitness::dummy(MERKLE_HEIGHT),
+                    keypair,
+                });
+                if inputs.len() >= key_inputs - 1 {
+                    break;
+                }
+            }
+        }
+
+        Ok(proving_key)
+    }
 }

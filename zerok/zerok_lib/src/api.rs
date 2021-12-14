@@ -88,6 +88,10 @@ pub struct UserAddress(pub jf_txn::keys::UserAddress);
 
 pub use jf_txn::keys::UserPubKey;
 
+#[tagged_blob("RECPROOF")]
+#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
+pub struct MerklePath(pub jf_txn::MerklePath);
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommittedBlock {
     pub id: BlockId,

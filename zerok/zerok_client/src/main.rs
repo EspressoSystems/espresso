@@ -29,12 +29,6 @@ pub struct Args {
     #[structopt(short = "g", long)]
     pub key_gen: Option<PathBuf>,
 
-    /// Path to a private key file to use for the wallet.
-    ///
-    /// If not given, new keys are generated randomly.
-    #[structopt(short, long)]
-    pub key_path: Option<PathBuf>,
-
     /// Path to a saved wallet, or a new directory where this wallet will be saved.
     ///
     /// If not given, the wallet will be stored in ~/.translucence/wallet. If a wallet already
@@ -78,10 +72,6 @@ impl CLIArgs for Args {
 
     fn storage_path(&self) -> Option<PathBuf> {
         self.storage.clone()
-    }
-
-    fn key_path(&self) -> Option<PathBuf> {
-        self.key_path.clone()
     }
 
     fn interactive(&self) -> bool {
