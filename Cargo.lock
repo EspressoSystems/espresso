@@ -2054,7 +2054,7 @@ checksum = "b71991ff56294aa922b450139ee08b3bfc70982c6b2c7562771375cf73542dd4"
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2085,7 +2085,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2116,7 +2116,7 @@ dependencies = [
 [[package]]
 name = "jf-rescue"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2144,7 +2144,7 @@ dependencies = [
 [[package]]
 name = "jf-txn"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "anyhow",
  "ark-bls12-377",
@@ -2182,7 +2182,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "anyhow",
  "ark-ec",
@@ -2199,7 +2199,7 @@ dependencies = [
 [[package]]
 name = "jf-utils-derive"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.com/translucence/crypto/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e#4d7e1c38e3f41d83e5b93f0eca1ae0663f221a5e"
 dependencies = [
  "ark-serialize",
  "ark-std",
@@ -2661,7 +2661,7 @@ dependencies = [
 [[package]]
 name = "phaselock"
 version = "0.0.5"
-source = "git+ssh://git@gitlab.com/translucence/systems/phaselock.git?rev=14586ed218a35cb48675b73d4a34ae7ae55c67e6#14586ed218a35cb48675b73d4a34ae7ae55c67e6"
+source = "git+ssh://git@github.com/SpectrumXYZ/phaselock.git?rev=14586ed218a35cb48675b73d4a34ae7ae55c67e6#14586ed218a35cb48675b73d4a34ae7ae55c67e6"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",
@@ -3784,7 +3784,7 @@ dependencies = [
 [[package]]
 name = "tagged-base64"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.com/translucence/common/tagged-base64.git?branch=main#0887bb4e6cf69534f827adde9030203887f0eaf2"
+source = "git+ssh://git@github.com/SpectrumXYZ/tagged-base64.git?branch=main#0887bb4e6cf69534f827adde9030203887f0eaf2"
 dependencies = [
  "base64 0.13.0",
  "console_error_panic_hook",
