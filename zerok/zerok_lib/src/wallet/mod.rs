@@ -193,10 +193,19 @@ impl<'a> Arbitrary<'a> for BackgroundKeyScan {
 impl BackgroundKeyScan {
     fn process_nullifiers(&mut self, nullifiers: &[Nullifier], new: bool) {
         for n in nullifiers {
+            // Whether these nullifiers are newly published since the scan began, or were already
+            // published and the scan has only now encountered them, we need to remove any records
+            // we've collected which are nullified.
             if self.records.remove(n).is_none() && new {
-                // If this nullifier is new since we started the scan and the record corresponding
-                // to this nullifier was not already in our records, add this nullifier to the set
-                // of new nullifiers in case we encounter the corresponding record later.
+                // Now, if this nullifier is newly published and we did not just remove a record
+                // that we had already discovered, we need to save the nullifier in case we discover
+                // the record that it nullifies later in our scan.
+                //
+                // Note that we do not need to save the nullifier if it is not newly published,
+                // because if we are encountering this nullifier in the normal course of our scan,
+                // then we have already scanned all blocks before it was published, and thus we must
+                // have already discovered the corresponding record if the record is discoverable at
+                // all.
                 self.new_nullifiers.insert(*n);
             }
         }
