@@ -1,4 +1,6 @@
-use super::persistence::{AtomicWalletStorage, WalletLoader};
+use super::hd::KeyTree;
+use super::loader::WalletLoader;
+use super::persistence::AtomicWalletStorage;
 use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
 use crate::api;
 use crate::ledger::AAPLedger;
@@ -32,6 +34,7 @@ pub struct NetworkBackend<'a, Meta: Serialize + DeserializeOwned> {
     bulletin_client: surf::Client,
     validator_client: surf::Client,
     storage: Arc<Mutex<AtomicWalletStorage<'a, AAPLedger, Meta>>>,
+    key_stream: KeyTree,
 }
 
 impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
@@ -42,12 +45,14 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
         validator_url: Url,
         loader: &mut impl WalletLoader<Meta = Meta>,
     ) -> Result<Self, WalletError> {
+        let storage = AtomicWalletStorage::new(loader)?;
         Ok(Self {
             query_client: Self::client(query_url)?,
             bulletin_client: Self::client(bulletin_url)?,
             validator_client: Self::client(validator_url)?,
             univ_param,
-            storage: Arc::new(Mutex::new(AtomicWalletStorage::new(loader)?)),
+            key_stream: storage.key_stream(),
+            storage: Arc::new(Mutex::new(storage)),
         })
     }
 
@@ -180,6 +185,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                 transactions: Default::default(),
             },
             key_scans: Default::default(),
+            key_state: Default::default(),
             auditable_assets: Default::default(),
             audit_keys: Default::default(),
             freeze_keys: Default::default(),
@@ -193,6 +199,10 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
 
     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
         self.storage.lock().await
+    }
+
+    fn key_stream(&self) -> KeyTree {
+        self.key_stream.clone()
     }
 
     async fn subscribe(&self, starting_at: u64) -> Self::EventStream {

@@ -34,8 +34,8 @@ use std::time::Duration;
 use structopt::StructOpt;
 use tracing::{event, Level};
 use wallet::hd::KeyTree;
+use wallet::loader::WalletLoader;
 use wallet::network::{NetworkBackend, Url};
-use wallet::persistence::WalletLoader;
 use wallet::{KeyError, WalletError};
 use zerok_lib::{api::client, universal_params::UNIVERSAL_PARAM, wallet};
 
@@ -125,7 +125,7 @@ async fn main() {
                 });
         }
         None => {
-            wallet.generate_user_key().await.unwrap_or_else(|err| {
+            wallet.generate_user_key(None).await.unwrap_or_else(|err| {
                 panic!("error generating random key: {}", err);
             });
         }

@@ -1,8 +1,10 @@
 pub mod cli;
 pub mod encryption;
 pub mod hd;
+pub mod loader;
 pub mod network;
 pub mod persistence;
+pub mod reader;
 mod secret;
 
 use crate::api;
@@ -227,6 +229,14 @@ impl BackgroundKeyScan {
     }
 }
 
+#[ser_test(arbitrary, ark(false))]
+#[derive(Arbitrary, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct KeyStreamState {
+    auditor: u64,
+    freezer: u64,
+    user: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct WalletState<'a, L: Ledger = AAPLedger> {
     // TODO: Move the mutable keys to the txn state.
@@ -253,6 +263,8 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
     pub(crate) txn_state: TransactionState<L>,
     // background scans triggered by the addition of new keys.
     pub(crate) key_scans: HashMap<UserAddress, BackgroundKeyScan>,
+    // HD key generation state.
+    pub(crate) key_state: KeyStreamState,
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Monotonic data
@@ -625,6 +637,8 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
         fut.await
     }
 
+    fn key_stream(&self) -> hd::KeyTree;
+
     // Querying the ledger
     async fn create(&mut self) -> Result<WalletState<'a, L>, WalletError>;
     async fn subscribe(&self, starting_at: u64) -> Self::EventStream;
@@ -655,6 +669,9 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
 pub struct WalletSession<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
     backend: Backend,
     rng: ChaChaRng,
+    auditor_key_stream: hd::KeyTree,
+    user_key_stream: hd::KeyTree,
+    freezer_key_stream: hd::KeyTree,
     _marker: std::marker::PhantomData<&'a ()>,
     _marker2: std::marker::PhantomData<L>,
 }
@@ -1907,9 +1924,13 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
                     .take((scan.to_event - scan.next_event) as usize),
             ));
         }
+        let key_tree = backend.key_stream();
         let session = WalletSession {
             backend,
             rng: ChaChaRng::from_entropy(),
+            auditor_key_stream: key_tree.derive_sub_tree("auditor".as_bytes()),
+            freezer_key_stream: key_tree.derive_sub_tree("freezer".as_bytes()),
+            user_key_stream: key_tree.derive_sub_tree("user".as_bytes()),
             _marker: Default::default(),
             _marker2: Default::default(),
         };
@@ -2100,7 +2121,10 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     /// generate a new auditor key and add it to the wallet's key set
     pub async fn generate_audit_key(&mut self) -> Result<AuditorPubKey, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        let audit_key = AuditorKeyPair::generate(&mut session.rng);
+        let audit_key = session
+            .auditor_key_stream
+            .derive_auditor_keypair(&state.key_state.auditor.to_le_bytes());
+        state.key_state.auditor += 1;
         state.add_audit_key(session, audit_key.clone()).await?;
         Ok(audit_key.pub_key())
     }
@@ -2114,7 +2138,10 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     /// generate a new freezer key and add it to the wallet's key set
     pub async fn generate_freeze_key(&mut self) -> Result<FreezerPubKey, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        let freeze_key = FreezerKeyPair::generate(&mut session.rng);
+        let freeze_key = session
+            .freezer_key_stream
+            .derive_freezer_keypair(&state.key_state.freezer.to_le_bytes());
+        state.key_state.freezer += 1;
         state.add_freeze_key(session, freeze_key.clone()).await?;
         Ok(freeze_key.pub_key())
     }
@@ -2142,11 +2169,23 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         Ok(())
     }
 
-    /// generate a new freezer key and add it to the wallet's key set
-    pub async fn generate_user_key(&mut self) -> Result<UserPubKey, WalletError> {
+    /// generate a new user key and add it to the wallet's key set. Keys are generated
+    /// deterministically based on the mnemonic phrase used to load the wallet. If this is a
+    /// recovery of an HD wallet from a mnemonic phrase, `scan_from` can be used to initiate a
+    /// background scan of the ledger from the given event index to find records already belonging
+    /// to the new key.
+    pub async fn generate_user_key(
+        &mut self,
+        scan_from: Option<u64>,
+    ) -> Result<UserPubKey, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        let user_key = UserKeyPair::generate(&mut session.rng);
-        state.add_user_key(session, user_key.clone(), None).await?;
+        let user_key = session
+            .user_key_stream
+            .derive_user_keypair(&state.key_state.user.to_le_bytes());
+        state.key_state.user += 1;
+        state
+            .add_user_key(session, user_key.clone(), scan_from)
+            .await?;
         Ok(user_key.pub_key())
     }
 
@@ -2343,6 +2382,7 @@ pub mod test_helpers {
         );
         assert_eq!(w1.proving_keys, w2.proving_keys);
         assert_eq!(w1.txn_state.records, w2.txn_state.records);
+        assert_eq!(w1.key_state, w2.key_state);
         assert_eq!(w1.auditable_assets, w2.auditable_assets);
         assert_eq!(
             w1.audit_keys.keys().collect::<Vec<_>>(),
@@ -2405,6 +2445,7 @@ pub mod test_helpers {
             if let Some(working) = &mut self.working {
                 working.txn_state = state.txn_state.clone();
                 working.key_scans = state.key_scans.clone();
+                working.key_state = state.key_state.clone();
             }
             Ok(())
         }
@@ -2720,6 +2761,7 @@ pub mod test_helpers {
                         now: 0,
                         transactions: Default::default(),
                     },
+                    key_state: Default::default(),
                     key_scans: Default::default(),
                     auditable_assets: Default::default(),
                     audit_keys: Default::default(),
@@ -2735,6 +2777,11 @@ pub mod test_helpers {
             storage.working = Some(state.clone());
 
             Ok(state)
+        }
+
+        fn key_stream(&self) -> hd::KeyTree {
+            let mut rng = ChaChaRng::from_seed(self.seed);
+            hd::KeyTree::random(&mut rng).unwrap().0
         }
 
         async fn subscribe(&self, starting_at: u64) -> Self::EventStream {

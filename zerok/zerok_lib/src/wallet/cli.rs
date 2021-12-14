@@ -9,7 +9,6 @@ use crate::{api, universal_params::UNIVERSAL_PARAM, wallet};
 use api::{MerklePath, UserAddress};
 use async_std::task::block_on;
 use async_trait::async_trait;
-use encryption::{Cipher, CipherText};
 use fmt::{Display, Formatter};
 use futures::future::BoxFuture;
 use jf_txn::{
@@ -17,12 +16,6 @@ use jf_txn::{
     proof::UniversalParam,
     structs::{AssetCode, AssetDefinition, AssetPolicy, ReceiverMemo, RecordCommitment},
 };
-use rand_chacha::{
-    rand_core::{RngCore, SeedableRng},
-    ChaChaRng,
-};
-use rpassword::prompt_password_stdout;
-use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::any::type_name;
 use std::collections::HashMap;
@@ -35,8 +28,10 @@ use std::str::FromStr;
 use tagged_base64::TaggedBase64;
 use tempdir::TempDir;
 use wallet::{
-    encryption, hd::KeyTree, ledger::Ledger, persistence::WalletLoader, AssetInfo, BincodeError,
-    EncryptionError, IoError, KeyError, MintInfo, TransactionReceipt, TransactionStatus,
+    ledger::Ledger,
+    loader::{LoadMethod, Loader, LoaderMetadata, WalletLoader},
+    reader::Reader,
+    AssetInfo, BincodeError, IoError, MintInfo, TransactionReceipt, TransactionStatus,
     WalletBackend, WalletError,
 };
 
@@ -48,7 +43,7 @@ pub trait CLI<'a> {
     fn init_backend(
         universal_param: &'a UniversalParam,
         args: &'a Self::Args,
-        loader: &mut impl WalletLoader<Meta = WalletMetadata>,
+        loader: &mut impl WalletLoader<Meta = LoaderMetadata>,
     ) -> Result<Self::Backend, WalletError>;
 }
 
@@ -57,6 +52,7 @@ pub trait CLIArgs {
     fn storage_path(&self) -> Option<PathBuf>;
     fn interactive(&self) -> bool;
     fn encrypted(&self) -> bool;
+    fn load_method(&self) -> LoadMethod;
     fn use_tmp_storage(&self) -> bool;
 }
 
@@ -600,7 +596,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
             gen_key,
             "generate new keys",
             C,
-            |wallet, key_type: KeyType| {
+            |wallet, key_type: KeyType; scan_from: Option<u64>| {
                 match key_type {
                     KeyType::Audit => match wallet.generate_audit_key().await {
                         Ok(pub_key) => println!("{}", pub_key),
@@ -610,7 +606,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                         Ok(pub_key) => println!("{}", pub_key),
                         Err(err) => println!("Error generating freeze key: {}", err),
                     },
-                    KeyType::Spend => match wallet.generate_user_key().await {
+                    KeyType::Spend => match wallet.generate_user_key(scan_from).await {
                         Ok(pub_key) => println!("{}", UserAddress(pub_key.address())),
                         Err(err) => println!("Error generating spending key: {}", err),
                     },
@@ -730,162 +726,6 @@ impl<'a, C: CLI<'a>> CLIInput<'a, C> for KeyType {
     }
 }
 
-enum Reader {
-    Interactive(rustyline::Editor<()>),
-    Automated,
-}
-
-impl Reader {
-    fn new(args: &impl CLIArgs) -> Self {
-        if args.interactive() {
-            Self::Interactive(rustyline::Editor::<()>::new())
-        } else {
-            Self::Automated
-        }
-    }
-
-    fn read_password(&self, prompt: &str) -> Result<String, WalletError> {
-        match self {
-            Self::Interactive(_) => {
-                prompt_password_stdout(prompt).map_err(|err| WalletError::Failed {
-                    msg: err.to_string(),
-                })
-            }
-            Self::Automated => {
-                println!("{}", prompt);
-                let mut password = String::new();
-                match std::io::stdin().read_line(&mut password) {
-                    Ok(_) => Ok(password),
-                    Err(err) => Err(WalletError::Failed {
-                        msg: err.to_string(),
-                    }),
-                }
-            }
-        }
-    }
-
-    fn read_line(&mut self) -> Option<String> {
-        let prompt = "> ";
-        match self {
-            Self::Interactive(editor) => editor.readline(prompt).ok(),
-            Self::Automated => {
-                println!("{}", prompt);
-                let mut line = String::new();
-                match std::io::stdin().read_line(&mut line) {
-                    Ok(0) => {
-                        // EOF
-                        None
-                    }
-                    Err(_) => None,
-                    Ok(_) => Some(line),
-                }
-            }
-        }
-    }
-}
-
-// Metadata about a wallet which is always stored unencrypted, so we can report some basic
-// information about the wallet without decrypting. This also aids in the key derivation process.
-//
-// DO NOT put secrets in here.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct WalletMetadata {
-    encrypted: bool,
-    salt: encryption::Salt,
-    // Encrypted random bytes. This will only decrypt successfully if we have the correct password,
-    // so we can use it as a quick check that the user entered the right password.
-    password_check: CipherText,
-}
-
-struct PasswordLoader {
-    encrypted: bool,
-    dir: PathBuf,
-    rng: ChaChaRng,
-    reader: Reader,
-}
-
-impl WalletLoader for PasswordLoader {
-    type Meta = WalletMetadata;
-
-    fn location(&self) -> PathBuf {
-        self.dir.clone()
-    }
-
-    fn create(&mut self) -> Result<(WalletMetadata, KeyTree), WalletError> {
-        let password = if self.encrypted {
-            loop {
-                let password = self.reader.read_password("Create password: ")?;
-                let confirm = self.reader.read_password("Retype password: ")?;
-                if password == confirm {
-                    break password;
-                } else {
-                    println!("Passwords do not match.");
-                }
-            }
-        } else {
-            String::new()
-        };
-
-        let (key, salt) =
-            KeyTree::from_password(&mut self.rng, password.as_bytes()).context(KeyError)?;
-
-        // Encrypt some random data, which we can decrypt on load to check the user's password.
-        let mut password_check = [0; 32];
-        self.rng.fill_bytes(&mut password_check);
-        let password_check = Cipher::new(key.clone(), ChaChaRng::from_rng(&mut self.rng).unwrap())
-            .encrypt(&password_check)
-            .context(EncryptionError)?;
-
-        let meta = WalletMetadata {
-            encrypted: self.encrypted,
-            salt,
-            password_check,
-        };
-        Ok((meta, key))
-    }
-
-    fn load(&mut self, meta: &Self::Meta) -> Result<KeyTree, WalletError> {
-        if !self.encrypted {
-            return Err(WalletError::Failed {
-                msg: String::from(
-                    "option --unencrypted is not allowed when loading an existing wallet",
-                ),
-            });
-        }
-
-        let key = loop {
-            let password = if meta.encrypted {
-                self.reader.read_password("Enter password: ")?
-            } else {
-                String::new()
-            };
-
-            // Generate the key and check that we can use it to decrypt the `password_check` data.
-            // If we can't, the password is wrong.
-            let key = KeyTree::from_password_and_salt(password.as_bytes(), &meta.salt)
-                .context(KeyError)?;
-            if Cipher::new(key.clone(), ChaChaRng::from_rng(&mut self.rng).unwrap())
-                .decrypt(&meta.password_check)
-                .is_ok()
-            {
-                break key;
-            } else if !meta.encrypted {
-                // If the default password doesn't work, then the password_check data must be
-                // corrupted or encrypted with a non-default password. If the metadata claims it is
-                // unencrypted, than the metadata is corrupt (either in the `encrypted` field, the
-                // `password_check` field, or both).
-                return Err(WalletError::Failed {
-                    msg: String::from("wallet metadata is corrupt"),
-                });
-            } else {
-                println!("Sorry, that's incorrect.");
-            }
-        };
-
-        Ok(key)
-    }
-}
-
 pub async fn cli_main<'a, C: CLI<'a>>(args: &'a C::Args) -> Result<(), WalletError> {
     if let Some(path) = args.key_gen_path() {
         key_gen(path)
@@ -935,13 +775,8 @@ async fn repl<'a, C: CLI<'a>>(args: &'a C::Args) -> Result<(), WalletError> {
     );
     println!("(c) 2021 Translucence Research, Inc.");
 
-    let reader = Reader::new(args);
-    let mut loader = PasswordLoader {
-        dir: storage,
-        encrypted: args.encrypted(),
-        rng: ChaChaRng::from_entropy(),
-        reader,
-    };
+    let reader = Reader::new(args.interactive());
+    let mut loader = Loader::new(args.load_method(), args.encrypted(), storage, reader);
     let backend = C::init_backend(&*UNIVERSAL_PARAM, args, &mut loader)?;
 
     // Loading the wallet takes a while. Let the user know that's expected.
@@ -951,7 +786,7 @@ async fn repl<'a, C: CLI<'a>>(args: &'a C::Args) -> Result<(), WalletError> {
     println!("Type 'help' for a list of commands.");
     let commands = init_commands::<C>();
 
-    let mut input = Reader::new(args);
+    let mut input = Reader::new(args.interactive());
     'repl: while let Some(line) = input.read_line() {
         let tokens = line.split_whitespace().collect::<Vec<_>>();
         if tokens.is_empty() {
