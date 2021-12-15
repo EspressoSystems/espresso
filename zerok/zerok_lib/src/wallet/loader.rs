@@ -135,7 +135,7 @@ impl Loader {
     }
 
     fn dummy_mnemonic(&self) -> String {
-        mnemonic::to_string(&[])
+        mnemonic::to_string(&[0u8; 32])
     }
 }
 
