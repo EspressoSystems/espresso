@@ -106,9 +106,17 @@ impl KeyTree {
     /// Input a mnemonic phrase, in the form of bytes,
     /// i.e., "digital-apollo-aroma--rival-artist-rebel"
     /// initializing a key tree.
+    ///
+    /// We require that the input mnemonic phrase is 24 words
+    /// (equivalently, 32 bytes of seed), return a decoding error
+    /// if the mnemonic is not decoded successfully; or if the
+    /// input length is incorrect.
     pub fn from_mnemonic(mnemonic: &[u8]) -> Result<Self, argon2::Error> {
         let mut decoded_seed = Vec::<u8>::new();
         decode(mnemonic, &mut decoded_seed).map_err(|_| argon2::Error::DecodingFail)?;
+        if decoded_seed.len() != 32 {
+            return Err(argon2::Error::DecodingFail);
+        }
         // 32 bytes of salt
         let salt = "This is a salt to seed a KeyTree";
         Self::from_password_and_salt(decoded_seed.as_ref(), salt.as_bytes())
