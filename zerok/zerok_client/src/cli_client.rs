@@ -5,6 +5,7 @@ use escargot::CargoBuild;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -64,10 +65,18 @@ impl CliClient {
     }
 
     pub fn open(&mut self, wallet: usize) -> Result<&mut Self, String> {
+        self.open_with_args(wallet, [""; 0])
+    }
+
+    pub fn open_with_args<I, S>(&mut self, wallet: usize, args: I) -> Result<&mut Self, String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         while wallet >= self.wallets.len() {
             self.load(None)?;
         }
-        self.prev_output = self.wallets[wallet].open()?;
+        self.prev_output = self.wallets[wallet].open(args)?;
         Ok(self)
     }
 
@@ -334,7 +343,11 @@ impl Wallet {
         })
     }
 
-    fn open(&mut self) -> Result<Vec<String>, String> {
+    fn open<I, S>(&mut self, args: I) -> Result<Vec<String>, String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         if self.process.is_some() {
             return Err(String::from("wallet is already open"));
         }
@@ -349,6 +362,7 @@ impl Wallet {
                 })?,
             ])
             .arg("--non-interactive")
+            .args(args)
             .arg(&self.server)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -394,6 +408,7 @@ impl Wallet {
                 child.stdout.read_line(&mut line).map_err(err)?;
                 let line = std::mem::take(&mut line);
                 let line = line.trim();
+                println!("< {}", line);
                 if line.starts_with("Error loading wallet") {
                     return Err(String::from(line));
                 }
@@ -401,7 +416,11 @@ impl Wallet {
                     lines.push(String::from(line));
                 }
                 match line {
-                    ">" | "Enter password:" | "Create password:" | "Retype password:" => {
+                    ">"
+                    | "Enter password:"
+                    | "Create password:"
+                    | "Retype password:"
+                    | "Enter mnemonic phrase:" => {
                         break;
                     }
                     _ => {}

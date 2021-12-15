@@ -15,8 +15,8 @@ use zerok_lib::{
     ledger::AAPLedger,
     wallet::{
         cli::*,
+        loader::{LoadMethod, LoaderMetadata, WalletLoader},
         network::{NetworkBackend, Url},
-        persistence::WalletLoader,
         WalletError,
     },
 };
@@ -45,6 +45,10 @@ pub struct Args {
     /// password will always be required if the wallet was created without the --unencrypted flag.
     #[structopt(long)]
     pub unencrypted: bool,
+
+    /// Load the wallet using a password and salt, rather than a mnemonic phrase.
+    #[structopt(long)]
+    pub password: bool,
 
     /// Create a new wallet and store it an a temporary location which will be deleted on exit.
     ///
@@ -82,6 +86,14 @@ impl CLIArgs for Args {
         !self.unencrypted
     }
 
+    fn load_method(&self) -> LoadMethod {
+        if self.password {
+            LoadMethod::Password
+        } else {
+            LoadMethod::Mnemonic
+        }
+    }
+
     fn use_tmp_storage(&self) -> bool {
         self.tmp_storage
     }
@@ -91,13 +103,13 @@ struct AapCli;
 
 impl<'a> CLI<'a> for AapCli {
     type Ledger = AAPLedger;
-    type Backend = NetworkBackend<'a, WalletMetadata>;
+    type Backend = NetworkBackend<'a, LoaderMetadata>;
     type Args = Args;
 
     fn init_backend(
         univ_param: &'a UniversalParam,
         args: &'a Self::Args,
-        loader: &mut impl WalletLoader<Meta = WalletMetadata>,
+        loader: &mut impl WalletLoader<Meta = LoaderMetadata>,
     ) -> Result<Self::Backend, WalletError> {
         let server = args.server.clone().ok_or(WalletError::Failed {
             msg: String::from("server is required"),

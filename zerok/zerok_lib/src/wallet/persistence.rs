@@ -12,17 +12,10 @@ use atomic_store::{
 use encryption::Cipher;
 use hd::KeyTree;
 use jf_txn::structs::AssetDefinition;
+use loader::WalletLoader;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;
-use std::path::PathBuf;
-
-pub trait WalletLoader {
-    type Meta; // Metadata stored in plaintext and used by the loader to access the wallet.
-    fn location(&self) -> PathBuf;
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError>;
-    fn load(&mut self, meta: &Self::Meta) -> Result<KeyTree, WalletError>;
-}
 
 // Serialization intermediate for the static part of a WalletState.
 #[derive(Deserialize, Serialize)]
@@ -71,11 +64,14 @@ mod serde_ark_unchecked {
 struct WalletSnapshot<L: Ledger> {
     txn_state: TransactionState<L>,
     key_scans: Vec<BackgroundKeyScan>,
+    key_state: KeyStreamState,
 }
 
 impl<L: Ledger> PartialEq<Self> for WalletSnapshot<L> {
     fn eq(&self, other: &Self) -> bool {
-        self.txn_state == other.txn_state && self.key_scans == other.key_scans
+        self.txn_state == other.txn_state
+            && self.key_scans == other.key_scans
+            && self.key_state == other.key_state
     }
 }
 
@@ -84,6 +80,7 @@ impl<'a, L: Ledger> From<&WalletState<'a, L>> for WalletSnapshot<L> {
         Self {
             txn_state: w.txn_state.clone(),
             key_scans: w.key_scans.values().cloned().collect(),
+            key_state: w.key_state.clone(),
         }
     }
 }
@@ -96,6 +93,7 @@ where
         Ok(Self {
             txn_state: u.arbitrary()?,
             key_scans: u.arbitrary()?,
+            key_state: u.arbitrary()?,
         })
     }
 }
@@ -174,6 +172,7 @@ pub struct AtomicWalletStorage<'a, L: Ledger, Meta: Serialize + DeserializeOwned
     txn_history_dirty: bool,
     keys: AppendLog<EncryptingResourceAdapter<RoleKeyPair>>,
     keys_dirty: bool,
+    wallet_key_tree: KeyTree,
 }
 
 impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStorage<'a, L, Meta> {
@@ -202,7 +201,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
             }
         };
 
-        let adaptor = EncryptingResourceAdapter::<()>::new(key);
+        let adaptor = EncryptingResourceAdapter::<()>::new(key.derive_sub_tree("enc".as_bytes()));
         let static_data =
             RollingLog::load(&mut atomic_loader, adaptor.cast(), "wallet_static", 1024)
                 .context(PersistenceError)?;
@@ -238,6 +237,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
             txn_history_dirty: false,
             keys,
             keys_dirty: false,
+            wallet_key_tree: key.derive_sub_tree("wallet".as_bytes()),
         })
     }
 
@@ -270,6 +270,10 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
                 Err(err)
             }
         }
+    }
+
+    pub fn key_stream(&self) -> KeyTree {
+        self.wallet_key_tree.clone()
     }
 
     fn load_keys<K: KeyPair>(&self) -> HashMap<K::PubKey, K> {
@@ -310,6 +314,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
                 .into_iter()
                 .map(|scan| (scan.key.address(), scan))
                 .collect(),
+            key_state: dynamic_state.key_state,
 
             // Monotonic state
             auditable_assets: self
@@ -475,6 +480,7 @@ mod tests {
         ChaChaRng,
     };
     use std::iter::repeat_with;
+    use std::path::PathBuf;
     use tempdir::TempDir;
     use test_helpers::*;
 
@@ -588,6 +594,7 @@ mod tests {
                 transactions: Default::default(),
             },
             key_scans: Default::default(),
+            key_state: Default::default(),
             auditable_assets: Default::default(),
             audit_keys: Default::default(),
             freeze_keys: Default::default(),
