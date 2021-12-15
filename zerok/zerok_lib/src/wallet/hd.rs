@@ -29,7 +29,7 @@
 // `id`.
 
 use super::secret::Secret;
-use jf_txn::keys::{AuditorKeyPair, FreezerKeyPair, UserKeyPair};
+use jf_aap::keys::{AuditorKeyPair, FreezerKeyPair, UserKeyPair};
 use mnemonic::decode;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::rand_core::{CryptoRng, RngCore};

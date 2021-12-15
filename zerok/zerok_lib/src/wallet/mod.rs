@@ -28,7 +28,7 @@ use futures::{
     prelude::*,
     stream::{iter, Stream},
 };
-use jf_txn::{
+use jf_aap::{
     errors::TxnApiError,
     keys::{
         AuditorKeyPair, AuditorPubKey, FreezerKeyPair, FreezerPubKey, UserAddress, UserKeyPair,
@@ -2359,7 +2359,7 @@ pub mod test_helpers {
     use futures::channel::mpsc as channel;
     use futures::future;
     use itertools::izip;
-    use jf_txn::{structs::RecordCommitment, MerkleTree, TransactionVerifyingKey};
+    use jf_aap::{structs::RecordCommitment, MerkleTree, TransactionVerifyingKey};
     use key_set::KeySet;
     use phaselock::traits::state::State;
     use phaselock::BlockContents;
@@ -2927,7 +2927,7 @@ pub mod test_helpers {
         let mut xfr_prove_keys = vec![];
         let mut xfr_verif_keys = vec![];
         for (num_inputs, num_outputs) in xfr_sizes {
-            let (xfr_prove_key, xfr_verif_key, _) = jf_txn::proof::transfer::preprocess(
+            let (xfr_prove_key, xfr_verif_key, _) = jf_aap::proof::transfer::preprocess(
                 &*UNIVERSAL_PARAM,
                 *num_inputs,
                 *num_outputs,
@@ -2938,9 +2938,9 @@ pub mod test_helpers {
             xfr_verif_keys.push(TransactionVerifyingKey::Transfer(xfr_verif_key));
         }
         let (mint_prove_key, mint_verif_key, _) =
-            jf_txn::proof::mint::preprocess(&*UNIVERSAL_PARAM, MERKLE_HEIGHT).unwrap();
+            jf_aap::proof::mint::preprocess(&*UNIVERSAL_PARAM, MERKLE_HEIGHT).unwrap();
         let (freeze_prove_key, freeze_verif_key, _) =
-            jf_txn::proof::freeze::preprocess(&*UNIVERSAL_PARAM, 2, MERKLE_HEIGHT).unwrap();
+            jf_aap::proof::freeze::preprocess(&*UNIVERSAL_PARAM, 2, MERKLE_HEIGHT).unwrap();
         let nullifiers: SetMerkleTree = Default::default();
         let validator = ValidatorState::new(
             VerifierKeySet {
@@ -3480,7 +3480,7 @@ mod tests {
     use super::*;
     use crate::state::ValidatorState;
     use async_std::task::block_on;
-    use jf_txn::NodeValue;
+    use jf_aap::NodeValue;
     use proptest::collection::vec;
     use proptest::strategy::Strategy;
     use std::time::Instant;

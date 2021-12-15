@@ -3,7 +3,7 @@ use crate::state::{
     ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use jf_txn::{structs::Nullifier, TransactionNote};
+use jf_aap::{structs::Nullifier, TransactionNote};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;

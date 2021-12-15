@@ -20,8 +20,8 @@
 // `-w KEY_FILE.pub` and pass the key pair to `random_wallet` with `-k KEY_FILE`.
 
 use async_std::task::sleep;
-use jf_txn::keys::UserPubKey;
-use jf_txn::structs::{AssetCode, AssetPolicy};
+use jf_aap::keys::UserPubKey;
+use jf_aap::structs::{AssetCode, AssetPolicy};
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};

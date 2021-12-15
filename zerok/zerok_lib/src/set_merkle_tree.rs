@@ -5,7 +5,7 @@ use crate::util::{arbitrary_wrappers::*, canonical, commit};
 use ark_serialize::*;
 use bitvec::vec::BitVec;
 use core::mem;
-use jf_txn::structs::Nullifier;
+use jf_aap::structs::Nullifier;
 use serde::{Deserialize, Serialize};
 
 pub mod set_hash {

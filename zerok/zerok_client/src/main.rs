@@ -7,7 +7,7 @@
 
 mod cli_client;
 
-use jf_txn::proof::UniversalParam;
+use jf_aap::proof::UniversalParam;
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;

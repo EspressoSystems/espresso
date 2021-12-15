@@ -16,10 +16,10 @@ use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
 use futures::future::ready;
 use futures::prelude::*;
-use jf_txn::keys::{UserAddress, UserPubKey};
-use jf_txn::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
-use jf_txn::structs::{Nullifier, ReceiverMemo};
-use jf_txn::Signature;
+use jf_aap::keys::{UserAddress, UserPubKey};
+use jf_aap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
+use jf_aap::structs::{Nullifier, ReceiverMemo};
+use jf_aap::Signature;
 use node::{LedgerEvent, LedgerSnapshot};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;
@@ -124,7 +124,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = self.univ_param;
         let proving_keys = Arc::new(ProverKeySet {
-            mint: jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
+            mint: jf_aap::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
                 .context(CryptoError)?
                 .0,
             freeze: validator
@@ -133,7 +133,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                 .iter()
                 .map(|k| {
                     Ok::<FreezeProvingKey, WalletError>(
-                        jf_txn::proof::freeze::preprocess(
+                        jf_aap::proof::freeze::preprocess(
                             univ_param,
                             k.num_inputs(),
                             MERKLE_HEIGHT,
@@ -149,7 +149,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                 .iter()
                 .map(|k| {
                     Ok::<TransferProvingKey, WalletError>(
-                        jf_txn::proof::transfer::preprocess(
+                        jf_aap::proof::transfer::preprocess(
                             univ_param,
                             k.num_inputs(),
                             k.num_outputs(),

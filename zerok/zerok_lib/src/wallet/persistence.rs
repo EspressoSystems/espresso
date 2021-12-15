@@ -11,7 +11,7 @@ use atomic_store::{
 };
 use encryption::Cipher;
 use hd::KeyTree;
-use jf_txn::structs::AssetDefinition;
+use jf_aap::structs::AssetDefinition;
 use loader::WalletLoader;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -469,7 +469,7 @@ mod tests {
         txn_builder::{PendingTransaction, TransactionUID},
         universal_params::UNIVERSAL_PARAM,
     };
-    use jf_txn::{
+    use jf_aap::{
         sign_receiver_memos, structs::RecordCommitment, KeyPair, MerkleTree,
         TransactionVerifyingKey,
     };
@@ -551,7 +551,7 @@ mod tests {
         let mut xfr_prove_keys = vec![];
         let mut xfr_verif_keys = vec![];
         for (num_inputs, num_outputs) in xfr_sizes {
-            let (xfr_prove_key, xfr_verif_key, _) = jf_txn::proof::transfer::preprocess(
+            let (xfr_prove_key, xfr_verif_key, _) = jf_aap::proof::transfer::preprocess(
                 &*UNIVERSAL_PARAM,
                 num_inputs,
                 num_outputs,
@@ -562,9 +562,9 @@ mod tests {
             xfr_verif_keys.push(TransactionVerifyingKey::Transfer(xfr_verif_key));
         }
         let (mint_prove_key, mint_verif_key, _) =
-            jf_txn::proof::mint::preprocess(&*UNIVERSAL_PARAM, MERKLE_HEIGHT).unwrap();
+            jf_aap::proof::mint::preprocess(&*UNIVERSAL_PARAM, MERKLE_HEIGHT).unwrap();
         let (freeze_prove_key, freeze_verif_key, _) =
-            jf_txn::proof::freeze::preprocess(&*UNIVERSAL_PARAM, 2, MERKLE_HEIGHT).unwrap();
+            jf_aap::proof::freeze::preprocess(&*UNIVERSAL_PARAM, 2, MERKLE_HEIGHT).unwrap();
         let record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
         let validator = ValidatorState::new(
             VerifierKeySet {

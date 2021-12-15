@@ -8,7 +8,7 @@ use crate::{
 };
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
-use jf_txn::{
+use jf_aap::{
     errors::TxnApiError,
     freeze::{FreezeNote, FreezeNoteInput},
     keys::{AuditorPubKey, FreezerKeyPair, FreezerPubKey, UserAddress, UserKeyPair, UserPubKey},
@@ -683,7 +683,7 @@ pub const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u6
 // (block_id, txn_id, [(uid, remember)])
 pub type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
 // a never expired target
-pub const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
+pub const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_aap::constants::MAX_TIMESTAMP_LEN as u32) - 1;
 
 #[ser_test(arbitrary, types(AAPLedger), ark(false))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1075,7 +1075,7 @@ impl<L: Ledger> TransactionState<L> {
             .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let (mint_note, sig_key) = jf_txn::mint::MintNote::generate(
+        let (mint_note, sig_key) = jf_aap::mint::MintNote::generate(
             rng,
             mint_record,
             *seed,
