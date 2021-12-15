@@ -179,16 +179,68 @@ impl Key {
     }
 }
 
-#[test]
-fn test_key_tree_gen() {
-    use ark_std::rand::thread_rng;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::canonical;
+    use std::collections::HashSet;
 
-    let mut rng = thread_rng();
-    let (key_tree, mnemonic) = KeyTree::random(&mut rng).unwrap();
-    let key_tree_recovered = KeyTree::from_mnemonic(mnemonic.as_bytes()).unwrap();
+    #[test]
+    fn test_key_tree_gen_mnemonic() {
+        use ark_std::rand::thread_rng;
 
-    assert_eq!(
-        key_tree.state.open_secret(),
-        key_tree_recovered.state.open_secret()
-    )
+        let mut rng = thread_rng();
+        let (key_tree, mnemonic) = KeyTree::random(&mut rng).unwrap();
+        let key_tree_recovered = KeyTree::from_mnemonic(mnemonic.as_bytes()).unwrap();
+
+        assert_eq!(
+            key_tree.state.open_secret(),
+            key_tree_recovered.state.open_secret()
+        )
+    }
+
+    #[test]
+    fn test_key_tree_gen_password() {
+        use ark_std::rand::thread_rng;
+
+        let mut rng = thread_rng();
+        let mut password = [0u8; 32];
+        rng.fill_bytes(&mut password);
+
+        let (key_tree, salt) = KeyTree::from_password(&mut rng, &password).unwrap();
+        let key_tree_recovered = KeyTree::from_password_and_salt(&password, &salt).unwrap();
+
+        assert_eq!(
+            key_tree.state.open_secret(),
+            key_tree_recovered.state.open_secret()
+        );
+    }
+
+    #[test]
+    fn test_key_tree_domain_separation() {
+        use ark_std::rand::thread_rng;
+
+        let mut rng = thread_rng();
+        let mut id1 = [0u8; 32];
+        let mut id2 = [0u8; 32];
+        rng.fill_bytes(&mut id1);
+        rng.fill_bytes(&mut id2);
+        assert_ne!(id1, id2);
+
+        let (key_tree, _) = KeyTree::random(&mut rng).unwrap();
+        let all_keys = vec![
+            canonical::serialize(&key_tree.derive_auditor_keypair(&id1)).unwrap(),
+            canonical::serialize(&key_tree.derive_auditor_keypair(&id2)).unwrap(),
+            canonical::serialize(&key_tree.derive_freezer_keypair(&id1)).unwrap(),
+            canonical::serialize(&key_tree.derive_freezer_keypair(&id2)).unwrap(),
+            canonical::serialize(&key_tree.derive_user_keypair(&id1)).unwrap(),
+            canonical::serialize(&key_tree.derive_user_keypair(&id2)).unwrap(),
+            key_tree.derive_key(&id1).as_bytes().open_secret().to_vec(),
+            key_tree.derive_key(&id2).as_bytes().open_secret().to_vec(),
+            key_tree.derive_sub_tree(&id1).state.open_secret().to_vec(),
+            key_tree.derive_sub_tree(&id2).state.open_secret().to_vec(),
+        ];
+        let distinct_keys = all_keys.iter().cloned().collect::<HashSet<_>>();
+        assert_eq!(distinct_keys.len(), all_keys.len());
+    }
 }
