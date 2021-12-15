@@ -35,23 +35,23 @@ HEADING_ROUTES = "Routes"
 HEADING_PARAMETERS = "Parameters"
 HEADING_DESCRIPTION = "Description"
 
-[route.getinfo]
-PATH = [ "getinfo" ]
-DOC = """
-_This is preliminary:_
-- version: full node version
-- network_id
-- blocks: total number of blocks (1 more than the latest block number if we start with block #0)
-- transactions: total number of transactions
-- records: total number of records (including spent)
-- circulation: total number of XYZ tokens in circulation *(implementation note: XYZ-related items can wait until the native token is implemented).*
-- blockchain_size: total size of all blocks (not the size of a full node; just bare blocks)
-- current_block_size: size of latest block
-- current_block_tx: number of transactions in latest block
-- mempool_transactions: number of transactions in mempool (known to node)
-- mempool_outputs: number of outputs in mempool (known to node)
-- mempool_size: mempool size in bytes (known to node)
-"""
+# [route.getinfo]
+# PATH = [ "getinfo" ]
+# DOC = """
+# _This is preliminary:_
+# - version: full node version
+# - network_id
+# - blocks: total number of blocks (1 more than the latest block number if we start with block #0)
+# - transactions: total number of transactions
+# - records: total number of records (including spent)
+# - circulation: total number of XYZ tokens in circulation *(implementation note: XYZ-related items can wait until the native token is implemented).*
+# - blockchain_size: total size of all blocks (not the size of a full node; just bare blocks)
+# - current_block_size: size of latest block
+# - current_block_tx: number of transactions in latest block
+# - mempool_transactions: number of transactions in mempool (known to node)
+# - mempool_outputs: number of outputs in mempool (known to node)
+# - mempool_size: mempool size in bytes (known to node)
+# """
 
 [route.getblockhash]
 PATH = [ "getblockhash/latest", "getblockhash/:bkid", "getblockhash/index/:index" ]
@@ -206,4 +206,88 @@ PATH = ["getevent/:index"]
 ":index" = "Integer"
 DOC = """
 Get the event with the designated index.
+"""
+
+# CAPE routes
+
+# TODO !corbett How do transaction notifications work in CAPE?
+# TODO !corbett Where do fees fit in?
+# TODO !corbett Need a better way to send the password than in the URL.
+# TODO !corbett Consider increasing the syntaxtic distance between freeze and unfreeze.
+
+[route.openwallet]
+PATH = ["openwallet/:id/:password"]
+":id" = "Integer"
+":password" = "String"
+DOC = """
+Open the wallet with the given ID and password.
+"""
+
+[route.closewallet]
+PATH = ["closewallet"]
+DOC = """
+Close the current wallet.
+"""
+
+[route.getaddress]
+PATH = ["getaddress"]
+DOC = """
+Get the addresses for the current wallet.
+"""
+
+[route.getbalance]
+PATH = ["getbalance/address/:address", "getbalance/all"]
+":address" = "Integer"
+DOC = """
+Get the balance of the specified address, or get all balances for the current wallet.
+"""
+
+[route.getinfo]
+PATH = ["getinfo"]
+DOC = """
+Get the addresses, public keys, and asset codes for the current wallet.
+"""
+
+[route.genkey]
+PATH = ["genkey/:asset_code/audit", "genkey/:asset_code/freeze"]
+":asset_code" = "TaggedBase64"
+DOC = """
+Generate a key of the given type.
+"""
+
+[route.transfer]
+PATH = ["xfr/from/:sender/to/:recipient/amount/:amount", "xfr/to/:recipient/from/:sender/amount/:amount"]
+":from" = "TaggedBase64"
+":recipient" = "TaggedBase64"
+":amount" = "Integer"
+DOC = """
+Transfer amount units from the sender to the recipient.
+"""
+
+[route.mint]
+PATH = ["mint/asset_code/:asset_code/amount/:amount"]
+":asset_code" = "TaggedBase64"
+DOC = """
+Mint amount units of a given asset code controlled by the current wallet.
+"""
+
+[route.freeze]
+PATH = ["freeze/asset_code/:asset_code"]
+":asset_code" = "TaggedBase64"
+DOC = """
+Freeze the given asset code.
+"""
+
+[route.unfreeze]
+PATH = ["unfreeze/asset_code/:asset_code"]
+":asset_code" = "TaggedBase64"
+DOC = """
+Freeze the given asset code.
+"""
+
+[route.trace]
+PATH = ["trace/asset_code/:asset_code"]
+":asset_code" = "TaggedBase64"
+DOC = """
+Trace the given asset code.
 """
