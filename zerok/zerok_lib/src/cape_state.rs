@@ -47,7 +47,11 @@ impl CapeTransaction {
 
     pub fn commitments(&self) -> Vec<RecordCommitment> {
         match self {
-            CapeTransaction::Burn { xfr, .. } => xfr.output_commitments.clone(),
+            CapeTransaction::Burn { xfr, .. } => {
+                // All valid burn transactions have two outputs, but only the first one (the fee
+                // change output) is added to the Merkle tree. The second output is burned.
+                vec![xfr.output_commitments[0]]
+            }
             CapeTransaction::AAP(note) => note.output_commitments(),
         }
     }
@@ -349,6 +353,7 @@ impl CapeContractState {
                     let mut records_to_insert = vec![];
                     // TODO: the workflow code puts these after the things
                     // in the transactions -- which choice is correct?
+                    let wrapped_commitments = new_state.erc20_deposits.clone();
                     records_to_insert.append(&mut new_state.erc20_deposits);
 
                     // past this point, if any validation error occurs the
@@ -568,7 +573,7 @@ impl CapeContractState {
                     new_state.ledger.record_merkle_frontier = record_merkle_frontier;
 
                     effects.push(CapeEthEffect::Emit(CapeEvent::BlockCommitted {
-                        wraps: self.erc20_deposits.clone(),
+                        wraps: wrapped_commitments,
                         txns: filtered_txns,
                     }))
                 }
