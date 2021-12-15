@@ -7,9 +7,9 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use jf_aap::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
+use jf_aap::TransactionVerifyingKey;
 use jf_primitives::merkle_tree::FilledMTBuilder;
-use jf_txn::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
-use jf_txn::TransactionVerifyingKey;
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
@@ -405,13 +405,13 @@ async fn init_state_and_phaselock(
             // Set up the validator.
             let univ_setup = &*UNIVERSAL_PARAM;
             let (_, xfr_verif_key_12, _) =
-                jf_txn::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
+                jf_aap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
             let (_, xfr_verif_key_23, _) =
-                jf_txn::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
+                jf_aap::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
             let (_, mint_verif_key, _) =
-                jf_txn::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
+                jf_aap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
             let (_, freeze_verif_key, _) =
-                jf_txn::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
+                jf_aap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
             let verif_keys = VerifierKeySet {
                 mint: TransactionVerifyingKey::Mint(mint_verif_key),
                 xfr: KeySet::new(

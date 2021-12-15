@@ -39,9 +39,9 @@ pub mod canonical {
 pub mod arbitrary_wrappers {
     use arbitrary::{Arbitrary, Unstructured};
     use ark_std::UniformRand;
-    use jf_txn::keys::{UserAddress, UserKeyPair};
-    use jf_txn::structs::{FreezeFlag, Nullifier, ReceiverMemo, RecordOpening};
-    use jf_txn::{BaseField, KeyPair};
+    use jf_aap::keys::{UserAddress, UserKeyPair};
+    use jf_aap::structs::{FreezeFlag, Nullifier, ReceiverMemo, RecordOpening};
+    use jf_aap::{BaseField, KeyPair};
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 
     pub struct ArbitraryNullifier(Nullifier);

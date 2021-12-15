@@ -11,7 +11,7 @@ use async_std::task::block_on;
 use async_trait::async_trait;
 use fmt::{Display, Formatter};
 use futures::future::BoxFuture;
-use jf_txn::{
+use jf_aap::{
     keys::{AuditorKeyPair, AuditorPubKey, FreezerKeyPair, FreezerPubKey, UserKeyPair},
     proof::UniversalParam,
     structs::{AssetCode, AssetDefinition, AssetPolicy, ReceiverMemo, RecordCommitment},
