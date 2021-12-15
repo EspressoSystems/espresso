@@ -23,7 +23,7 @@ use itertools::izip;
 use jf_txn::{
     keys::{UserAddress, UserKeyPair, UserPubKey},
     proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
-    structs::{Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
+    structs::{AssetDefinition, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
     MerklePath, MerkleTree, Signature, TransactionNote,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
@@ -299,6 +299,54 @@ impl LocalCapeLedger {
             txns: Default::default(),
             address_map: Default::default(),
         }
+    }
+
+    pub fn register_erc20(
+        &mut self,
+        asset_def: AssetDefinition,
+        erc20_code: Erc20Code,
+        sponsor_addr: EthereumAddr,
+    ) -> Result<(), CapeValidationError> {
+        self.submit_operations(vec![CapeOperation::RegisterErc20 {
+            asset_def: Box::new(asset_def),
+            erc20_code,
+            sponsor_addr,
+        }])
+    }
+
+    pub fn wrap_erc20(
+        &mut self,
+        erc20_code: Erc20Code,
+        src_addr: EthereumAddr,
+        ro: RecordOpening,
+    ) -> Result<(), CapeValidationError> {
+        self.submit_operations(vec![CapeOperation::WrapErc20 {
+            erc20_code,
+            src_addr,
+            ro: Box::new(ro),
+        }])
+    }
+
+    fn submit_operations(&mut self, ops: Vec<CapeOperation>) -> Result<(), CapeValidationError> {
+        let (new_state, effects) = self.contract.submit_operations(ops)?;
+        let mut events = vec![];
+        for effect in effects {
+            if let CapeEthEffect::Emit(event) = effect {
+                events.push(event);
+            } else {
+                //todo Simulate and validate the other ETH effects. If any effects fail, the
+                // whole transaction must be considered reverted with no visible effects.
+            }
+        }
+
+        // Simulate the EQS processing the events emitted by the contract, updating its state, and
+        // broadcasting processed events to subscribers.
+        for event in events {
+            self.handle_event(event);
+        }
+        self.contract = new_state;
+
+        Ok(())
     }
 
     fn handle_event(&mut self, event: CapeEvent) {
@@ -596,33 +644,12 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
             },
         };
 
-        let (new_state, effects) = network
-            .contract
-            .submit_operations(vec![op])
-            .map_err(|err| {
-                //todo Convert CapeValidationError to WalletError in a better way. Maybe WalletError
-                // should be parameterized on the ledger type and there should be a ledger trait
-                // ValidationError.
-                WalletError::catch_all(err.to_string())
-            })?;
-        let mut events = vec![];
-        for effect in effects {
-            if let CapeEthEffect::Emit(event) = effect {
-                events.push(event);
-            } else {
-                //todo Simulate and validate the other ETH effects. If any effects fail, the
-                // whole transaction must be considered reverted with no visible effects.
-            }
-        }
-
-        // Simulate the EQS processing the events emitted by the contract, updating its state, and
-        // broadcasting processed events to subscribers.
-        for event in events {
-            network.handle_event(event);
-        }
-        network.contract = new_state;
-
-        Ok(())
+        network.submit_operations(vec![op]).map_err(|err| {
+            //todo Convert CapeValidationError to WalletError in a better way. Maybe WalletError
+            // should be parameterized on the ledger type and there should be a ledger trait
+            // ValidationError.
+            WalletError::catch_all(err.to_string())
+        })
     }
 
     async fn post_memos(
