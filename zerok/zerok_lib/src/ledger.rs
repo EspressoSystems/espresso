@@ -3,7 +3,10 @@ use crate::state::{
     ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use jf_txn::{structs::{Nullifier, RecordCommitment}, TransactionNote};
+use jf_txn::{
+    structs::{Nullifier, RecordCommitment},
+    TransactionNote,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
@@ -56,7 +59,9 @@ pub mod traits {
         ) -> Self;
 
         fn as_aap(&self) -> Option<TransactionNote>;
-        fn proven_nullifiers(&self) -> Vec<(Nullifier, <Self::NullifierSet as NullifierSet>::Proof)>;
+        fn proven_nullifiers(
+            &self,
+        ) -> Vec<(Nullifier, <Self::NullifierSet as NullifierSet>::Proof)>;
         fn output_commitments(&self) -> Vec<RecordCommitment>;
         fn hash(&self) -> Self::Hash;
         fn kind(&self) -> Self::Kind;
@@ -70,7 +75,10 @@ pub mod traits {
         }
 
         fn input_nullifiers(&self) -> Vec<Nullifier> {
-            self.proven_nullifiers().into_iter().map(|(n, _)| n).collect()
+            self.proven_nullifiers()
+                .into_iter()
+                .map(|(n, _)| n)
+                .collect()
         }
     }
 
@@ -192,7 +200,11 @@ impl traits::Transaction for ElaboratedTransaction {
     }
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {
-        self.txn.nullifiers().into_iter().zip(self.proofs.clone()).collect()
+        self.txn
+            .nullifiers()
+            .into_iter()
+            .zip(self.proofs.clone())
+            .collect()
     }
 
     fn input_nullifiers(&self) -> Vec<Nullifier> {

@@ -139,6 +139,12 @@ impl From<crate::txn_builder::TransactionError> for WalletError {
     }
 }
 
+impl From<crate::node::QueryServiceError> for WalletError {
+    fn from(source: crate::node::QueryServiceError) -> Self {
+        Self::QueryServiceError { source }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletImmutableKeySet {
     // key pair for building/receiving transactions

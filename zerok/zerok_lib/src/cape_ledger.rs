@@ -1,26 +1,50 @@
-use crate::cape_state::*;
-use crate::ledger::{traits::*, AAPTransactionKind};
-use crate::state::ValidationError;
-use crate::util::commit::{Committable, Commitment, RawCommitmentBuilder};
-use generic_array::GenericArray;
-use jf_txn::{
-    structs::{Nullifier, RecordCommitment, RecordOpening},
-    TransactionNote,
+use crate::{
+    cape_state::*,
+    ledger::{traits::*, AAPTransactionKind},
+    node::{LedgerEvent, QueryServiceError},
+    state::{key_set::SizedKey, ProverKeySet, ValidationError, MERKLE_HEIGHT},
+    txn_builder::TransactionState,
+    universal_params::UNIVERSAL_PARAM,
+    util::commit::{Commitment, Committable, RawCommitmentBuilder},
+    wallet::{
+        persistence::{AtomicWalletStorage, WalletLoader},
+        CryptoError, WalletBackend, WalletError, WalletImmutableKeySet, WalletState,
+    },
 };
-use serde::{Deserialize, Serialize};
+use async_std::sync::{Mutex, MutexGuard};
+use async_trait::async_trait;
+use futures::stream::Stream;
+use generic_array::GenericArray;
+use itertools::izip;
+use jf_txn::{
+    keys::{UserAddress, UserKeyPair, UserPubKey},
+    proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
+    structs::{Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
+    MerklePath, MerkleTree, Signature, TransactionNote,
+};
+use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
-use std::collections::HashSet;
+use snafu::ResultExt;
+use std::collections::HashMap;
 use std::iter::repeat;
+use std::sync::Arc;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CapeNullifierSet(HashSet<Nullifier>);
+// A representation of an unauthenticated sparse set of nullifiers (it is "authenticated" by
+// querying the ultimate source of truth, the CAPE smart contract). The HashMap maps any nullifier
+// to one of 3 states:
+//  * Some(true): definitely in the set
+//  * Some(false): definitely not in the set
+//  * None: outside the sparse domain of this set, query a full node for a definitive answer
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CapeNullifierSet(HashMap<Nullifier, bool>);
 
 impl NullifierSet for CapeNullifierSet {
     type Proof = ();
 
     fn multi_insert(&mut self, nullifiers: &[(Nullifier, Self::Proof)]) -> Result<(), Self::Proof> {
         for (n, _) in nullifiers {
-            self.0.insert(*n);
+            self.0.insert(*n, true);
         }
         Ok(())
     }
@@ -90,11 +114,13 @@ impl Transaction for CapeTransition {
         match self {
             Self::Transaction(CapeTransaction::AAP(note)) => Some(note.clone()),
             Self::Transaction(CapeTransaction::Burn { xfr, .. }) =>
-                // What to do in this case? Currently, this function is only used for auditing, so
-                // it probably makes sense to treat burns as transfers so we get thet most
-                // information possible out of auditing. But in general it may not be great to
-                // identify burns and transfers.
-                Some(TransactionNote::Transfer(xfr.clone())),
+            // What to do in this case? Currently, this function is only used for auditing, so
+            // it probably makes sense to treat burns as transfers so we get thet most
+            // information possible out of auditing. But in general it may not be great to
+            // identify burns and transfers.
+            {
+                Some(TransactionNote::Transfer(xfr.clone()))
+            }
             _ => None,
         }
     }
@@ -139,7 +165,10 @@ pub struct CapeBlock(Vec<CapeTransition>);
 impl Committable for CapeBlock {
     fn commit(&self) -> Commitment<Self> {
         RawCommitmentBuilder::new("CapeBlock")
-            .array_field("txns", &self.0.iter().map(|x| x.commit()).collect::<Vec<_>>())
+            .array_field(
+                "txns",
+                &self.0.iter().map(|x| x.commit()).collect::<Vec<_>>(),
+            )
             .finalize()
     }
 }
@@ -231,4 +260,280 @@ pub struct CapeLedger;
 
 impl Ledger for CapeLedger {
     type Validator = CapeTruster;
+}
+
+struct CommittedTransaction {
+    txn: CapeTransition,
+    uids: Vec<u64>,
+    #[allow(clippy::type_complexity)]
+    memos: Option<(
+        Vec<(ReceiverMemo, RecordCommitment, u64, MerklePath)>,
+        Signature,
+    )>,
+}
+
+// A mock implementation of the WalletBackend trait which maintains the full state of a CAPE ledger
+// locally.
+pub struct LocalCapeLedger {
+    contract: CapeContractState,
+
+    // Mock EQS and peripheral services
+    records: MerkleTree,
+    txns: HashMap<(u64, u64), CommittedTransaction>,
+    address_map: HashMap<UserAddress, UserPubKey>,
+}
+
+impl LocalCapeLedger {
+    fn send_event(&mut self, _event: LedgerEvent<CapeLedger>) {
+        unimplemented!()
+    }
+}
+
+pub struct LocalCapeBackend<'a, Meta: Serialize + DeserializeOwned> {
+    storage: Arc<Mutex<AtomicWalletStorage<'a, CapeLedger, Meta>>>,
+    key_pair: Option<UserKeyPair>,
+    network: Arc<Mutex<LocalCapeLedger>>,
+}
+
+impl<'a, Meta: Serialize + DeserializeOwned + Send> LocalCapeBackend<'a, Meta> {
+    pub fn new(
+        network: Arc<Mutex<LocalCapeLedger>>,
+        loader: &mut impl WalletLoader<Meta = Meta>,
+    ) -> Result<Self, WalletError> {
+        Ok(Self {
+            storage: Arc::new(Mutex::new(AtomicWalletStorage::new(loader)?)),
+            key_pair: loader.key_pair(),
+            network,
+        })
+    }
+}
+
+#[async_trait]
+impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger>
+    for LocalCapeBackend<'a, Meta>
+{
+    type EventStream = Box<dyn Stream<Item = LedgerEvent<CapeLedger>> + Unpin + Send>;
+    type Storage = AtomicWalletStorage<'a, CapeLedger, Meta>;
+
+    async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
+        self.storage.lock().await
+    }
+
+    async fn create(&mut self) -> Result<WalletState<'a, CapeLedger>, WalletError> {
+        let mut rng = ChaChaRng::from_entropy();
+        // Construct proving keys of the same arities as the verifier keys from the validator.
+        let univ_param = &*UNIVERSAL_PARAM;
+        let mut network = self.network.lock().await;
+        let proving_keys = Arc::new(ProverKeySet {
+            mint: jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
+                .context(CryptoError)?
+                .0,
+            freeze: network
+                .contract
+                .verif_crs
+                .freeze
+                .iter()
+                .map(|k| {
+                    Ok::<FreezeProvingKey, WalletError>(
+                        jf_txn::proof::freeze::preprocess(
+                            univ_param,
+                            k.num_inputs(),
+                            MERKLE_HEIGHT,
+                        )
+                        .context(CryptoError)?
+                        .0,
+                    )
+                })
+                .collect::<Result<_, _>>()?,
+            xfr: network
+                .contract
+                .verif_crs
+                .xfr
+                .iter()
+                .map(|k| {
+                    Ok::<TransferProvingKey, WalletError>(
+                        jf_txn::proof::transfer::preprocess(
+                            univ_param,
+                            k.num_inputs(),
+                            k.num_outputs(),
+                            MERKLE_HEIGHT,
+                        )
+                        .context(CryptoError)?
+                        .0,
+                    )
+                })
+                .collect::<Result<_, _>>()?,
+        });
+
+        // `records` should be _almost_ completely sparse. However, even a fully pruned Merkle tree
+        // contains the last leaf appended, but as a new wallet, we don't care about _any_ of the
+        // leaves, so make a note to forget the last one once more leaves have been appended.
+        let records = MerkleTree::restore_from_frontier(
+            network.contract.ledger.record_merkle_commitment,
+            &network.contract.ledger.record_merkle_frontier,
+        )
+        .unwrap();
+        let merkle_leaf_to_forget = if records.num_leaves() > 0 {
+            Some(records.num_leaves() - 1)
+        } else {
+            None
+        };
+
+        let state = WalletState {
+            proving_keys,
+            immutable_keys: Arc::new(WalletImmutableKeySet {
+                key_pair: self
+                    .key_pair
+                    .clone()
+                    .unwrap_or_else(|| UserKeyPair::generate(&mut rng)),
+            }),
+            txn_state: TransactionState {
+                validator: CapeTruster::new(
+                    network.contract.ledger.state_number,
+                    records.num_leaves(),
+                ),
+                nullifiers: Default::default(),
+                // Completely sparse nullifier set
+                record_mt: records,
+                merkle_leaf_to_forget,
+                now: 0,
+                records: Default::default(),
+
+                transactions: Default::default(),
+            },
+            auditable_assets: Default::default(),
+            audit_keys: Default::default(),
+            freeze_keys: Default::default(),
+            defined_assets: Default::default(),
+        };
+
+        // Publish the address of the new wallet.
+        network.address_map.insert(
+            state.immutable_keys.key_pair.address(),
+            state.immutable_keys.key_pair.pub_key(),
+        );
+
+        drop(network);
+        self.storage().await.create(&state).await?;
+
+        Ok(state)
+    }
+
+    async fn subscribe(&self, _starting_at: u64) -> Self::EventStream {
+        unimplemented!()
+    }
+
+    async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
+        Ok(self
+            .network
+            .lock()
+            .await
+            .address_map
+            .get(address)
+            .ok_or(QueryServiceError::InvalidAddress {})?
+            .clone())
+    }
+
+    async fn get_nullifier_proof(
+        &self,
+        nullifiers: &mut CapeNullifierSet,
+        nullifier: Nullifier,
+    ) -> Result<(bool, ()), WalletError> {
+        // Try to look up the nullifier in our "local" cache. If it is not there, query the contract
+        // and cache it.
+        match nullifiers.0.get(&nullifier) {
+            Some(ret) => Ok((*ret, ())),
+            None => {
+                let ret = self
+                    .network
+                    .lock()
+                    .await
+                    .contract
+                    .nullifiers
+                    .contains(&nullifier);
+                nullifiers.0.insert(nullifier, ret);
+                Ok((ret, ()))
+            }
+        }
+    }
+
+    async fn get_transaction(
+        &self,
+        block_id: u64,
+        txn_id: u64,
+    ) -> Result<CapeTransition, WalletError> {
+        Ok(self
+            .network
+            .lock()
+            .await
+            .txns
+            .get(&(block_id, txn_id))
+            .ok_or(QueryServiceError::InvalidTxnId {})?
+            .txn
+            .clone())
+    }
+
+    async fn submit(&mut self, _txn: CapeTransition) -> Result<(), WalletError> {
+        unimplemented!()
+    }
+
+    async fn post_memos(
+        &mut self,
+        block_id: u64,
+        txn_id: u64,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+    ) -> Result<(), WalletError> {
+        let network = &mut *self.network.lock().await;
+        let txn = match network.txns.get_mut(&(block_id, txn_id)) {
+            Some(txn) => txn,
+            None => return Err(QueryServiceError::InvalidTxnId {}.into()),
+        };
+        if txn.memos.is_some() {
+            return Err(QueryServiceError::MemosAlreadyPosted {}.into());
+        }
+        // Validate the new memos.
+        match &txn.txn {
+            CapeTransition::Transaction(CapeTransaction::AAP(note)) => {
+                if note.verify_receiver_memos_signature(&memos, &sig).is_err() {
+                    return Err(QueryServiceError::InvalidSignature {}.into());
+                }
+            }
+            _ => {
+                // Wrap/burn transactions don't get memos.
+                return Err(QueryServiceError::InvalidTxnId {}.into());
+            }
+        }
+        if memos.len() != txn.txn.output_len() {
+            return Err(QueryServiceError::WrongNumberOfMemos {
+                expected: txn.txn.output_len(),
+            }
+            .into());
+        }
+
+        // Authenticate the validity of the records corresponding to the memos.
+        let merkle_tree = &network.records;
+        let merkle_paths = txn
+            .uids
+            .iter()
+            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path)
+            .collect::<Vec<_>>();
+
+        // Store and broadcast the new memos.
+        let memos = izip!(
+            memos,
+            txn.txn.output_commitments(),
+            txn.uids.iter().cloned(),
+            merkle_paths
+        )
+        .collect::<Vec<_>>();
+        txn.memos = Some((memos.clone(), sig));
+        let event = LedgerEvent::Memos {
+            outputs: memos,
+            transaction: Some((block_id as u64, txn_id as u64)),
+        };
+        network.send_event(event);
+
+        Ok(())
+    }
 }
