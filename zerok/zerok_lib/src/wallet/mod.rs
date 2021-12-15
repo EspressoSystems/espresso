@@ -49,6 +49,7 @@ use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::iter::repeat;
 use std::sync::Arc;
 
 #[derive(Debug, Snafu)]
@@ -671,13 +672,13 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 // the validator state.
                 for txn in block.txns() {
                     // Remove spent records.
-                    for n in txn.note().nullifiers() {
+                    for n in txn.input_nullifiers() {
                         if let Some(record) = self.txn_state.records.remove_by_nullifier(n) {
                             self.txn_state.forget_merkle_leaf(record.uid);
                         }
                     }
                     // Insert new records.
-                    for o in txn.note().output_commitments() {
+                    for o in txn.output_commitments() {
                         self.txn_state.append_merkle_leaf(o);
                     }
                 }
@@ -685,12 +686,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 let nullifier_proofs = block
                     .txns()
                     .into_iter()
-                    .flat_map(|txn| {
-                        txn.note()
-                            .nullifiers()
-                            .into_iter()
-                            .zip(txn.proofs().to_vec())
-                    })
+                    .flat_map(|txn| txn.proven_nullifiers())
                     .collect::<Vec<_>>();
                 if self
                     .txn_state
@@ -707,14 +703,17 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 for (txn_id, txn) in block.txns().into_iter().enumerate() {
                     // Split the uids corresponding to this transaction off the front of `uids`.
                     let mut this_txn_uids = uids;
-                    uids = this_txn_uids.split_off(txn.note().output_len());
+                    uids = this_txn_uids.split_off(txn.output_len());
 
-                    assert_eq!(this_txn_uids.len(), txn.note().output_len());
+                    assert_eq!(this_txn_uids.len(), txn.output_len());
+                    // Add the spent nullifiers to the summary. Map each nullifier to one of the
+                    // output UIDs of the same transaction, so that we can tell when the memos
+                    // arrive for the transaction which spent this nullifier (completing the
+                    // transaction's life cycle) by looking at the UIDs attached to the memos.
                     summary.spent_nullifiers.extend(
-                        txn.note()
-                            .nullifiers()
+                        txn.input_nullifiers()
                             .into_iter()
-                            .zip(this_txn_uids.iter().map(|(uid, _)| *uid)),
+                            .zip(repeat(this_txn_uids[0].0)),
                     );
 
                     // Different concerns within the wallet consume transactions in different ways.
@@ -737,9 +736,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                             .push((pending.uid, TransactionStatus::AwaitingMemos));
                     }
 
-                    // This is someone else's transaction but we can audit it.
-                    self.audit_transaction(session, txn.note(), &mut this_txn_uids)
-                        .await;
+                    if let Some(note) = txn.as_aap() {
+                        // This is someone else's transaction but we can audit it.
+                        self.audit_transaction(session, &note, &mut this_txn_uids)
+                            .await;
+                    }
 
                     // Prune the record Merkle tree of records we don't care about.
                     for (uid, remember) in this_txn_uids {
@@ -887,7 +888,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 for mut txn in block.txns() {
                     summary
                         .rejected_nullifiers
-                        .append(&mut txn.note().nullifiers());
+                        .append(&mut txn.input_nullifiers());
                     if let Some(pending) = self.clear_pending_transaction(session, &txn, None).await
                     {
                         // Try to resubmit if the error is recoverable.
@@ -1070,7 +1071,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         txn: &mut Transaction<L>,
     ) -> Result<(), WalletError> {
         let mut proofs = Vec::new();
-        for n in txn.note().nullifiers() {
+        for n in txn.input_nullifiers() {
             let (spent, proof) = session
                 .backend
                 .get_nullifier_proof(&mut self.txn_state.nullifiers, n)
@@ -1465,7 +1466,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             nullifier_pfs.push(proof);
         }
 
-        let txn = Transaction::<L>::new(note, nullifier_pfs);
+        let txn = Transaction::<L>::aap(note, nullifier_pfs);
         self.submit_elaborated_transaction(
             session,
             txn,

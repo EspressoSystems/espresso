@@ -750,7 +750,7 @@ impl<L: Ledger> TransactionState<L> {
         let hash = txn.hash();
         let uid = uid.unwrap_or_else(|| TransactionUID(hash.clone()));
 
-        for nullifier in txn.note().nullifiers() {
+        for nullifier in txn.input_nullifiers() {
             // hold the record corresponding to this nullifier until the transaction is committed,
             // rejected, or expired.
             if let Some(record) = self.records.record_with_nullifier_mut(&nullifier) {
@@ -772,7 +772,7 @@ impl<L: Ledger> TransactionState<L> {
 
         TransactionReceipt {
             uid,
-            fee_nullifier: txn.note().nullifiers()[0],
+            fee_nullifier: txn.input_nullifiers()[0],
             submitter: user_address,
         }
     }
@@ -788,7 +788,7 @@ impl<L: Ledger> TransactionState<L> {
         let txn_hash = txn.hash();
         let pending = self.transactions.remove_pending(&txn_hash);
 
-        for nullifier in txn.note().nullifiers() {
+        for nullifier in txn.input_nullifiers() {
             if let Some(record) = self.records.record_with_nullifier_mut(&nullifier) {
                 if pending.is_some() {
                     // If we started this transaction, all of its inputs should have been on hold,

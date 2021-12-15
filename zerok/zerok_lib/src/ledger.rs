@@ -3,7 +3,7 @@ use crate::state::{
     ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use jf_txn::{structs::Nullifier, TransactionNote};
+use jf_txn::{structs::{Nullifier, RecordCommitment}, TransactionNote};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
@@ -49,17 +49,28 @@ pub mod traits {
             + CanonicalSerialize
             + CanonicalDeserialize;
         type Kind: TransactionKind;
-        fn new(
+
+        fn aap(
             note: TransactionNote,
             proofs: Vec<<Self::NullifierSet as NullifierSet>::Proof>,
         ) -> Self;
-        fn note(&self) -> &TransactionNote;
-        fn proofs(&self) -> Vec<<Self::NullifierSet as NullifierSet>::Proof>;
+
+        fn as_aap(&self) -> Option<TransactionNote>;
+        fn proven_nullifiers(&self) -> Vec<(Nullifier, <Self::NullifierSet as NullifierSet>::Proof)>;
+        fn output_commitments(&self) -> Vec<RecordCommitment>;
         fn hash(&self) -> Self::Hash;
         fn kind(&self) -> Self::Kind;
 
-        fn set_proofs(&mut self, proofs: Vec<<Self::NullifierSet as NullifierSet>::Proof>) {
-            *self = Self::new(self.note().clone(), proofs);
+        fn set_proofs(&mut self, proofs: Vec<<Self::NullifierSet as NullifierSet>::Proof>);
+
+        // Override with a more efficient implementation if the output length can be calculated
+        // without building the vector of outputs.
+        fn output_len(&self) -> usize {
+            self.output_commitments().len()
+        }
+
+        fn input_nullifiers(&self) -> Vec<Nullifier> {
+            self.proven_nullifiers().into_iter().map(|(n, _)| n).collect()
         }
     }
 
@@ -172,16 +183,28 @@ impl traits::Transaction for ElaboratedTransaction {
     type Hash = ElaboratedTransactionHash;
     type Kind = AAPTransactionKind;
 
-    fn new(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
+    fn aap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
         Self { txn: note, proofs }
     }
 
-    fn note(&self) -> &TransactionNote {
-        &self.txn
+    fn as_aap(&self) -> Option<TransactionNote> {
+        Some(self.txn.clone())
     }
 
-    fn proofs(&self) -> Vec<SetMerkleProof> {
-        self.proofs.clone()
+    fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {
+        self.txn.nullifiers().into_iter().zip(self.proofs.clone()).collect()
+    }
+
+    fn input_nullifiers(&self) -> Vec<Nullifier> {
+        self.txn.nullifiers()
+    }
+
+    fn output_commitments(&self) -> Vec<RecordCommitment> {
+        self.txn.output_commitments()
+    }
+
+    fn output_len(&self) -> usize {
+        self.txn.output_len()
     }
 
     fn hash(&self) -> Self::Hash {
