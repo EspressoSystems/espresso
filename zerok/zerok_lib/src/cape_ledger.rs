@@ -2,7 +2,7 @@ use crate::{
     cape_state::*,
     ledger::{traits::*, AAPTransactionKind},
     node::{LedgerEvent, QueryServiceError},
-    state::{key_set::SizedKey, ProverKeySet, ValidationError, MERKLE_HEIGHT},
+    state::{key_set::SizedKey, ProverKeySet, ValidationError, VerifierKeySet, MERKLE_HEIGHT},
     txn_builder::TransactionState,
     universal_params::UNIVERSAL_PARAM,
     util::commit::{Commitment, Committable, RawCommitmentBuilder},
@@ -13,7 +13,11 @@ use crate::{
 };
 use async_std::sync::{Mutex, MutexGuard};
 use async_trait::async_trait;
-use futures::stream::Stream;
+use futures::{
+    channel::mpsc,
+    prelude::*,
+    stream::{iter, Stream},
+};
 use generic_array::GenericArray;
 use itertools::izip;
 use jf_txn::{
@@ -26,8 +30,9 @@ use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
 use snafu::ResultExt;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::iter::repeat;
+use std::pin::Pin;
 use std::sync::Arc;
 
 // A representation of an unauthenticated sparse set of nullifiers (it is "authenticated" by
@@ -279,13 +284,46 @@ pub struct LocalCapeLedger {
 
     // Mock EQS and peripheral services
     records: MerkleTree,
+    events: Vec<LedgerEvent<CapeLedger>>,
+    subscribers: Vec<mpsc::UnboundedSender<LedgerEvent<CapeLedger>>>,
+    // Clients which have subscribed to events starting at some time in the future, to be added to
+    // `subscribers` when the time comes.
+    pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<LedgerEvent<CapeLedger>>>>,
     txns: HashMap<(u64, u64), CommittedTransaction>,
     address_map: HashMap<UserAddress, UserPubKey>,
 }
 
 impl LocalCapeLedger {
-    fn send_event(&mut self, _event: LedgerEvent<CapeLedger>) {
-        unimplemented!()
+    pub fn new(verif_crs: VerifierKeySet) -> Self {
+        Self {
+            contract: CapeContractState::new(verif_crs, MerkleTree::new(MERKLE_HEIGHT).unwrap()),
+            records: MerkleTree::new(MERKLE_HEIGHT).unwrap(),
+            events: Default::default(),
+            subscribers: Default::default(),
+            pending_subscribers: Default::default(),
+            txns: Default::default(),
+            address_map: Default::default(),
+        }
+    }
+
+    fn send_event(&mut self, event: LedgerEvent<CapeLedger>) {
+        // Subscribers who asked for a subscription starting from the current time can now be added
+        // to the list of active subscribers.
+        let now = self.events.len() as u64;
+        if let Some(new_subscribers) = self.pending_subscribers.remove(&now) {
+            self.subscribers.extend(new_subscribers);
+        }
+
+        // Send the message to all active subscribers. Filter out subscribers where the send fails,
+        // which means that the client has disconnected.
+        self.subscribers = std::mem::take(&mut self.subscribers)
+            .into_iter()
+            .filter(|subscriber| subscriber.unbounded_send(event.clone()).is_ok())
+            .collect();
+
+        // Save the event so we can feed it to later subscribers who want to start from some time in
+        // the past.
+        self.events.push(event);
     }
 }
 
@@ -312,7 +350,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> LocalCapeBackend<'a, Meta> {
 impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger>
     for LocalCapeBackend<'a, Meta>
 {
-    type EventStream = Box<dyn Stream<Item = LedgerEvent<CapeLedger>> + Unpin + Send>;
+    type EventStream = Pin<Box<dyn Stream<Item = LedgerEvent<CapeLedger>> + Send>>;
     type Storage = AtomicWalletStorage<'a, CapeLedger, Meta>;
 
     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
@@ -419,8 +457,30 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         Ok(state)
     }
 
-    async fn subscribe(&self, _starting_at: u64) -> Self::EventStream {
-        unimplemented!()
+    async fn subscribe(&self, t: u64) -> Self::EventStream {
+        let (sender, receiver) = mpsc::unbounded();
+        let mut network = self.network.lock().await;
+        if (t as usize) < network.events.len() {
+            // If the start time is in the past, send the subscriber all saved events since the
+            // start time and make them an active subscriber starting now.
+            network.subscribers.push(sender);
+            let past_events = network
+                .events
+                .iter()
+                .skip(t as usize)
+                .cloned()
+                .collect::<Vec<_>>();
+            Box::pin(iter(past_events).chain(receiver))
+        } else {
+            // Otherwise, add the subscriber to the list of pending subscribers to start receiving
+            // events at time `t`.
+            network
+                .pending_subscribers
+                .entry(t)
+                .or_default()
+                .push(sender);
+            Box::pin(receiver)
+        }
     }
 
     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
