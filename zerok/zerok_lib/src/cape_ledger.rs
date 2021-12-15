@@ -712,3 +712,282 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         Ok(())
     }
 }
+
+#[cfg(any(test, fuzzing))]
+pub mod test_helpers {
+    use super::*;
+    use crate::{
+        state::{SetMerkleTree, ValidatorState, VerifierKeySet, MERKLE_HEIGHT},
+        universal_params::UNIVERSAL_PARAM,
+        wallet::*,
+    };
+    use jf_txn::{structs::RecordCommitment, MerkleTree, TransactionVerifyingKey};
+    use phaselock::traits::state::State;
+    use rand_chacha::rand_core::RngCore;
+    use std::sync::Mutex as SyncMutex;
+    use std::time::Instant;
+
+    pub async fn create_test_network<'a, Meta>(
+        xfr_sizes: &[(usize, usize)],
+        initial_grants: Vec<u64>,
+        now: &mut Instant,
+    ) -> (
+        Arc<SyncMutex<LocalCapeLedger>>,
+        Vec<Wallet<'a, LocalCapeBackend<'a, Meta>>>,
+    ) {
+        let mut rng = ChaChaRng::from_seed([42u8; 32]);
+
+        // Populate the unpruned record merkle tree with an initial record commitment for each
+        // non-zero initial grant. Collect user-specific info (keys and record openings
+        // corresponding to grants) in `users`, which will be used to create the wallets later.
+        let mut record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
+        let mut users = vec![];
+        for amount in initial_grants {
+            let key = UserKeyPair::generate(&mut rng);
+            if amount > 0 {
+                let ro = RecordOpening::new(
+                    &mut rng,
+                    amount,
+                    AssetDefinition::native(),
+                    key.pub_key(),
+                    FreezeFlag::Unfrozen,
+                );
+                let comm = RecordCommitment::from(&ro);
+                let uid = record_merkle_tree.num_leaves();
+                record_merkle_tree.push(comm.to_field_element());
+                users.push((key, vec![(ro, uid)]));
+            } else {
+                users.push((key, vec![]));
+            }
+        }
+
+        // Create the validator using the ledger state containing the initial grants, computed above.
+        println!(
+            "Generating validator keys: {}s",
+            now.elapsed().as_secs_f32()
+        );
+        *now = Instant::now();
+
+        let mut xfr_prove_keys = vec![];
+        let mut xfr_verif_keys = vec![];
+        for (num_inputs, num_outputs) in xfr_sizes {
+            let (xfr_prove_key, xfr_verif_key, _) = jf_txn::proof::transfer::preprocess(
+                &*UNIVERSAL_PARAM,
+                *num_inputs,
+                *num_outputs,
+                MERKLE_HEIGHT,
+            )
+            .unwrap();
+            xfr_prove_keys.push(xfr_prove_key);
+            xfr_verif_keys.push(TransactionVerifyingKey::Transfer(xfr_verif_key));
+        }
+        let (mint_prove_key, mint_verif_key, _) =
+            jf_txn::proof::mint::preprocess(&*UNIVERSAL_PARAM, MERKLE_HEIGHT).unwrap();
+        let (freeze_prove_key, freeze_verif_key, _) =
+            jf_txn::proof::freeze::preprocess(&*UNIVERSAL_PARAM, 2, MERKLE_HEIGHT).unwrap();
+        let nullifiers: SetMerkleTree = Default::default();
+        let validator = ValidatorState::new(
+            VerifierKeySet {
+                xfr: KeySet::new(xfr_verif_keys.into_iter()).unwrap(),
+                mint: TransactionVerifyingKey::Mint(mint_verif_key),
+                freeze: KeySet::new(
+                    vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
+                )
+                .unwrap(),
+            },
+            record_merkle_tree.clone(),
+        );
+
+        let comm = validator.commit();
+        println!(
+            "Validator set up with state {:x?}: {}s",
+            comm,
+            now.elapsed().as_secs_f32()
+        );
+
+        let current_block = validator.next_block();
+        let mut storage = Vec::new();
+        for _ in &users {
+            storage.push(Arc::new(Mutex::new(MockWalletStorage::default())));
+        }
+        let ledger = Arc::new(SyncMutex::new(MockLedger {
+            validator,
+            nullifiers,
+            records: record_merkle_tree,
+            subscribers: Vec::new(),
+            current_block,
+            committed_blocks: Vec::new(),
+            block_size: 2,
+            hold_next_transaction: false,
+            held_transaction: None,
+            proving_keys: Arc::new(ProverKeySet {
+                xfr: KeySet::new(xfr_prove_keys.into_iter()).unwrap(),
+                mint: mint_prove_key,
+                freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
+            }),
+            address_map: users
+                .iter()
+                .map(|(key, _)| (key.address(), key.pub_key()))
+                .collect(),
+            events: Vec::new(),
+            storage: storage.clone(),
+        }));
+
+        // Create a wallet for each user based on the validator and the per-user information
+        // computed above.
+        let wallets = iter(users)
+            .zip(iter(storage))
+            .then(|((key_pair, initial_grants), storage)| {
+                let mut rng = ChaChaRng::from_rng(&mut rng).unwrap();
+                let ledger = ledger.clone();
+                async move {
+                    let mut seed = [0u8; 32];
+                    rng.fill_bytes(&mut seed);
+                    Wallet::new(MockWalletBackend {
+                        ledger,
+                        initial_grants,
+                        seed,
+                        storage,
+                        key_pair,
+                    })
+                    .await
+                    .unwrap()
+                }
+            })
+            .collect()
+            .await;
+
+        println!("Wallets set up: {}s", now.elapsed().as_secs_f32());
+        *now = Instant::now();
+        (ledger, wallets)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+    use test_helpers::*;
+
+    #[allow(unused_assignments)]
+    async fn test_two_wallets(native: bool) {
+        let mut now = Instant::now();
+
+        // One more input and one more output than we will ever need, to test dummy records.
+        let num_inputs = 3;
+        let num_outputs = 4;
+
+        // Give Alice an initial grant of 5 native coins. If using non-native transfers, give Bob an
+        // initial grant with which to pay his transaction fee, since he will not be receiving any
+        // native coins from Alice.
+        let alice_grant = 5;
+        let bob_grant = if native { 0 } else { 1 };
+        let (ledger, mut wallets) = create_test_network(
+            &[(num_inputs, num_outputs)],
+            vec![alice_grant, bob_grant],
+            &mut now,
+        )
+        .await;
+        let alice_address = wallets[0].address();
+        let bob_address = wallets[1].address();
+
+        // Verify initial wallet state.
+        assert_ne!(alice_address, bob_address);
+        assert_eq!(wallets[0].balance(&AssetCode::native()).await, alice_grant);
+        assert_eq!(wallets[1].balance(&AssetCode::native()).await, bob_grant);
+
+        let coin = if native {
+            AssetDefinition::native()
+        } else {
+            let coin = wallets[0]
+                .define_asset("Alice's asset".as_bytes(), Default::default())
+                .await
+                .unwrap();
+            // Alice gives herself an initial grant of 5 coins.
+            wallets[0]
+                .mint(1, &coin.code, 5, alice_address.clone())
+                .await
+                .unwrap();
+            sync(&ledger, &wallets).await;
+            println!("Asset minted: {}s", now.elapsed().as_secs_f32());
+            now = Instant::now();
+
+            assert_eq!(wallets[0].balance(&coin.code).await, 5);
+            assert_eq!(wallets[1].balance(&coin.code).await, 0);
+
+            coin
+        };
+
+        let alice_initial_native_balance = wallets[0].balance(&AssetCode::native()).await;
+        let bob_initial_native_balance = wallets[1].balance(&AssetCode::native()).await;
+
+        // Construct a transaction to transfer some coins from Alice to Bob.
+        wallets[0]
+            .transfer(&coin.code, &[(bob_address, 3)], 1)
+            .await
+            .unwrap();
+        sync(&ledger, &wallets).await;
+        println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+
+        // Check that both wallets reflect the new balances (less any fees). This cannot be a
+        // closure because rust infers the wrong lifetime for the references (it tries to use 'a,
+        // which is longer than we want to borrow `wallets` for).
+        async fn check_balance<'a>(
+            wallet: &Wallet<'a, MockWalletBackend<'a>>,
+            expected_coin_balance: u64,
+            starting_native_balance: u64,
+            fees_paid: u64,
+            coin: &AssetDefinition,
+            native: bool,
+        ) {
+            if native {
+                assert_eq!(
+                    wallet.balance(&coin.code).await,
+                    expected_coin_balance - fees_paid
+                );
+            } else {
+                assert_eq!(wallet.balance(&coin.code).await, expected_coin_balance);
+                assert_eq!(
+                    wallet.balance(&AssetCode::native()).await,
+                    starting_native_balance - fees_paid
+                );
+            }
+        }
+        check_balance(
+            &wallets[0],
+            2,
+            alice_initial_native_balance,
+            1,
+            &coin,
+            native,
+        )
+        .await;
+        check_balance(&wallets[1], 3, bob_initial_native_balance, 0, &coin, native).await;
+
+        // Check that Bob's wallet has sufficient information to access received funds by
+        // transferring some back to Alice.
+        //
+        // This transaction should also result in a non-zero fee change record being
+        // transferred back to Bob, since Bob's only sufficient record has an amount of 3 coins, but
+        // the sum of the outputs and fee of this transaction is only 2.
+        wallets[1]
+            .transfer(&coin.code, &[(alice_address, 1)], 1)
+            .await
+            .unwrap();
+        sync(&ledger, &wallets).await;
+        println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+
+        check_balance(
+            &wallets[0],
+            3,
+            alice_initial_native_balance,
+            1,
+            &coin,
+            native,
+        )
+        .await;
+        check_balance(&wallets[1], 2, bob_initial_native_balance, 1, &coin, native).await;
+    }
+}

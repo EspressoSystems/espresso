@@ -3774,7 +3774,7 @@ dependencies = [
 [[package]]
 name = "tagged-base64"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.com/translucence/common/tagged-base64.git?branch=main#0887bb4e6cf69534f827adde9030203887f0eaf2"
+source = "git+ssh://git@gitlab.com/translucence/common/tagged-base64.git?branch=main#16a47b4228790a8f678115e0a6b7c2d3684b2074"
 dependencies = [
  "base64 0.13.0",
  "console_error_panic_hook",
