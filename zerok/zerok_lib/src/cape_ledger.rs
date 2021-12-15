@@ -1,4 +1,5 @@
 use crate::{
+    api::FromError,
     cape_state::*,
     ledger::{traits::*, AAPTransactionKind},
     node::{LedgerEvent, QueryServiceError},
@@ -18,7 +19,6 @@ use futures::{
     prelude::*,
     stream::{iter, Stream},
 };
-use generic_array::GenericArray;
 use itertools::izip;
 use jf_txn::{
     keys::{UserAddress, UserKeyPair, UserPubKey},
@@ -28,7 +28,6 @@ use jf_txn::{
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use sha3::{Digest, Keccak256};
 use snafu::ResultExt;
 use std::collections::{BTreeMap, HashMap};
 use std::iter::repeat;
@@ -95,7 +94,11 @@ impl TransactionKind for CapeTransactionKind {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CapeTransition {
     Transaction(CapeTransaction),
-    Wrap(Box<RecordOpening>),
+    Wrap {
+        erc20_code: Erc20Code,
+        src_addr: EthereumAddr,
+        ro: Box<RecordOpening>,
+    },
 }
 
 impl Committable for CapeTransition {
@@ -132,18 +135,16 @@ impl Transaction for CapeTransition {
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, ())> {
         let nullifiers = match self {
-            Self::Transaction(CapeTransaction::AAP(txn)) => txn.nullifiers(),
-            Self::Transaction(CapeTransaction::Burn { xfr, .. }) => xfr.inputs_nullifiers.clone(),
-            Self::Wrap(..) => Vec::new(),
+            Self::Transaction(txn) => txn.nullifiers(),
+            Self::Wrap { .. } => Vec::new(),
         };
         nullifiers.into_iter().zip(repeat(())).collect()
     }
 
     fn output_commitments(&self) -> Vec<RecordCommitment> {
         match self {
-            Self::Transaction(CapeTransaction::AAP(txn)) => txn.output_commitments(),
-            Self::Transaction(CapeTransaction::Burn { xfr, .. }) => xfr.output_commitments.clone(),
-            Self::Wrap(ro) => vec![RecordCommitment::from(&**ro)],
+            Self::Transaction(txn) => txn.commitments(),
+            Self::Wrap { ro, .. } => vec![RecordCommitment::from(&**ro)],
         }
     }
 
@@ -157,7 +158,7 @@ impl Transaction for CapeTransition {
                 TransactionNote::Freeze(..) => CapeTransactionKind::freeze(),
             },
             Self::Transaction(CapeTransaction::Burn { .. }) => CapeTransactionKind::Burn,
-            Self::Wrap(..) => CapeTransactionKind::Wrap,
+            Self::Wrap { .. } => CapeTransactionKind::Wrap,
         }
     }
 
@@ -201,28 +202,17 @@ pub struct CapeTruster {
     now: u64,
     // Number of records, for generating new UIDs.
     num_records: u64,
-    // Current state commitment. This is a commitment to every block which has been committed, as
-    // well as to the initial (now, num_records) state for good measure.
-    commitment: GenericArray<u8, <Keccak256 as Digest>::OutputSize>,
 }
 
 impl CapeTruster {
     #[allow(dead_code)]
     fn new(now: u64, num_records: u64) -> Self {
-        Self {
-            now,
-            num_records,
-            commitment: Keccak256::new()
-                .chain("initial".as_bytes())
-                .chain(now.to_le_bytes())
-                .chain(num_records.to_le_bytes())
-                .finalize(),
-        }
+        Self { now, num_records }
     }
 }
 
 impl Validator for CapeTruster {
-    type StateCommitment = GenericArray<u8, <Keccak256 as Digest>::OutputSize>;
+    type StateCommitment = u64;
     type Block = CapeBlock;
 
     fn now(&self) -> u64 {
@@ -230,22 +220,16 @@ impl Validator for CapeTruster {
     }
 
     fn commit(&self) -> Self::StateCommitment {
-        self.commitment
+        // Our commitment is just the block height of the ledger. Since we are trusting a query
+        // service anyways, this can be used to determine a unique ledger state by querying for the
+        // state of the ledger at this block index.
+        self.now
     }
 
     fn validate_and_apply(&mut self, block: Self::Block) -> Result<Vec<u64>, ValidationError> {
         // We don't actually do validation here, since in this implementation we trust the query
-        // service to provide only valid blocks. Instead, just compute a new commitment (by chaining
-        // the new block onto the current commitment hash, with a domain separator tag).
-        self.commitment = Keccak256::new()
-            .chain("block".as_bytes())
-            .chain(&self.commitment)
-            .chain(&block.commit())
-            .finalize();
-        self.now += 1;
-
-        // Compute the unique IDs of the output records of this block. The IDs for each block are
-        // a consecutive range of integers starting at the previous number of records.
+        // service to provide only valid blocks. Instead, just compute the UIDs of the new records
+        // assuming the block successfully validates.
         let mut uids = vec![];
         let mut uid = self.num_records;
         for txn in block.0 {
@@ -255,6 +239,7 @@ impl Validator for CapeTruster {
             }
         }
         self.num_records = uid;
+        self.now += 1;
 
         Ok(uids)
     }
@@ -283,7 +268,15 @@ pub struct LocalCapeLedger {
     contract: CapeContractState,
 
     // Mock EQS and peripheral services
+    block_height: u64,
     records: MerkleTree,
+    // When an ERC20 deposit is finalized during a block submission, the contract emits an event
+    // containing only the commitment of the new record. Therefore, to correllate these events with
+    // the other information needed to reconstruct a CapeTransition::Wrap, the query service needs
+    // to monitor the contracts Erc20Deposited events and keep track of the deposits which are
+    // pending finalization.
+    pending_erc20_deposits:
+        HashMap<RecordCommitment, (Erc20Code, EthereumAddr, Box<RecordOpening>)>,
     events: Vec<LedgerEvent<CapeLedger>>,
     subscribers: Vec<mpsc::UnboundedSender<LedgerEvent<CapeLedger>>>,
     // Clients which have subscribed to events starting at some time in the future, to be added to
@@ -297,12 +290,67 @@ impl LocalCapeLedger {
     pub fn new(verif_crs: VerifierKeySet) -> Self {
         Self {
             contract: CapeContractState::new(verif_crs, MerkleTree::new(MERKLE_HEIGHT).unwrap()),
+            block_height: 0,
             records: MerkleTree::new(MERKLE_HEIGHT).unwrap(),
+            pending_erc20_deposits: Default::default(),
             events: Default::default(),
             subscribers: Default::default(),
             pending_subscribers: Default::default(),
             txns: Default::default(),
             address_map: Default::default(),
+        }
+    }
+
+    fn handle_event(&mut self, event: CapeEvent) {
+        match event {
+            CapeEvent::BlockCommitted { wraps, txns } => {
+                for comm in &wraps {
+                    self.records.push(comm.to_field_element());
+                }
+                for txn in &txns {
+                    for comm in txn.commitments() {
+                        self.records.push(comm.to_field_element());
+                    }
+                }
+
+                // Wrap each transaction and wrap event into a CapeTransition, build a
+                // CapeBlock, and broadcast it to subscribers.
+                let block = CapeBlock::new(
+                    wraps
+                        .into_iter()
+                        .map(|comm| {
+                            // Look up the auxiliary information associated with this deposit which
+                            // we saved when we processed the deposit event. This lookup cannot
+                            // fail, because the contract only finalizes a Wrap operation after it
+                            // has already processed the deposit, which involves emitting an
+                            // Erc20Deposited event.
+                            let (erc20_code, src_addr, ro) =
+                                self.pending_erc20_deposits.remove(&comm).unwrap();
+                            CapeTransition::Wrap {
+                                erc20_code,
+                                src_addr,
+                                ro,
+                            }
+                        })
+                        .chain(txns.into_iter().map(CapeTransition::Transaction))
+                        .collect(),
+                );
+                self.send_event(LedgerEvent::Commit {
+                    block,
+                    block_id: self.block_height,
+                    state_comm: self.block_height,
+                });
+                self.block_height += 1;
+            }
+
+            CapeEvent::Erc20Deposited {
+                erc20_code,
+                src_addr,
+                ro,
+            } => {
+                self.pending_erc20_deposits
+                    .insert(RecordCommitment::from(&*ro), (erc20_code, src_addr, ro));
+            }
         }
     }
 
@@ -426,10 +474,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                     .unwrap_or_else(|| UserKeyPair::generate(&mut rng)),
             }),
             txn_state: TransactionState {
-                validator: CapeTruster::new(
-                    network.contract.ledger.state_number,
-                    records.num_leaves(),
-                ),
+                validator: CapeTruster::new(network.block_height, records.num_leaves()),
                 nullifiers: Default::default(),
                 // Completely sparse nullifier set
                 record_mt: records,
@@ -533,8 +578,51 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
             .clone())
     }
 
-    async fn submit(&mut self, _txn: CapeTransition) -> Result<(), WalletError> {
-        unimplemented!()
+    async fn submit(&mut self, txn: CapeTransition) -> Result<(), WalletError> {
+        let mut network = self.network.lock().await;
+
+        // Convert the submitted transaction to a CapeOperation.
+        //todo Buffer submitted transactions into non-trivial blocks.
+        let op = match txn {
+            CapeTransition::Transaction(txn) => CapeOperation::SubmitBlock(vec![txn]),
+            CapeTransition::Wrap {
+                erc20_code,
+                src_addr,
+                ro,
+            } => CapeOperation::WrapErc20 {
+                erc20_code,
+                src_addr,
+                ro,
+            },
+        };
+
+        let (new_state, effects) = network
+            .contract
+            .submit_operations(vec![op])
+            .map_err(|err| {
+                //todo Convert CapeValidationError to WalletError in a better way. Maybe WalletError
+                // should be parameterized on the ledger type and there should be a ledger trait
+                // ValidationError.
+                WalletError::catch_all(err.to_string())
+            })?;
+        let mut events = vec![];
+        for effect in effects {
+            if let CapeEthEffect::Emit(event) = effect {
+                events.push(event);
+            } else {
+                //todo Simulate and validate the other ETH effects. If any effects fail, the
+                // whole transaction must be considered reverted with no visible effects.
+            }
+        }
+
+        // Simulate the EQS processing the events emitted by the contract, updating its state, and
+        // broadcasting processed events to subscribers.
+        for event in events {
+            network.handle_event(event);
+        }
+        network.contract = new_state;
+
+        Ok(())
     }
 
     async fn post_memos(
