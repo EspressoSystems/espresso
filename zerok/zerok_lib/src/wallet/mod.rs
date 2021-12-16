@@ -859,7 +859,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
                     // If this transaction contains record openings for all of its outputs,
                     // consider it retired immediately, do not wait for memos.
-                    let retired = txn.output_openings().into_iter().all(|ro| ro.is_some());
+                    let retired = txn.output_openings().is_some();
 
                     // Add the spent nullifiers to the summary. Map each nullifier to one of the
                     // output UIDs of the same transaction, so that we can tell when the memos
@@ -1141,29 +1141,26 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         let my_records = txn
             .output_openings()
             .into_iter()
+            .flatten()
             .zip(uids)
             .filter_map(|(ro, (uid, remember))| {
-                if let Some(ro) = ro {
-                    if let Some(key_pair) = self.user_keys.get(&ro.pub_key.address()) {
-                        // If this record is for us, add it to the wallet and include it in the
-                        // list of received records for created a received transaction history
-                        // entry.
-                        *remember = true;
-                        self.txn_state.records.insert(ro.clone(), *uid, key_pair);
-                        Some(ro)
-                    } else if let Some(key_pair) = self
-                        .freeze_keys
-                        .get(ro.asset_def.policy_ref().freezer_pub_key())
-                    {
-                        // If this record is not for us, but we can freeze it, then this
-                        // becomes like an audit. Add the record to our collection of freezable
-                        // records, but do not include it in the history entry.
-                        *remember = true;
-                        self.txn_state.records.insert_freezable(ro, *uid, key_pair);
-                        None
-                    } else {
-                        None
-                    }
+                if let Some(key_pair) = self.user_keys.get(&ro.pub_key.address()) {
+                    // If this record is for us, add it to the wallet and include it in the
+                    // list of received records for created a received transaction history
+                    // entry.
+                    *remember = true;
+                    self.txn_state.records.insert(ro.clone(), *uid, key_pair);
+                    Some(ro)
+                } else if let Some(key_pair) = self
+                    .freeze_keys
+                    .get(ro.asset_def.policy_ref().freezer_pub_key())
+                {
+                    // If this record is not for us, but we can freeze it, then this
+                    // becomes like an audit. Add the record to our collection of freezable
+                    // records, but do not include it in the history entry.
+                    *remember = true;
+                    self.txn_state.records.insert_freezable(ro, *uid, key_pair);
+                    None
                 } else {
                     None
                 }

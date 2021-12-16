@@ -93,10 +93,10 @@ pub mod traits {
         // Tries to get record openings corresponding to the outputs of this transaction. If
         // possible, the wallet should add any relevant openings right away when this transaction is
         // received. Otherwise, it will wait for corresponding receiver memos.
-        fn output_openings(&self) -> Vec<Option<RecordOpening>> {
+        fn output_openings(&self) -> Option<Vec<RecordOpening>> {
             // Most transactions do not have attached record openings. Override this default if the
             // implementing transaction type does.
-            vec![None; self.output_len()]
+            None
         }
         fn hash(&self) -> Self::Hash;
         fn kind(&self) -> Self::Kind;

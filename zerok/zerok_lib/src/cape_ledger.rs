@@ -153,10 +153,10 @@ impl Transaction for CapeTransition {
         }
     }
 
-    fn output_openings(&self) -> Vec<Option<RecordOpening>> {
+    fn output_openings(&self) -> Option<Vec<RecordOpening>> {
         match self {
-            Self::Wrap { ro, .. } => vec![Some((**ro).clone())],
-            _ => vec![None; self.output_len()],
+            Self::Wrap { ro, .. } => Some(vec![(**ro).clone()]),
+            _ => None,
         }
     }
 
