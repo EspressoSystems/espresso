@@ -693,6 +693,8 @@ struct EventSummary<L: Ledger> {
     updated_txns: Vec<(TransactionUID<L>, TransactionStatus)>,
     spent_nullifiers: Vec<(Nullifier, u64)>,
     rejected_nullifiers: Vec<Nullifier>,
+    // Fee nullifiers of transactions which were retired immediately upon being received.
+    retired_nullifiers: Vec<Nullifier>,
     received_memos: Vec<(ReceiverMemo, u64)>,
 }
 
@@ -702,6 +704,7 @@ impl<L: Ledger> Default for EventSummary<L> {
             updated_txns: Default::default(),
             spent_nullifiers: Default::default(),
             rejected_nullifiers: Default::default(),
+            retired_nullifiers: Default::default(),
             received_memos: Default::default(),
         }
     }
@@ -852,8 +855,12 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     // Split the uids corresponding to this transaction off the front of `uids`.
                     let mut this_txn_uids = uids;
                     uids = this_txn_uids.split_off(txn.output_len());
-
                     assert_eq!(this_txn_uids.len(), txn.output_len());
+
+                    // If this transaction contains record openings for all of its outputs,
+                    // consider it retired immediately, do not wait for memos.
+                    let retired = txn.output_openings().into_iter().all(|ro| ro.is_some());
+
                     // Add the spent nullifiers to the summary. Map each nullifier to one of the
                     // output UIDs of the same transaction, so that we can tell when the memos
                     // arrive for the transaction which spent this nullifier (completing the
@@ -863,6 +870,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                             .into_iter()
                             .zip(repeat(this_txn_uids[0].0)),
                     );
+                    if retired {
+                        summary.retired_nullifiers.push(txn.input_nullifiers()[0]);
+                    }
 
                     // Different concerns within the wallet consume transactions in different ways.
                     // Now we give each concern a chance to consume this transaction, performing any
@@ -871,6 +881,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     //
                     // This is a transaction we submitted and have been
                     // awaiting confirmation.
+                    let mut self_published = false;
                     if let Some(pending) = self
                         .clear_pending_transaction(
                             session,
@@ -879,14 +890,31 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                         )
                         .await
                     {
-                        summary
-                            .updated_txns
-                            .push((pending.uid, TransactionStatus::AwaitingMemos));
+                        let status = if retired {
+                            TransactionStatus::Retired
+                        } else {
+                            TransactionStatus::AwaitingMemos
+                        };
+                        summary.updated_txns.push((pending.uid, status));
+                        self_published = true;
                     }
 
                     // This is someone else's transaction but we can audit it.
                     self.audit_transaction(session, &txn, &mut this_txn_uids)
                         .await;
+
+                    // If this transaction has record openings attached, check if they are for us
+                    // and add them immediately, without waiting for memos.
+                    self.receive_attached_records(
+                        session,
+                        block_id,
+                        txn_id as u64,
+                        &txn,
+                        &mut this_txn_uids,
+                        !self_published,
+                        // Only add to history if we didn't send this same transaction
+                    )
+                    .await;
 
                     // Prune the record Merkle tree of records we don't care about.
                     for (uid, remember) in this_txn_uids {
@@ -1073,18 +1101,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 // To add a transaction history entry, we need to fetch the actual transaction to
                 // figure out what type it was.
                 let kind = match session.backend.get_transaction(block_id, txn_id).await {
-                    Ok(txn) => {
-                        let kind = txn.kind();
-                        if kind == TransactionKind::<L>::send() {
-                            TransactionKind::<L>::receive()
-                        } else if kind == TransactionKind::<L>::freeze()
-                            && records[0].0.freeze_flag == FreezeFlag::Unfrozen
-                        {
-                            TransactionKind::<L>::unfreeze()
-                        } else {
-                            kind
-                        }
-                    }
+                    Ok(txn) => txn.kind(),
                     Err(err) => {
                         println!(
                             "Error fetching received transaction ({}, {}) from network: {}. \
@@ -1095,49 +1112,130 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     }
                 };
 
-                let txn_asset = records[0].0.asset_def.code;
-                let history = TransactionHistoryEntry {
-                    time: Local::now(),
-                    asset: txn_asset,
+                self.add_receive_history(
+                    session,
+                    block_id,
+                    txn_id,
                     kind,
-                    sender: None,
-                    // When we receive transactions, we can't tell from the protocol
-                    // who sent it to us.
-                    receivers: records
+                    &records
                         .iter()
-                        .filter_map(|(ro, _, _)| {
-                            if ro.asset_def.code == txn_asset {
-                                Some((ro.pub_key.address(), ro.amount))
-                            } else {
-                                println!(
-                                    "Received transaction ({}, {}) contains outputs with \
-                                    multiple asset types. Ignoring some of them.",
-                                    block_id, txn_id
-                                );
-                                None
-                            }
-                        })
-                        .collect(),
-                    receipt: None,
-                };
-
-                if let Err(err) = session
-                    .backend
-                    .store(|mut t| async move {
-                        t.store_transaction(history).await?;
-                        Ok(t)
-                    })
-                    .await
-                {
-                    println!(
-                        "Failed to store transaction history for ({}, {}): {}.",
-                        block_id, txn_id, err
-                    );
-                }
+                        .map(|(ro, _, _)| ro.clone())
+                        .collect::<Vec<_>>(),
+                )
+                .await;
             }
         }
 
         records
+    }
+
+    async fn receive_attached_records(
+        &mut self,
+        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        block_id: u64,
+        txn_id: u64,
+        txn: &Transaction<L>,
+        uids: &mut [(u64, bool)],
+        add_to_history: bool,
+    ) {
+        let my_records = txn
+            .output_openings()
+            .into_iter()
+            .zip(uids)
+            .filter_map(|(ro, (uid, remember))| {
+                if let Some(ro) = ro {
+                    if let Some(key_pair) = self.user_keys.get(&ro.pub_key.address()) {
+                        // If this record is for us, add it to the wallet and include it in the
+                        // list of received records for created a received transaction history
+                        // entry.
+                        *remember = true;
+                        self.txn_state.records.insert(ro.clone(), *uid, key_pair);
+                        Some(ro)
+                    } else if let Some(key_pair) = self
+                        .freeze_keys
+                        .get(ro.asset_def.policy_ref().freezer_pub_key())
+                    {
+                        // If this record is not for us, but we can freeze it, then this
+                        // becomes like an audit. Add the record to our collection of freezable
+                        // records, but do not include it in the history entry.
+                        *remember = true;
+                        self.txn_state.records.insert_freezable(ro, *uid, key_pair);
+                        None
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if add_to_history && !my_records.is_empty() {
+            self.add_receive_history(session, block_id, txn_id, txn.kind(), &my_records)
+                .await;
+        }
+    }
+
+    async fn add_receive_history(
+        &mut self,
+        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        block_id: u64,
+        txn_id: u64,
+        kind: TransactionKind<L>,
+        records: &[RecordOpening],
+    ) {
+        // The last record is guaranteed not to be the fee change record. It contains useful
+        // information about asset type and freeze state.
+        let last_record = records.last().unwrap();
+        let kind = if kind == TransactionKind::<L>::send() {
+            TransactionKind::<L>::receive()
+        } else if kind == TransactionKind::<L>::freeze()
+            && last_record.freeze_flag == FreezeFlag::Unfrozen
+        {
+            TransactionKind::<L>::unfreeze()
+        } else {
+            kind
+        };
+
+        let txn_asset = last_record.asset_def.code;
+        let history = TransactionHistoryEntry {
+            time: Local::now(),
+            asset: txn_asset,
+            kind,
+            sender: None,
+            // When we receive transactions, we can't tell from the protocol
+            // who sent it to us.
+            receivers: records
+                .iter()
+                .filter_map(|ro| {
+                    if ro.asset_def.code == txn_asset {
+                        Some((ro.pub_key.address(), ro.amount))
+                    } else {
+                        println!(
+                            "Received transaction ({}, {}) contains outputs with \
+                            multiple asset types. Ignoring some of them.",
+                            block_id, txn_id
+                        );
+                        None
+                    }
+                })
+                .collect(),
+            receipt: None,
+        };
+
+        if let Err(err) = session
+            .backend
+            .store(|mut t| async move {
+                t.store_transaction(history).await?;
+                Ok(t)
+            })
+            .await
+        {
+            println!(
+                "Failed to store transaction ({}, {}) in history: {}.",
+                block_id, txn_id, err
+            );
+        }
     }
 
     fn add_records(
@@ -1969,7 +2067,12 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
                             }
                         }
                         // For any await_transaction() futures waiting on foreign transactions which
-                        // were just accepted, move them to the awaiting memos state.
+                        // were just accepted, move them to the retired or awaiting memos state.
+                        for n in summary.retired_nullifiers {
+                            for sender in pending_foreign_txns.remove(&n).into_iter().flatten() {
+                                sender.send(TransactionStatus::Retired).ok();
+                            }
+                        }
                         for (n, uid) in summary.spent_nullifiers {
                             if let Some(subscribers) = pending_foreign_txns.remove(&n) {
                                 foreign_txns_awaiting_memos
