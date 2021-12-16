@@ -8,6 +8,7 @@ use crate::{
 };
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
+use chrono::{DateTime, Local};
 use jf_aap::{
     errors::TxnApiError,
     freeze::{FreezeNote, FreezeNoteInput},
@@ -674,6 +675,49 @@ impl From<AssetDefinition> for AssetInfo {
             mint_info: None,
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct TransactionHistoryEntry<L: Ledger> {
+    pub time: DateTime<Local>,
+    pub asset: AssetCode,
+    pub kind: TransactionKind<L>,
+    // If we sent this transaction, `sender` records the address of the spending key used to submit
+    // it. If we received this transaction from someone else, we may not know who the sender is and
+    // this field may be None.
+    pub sender: Option<UserAddress>,
+    // Receivers and corresponding amounts.
+    pub receivers: Vec<(UserAddress, u64)>,
+    // If we sent this transaction, a receipt to track its progress.
+    pub receipt: Option<TransactionReceipt<L>>,
+}
+
+impl<L: Ledger> PartialEq<Self> for TransactionHistoryEntry<L> {
+    fn eq(&self, other: &Self) -> bool {
+        self.time == other.time
+            && self.asset == other.asset
+            && self.kind == other.kind
+            && self.receivers == other.receivers
+            && self.receipt == other.receipt
+    }
+}
+
+// Additional information about a transaction not included in the note, needed to submit it and
+// track it after submission..
+pub struct TransactionInfo<L: Ledger> {
+    // The account sending the transaction.
+    pub account: UserAddress,
+    pub memos: Vec<ReceiverMemo>,
+    pub sig: Signature,
+    // If the transaction is a freeze, the expected frozen/unfrozen outputs.
+    pub freeze_outputs: Vec<RecordOpening>,
+    // Entry to include in transaction history when the transaction is submitted.
+    pub history: Option<TransactionHistoryEntry<L>>,
+    // If this is a resubmission of a previous transaction, the UID for tracking.
+    pub uid: Option<TransactionUID<L>>,
+    pub inputs: Vec<RecordOpening>,
+    pub outputs: Vec<RecordOpening>,
 }
 
 // how long (in number of validator states) a record used as an input to an unconfirmed transaction

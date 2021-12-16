@@ -21,7 +21,7 @@ use async_scoped::AsyncScope;
 use async_std::sync::{Mutex, MutexGuard};
 use async_std::task::block_on;
 use async_trait::async_trait;
-use chrono::{DateTime, Local};
+use chrono::Local;
 use core::fmt::Debug;
 use futures::{
     channel::oneshot,
@@ -38,6 +38,7 @@ use jf_aap::{
         AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FreezeFlag, Nullifier,
         ReceiverMemo, RecordCommitment, RecordOpening,
     },
+    transfer::TransferNote,
     MerkleLeafProof, MerklePath, Signature, TransactionNote,
 };
 use ledger::{
@@ -288,32 +289,6 @@ pub struct WalletState<'a, L: Ledger = AAPLedger> {
     pub(crate) user_keys: HashMap<UserAddress, UserKeyPair>,
     // maps defined asset code to asset definition, seed and description of the asset
     pub(crate) defined_assets: HashMap<AssetCode, (AssetDefinition, AssetCodeSeed, Vec<u8>)>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct TransactionHistoryEntry<L: Ledger> {
-    time: DateTime<Local>,
-    asset: AssetCode,
-    kind: TransactionKind<L>,
-    // If we sent this transaction, `sender` records the address of the spending key used to submit
-    // it. If we received this transaction from someone else, we may not know who the sender is and
-    // this field may be None.
-    sender: Option<UserAddress>,
-    // Receivers and corresponding amounts.
-    receivers: Vec<(UserAddress, u64)>,
-    // If we sent this transaction, a receipt to track its progress.
-    receipt: Option<TransactionReceipt<L>>,
-}
-
-impl<L: Ledger> PartialEq<Self> for TransactionHistoryEntry<L> {
-    fn eq(&self, other: &Self) -> bool {
-        self.time == other.time
-            && self.asset == other.asset
-            && self.kind == other.kind
-            && self.receivers == other.receivers
-            && self.receipt == other.receipt
-    }
 }
 
 // Type erasure for key pairs so that backend components like storage that don't care about the
@@ -2177,6 +2152,25 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         state
             .transfer(session, account, asset, receivers, fee)
             .await
+    }
+
+    pub async fn build_transfer(
+        &mut self,
+        _account: &UserAddress,
+        _asset: &AssetCode,
+        _receivers: &[(UserAddress, u64)],
+        _fee: u64,
+        _bound_data: &[u8],
+    ) -> Result<(TransferNote, TransactionInfo<L>), WalletError> {
+        unimplemented!();
+    }
+
+    pub async fn submit(
+        &mut self,
+        _txn: Transaction<L>,
+        _info: TransactionInfo<L>,
+    ) -> Result<TransactionReceipt<L>, WalletError> {
+        unimplemented!();
     }
 
     /// define a new asset and store secret info for minting
