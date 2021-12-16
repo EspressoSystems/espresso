@@ -557,48 +557,53 @@ struct Connection {
 }
 
 #[derive(Clone)]
+struct DummyNode {
+    node_state: u8,
+}
+
+#[derive(Clone)]
 pub struct WebState {
     connections: Arc<RwLock<HashMap<String, Connection>>>,
     web_path: PathBuf,
     api: toml::Value,
-    node: Arc<RwLock<FullNode<'static>>>,
+    node: Arc<RwLock<DummyNode>>,
 }
 
-async fn submit_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let tx = request_body(&mut req).await?;
-    let validator = req.state().node.read().await;
-    validator
-        .submit_transaction(tx)
-        .await
-        .map_err(server_error)?;
+async fn submit_endpoint(mut _req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    // let tx = request_body(&mut req).await?;
+    // let validator = req.state().node.read().await;
+    // validator
+    //     .submit_transaction(tx)
+    //     .await
+    //     .map_err(server_error)?;
     Ok(tide::Response::new(StatusCode::Ok))
 }
 
-async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let PostMemos { memos, signature } = request_body(&mut req).await?;
-    let mut bulletin = req.state().node.write().await;
-    let TransactionId(BlockId(block), tx) =
-        UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
-            .ok_or_else(|| {
-                server_error(Error::ParamError {
-                    param: String::from("txid"),
-                    msg: String::from(
-                        "Valid transaction ID required. Transaction IDs start with TX~.",
-                    ),
-                })
-            })?
-            .to()?;
-    bulletin
-        .post_memos(block as u64, tx as u64, memos, signature)
-        .await
-        .map_err(server_error)?;
+async fn memos_endpoint(mut _req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    // let PostMemos { memos, signature } = request_body(&mut req).await?;
+    // let mut bulletin = req.state().node.write().await;
+    // let TransactionId(BlockId(block), tx) =
+    //     UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
+    //         .ok_or_else(|| {
+    //             server_error(Error::ParamError {
+    //                 param: String::from("txid"),
+    //                 msg: String::from(
+    //                     "Valid transaction ID required. Transaction IDs start with TX~.",
+    //                 ),
+    //             })
+    //         })?
+    //         .to()?;
+    // bulletin
+    //     .post_memos(block as u64, tx as u64, memos, signature)
+    //     .await
+    //     .map_err(server_error)?;
     Ok(tide::Response::new(StatusCode::Ok))
 }
 
-async fn users_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let pub_key: UserPubKey = request_body(&mut req).await?;
-    let mut bulletin = req.state().node.write().await;
-    bulletin.introduce(&pub_key).await.map_err(server_error)?;
+async fn users_endpoint(mut _req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
+    // let pub_key: UserPubKey = request_body(&mut req).await?;
+    // let mut bulletin = req.state().node.write().await;
+    // bulletin.introduce(&pub_key).await.map_err(server_error)?;
     Ok(tide::Response::new(StatusCode::Ok))
 }
 
@@ -790,11 +795,12 @@ fn init_web_server(
     };
     println!("Web path: {:?}", web_path);
     let api = disco::load_messages(&api_path);
+    let dummy_node = Arc::new(RwLock::new(DummyNode { node_state: 0 }));
     let mut web_server = tide::with_state(WebState {
         connections: Default::default(),
         web_path: web_path.clone(),
         api: api.clone(),
-        node,
+        node: dummy_node.clone(),
     });
     web_server.with(server::trace).with(server::add_error_body);
 
@@ -967,7 +973,7 @@ async fn main() -> Result<(), std::io::Error> {
                 init_web_server(
                     &NodeOpt::from_args().api_path,
                     &NodeOpt::from_args().web_path,
-                    own_id,
+                    0, /* own_id */
                     node.clone(),
                 )
                 .expect("Failed to initialize web server"),

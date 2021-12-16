@@ -465,22 +465,22 @@ async fn subscribe(
     conn: WebSocketConnection,
     bindings: &HashMap<String, RouteBinding>,
 ) -> Result<(), tide::Error> {
-    let response_type = best_response_type(
-        &mut Accept::from_headers(&req)?,
-        &[mime::JSON, mime::BYTE_STREAM],
-    )?;
-    let index = bindings[":index"].value.as_index()? as u64;
-    let mut events = req.state().node.read().await.subscribe(index).await;
-    while let Some(event) = events.next().await {
-        event!(Level::INFO, "broadcast event {}", event.as_static());
-        if response_type == mime::JSON {
-            conn.send_json(&event).await?;
-        } else if response_type == mime::BYTE_STREAM {
-            conn.send_bytes(bincode::serialize(&event)?).await?;
-        } else {
-            unreachable!();
-        }
-    }
+    // let response_type = best_response_type(
+    //     &mut Accept::from_headers(&req)?,
+    //     &[mime::JSON, mime::BYTE_STREAM],
+    // )?;
+    // let index = bindings[":index"].value.as_index()? as u64;
+    // let mut events = req.state().node.read().await.subscribe(index).await;
+    // while let Some(event) = events.next().await {
+    //     event!(Level::INFO, "broadcast event {}", event.as_static());
+    //     if response_type == mime::JSON {
+    //         conn.send_json(&event).await?;
+    //     } else if response_type == mime::BYTE_STREAM {
+    //         conn.send_bytes(bincode::serialize(&event)?).await?;
+    //     } else {
+    //         unreachable!();
+    //     }
+    // }
     Ok(())
 }
 
@@ -497,25 +497,25 @@ pub async fn dispatch_url(
     let query_service_guard = req.state().node.read().await;
     let query_service = &*query_service_guard;
     match key {
-        ApiRouteKey::getblock => response(&req, get_block(bindings, query_service).await?),
-        ApiRouteKey::getblockcount => response(&req, get_block_count(query_service).await?),
-        ApiRouteKey::getblockhash => response(&req, get_block_hash(bindings, query_service).await?),
-        ApiRouteKey::getblockid => response(&req, get_block_id(bindings, query_service).await?),
-        ApiRouteKey::getevent => response(&req, get_event(bindings, query_service).await?),
-        ApiRouteKey::getinfo => response(&req, get_info(query_service).await?),
-        ApiRouteKey::getmempool => dummy_url_eval(route_pattern, bindings),
-        ApiRouteKey::gettransaction => {
-            response(&req, get_transaction(bindings, query_service).await?)
-        }
-        ApiRouteKey::getunspentrecord => {
-            response(&req, get_unspent_record(bindings, query_service).await?)
-        }
-        ApiRouteKey::getunspentrecordsetinfo => dummy_url_eval(route_pattern, bindings),
-        ApiRouteKey::getsnapshot => response(&req, get_snapshot(bindings, query_service).await?),
-        ApiRouteKey::getuser => response(&req, get_user(bindings, query_service).await?),
-        ApiRouteKey::getusers => response(&req, get_users(query_service).await?),
-        ApiRouteKey::getnullifier => response(&req, get_nullifier(bindings, query_service).await?),
-        ApiRouteKey::getstatecomm => response(&req, get_state_comm(bindings, query_service).await?),
+        // ApiRouteKey::getblock => response(&req, get_block(bindings, query_service).await?),
+        // ApiRouteKey::getblockcount => response(&req, get_block_count(query_service).await?),
+        // ApiRouteKey::getblockhash => response(&req, get_block_hash(bindings, query_service).await?),
+        // ApiRouteKey::getblockid => response(&req, get_block_id(bindings, query_service).await?),
+        // ApiRouteKey::getevent => response(&req, get_event(bindings, query_service).await?),
+        // ApiRouteKey::getinfo => response(&req, get_info(query_service).await?),
+        // ApiRouteKey::getmempool => dummy_url_eval(route_pattern, bindings),
+        // ApiRouteKey::gettransaction => {
+        //     response(&req, get_transaction(bindings, query_service).await?)
+        // }
+        // ApiRouteKey::getunspentrecord => {
+        //     response(&req, get_unspent_record(bindings, query_service).await?)
+        // }
+        // ApiRouteKey::getunspentrecordsetinfo => dummy_url_eval(route_pattern, bindings),
+        // ApiRouteKey::getsnapshot => response(&req, get_snapshot(bindings, query_service).await?),
+        // ApiRouteKey::getuser => response(&req, get_user(bindings, query_service).await?),
+        // ApiRouteKey::getusers => response(&req, get_users(query_service).await?),
+        // ApiRouteKey::getnullifier => response(&req, get_nullifier(bindings, query_service).await?),
+        // ApiRouteKey::getstatecomm => response(&req, get_state_comm(bindings, query_service).await?),
         _ => Err(tide::Error::from_str(
             StatusCode::InternalServerError,
             "server called dispatch_url with an unsupported route; perhaps the route has not \
