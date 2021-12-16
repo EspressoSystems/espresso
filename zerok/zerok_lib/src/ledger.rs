@@ -6,8 +6,8 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use jf_txn::{
     keys::{AuditorKeyPair, AuditorPubKey},
     mint::MintNote,
-    transfer::TransferNote,
     structs::{AssetCode, AssetDefinition, AuditData, Nullifier, RecordCommitment},
+    transfer::TransferNote,
     TransactionNote,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
