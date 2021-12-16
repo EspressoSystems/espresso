@@ -214,13 +214,22 @@ Get the event with the designated index.
 # TODO !corbett Where do fees fit in?
 # TODO !corbett Need a better way to send the password than in the URL.
 # TODO !corbett Consider increasing the syntaxtic distance between freeze and unfreeze.
+# TODO !corbett Is there an operation that both defines an asset and issues units of it? Should this be a single operation or two separate operations? Is it allowed to issue more of an asset later after the asset is already defined?
+# TODO !corbett Is okay to use 'mint' as the term for defining and issuing an asset?
+
+[route.newwallet]
+PATH = ["newwallet/:mnemonic"]
+":mnemonic" = "TaggedBase64"
+DOC = """
+Creates a new the wallet with the given mnemonic.
+"""
 
 [route.openwallet]
-PATH = ["openwallet/:id/:password"]
-":id" = "Integer"
-":password" = "String"
+PATH = ["openwallet/:mnemonic", "openwallet/:mnemonic/path/:path"]
+":path" = "TaggedBase64"
+":mnemonic" = "String"
 DOC = """
-Open the wallet with the given ID and password.
+Open the wallet from local storage with the given mnemonic and path.
 """
 
 [route.closewallet]
@@ -236,58 +245,75 @@ Get the addresses for the current wallet.
 """
 
 [route.getbalance]
-PATH = ["getbalance/address/:address", "getbalance/all"]
-":address" = "Integer"
+PATH = ["getbalance/all", "getbalance/address/:address", "getbalance/address/:address/asset/:asset"]
+":address" = "TaggedBase64"
+":asset" = "TaggedBase64"
 DOC = """
-Get the balance of the specified address, or get all balances for the current wallet.
+Get all balances for the current wallet, all the balances for a given address, or the balance for a given address and asset type.
 """
 
 [route.getinfo]
-PATH = ["getinfo"]
+PATH = ["getinfo", "getinfo/address", "getinfo/key", "getinfo/asset"]
 DOC = """
-Get the addresses, public keys, and asset codes for the current wallet.
+Get the addresses, public keys, and asset types for the current wallet.
 """
 
 [route.genkey]
-PATH = ["genkey/:asset_code/audit", "genkey/:asset_code/freeze"]
-":asset_code" = "TaggedBase64"
+PATH = ["getkey/transfer", "genkey/trace", "genkey/freeze"]
 DOC = """
-Generate a key of the given type.
+Generate a key of the given type to be used to define assets.
+"""
+
+[route.importkey]
+PATH = ["importkey/tracekey/:freezekey", "importkey/spendkey/:spendkey", "importkey/tracekey/:tracekey" ]
+":freezekey" = "TaggedBase64"
+":spendkey" = "TaggedBase64"
+":tracekey" = "TaggedBase64"
+DOC = """
+Import the given key into the current wallet.
 """
 
 [route.transfer]
-PATH = ["xfr/from/:sender/to/:recipient/amount/:amount", "xfr/to/:recipient/from/:sender/amount/:amount"]
-":from" = "TaggedBase64"
+PATH = ["xfr/from/:asset/to/:recipient/amount/:amount", "xfr/to/:asset/from/:sender/amount/:amount"]
+":asset" = "TaggedBase64"
 ":recipient" = "TaggedBase64"
 ":amount" = "Integer"
 DOC = """
-Transfer amount units from the sender to the recipient.
+Transfer amount units from the sender to the recipient. Returns a serialized receipt which can be used to track/wait on the transaction.
 """
 
 [route.mint]
-PATH = ["mint/asset_code/:asset_code/amount/:amount"]
-":asset_code" = "TaggedBase64"
+PATH = ["mint/:description/amount/:amount/spendkey/:spendkey/freezekey/:freezekey/tracekey/:tracekey"]
+":description" = "TaggedBase64"
+":amount" = "Integer"
+":spendkey" = "TaggedBase64"
+":freezekey" = "TaggedBase64"
+":tracekey" = "TaggedBase64"
 DOC = """
-Mint amount units of a given asset code controlled by the current wallet.
+Mint amount units of a given asset code controlled by the current wallet. Reports the asset code associated with the given keys. Keys are generated with genkey.
 """
 
 [route.freeze]
-PATH = ["freeze/asset_code/:asset_code"]
-":asset_code" = "TaggedBase64"
+PATH = ["freeze/:address/:freezekey/fee/:feeaddress/:feeamount"]
+":address" = "TaggedBase64"
+":freezekey" = "TaggedBase64"
+":feeaddress" = "TaggedBase64"
+":feeamount" = "Integer"
 DOC = """
-Freeze the given asset code.
+Freeze the asset associated with the given freezing key.
 """
 
 [route.unfreeze]
-PATH = ["unfreeze/asset_code/:asset_code"]
-":asset_code" = "TaggedBase64"
+PATH = ["unfreeze/:freezekey"]
+":freezekey" = "TaggedBase64"
 DOC = """
-Freeze the given asset code.
+Unfreeze the asset associated with the given freezing key.
 """
 
 [route.trace]
-PATH = ["trace/asset_code/:asset_code"]
-":asset_code" = "TaggedBase64"
+PATH = ["trace/:asset", "trace/key/:key"]
+":asset" = "TaggedBase64"
+":key" = "TaggedBase64"
 DOC = """
-Trace the given asset code.
+Trace the given asset or trace the asset associated with the given tracing key.
 """
