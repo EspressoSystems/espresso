@@ -52,6 +52,7 @@ use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::iter::repeat;
 use std::sync::Arc;
 
 #[derive(Debug, Snafu)]
@@ -142,6 +143,12 @@ impl api::FromError for WalletError {
 impl From<crate::txn_builder::TransactionError> for WalletError {
     fn from(source: crate::txn_builder::TransactionError) -> Self {
         Self::TransactionError { source }
+    }
+}
+
+impl From<crate::node::QueryServiceError> for WalletError {
+    fn from(source: crate::node::QueryServiceError) -> Self {
+        Self::QueryServiceError { source }
     }
 }
 
@@ -807,7 +814,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 // Update our full copies of sparse validator data structures to be consistent with
                 // the validator state.
                 for txn in block.txns() {
-                    let nullifiers = txn.note().nullifiers();
+                    let nullifiers = txn.input_nullifiers();
                     // Remove spent records.
                     for n in &nullifiers {
                         if let Some(record) = self.txn_state.records.remove_by_nullifier(*n) {
@@ -815,7 +822,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                         }
                     }
                     // Insert new records.
-                    for o in txn.note().output_commitments() {
+                    for o in txn.output_commitments() {
                         self.txn_state.append_merkle_leaf(o);
                     }
                     // Update background scans with newly published nullifiers.
@@ -827,12 +834,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 let nullifier_proofs = block
                     .txns()
                     .into_iter()
-                    .flat_map(|txn| {
-                        txn.note()
-                            .nullifiers()
-                            .into_iter()
-                            .zip(txn.proofs().to_vec())
-                    })
+                    .flat_map(|txn| txn.proven_nullifiers())
                     .collect::<Vec<_>>();
                 if self
                     .txn_state
@@ -849,14 +851,17 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 for (txn_id, txn) in block.txns().into_iter().enumerate() {
                     // Split the uids corresponding to this transaction off the front of `uids`.
                     let mut this_txn_uids = uids;
-                    uids = this_txn_uids.split_off(txn.note().output_len());
+                    uids = this_txn_uids.split_off(txn.output_len());
 
-                    assert_eq!(this_txn_uids.len(), txn.note().output_len());
+                    assert_eq!(this_txn_uids.len(), txn.output_len());
+                    // Add the spent nullifiers to the summary. Map each nullifier to one of the
+                    // output UIDs of the same transaction, so that we can tell when the memos
+                    // arrive for the transaction which spent this nullifier (completing the
+                    // transaction's life cycle) by looking at the UIDs attached to the memos.
                     summary.spent_nullifiers.extend(
-                        txn.note()
-                            .nullifiers()
+                        txn.input_nullifiers()
                             .into_iter()
-                            .zip(this_txn_uids.iter().map(|(uid, _)| *uid)),
+                            .zip(repeat(this_txn_uids[0].0)),
                     );
 
                     // Different concerns within the wallet consume transactions in different ways.
@@ -880,7 +885,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     }
 
                     // This is someone else's transaction but we can audit it.
-                    self.audit_transaction(session, txn.note(), &mut this_txn_uids)
+                    self.audit_transaction(session, &txn, &mut this_txn_uids)
                         .await;
 
                     // Prune the record Merkle tree of records we don't care about.
@@ -935,7 +940,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 for mut txn in block.txns() {
                     summary
                         .rejected_nullifiers
-                        .append(&mut txn.note().nullifiers());
+                        .append(&mut txn.input_nullifiers());
                     if let Some(pending) = self.clear_pending_transaction(session, &txn, None).await
                     {
                         // Try to resubmit if the error is recoverable.
@@ -1018,7 +1023,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 let nullifiers = block
                     .txns()
                     .into_iter()
-                    .flat_map(|txn| txn.note().nullifiers())
+                    .flat_map(|txn| txn.input_nullifiers())
                     .collect::<Vec<_>>();
                 let scan = self.key_scans.get_mut(&key.address()).unwrap();
                 scan.process_nullifiers(&nullifiers, false);
@@ -1235,43 +1240,18 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     async fn audit_transaction(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        txn: &TransactionNote,
+        txn: &Transaction<L>,
         uids: &mut [(u64, bool)],
     ) {
         // Try to decrypt auditor memos.
-        let audit_data = match txn {
-            TransactionNote::Transfer(xfr) => {
-                let mut assets = self.auditable_assets.values();
-                loop {
-                    if let Some(asset) = assets.next() {
-                        let audit_key = &self.audit_keys[asset.policy_ref().auditor_pub_key()];
-                        if let Ok(data) = audit_key.open_transfer_audit_memo(asset, xfr) {
-                            break Some((asset, data));
-                        }
-                    } else {
-                        break None;
-                    }
-                }
-            }
-            TransactionNote::Mint(mint) => self
-                .audit_keys
-                .get(mint.mint_asset_def.policy_ref().auditor_pub_key())
-                .and_then(|audit_key| {
-                    audit_key
-                        .open_mint_audit_memo(mint)
-                        .ok()
-                        .map(|audit_output| (&mint.mint_asset_def, (vec![], vec![audit_output])))
-                }),
-            TransactionNote::Freeze(_) => None,
-        };
-        if let Some((asset_def, (_, audit_outputs))) = audit_data {
+        if let Ok(memo) = txn.open_audit_memo(&self.auditable_assets, &self.audit_keys) {
             //todo !jeb.bearer eventually, we will probably want to save all the audit memos for
             // the whole transaction (inputs and outputs) regardless of whether any of the outputs
             // are freezeable, just for general auditing purposes.
 
             // the first uid corresponds to the fee change output, which has no audit memo, so skip
             // that one
-            for ((uid, remember), output) in uids.iter_mut().skip(1).zip(audit_outputs) {
+            for ((uid, remember), output) in uids.iter_mut().skip(1).zip(memo.outputs) {
                 let pub_key = match output.user_address {
                     Some(address) => session.backend.get_public_key(&address).await.ok(),
                     None => None,
@@ -1283,11 +1263,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     // this record, save it in our database for later freezing.
                     if let Some(freeze_key) = self
                         .freeze_keys
-                        .get(asset_def.policy_ref().freezer_pub_key())
+                        .get(memo.asset.policy_ref().freezer_pub_key())
                     {
                         let record_opening = RecordOpening {
                             amount,
-                            asset_def: asset_def.clone(),
+                            asset_def: memo.asset.clone(),
                             pub_key,
                             freeze_flag: FreezeFlag::Unfrozen,
                             blind,
@@ -1308,7 +1288,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         txn: &mut Transaction<L>,
     ) -> Result<(), WalletError> {
         let mut proofs = Vec::new();
-        for n in txn.note().nullifiers() {
+        for n in txn.input_nullifiers() {
             let (spent, proof) = session
                 .backend
                 .get_nullifier_proof(&mut self.txn_state.nullifiers, n)
@@ -1772,7 +1752,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             nullifier_pfs.push(proof);
         }
 
-        let txn = Transaction::<L>::new(note, nullifier_pfs);
+        let txn = Transaction::<L>::aap(note, nullifier_pfs);
         self.submit_elaborated_transaction(
             session,
             account,

@@ -389,7 +389,7 @@ pub enum ValidationError {
     },
 }
 
-mod ser_display {
+pub(crate) mod ser_display {
     use serde::de::{Deserialize, Deserializer};
     use serde::ser::{Serialize, Serializer};
     use std::fmt::Display;
