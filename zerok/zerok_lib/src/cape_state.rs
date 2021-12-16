@@ -3,13 +3,13 @@
 use crate::state::VerifierKeySet;
 use core::convert::TryFrom;
 use core::fmt::Debug;
-use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_aap::{
     errors::TxnApiError,
     structs::{AssetDefinition, Nullifier, RecordCommitment, RecordOpening},
     transfer::TransferNote,
     txn_batch_verify, MerkleCommitment, MerkleFrontier, MerkleTree, NodeValue, TransactionNote,
 };
+use jf_primitives::merkle_tree::FilledMTBuilder;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashMap, HashSet, VecDeque};
