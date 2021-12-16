@@ -1,4 +1,11 @@
-with import <nixpkgs> { };
+with import
+  (fetchTarball {
+    url = "https://github.com/NixOS/nixpkgs/archive/a7ecde854aee5c4c7cd6177f54a99d2c1ff28a31.tar.gz";
+    # To update hash:
+    #   nix-prefetch-url --type sha256 --unpack https://github.com/NixOS/nixpkgs/archive/....tar.gz
+    sha256 = "162dywda2dvfj1248afxc45kcrg83appjd0nmdb541hl7rnncf02";
+  })
+{ };
 let
   src = fetchFromGitHub {
     owner = "mozilla";
@@ -13,6 +20,7 @@ let
     extensions = [
       "clippy-preview"
       "rustfmt-preview"
+      "rust-src"
     ];
   };
 in
@@ -31,7 +39,7 @@ stdenv.mkDerivation {
     cargo-udeps
 
     alloy5
-  ] ++ stdenv.lib.optionals stdenv.isDarwin [
+  ] ++ lib.optionals stdenv.isDarwin [
     darwin.apple_sdk.frameworks.Security
   ];
 
