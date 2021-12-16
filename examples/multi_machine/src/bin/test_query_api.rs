@@ -34,8 +34,8 @@ use tempdir::TempDir;
 use tracing::{event, Level};
 use wallet::{
     hd::KeyTree,
+    loader::WalletLoader,
     network::{NetworkBackend, Url},
-    persistence::WalletLoader,
     KeyError, Wallet, WalletError,
 };
 use zerok_lib::api::*;

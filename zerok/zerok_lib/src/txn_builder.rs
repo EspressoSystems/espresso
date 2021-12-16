@@ -1,3 +1,4 @@
+use crate::node::MerkleTreeWithArbitrary;
 use crate::util::arbitrary_wrappers::*;
 use crate::{
     ledger,
@@ -7,7 +8,7 @@ use crate::{
 };
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
-use jf_txn::{
+use jf_aap::{
     errors::TxnApiError,
     freeze::{FreezeNote, FreezeNoteInput},
     keys::{AuditorPubKey, FreezerKeyPair, FreezerPubKey, UserAddress, UserKeyPair, UserPubKey},
@@ -345,6 +346,8 @@ where
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(bound = "")]
 pub struct PendingTransaction<L: Ledger> {
+    // The account from which this transaction was submitted, in case we need to resubmit it.
+    pub account: UserAddress,
     pub receiver_memos: Vec<ReceiverMemo>,
     pub signature: Signature,
     pub freeze_outputs: Vec<RecordOpening>,
@@ -376,6 +379,7 @@ where
         let key = u.arbitrary::<ArbitraryKeyPair>()?.into();
         let signature = sign_receiver_memos(&key, &memos).unwrap();
         Ok(Self {
+            account: u.arbitrary::<ArbitraryUserAddress>()?.into(),
             receiver_memos: memos,
             signature,
             freeze_outputs: u
@@ -679,9 +683,11 @@ pub const RECORD_HOLD_TIME: u64 = ValidatorState::RECORD_ROOT_HISTORY_SIZE as u6
 // (block_id, txn_id, [(uid, remember)])
 pub type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
 // a never expired target
-pub const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_txn::constants::MAX_TIMESTAMP_LEN as u32) - 1;
+pub const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_aap::constants::MAX_TIMESTAMP_LEN as u32) - 1;
 
-#[derive(Debug, Clone)]
+#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct TransactionState<L: Ledger = AAPLedger> {
     // sequence number of the last event processed
     pub now: u64,
@@ -699,6 +705,37 @@ pub struct TransactionState<L: Ledger = AAPLedger> {
     pub merkle_leaf_to_forget: Option<u64>,
     // set of pending transactions
     pub transactions: TransactionDatabase<L>,
+}
+
+impl<L: Ledger> PartialEq<Self> for TransactionState<L> {
+    fn eq(&self, other: &Self) -> bool {
+        self.now == other.now
+            && self.validator == other.validator
+            && self.records == other.records
+            && self.nullifiers == other.nullifiers
+            && self.record_mt == other.record_mt
+            && self.merkle_leaf_to_forget == other.merkle_leaf_to_forget
+            && self.transactions == other.transactions
+    }
+}
+
+impl<'a, L: Ledger> Arbitrary<'a> for TransactionState<L>
+where
+    Validator<L>: Arbitrary<'a>,
+    NullifierSet<L>: Arbitrary<'a>,
+    TransactionHash<L>: Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            now: u.arbitrary()?,
+            validator: u.arbitrary()?,
+            records: u.arbitrary()?,
+            nullifiers: u.arbitrary()?,
+            record_mt: u.arbitrary::<MerkleTreeWithArbitrary>()?.0,
+            merkle_leaf_to_forget: None,
+            transactions: u.arbitrary()?,
+        })
+    }
 }
 
 impl<L: Ledger> TransactionState<L> {
@@ -761,6 +798,7 @@ impl<L: Ledger> TransactionState<L> {
 
         // Add the transaction to `transactions`.
         let pending = PendingTransaction {
+            account: user_address.clone(),
             receiver_memos,
             signature,
             timeout,
@@ -941,6 +979,7 @@ impl<L: Ledger> TransactionState<L> {
                 cred: None, // TODO support credentials
             })
         }
+        let fee_input = self.find_fee_input(owner_keypair, fee)?;
 
         // prepare outputs, excluding fee change (which will be automatically generated)
         let mut outputs = vec![];
@@ -960,13 +999,6 @@ impl<L: Ledger> TransactionState<L> {
                 RecordOpening::new(rng, change, asset.clone(), me, FreezeFlag::Unfrozen);
             outputs.push(change_ro);
         }
-
-        let (fee_ro, fee_uid) = self.find_native_record_for_fee(&owner_keypair.pub_key(), fee)?;
-        let fee_input = FeeInput {
-            ro: fee_ro,
-            acc_member_witness: self.get_merkle_proof(fee_uid),
-            owner_keypair,
-        };
 
         // find a proving key which can handle this transaction size
         let (proving_key, dummy_inputs) = Self::xfr_proving_key(
@@ -1026,8 +1058,6 @@ impl<L: Ledger> TransactionState<L> {
         receiver: UserPubKey,
         rng: &mut ChaChaRng,
     ) -> Result<(MintNote, Vec<ReceiverMemo>, Signature), TransactionError> {
-        let (fee_ro, uid) = self.find_native_record_for_fee(&owner_keypair.pub_key(), fee)?;
-        let acc_member_witness = self.get_merkle_proof(uid);
         let (asset_def, seed, asset_description) = asset;
         let mint_record = RecordOpening {
             amount,
@@ -1037,11 +1067,7 @@ impl<L: Ledger> TransactionState<L> {
             blind: BlindFactor::rand(rng),
         };
 
-        let fee_input = FeeInput {
-            ro: fee_ro,
-            acc_member_witness,
-            owner_keypair,
-        };
+        let fee_input = self.find_fee_input(owner_keypair, fee)?;
         let (fee_info, fee_out_rec) = TxnFeeInfo::new(rng, fee_input, fee).unwrap();
         let rng = rng;
         let recv_memos = vec![&fee_out_rec, &mint_record]
@@ -1049,7 +1075,7 @@ impl<L: Ledger> TransactionState<L> {
             .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let (mint_note, sig_key) = jf_txn::mint::MintNote::generate(
+        let (mint_note, sig_key) = jf_aap::mint::MintNote::generate(
             rng,
             mint_record,
             *seed,
@@ -1094,13 +1120,7 @@ impl<L: Ledger> TransactionState<L> {
                 keypair: freezer_keypair,
             })
         }
-
-        let (fee_ro, fee_uid) = self.find_native_record_for_fee(&fee_keypair.pub_key(), fee)?;
-        let fee_input = FeeInput {
-            ro: fee_ro,
-            acc_member_witness: self.get_merkle_proof(fee_uid),
-            owner_keypair: fee_keypair,
-        };
+        let fee_input = self.find_fee_input(fee_keypair, fee)?;
 
         // find a proving key which can handle this transaction size
         let proving_key =
@@ -1223,21 +1243,27 @@ impl<L: Ledger> TransactionState<L> {
         })
     }
 
-    /// find a record and corresponding uid on the native asset type with enough
-    /// funds to pay transaction fee
-    fn find_native_record_for_fee(
+    /// find a record of the native asset type with enough funds to pay a transaction fee
+    fn find_fee_input<'l>(
         &self,
-        owner: &UserPubKey,
+        owner_keypair: &'l UserKeyPair,
         fee: u64,
-    ) -> Result<(RecordOpening, u64), TransactionError> {
-        self.find_records(
-            &AssetCode::native(),
-            owner,
-            FreezeFlag::Unfrozen,
-            fee,
-            Some(1),
-        )
-        .map(|(ros, _change)| ros.into_iter().next().unwrap())
+    ) -> Result<FeeInput<'l>, TransactionError> {
+        let (ro, uid) = self
+            .find_records(
+                &AssetCode::native(),
+                &owner_keypair.pub_key(),
+                FreezeFlag::Unfrozen,
+                fee,
+                Some(1),
+            )
+            .map(|(ros, _change)| ros.into_iter().next().unwrap())?;
+
+        Ok(FeeInput {
+            ro,
+            acc_member_witness: self.get_merkle_proof(uid),
+            owner_keypair,
+        })
     }
 
     fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {

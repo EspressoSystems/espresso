@@ -4,7 +4,7 @@ use crate::state::VerifierKeySet;
 use core::convert::TryFrom;
 use core::fmt::Debug;
 use jf_primitives::merkle_tree::FilledMTBuilder;
-use jf_txn::{
+use jf_aap::{
     errors::TxnApiError,
     structs::{AssetDefinition, Nullifier, RecordCommitment, RecordOpening},
     transfer::TransferNote,

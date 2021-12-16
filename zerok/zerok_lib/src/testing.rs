@@ -4,7 +4,7 @@ use crate::state::*;
 use crate::universal_params::UNIVERSAL_PARAM;
 use arbitrary::Arbitrary;
 use core::iter::once;
-use jf_txn::{
+use jf_aap::{
     keys::UserKeyPair,
     mint::MintNote,
     sign_receiver_memos,
@@ -26,7 +26,7 @@ use std::time::Instant;
 pub struct MultiXfrTestState {
     pub prng: ChaChaRng,
 
-    pub univ_setup: &'static jf_txn::proof::UniversalParam,
+    pub univ_setup: &'static jf_aap::proof::UniversalParam,
     pub prove_keys: ProverKeySet<'static>,
     pub verif_keys: VerifierKeySet,
 
@@ -149,7 +149,7 @@ impl MultiXfrTestState {
 
         fence();
         let (xfr_prove_key_22, xfr_verif_key_22, _) =
-            jf_txn::proof::transfer::preprocess(univ_setup, 2, 2, MERKLE_HEIGHT)?;
+            jf_aap::proof::transfer::preprocess(univ_setup, 2, 2, MERKLE_HEIGHT)?;
         fence();
         Self::update_timer(&mut timer, |t| println!("Generated xfr22: {}s", t));
 
@@ -157,14 +157,14 @@ impl MultiXfrTestState {
 
         fence();
         let (xfr_prove_key_33, xfr_verif_key_33, _) =
-            jf_txn::proof::transfer::preprocess(univ_setup, 3, 3, MERKLE_HEIGHT)?;
+            jf_aap::proof::transfer::preprocess(univ_setup, 3, 3, MERKLE_HEIGHT)?;
         fence();
         Self::update_timer(&mut timer, |t| println!("Generated xfr33: {}s", t));
 
         fence();
         report_mem();
         let (mint_prove_key, mint_verif_key, _) =
-            jf_txn::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT)?;
+            jf_aap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT)?;
         fence();
         Self::update_timer(&mut timer, |t| println!("Generated mint: {}s", t));
 
@@ -172,7 +172,7 @@ impl MultiXfrTestState {
 
         fence();
         let (freeze_prove_key, freeze_verif_key, _) =
-            jf_txn::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT)?;
+            jf_aap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT)?;
         fence();
         Self::update_timer(&mut timer, |t| println!("Generated freeze: {}s", t));
 
@@ -1143,9 +1143,9 @@ pub fn crypto_rng_from_seed(seed: [u8; 32]) -> ChaChaRng {
 mod tests {
     use super::*;
     use crate::util::canonical::CanonicalBytes;
+    use jf_aap::structs::NoteType;
+    use jf_aap::{utils::compute_universal_param_size, BaseField, MerkleLeafProof, NodeValue};
     use jf_primitives::merkle_tree::LookupResult;
-    use jf_txn::structs::NoteType;
-    use jf_txn::{utils::compute_universal_param_size, BaseField, MerkleLeafProof, NodeValue};
     use quickcheck::QuickCheck;
     use rand::Rng;
 
@@ -1302,13 +1302,13 @@ mod tests {
         let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
         println!("generating universal parameters");
 
-        let univ = jf_txn::proof::universal_setup(
+        let univ = jf_aap::proof::universal_setup(
             compute_universal_param_size(NoteType::Transfer, 1, 1, MERKLE_HEIGHT).unwrap(),
             &mut prng,
         )
         .unwrap();
         let (_prove, _verif, _constraint_count) =
-            jf_txn::proof::transfer::preprocess(&univ, 1, 1, MERKLE_HEIGHT).unwrap();
+            jf_aap::proof::transfer::preprocess(&univ, 1, 1, MERKLE_HEIGHT).unwrap();
 
         println!("CRS set up");
     }
@@ -1319,11 +1319,11 @@ mod tests {
         println!("generating universal parameters");
 
         let univ = &*UNIVERSAL_PARAM;
-        let (_, mint, _) = jf_txn::proof::mint::preprocess(univ, MERKLE_HEIGHT).unwrap();
-        let (_, xfr11, _) = jf_txn::proof::transfer::preprocess(univ, 1, 1, MERKLE_HEIGHT).unwrap();
-        let (_, xfr22, _) = jf_txn::proof::transfer::preprocess(univ, 2, 2, MERKLE_HEIGHT).unwrap();
-        let (_, freeze2, _) = jf_txn::proof::freeze::preprocess(univ, 2, MERKLE_HEIGHT).unwrap();
-        let (_, freeze3, _) = jf_txn::proof::freeze::preprocess(univ, 3, MERKLE_HEIGHT).unwrap();
+        let (_, mint, _) = jf_aap::proof::mint::preprocess(univ, MERKLE_HEIGHT).unwrap();
+        let (_, xfr11, _) = jf_aap::proof::transfer::preprocess(univ, 1, 1, MERKLE_HEIGHT).unwrap();
+        let (_, xfr22, _) = jf_aap::proof::transfer::preprocess(univ, 2, 2, MERKLE_HEIGHT).unwrap();
+        let (_, freeze2, _) = jf_aap::proof::freeze::preprocess(univ, 2, MERKLE_HEIGHT).unwrap();
+        let (_, freeze3, _) = jf_aap::proof::freeze::preprocess(univ, 3, MERKLE_HEIGHT).unwrap();
         println!("CRS set up");
 
         let validator = |xfrs: &[_], freezes: &[_]| {
@@ -1377,9 +1377,9 @@ mod tests {
         println!("generating universal parameters");
 
         let univ = &*UNIVERSAL_PARAM;
-        let (_, mint, _) = jf_txn::proof::mint::preprocess(univ, MERKLE_HEIGHT).unwrap();
-        let (_, xfr, _) = jf_txn::proof::transfer::preprocess(univ, 1, 1, MERKLE_HEIGHT).unwrap();
-        let (_, freeze, _) = jf_txn::proof::freeze::preprocess(univ, 2, MERKLE_HEIGHT).unwrap();
+        let (_, mint, _) = jf_aap::proof::mint::preprocess(univ, MERKLE_HEIGHT).unwrap();
+        let (_, xfr, _) = jf_aap::proof::transfer::preprocess(univ, 1, 1, MERKLE_HEIGHT).unwrap();
+        let (_, freeze, _) = jf_aap::proof::freeze::preprocess(univ, 2, MERKLE_HEIGHT).unwrap();
         println!("CRS set up");
 
         let verif_crs = VerifierKeySet {
@@ -1411,11 +1411,11 @@ mod tests {
         let univ_setup = &*UNIVERSAL_PARAM;
 
         let (xfr_prove_key, xfr_verif_key, _) =
-            jf_txn::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
+            jf_aap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
         let (mint_prove_key, mint_verif_key, _) =
-            jf_txn::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
+            jf_aap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
         let (freeze_prove_key, freeze_verif_key, _) =
-            jf_txn::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
+            jf_aap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
 
         for (l, k) in vec![
             ("xfr", CanonicalBytes::from(xfr_verif_key.clone())),

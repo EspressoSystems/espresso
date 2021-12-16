@@ -20,8 +20,8 @@
 // `-w KEY_FILE.pub` and pass the key pair to `random_wallet` with `-k KEY_FILE`.
 
 use async_std::task::sleep;
-use jf_txn::keys::{UserKeyPair, UserPubKey};
-use jf_txn::structs::{AssetCode, AssetPolicy};
+use jf_aap::keys::UserPubKey;
+use jf_aap::structs::{AssetCode, AssetPolicy};
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
@@ -34,8 +34,8 @@ use std::time::Duration;
 use structopt::StructOpt;
 use tracing::{event, Level};
 use wallet::hd::KeyTree;
+use wallet::loader::WalletLoader;
 use wallet::network::{NetworkBackend, Url};
-use wallet::persistence::WalletLoader;
 use wallet::{KeyError, WalletError};
 use zerok_lib::{api::client, universal_params::UNIVERSAL_PARAM, wallet};
 
@@ -62,7 +62,6 @@ struct Args {
 
 struct TrivialWalletLoader {
     dir: PathBuf,
-    key_path: Option<PathBuf>,
 }
 
 impl WalletLoader for TrivialWalletLoader {
@@ -80,21 +79,6 @@ impl WalletLoader for TrivialWalletLoader {
     fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)
     }
-
-    fn key_pair(&self) -> Option<UserKeyPair> {
-        self.key_path.clone().map(|path| {
-            let mut file = File::open(path).unwrap_or_else(|err| {
-                panic!("cannot open private key file: {}", err);
-            });
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes).unwrap_or_else(|err| {
-                panic!("error reading private key file: {}", err);
-            });
-            bincode::deserialize(&bytes).unwrap_or_else(|err| {
-                panic!("invalid private key file: {}", err);
-            })
-        })
-    }
 }
 
 async fn retry_delay() {
@@ -109,10 +93,7 @@ async fn main() {
 
     let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
 
-    let mut loader = TrivialWalletLoader {
-        dir: args.storage,
-        key_path: args.key_path,
-    };
+    let mut loader = TrivialWalletLoader { dir: args.storage };
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
         args.server.clone(),
@@ -122,15 +103,44 @@ async fn main() {
     )
     .expect("failed to connect to backend");
     let mut wallet = Wallet::new(backend).await.expect("error loading wallet");
+    match args.key_path {
+        Some(path) => {
+            let mut file = File::open(path).unwrap_or_else(|err| {
+                panic!("cannot open private key file: {}", err);
+            });
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes).unwrap_or_else(|err| {
+                panic!("error reading private key file: {}", err);
+            });
+            wallet
+                .add_user_key(
+                    bincode::deserialize(&bytes).unwrap_or_else(|err| {
+                        panic!("invalid private key file: {}", err);
+                    }),
+                    0,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!("error loading key: {}", err);
+                });
+        }
+        None => {
+            wallet.generate_user_key(None).await.unwrap_or_else(|err| {
+                panic!("error generating random key: {}", err);
+            });
+        }
+    }
+    let pub_key = wallet.pub_keys().await.remove(0);
+    let address = pub_key.address();
     event!(
         Level::INFO,
         "initialized wallet\n  address: {}\n  pub key: {}",
-        wallet.address(),
-        wallet.pub_key()
+        address,
+        pub_key,
     );
 
     // Wait for initial balance.
-    while wallet.balance(&AssetCode::native()).await == 0 {
+    while wallet.balance(&address, &AssetCode::native()).await == 0 {
         event!(Level::INFO, "waiting for initial balance");
         retry_delay().await;
     }
@@ -160,11 +170,11 @@ async fn main() {
         }
     };
     // If we don't yet have a balance of our asset type, mint some.
-    if wallet.balance(&my_asset.code).await == 0 {
+    if wallet.balance(&address, &my_asset.code).await == 0 {
         event!(Level::INFO, "minting my asset type {}", my_asset.code);
         loop {
             let txn = wallet
-                .mint(1, &my_asset.code, 1u64 << 32, wallet.address())
+                .mint(&address, 1, &my_asset.code, 1u64 << 32, address.clone())
                 .await
                 .expect("failed to generate mint transaction");
             let status = wallet
@@ -201,23 +211,23 @@ async fn main() {
             }
         };
         // Filter out our own public key and randomly choose one of the other ones to transfer to.
-        let me = wallet.pub_key();
-        let recipient = match peers.choose_weighted(&mut rng, |pk| if *pk == me { 0 } else { 1 }) {
-            Ok(recipient) => recipient,
-            Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
-                event!(Level::WARN, "no peers yet, retrying...");
-                retry_delay().await;
-                continue;
-            }
-            Err(err) => {
-                panic!("error in weighted choice of peer: {}", err);
-            }
-        };
+        let recipient =
+            match peers.choose_weighted(&mut rng, |pk| if *pk == pub_key { 0 } else { 1 }) {
+                Ok(recipient) => recipient,
+                Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
+                    event!(Level::WARN, "no peers yet, retrying...");
+                    retry_delay().await;
+                    continue;
+                }
+                Err(err) => {
+                    panic!("error in weighted choice of peer: {}", err);
+                }
+            };
 
         // Get a list of assets for which we have a non-zero balance.
         let mut asset_balances = vec![];
         for code in wallet.assets().await.keys() {
-            if wallet.balance(code).await > 0 {
+            if wallet.balance(&address, code).await > 0 {
                 asset_balances.push(*code);
             }
         }
@@ -243,7 +253,7 @@ async fn main() {
             recipient,
         );
         let txn = match wallet
-            .transfer(asset, &[(recipient.address(), amount)], fee)
+            .transfer(&address, asset, &[(recipient.address(), amount)], fee)
             .await
         {
             Ok(txn) => txn,

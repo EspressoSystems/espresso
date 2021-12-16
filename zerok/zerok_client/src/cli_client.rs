@@ -5,6 +5,7 @@ use escargot::CargoBuild;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -64,10 +65,18 @@ impl CliClient {
     }
 
     pub fn open(&mut self, wallet: usize) -> Result<&mut Self, String> {
+        self.open_with_args(wallet, [""; 0])
+    }
+
+    pub fn open_with_args<I, S>(&mut self, wallet: usize, args: I) -> Result<&mut Self, String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         while wallet >= self.wallets.len() {
             self.load(None)?;
         }
-        self.prev_output = self.wallets[wallet].open()?;
+        self.prev_output = self.wallets[wallet].open(args)?;
         Ok(self)
     }
 
@@ -76,6 +85,13 @@ impl CliClient {
             wallet.close();
         }
         Ok(self)
+    }
+
+    pub fn wallet_key_path(&mut self, wallet: usize) -> Result<PathBuf, String> {
+        while wallet >= self.wallets.len() {
+            self.load(None)?;
+        }
+        Ok(self.wallets[wallet].key_path.clone())
     }
 
     pub fn open_validator(&mut self, v: usize) -> Result<&mut Self, String> {
@@ -112,6 +128,7 @@ impl CliClient {
             .wallets
             .get_mut(id)
             .ok_or_else(|| format!("wallet {} is not open", id))?;
+        println!("{}> {}", id, command);
         self.prev_output = wallet.command(&command)?;
         Ok(self)
     }
@@ -326,17 +343,15 @@ impl Wallet {
         })
     }
 
-    fn open(&mut self) -> Result<Vec<String>, String> {
+    fn open<I, S>(&mut self, args: I) -> Result<Vec<String>, String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         if self.process.is_some() {
             return Err(String::from("wallet is already open"));
         }
         let mut child = cargo_run("zerok_client")?
-            .args([
-                "-k",
-                self.key_path.as_os_str().to_str().ok_or_else(|| {
-                    format!("failed to convert key_path {:?} to string", self.key_path)
-                })?,
-            ])
             .args([
                 "--storage",
                 self.storage.path().as_os_str().to_str().ok_or_else(|| {
@@ -347,6 +362,7 @@ impl Wallet {
                 })?,
             ])
             .arg("--non-interactive")
+            .args(args)
             .arg(&self.server)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -392,6 +408,7 @@ impl Wallet {
                 child.stdout.read_line(&mut line).map_err(err)?;
                 let line = std::mem::take(&mut line);
                 let line = line.trim();
+                println!("< {}", line);
                 if line.starts_with("Error loading wallet") {
                     return Err(String::from(line));
                 }
@@ -399,7 +416,11 @@ impl Wallet {
                     lines.push(String::from(line));
                 }
                 match line {
-                    ">" | "Enter password:" | "Create password:" | "Retype password:" => {
+                    ">"
+                    | "Enter password:"
+                    | "Create password:"
+                    | "Retype password:"
+                    | "Enter mnemonic phrase:" => {
                         break;
                     }
                     _ => {}

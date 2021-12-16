@@ -221,7 +221,7 @@ pub fn ser_test(args: TokenStream, input: TokenStream) -> TokenStream {
                     use arbitrary::Unstructured;
                     use rand_chacha::{rand_core::{RngCore, SeedableRng}, ChaChaRng};
                     let mut rng = ChaChaRng::from_seed([42u8; 32]);
-                    let mut data = vec![0u8; 1024];
+                    let mut data = vec![0u8; 2048];
                     rng.fill_bytes(&mut data);
                     Unstructured::new(&data).arbitrary::#ty().unwrap()
                 }

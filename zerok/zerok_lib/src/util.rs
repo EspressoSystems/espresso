@@ -17,17 +17,31 @@ pub mod canonical {
         Ok(bytes)
     }
 
+    pub fn serialize_unchecked<T: CanonicalSerialize>(
+        x: &T,
+    ) -> Result<Vec<u8>, SerializationError> {
+        let mut bytes = Vec::new();
+        x.serialize_unchecked(&mut bytes)?;
+        Ok(bytes)
+    }
+
     pub fn deserialize<T: CanonicalDeserialize>(bytes: &[u8]) -> Result<T, SerializationError> {
         T::deserialize(bytes)
+    }
+
+    pub fn deserialize_unchecked<T: CanonicalDeserialize>(
+        bytes: &[u8],
+    ) -> Result<T, SerializationError> {
+        T::deserialize_unchecked(bytes)
     }
 }
 
 pub mod arbitrary_wrappers {
     use arbitrary::{Arbitrary, Unstructured};
     use ark_std::UniformRand;
-    use jf_txn::keys::{UserAddress, UserKeyPair};
-    use jf_txn::structs::{FreezeFlag, Nullifier, ReceiverMemo, RecordOpening};
-    use jf_txn::{BaseField, KeyPair};
+    use jf_aap::keys::{UserAddress, UserKeyPair};
+    use jf_aap::structs::{FreezeFlag, Nullifier, ReceiverMemo, RecordOpening};
+    use jf_aap::{BaseField, KeyPair};
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 
     pub struct ArbitraryNullifier(Nullifier);

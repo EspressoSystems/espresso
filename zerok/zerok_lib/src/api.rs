@@ -27,7 +27,7 @@ use fmt::{Display, Formatter};
 use futures::future::BoxFuture;
 use futures::prelude::*;
 use generic_array::{ArrayLength, GenericArray};
-use jf_txn::{
+use jf_aap::{
     structs::{ReceiverMemo, RecordCommitment},
     Signature, TransactionNote,
 };
@@ -80,13 +80,17 @@ pub struct BlockId(pub usize);
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
 pub struct TransactionId(pub BlockId, pub usize);
 
-// UserAddress from jf_txn is just a type alias for VerKey, which serializes with the tag VERKEY,
+// UserAddress from jf_aap is just a type alias for VerKey, which serializes with the tag VERKEY,
 // which is confusing. This newtype struct lets us a define a more user-friendly tag.
 #[tagged_blob("ADDR")]
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
-pub struct UserAddress(pub jf_txn::keys::UserAddress);
+pub struct UserAddress(pub jf_aap::keys::UserAddress);
 
-pub use jf_txn::keys::UserPubKey;
+pub use jf_aap::keys::UserPubKey;
+
+#[tagged_blob("RECPROOF")]
+#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
+pub struct MerklePath(pub jf_aap::MerklePath);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommittedBlock {
