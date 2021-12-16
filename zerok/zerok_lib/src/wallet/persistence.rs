@@ -466,7 +466,7 @@ mod tests {
             ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, ValidatorState,
             VerifierKeySet, MERKLE_HEIGHT,
         },
-        txn_builder::{PendingTransaction, TransactionUID},
+        txn_builder::{PendingTransaction, TransactionInfo, TransactionUID},
         universal_params::UNIVERSAL_PARAM,
     };
     use jf_aap::{
@@ -663,15 +663,20 @@ mod tests {
                 .num_leaves,
             &user_key,
         );
-        let (receiver_memos, signature) = random_memos(&mut rng, &user_key);
+        let (memos, sig) = random_memos(&mut rng, &user_key);
         let txn_uid = TransactionUID(random_txn_hash(&mut rng));
         let txn = PendingTransaction {
-            account: user_key.address(),
-            receiver_memos,
-            signature,
-            freeze_outputs: random_ros(&mut rng, &user_key),
+            info: TransactionInfo {
+                account: user_key.address(),
+                memos,
+                sig,
+                freeze_outputs: random_ros(&mut rng, &user_key),
+                uid: Some(txn_uid.clone()),
+                history: None,
+                inputs: random_ros(&mut rng, &user_key),
+                outputs: random_ros(&mut rng, &user_key),
+            },
             timeout: 5000,
-            uid: txn_uid.clone(),
             hash: random_txn_hash(&mut rng),
         };
         stored.txn_state.transactions.insert_pending(txn);
