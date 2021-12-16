@@ -742,11 +742,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                             .push((pending.uid, TransactionStatus::AwaitingMemos));
                     }
 
-                    if let Some(note) = txn.as_aap() {
-                        // This is someone else's transaction but we can audit it.
-                        self.audit_transaction(session, &note, &mut this_txn_uids)
-                            .await;
-                    }
+                    // This is someone else's transaction but we can audit it.
+                    self.audit_transaction(session, &txn, &mut this_txn_uids)
+                        .await;
 
                     // Prune the record Merkle tree of records we don't care about.
                     for (uid, remember) in this_txn_uids {
@@ -1004,43 +1002,18 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     async fn audit_transaction(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        txn: &TransactionNote,
+        txn: &Transaction<L>,
         uids: &mut [(u64, bool)],
     ) {
         // Try to decrypt auditor memos.
-        let audit_data = match txn {
-            TransactionNote::Transfer(xfr) => {
-                let mut assets = self.auditable_assets.values();
-                loop {
-                    if let Some(asset) = assets.next() {
-                        let audit_key = &self.audit_keys[asset.policy_ref().auditor_pub_key()];
-                        if let Ok(data) = audit_key.open_transfer_audit_memo(asset, xfr) {
-                            break Some((asset, data));
-                        }
-                    } else {
-                        break None;
-                    }
-                }
-            }
-            TransactionNote::Mint(mint) => self
-                .audit_keys
-                .get(mint.mint_asset_def.policy_ref().auditor_pub_key())
-                .and_then(|audit_key| {
-                    audit_key
-                        .open_mint_audit_memo(mint)
-                        .ok()
-                        .map(|audit_output| (&mint.mint_asset_def, (vec![], vec![audit_output])))
-                }),
-            TransactionNote::Freeze(_) => None,
-        };
-        if let Some((asset_def, (_, audit_outputs))) = audit_data {
+        if let Ok(memo) = txn.open_audit_memo(&self.auditable_assets, &self.audit_keys) {
             //todo !jeb.bearer eventually, we will probably want to save all the audit memos for
             // the whole transaction (inputs and outputs) regardless of whether any of the outputs
             // are freezeable, just for general auditing purposes.
 
             // the first uid corresponds to the fee change output, which has no audit memo, so skip
             // that one
-            for ((uid, remember), output) in uids.iter_mut().skip(1).zip(audit_outputs) {
+            for ((uid, remember), output) in uids.iter_mut().skip(1).zip(memo.outputs) {
                 let pub_key = match output.user_address {
                     Some(address) => session.backend.get_public_key(&address).await.ok(),
                     None => None,
@@ -1052,11 +1025,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     // this record, save it in our database for later freezing.
                     if let Some(freeze_key) = self
                         .freeze_keys
-                        .get(asset_def.policy_ref().freezer_pub_key())
+                        .get(memo.asset.policy_ref().freezer_pub_key())
                     {
                         let record_opening = RecordOpening {
                             amount,
-                            asset_def: asset_def.clone(),
+                            asset_def: memo.asset.clone(),
                             pub_key,
                             freeze_flag: FreezeFlag::Unfrozen,
                             blind,

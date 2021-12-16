@@ -4,12 +4,27 @@ use crate::state::{
 };
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use jf_txn::{
-    structs::{Nullifier, RecordCommitment},
+    keys::{AuditorKeyPair, AuditorPubKey},
+    mint::MintNote,
+    transfer::TransferNote,
+    structs::{AssetCode, AssetDefinition, AuditData, Nullifier, RecordCommitment},
     TransactionNote,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
+
+pub struct AuditMemoOpening {
+    pub asset: AssetDefinition,
+    pub inputs: Vec<AuditData>,
+    pub outputs: Vec<AuditData>,
+}
+
+pub enum AuditError {
+    UnauditableAsset,
+    NoAuditMemos,
+}
 
 pub mod traits {
     use super::*;
@@ -58,7 +73,19 @@ pub mod traits {
             proofs: Vec<<Self::NullifierSet as NullifierSet>::Proof>,
         ) -> Self;
 
-        fn as_aap(&self) -> Option<TransactionNote>;
+        // Given a collection of asset types that the caller is able to audit, attempt to open the
+        // audit memos attached to this transaction.
+        //
+        // `auditable_assets` should be the set of asset types which the caller can audit, indexed
+        // by asset code. This determines which asset types can be audited by this method.
+        // `auditor_keys` is the caller's collection of auditing key pairs, indexed by public key.
+        // `auditor_keys` must contain every public key which is listed as an auditor in the policy
+        // of one of the `auditable_assets`.
+        fn open_audit_memo(
+            &self,
+            auditable_assets: &HashMap<AssetCode, AssetDefinition>,
+            auditor_keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
+        ) -> Result<AuditMemoOpening, AuditError>;
         fn proven_nullifiers(
             &self,
         ) -> Vec<(Nullifier, <Self::NullifierSet as NullifierSet>::Proof)>;
@@ -186,6 +213,52 @@ impl traits::TransactionKind for AAPTransactionKind {
     }
 }
 
+pub fn open_aap_audit_memo(
+    assets: &HashMap<AssetCode, AssetDefinition>,
+    keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
+    txn: &TransactionNote,
+) -> Result<AuditMemoOpening, AuditError> {
+    match txn {
+        TransactionNote::Transfer(xfr) => open_xfr_audit_memo(assets, keys, xfr),
+        TransactionNote::Mint(mint) => open_mint_audit_memo(keys, mint),
+        TransactionNote::Freeze(_) => Err(AuditError::NoAuditMemos),
+    }
+}
+
+pub fn open_xfr_audit_memo(
+    assets: &HashMap<AssetCode, AssetDefinition>,
+    keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
+    xfr: &TransferNote,
+) -> Result<AuditMemoOpening, AuditError> {
+    for asset in assets.values() {
+        let audit_key = &keys[asset.policy_ref().auditor_pub_key()];
+        if let Ok((inputs, outputs)) = audit_key.open_transfer_audit_memo(asset, xfr) {
+            return Ok(AuditMemoOpening {
+                asset: asset.clone(),
+                inputs,
+                outputs,
+            });
+        }
+    }
+    Err(AuditError::UnauditableAsset)
+}
+
+pub fn open_mint_audit_memo(
+    keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
+    mint: &MintNote,
+) -> Result<AuditMemoOpening, AuditError> {
+    keys.get(mint.mint_asset_def.policy_ref().auditor_pub_key())
+        .ok_or(AuditError::UnauditableAsset)
+        .map(|audit_key| {
+            let output = audit_key.open_mint_audit_memo(mint).unwrap();
+            AuditMemoOpening {
+                asset: mint.mint_asset_def.clone(),
+                inputs: vec![],
+                outputs: vec![output],
+            }
+        })
+}
+
 impl traits::Transaction for ElaboratedTransaction {
     type NullifierSet = SetMerkleTree;
     type Hash = ElaboratedTransactionHash;
@@ -195,8 +268,12 @@ impl traits::Transaction for ElaboratedTransaction {
         Self { txn: note, proofs }
     }
 
-    fn as_aap(&self) -> Option<TransactionNote> {
-        Some(self.txn.clone())
+    fn open_audit_memo(
+        &self,
+        assets: &HashMap<AssetCode, AssetDefinition>,
+        keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
+    ) -> Result<AuditMemoOpening, AuditError> {
+        open_aap_audit_memo(assets, keys, &self.txn)
     }
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {

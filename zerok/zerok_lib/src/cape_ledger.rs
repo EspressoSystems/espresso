@@ -1,7 +1,10 @@
 use crate::{
     api::FromError,
     cape_state::*,
-    ledger::{traits::*, AAPTransactionKind},
+    ledger::{
+        open_aap_audit_memo, open_xfr_audit_memo, traits::*, AAPTransactionKind, AuditError,
+        AuditMemoOpening,
+    },
     node::{LedgerEvent, QueryServiceError},
     state::{key_set::SizedKey, ProverKeySet, ValidationError, VerifierKeySet, MERKLE_HEIGHT},
     txn_builder::TransactionState,
@@ -21,9 +24,11 @@ use futures::{
 };
 use itertools::izip;
 use jf_txn::{
-    keys::{UserAddress, UserKeyPair, UserPubKey},
+    keys::{AuditorKeyPair, AuditorPubKey, UserAddress, UserKeyPair, UserPubKey},
     proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
-    structs::{AssetDefinition, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
+    structs::{
+        AssetCode, AssetDefinition, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening,
+    },
     MerklePath, MerkleTree, Signature, TransactionNote,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
@@ -118,18 +123,19 @@ impl Transaction for CapeTransition {
         Self::Transaction(CapeTransaction::AAP(note))
     }
 
-    fn as_aap(&self) -> Option<TransactionNote> {
+    fn open_audit_memo(
+        &self,
+        assets: &HashMap<AssetCode, AssetDefinition>,
+        keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
+    ) -> Result<AuditMemoOpening, AuditError> {
         match self {
-            Self::Transaction(CapeTransaction::AAP(note)) => Some(note.clone()),
-            Self::Transaction(CapeTransaction::Burn { xfr, .. }) =>
-            // What to do in this case? Currently, this function is only used for auditing, so
-            // it probably makes sense to treat burns as transfers so we get thet most
-            // information possible out of auditing. But in general it may not be great to
-            // identify burns and transfers.
-            {
-                Some(TransactionNote::Transfer(xfr.clone()))
+            Self::Transaction(CapeTransaction::AAP(note)) => {
+                open_aap_audit_memo(assets, keys, note)
             }
-            _ => None,
+            Self::Transaction(CapeTransaction::Burn { xfr, .. }) => {
+                open_xfr_audit_memo(assets, keys, xfr)
+            }
+            _ => Err(AuditError::NoAuditMemos),
         }
     }
 
