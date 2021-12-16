@@ -827,7 +827,7 @@ impl<'a, Meta: 'a + Serialize + DeserializeOwned + Send> LocalCapeWallet<'a, Met
                 aap_asset,
                 &[(account.clone(), amount)],
                 fee,
-                &bound_data,
+                bound_data,
             )
             .await?;
         assert!(info.outputs.len() >= 2);
