@@ -747,6 +747,7 @@ pub mod test_helpers {
     struct MockCapeWalletLoader {
         dir: TempDir,
         key: KeyTree,
+        key_pair: UserKeyPair,
     }
 
     impl WalletLoader for MockCapeWalletLoader {
@@ -762,6 +763,10 @@ pub mod test_helpers {
 
         fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
             Ok(self.key.clone())
+        }
+
+        fn key_pair(&self) -> Option<UserKeyPair> {
+            Some(self.key_pair.clone())
         }
     }
 
@@ -779,7 +784,7 @@ pub mod test_helpers {
         // non-zero initial grant. Collect user-specific info (keys and record openings
         // corresponding to grants) in `users`, which will be used to create the wallets later.
         let mut record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
-        let mut users: Vec<Vec<(RecordOpening, u64)>> = vec![];
+        let mut users: Vec<(UserKeyPair, Vec<(RecordOpening, u64)>)> = vec![];
         for amount in initial_grants {
             let key = UserKeyPair::generate(&mut rng);
             if amount > 0 {
@@ -793,9 +798,9 @@ pub mod test_helpers {
                 let comm = RecordCommitment::from(&ro);
                 let uid = record_merkle_tree.num_leaves();
                 record_merkle_tree.push(comm.to_field_element());
-                users.push(vec![(ro, uid)]);
+                users.push((key, vec![(ro, uid)]));
             } else {
-                users.push(vec![]);
+                users.push((key, vec![]));
             }
         }
 
@@ -840,11 +845,12 @@ pub mod test_helpers {
         // Create a wallet for each user based on the validator and the per-user information
         // computed above.
         let wallets: Vec<Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>> = iter(users)
-            .then(|initial_grants| {
+            .then(|(key_pair, initial_grants)| {
                 let ledger = ledger.clone();
                 let mut loader = MockCapeWalletLoader {
                     dir: TempDir::new("cape_wallet").unwrap(),
                     key: KeyTree::random(&mut rng),
+                    key_pair,
                 };
                 println!("init grants: {:?}", initial_grants);
                 async move {
