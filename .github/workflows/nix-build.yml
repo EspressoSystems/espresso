@@ -1,0 +1,49 @@
+name: Nix Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  nix-build:
+    runs-on: self-hosted
+    container:
+      image: nixos/nix:2.3.12
+      volumes:
+        - github_nix:/nix
+    steps:
+      - uses: styfle/cancel-workflow-action@0.9.1
+        name: Cancel Outdated Builds
+        with:
+          all_but_latest: true
+          access_token: ${{ github.token }}
+
+      - name: Install Tools
+        run: |
+          apk add git
+
+      - uses: actions/checkout@v2
+        name: Checkout Repository
+
+      - name: Initialize Nix Shell
+        run: nix-shell --run "echo Init"
+
+      - name: Configure Git
+        run: |
+          git config --global url."https://tl-ancients:${{ secrets.GITLAB_PAT }}@gitlab.com".insteadOf git://gitlab.com
+          git config --global url."https://tl-ancients:${{ secrets.GITLAB_PAT }}@gitlab.com".insteadOf ssh://git@gitlab.com
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com".insteadOf git://github.com
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com".insteadOf ssh://git@github.com
+          git config --global url."https://dl.cloudsmith.io/${{ secrets.CLOUDSMITH_ENTITLEMENT }}/".insteadOf https://dl.cloudsmith.io/basic/
+
+      - name: Linting
+        run: nix-shell --run "cargo fmt -- --check"
+
+      - name: Run Clippy
+        run: nix-shell --run "cargo clippy --workspace"
+
+      - name: Run Audit
+        run: nix-shell --run "cargo audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071"
+
+      - name: Run Tests
+        run: nix-shell --run "cargo test --workspace --release --no-run"
+        timeout-minutes: 30
