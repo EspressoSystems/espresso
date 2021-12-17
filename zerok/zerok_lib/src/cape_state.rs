@@ -512,11 +512,12 @@ impl CapeContractState {
                         };
 
                         verif_keys.push(vkey);
-                        if !new_state
-                            .ledger
-                            .past_record_merkle_roots
-                            .0
-                            .contains(&merkle_root)
+                        if merkle_root != new_state.ledger.record_merkle_commitment.root_value
+                            && !new_state
+                                .ledger
+                                .past_record_merkle_roots
+                                .0
+                                .contains(&merkle_root)
                         {
                             return Err(CapeValidationError::BadMerkleRoot {});
                         }
