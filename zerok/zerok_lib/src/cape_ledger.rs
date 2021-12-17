@@ -733,6 +733,8 @@ pub mod test_helpers {
         universal_params::UNIVERSAL_PARAM,
         wallet::{hd::KeyTree, Wallet},
     };
+    use jf_txn::structs::AssetCode;
+
     use jf_txn::{
         structs::{FreezeFlag, RecordCommitment},
         MerkleTree, TransactionVerifyingKey,
@@ -834,22 +836,33 @@ pub mod test_helpers {
             verif_crs,
             record_merkle_tree,
         )));
-        let mut loader = MockCapeWalletLoader {
-            dir: TempDir::new("cape_wallet").unwrap(),
-            key: KeyTree::random(&mut rng),
-        };
 
         // Create a wallet for each user based on the validator and the per-user information
         // computed above.
-        let mut wallets: Vec<Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>> = vec![];
-        for initial_grants in users {
-            let backend =
-                LocalCapeBackend::new(ledger.clone(), &mut loader, initial_grants.to_vec())
-                    .unwrap();
-            let wallet: Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger> =
-                Wallet::new(backend).await.unwrap();
-            wallets.push(wallet);
-        }
+        let wallets: Vec<Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>> = iter(users)
+            .then(|initial_grants| {
+                let ledger = ledger.clone();
+                let mut loader = MockCapeWalletLoader {
+                    dir: TempDir::new("cape_wallet").unwrap(),
+                    key: KeyTree::random(&mut rng),
+                };
+                println!("init grants: {:?}", initial_grants);
+                async move {
+                    Wallet::new(
+                        LocalCapeBackend::new(ledger, &mut loader, initial_grants.to_vec())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap()
+                }
+            })
+            .collect()
+            .await;
+        //TODO !keyao Balance should be non-zero.
+        println!(
+            "balance: {:?}",
+            &wallets[0].balance(&AssetCode::native()).await
+        );
 
         println!("Wallets set up: {}s", now.elapsed().as_secs_f32());
         *now = Instant::now();
