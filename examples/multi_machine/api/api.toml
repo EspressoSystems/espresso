@@ -216,12 +216,16 @@ Get the event with the designated index.
 # TODO !corbett Consider increasing the syntaxtic distance between freeze and unfreeze.
 # TODO !corbett Is there an operation that both defines an asset and issues units of it? Should this be a single operation or two separate operations? Is it allowed to issue more of an asset later after the asset is already defined?
 # TODO !corbett Is okay to use 'mint' as the term for defining and issuing an asset?
+# TODO !corbett getinfo isn't the only entry point for getting information. How do we make it consistent?
+# TODO !corbett several entries have 'get' as a prefix. Some don't. It's unclear whether 'get' is useful.
+# TODO !corbett Between the words 'transfer' and 'send', we use transfer more often, but send seems more specific and intuitive. Send is also shorter.
+# TODO !corbett 'send' and 'spend' are annoyingly similar.
 
 [route.newwallet]
 PATH = ["newwallet/:mnemonic"]
 ":mnemonic" = "TaggedBase64"
 DOC = """
-Creates a new the wallet with the given mnemonic.
+Creates and opens a new the wallet with the given mnemonic.
 """
 
 [route.openwallet]
@@ -253,13 +257,13 @@ Get all balances for the current wallet, all the balances for a given address, o
 """
 
 [route.getinfo]
-PATH = ["getinfo", "getinfo/address", "getinfo/key", "getinfo/asset"]
+PATH = ["getinfo", "getinfo/address", "getinfo/key", "getinfo/asset", "getinfo/asset/:asset", "getinfo/freezekey", "getinfo/sendkey", "getinfo/tracekey"]
 DOC = """
 Get the addresses, public keys, and asset types for the current wallet.
 """
 
 [route.genkey]
-PATH = ["getkey/transfer", "genkey/trace", "genkey/freeze"]
+PATH = ["getkey/send", "genkey/trace", "genkey/freeze"]
 DOC = """
 Generate a key of the given type to be used to define assets.
 """
@@ -273,13 +277,13 @@ DOC = """
 Import the given key into the current wallet.
 """
 
-[route.transfer]
-PATH = ["xfr/from/:asset/to/:recipient/amount/:amount", "xfr/to/:asset/from/:sender/amount/:amount"]
+[route.send]
+PATH = ["send/amount/:amount/asset/:asset/recipient/:recipient"]
+":amount" = "Integer"
 ":asset" = "TaggedBase64"
 ":recipient" = "TaggedBase64"
-":amount" = "Integer"
 DOC = """
-Transfer amount units from the sender to the recipient. Returns a serialized receipt which can be used to track/wait on the transaction.
+Transfer amount units of the given asset to the recipient. Returns a serialized receipt which can be used to track the transaction through the validation process.
 """
 
 [route.mint]
@@ -292,6 +296,16 @@ PATH = ["mint/:description/amount/:amount/spendkey/:spendkey/freezekey/:freezeke
 DOC = """
 Mint amount units of a given asset code controlled by the current wallet. Reports the asset code associated with the given keys. Keys are generated with genkey.
 """
+
+# TODO !corbett This is also called sponsor, but that seems harder to understand than 'deposit' or 'wrap'.
+[route.deposit]
+PATH = ["deposit/erc20/:erc20/amount/:amount"]
+":erc20" = "TaggedBase64"
+":amount" = "Integer"
+DOC = """
+Deposit (wrap) ERC-20 into CAPE.
+"""
+
 
 [route.freeze]
 PATH = ["freeze/:address/:freezekey/fee/:feeaddress/:feeamount"]
@@ -316,4 +330,13 @@ PATH = ["trace/:asset", "trace/key/:key"]
 ":key" = "TaggedBase64"
 DOC = """
 Trace the given asset or trace the asset associated with the given tracing key.
+"""
+
+[route.transaction]
+PATH = ["transaction/list", "transaction/list/:from/:count", "transaction/status/:receipt", "transaction/await/:reciept"]
+":from" = "TaggedBase64"
+":reciept" = "TaggedBase64"
+":count" = "Integer"
+DOC = """
+List transactions, poll the status of a given transaction, or await events for a given transaction.
 """
