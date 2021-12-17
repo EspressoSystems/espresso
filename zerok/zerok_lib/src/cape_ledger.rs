@@ -740,12 +740,13 @@ pub mod test_helpers {
         MerkleTree, TransactionVerifyingKey,
     };
     use key_set::KeySet;
+    // use std::path::Path;
     use std::path::PathBuf;
     use std::time::Instant;
     use tempdir::TempDir;
 
     struct MockCapeWalletLoader {
-        dir: TempDir,
+        path: PathBuf,
         key: KeyTree,
         key_pair: UserKeyPair,
     }
@@ -754,7 +755,7 @@ pub mod test_helpers {
         type Meta = ();
 
         fn location(&self) -> PathBuf {
-            self.dir.path().into()
+            self.path.clone()
         }
 
         fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError> {
@@ -777,6 +778,7 @@ pub mod test_helpers {
     ) -> (
         Arc<Mutex<LocalCapeLedger>>,
         Vec<Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>>,
+        PathBuf,
     ) {
         let mut rng = ChaChaRng::from_seed([42u8; 32]);
 
@@ -844,11 +846,12 @@ pub mod test_helpers {
 
         // Create a wallet for each user based on the validator and the per-user information
         // computed above.
+        let temp_path = TempDir::new("cape_wallet").unwrap().into_path();
         let wallets: Vec<Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>> = iter(users)
             .then(|(key_pair, initial_grants)| {
                 let ledger = ledger.clone();
                 let mut loader = MockCapeWalletLoader {
-                    dir: TempDir::new("cape_wallet").unwrap(),
+                    path: temp_path.clone(),
                     key: KeyTree::random(&mut rng),
                     key_pair,
                 };
@@ -872,7 +875,7 @@ pub mod test_helpers {
 
         println!("Wallets set up: {}s", now.elapsed().as_secs_f32());
         *now = Instant::now();
-        (ledger, wallets)
+        (ledger, wallets, temp_path)
     }
 
     // // This function checks probabilistic equality for two wallet states, comparing hashes for
@@ -950,6 +953,8 @@ mod tests {
     use crate::wallet::Wallet;
     use jf_txn::structs::AssetCode;
     use std::time::Instant;
+    // use tempdir::TempDir;
+    // use std::fs;
     use test_helpers::*;
 
     async fn test_two_wallets() {
@@ -964,7 +969,8 @@ mod tests {
         // native coins from Alice.
         let alice_grant = 5;
         let bob_grant = 1;
-        let (_ledger, mut wallets) = create_test_network(
+        // TODO !keyao Delete temp_path.
+        let (_ledger, mut wallets, _temp_path) = create_test_network(
             &[(num_inputs, num_outputs)],
             vec![alice_grant, bob_grant],
             &mut now,
@@ -1042,6 +1048,8 @@ mod tests {
 
         check_balance(&wallets[0], 3, alice_initial_native_balance, 1, &coin).await;
         check_balance(&wallets[1], 2, bob_initial_native_balance, 1, &coin).await;
+
+        // fs::remove_dir_all(temp_path).unwrap();
     }
 
     #[async_std::test]
