@@ -511,13 +511,13 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         // `records` should be _almost_ completely sparse. However, even a fully pruned Merkle tree
         // contains the last leaf appended, but as a new wallet, we don't care about _any_ of the
         // leaves, so make a note to forget the last one once more leaves have been appended.
-        let records = MerkleTree::restore_from_frontier(
-            network.contract.ledger.record_merkle_commitment,
-            &network.contract.ledger.record_merkle_frontier,
-        )
-        .unwrap();
-        let merkle_leaf_to_forget = if records.num_leaves() > 0 {
-            Some(records.num_leaves() - 1)
+        //
+        // TODO: Better way of getting `record_mt`: when we get initial grants, grab the MerklePaths
+        // from somewhere (probably the complete tree in the query service) and remember them into
+        // our sparse tree.
+        let record_mt = network.records.clone();
+        let merkle_leaf_to_forget = if record_mt.num_leaves() > 0 {
+            Some(record_mt.num_leaves() - 1)
         } else {
             None
         };
@@ -528,10 +528,10 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                 key_pair: key_pair.clone(),
             }),
             txn_state: TransactionState {
-                validator: CapeTruster::new(network.block_height, records.num_leaves()),
+                validator: CapeTruster::new(network.block_height, record_mt.num_leaves()),
                 nullifiers: Default::default(),
                 // Completely sparse nullifier set
-                record_mt: records,
+                record_mt,
                 merkle_leaf_to_forget,
                 now: 0,
                 records: {
@@ -733,7 +733,6 @@ pub mod test_helpers {
         universal_params::UNIVERSAL_PARAM,
         wallet::{hd::KeyTree, Wallet},
     };
-    use jf_txn::structs::AssetCode;
 
     use jf_txn::{
         structs::{FreezeFlag, RecordCommitment},
@@ -778,7 +777,7 @@ pub mod test_helpers {
     ) -> (
         Arc<Mutex<LocalCapeLedger>>,
         Vec<Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>>,
-        PathBuf,
+        Vec<PathBuf>,
     ) {
         let mut rng = ChaChaRng::from_seed([42u8; 32]);
 
@@ -846,16 +845,20 @@ pub mod test_helpers {
 
         // Create a wallet for each user based on the validator and the per-user information
         // computed above.
-        let temp_path = TempDir::new("cape_wallet").unwrap().into_path();
+        let mut temp_paths: Vec<PathBuf> = Vec::new();
         let wallets: Vec<Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>> = iter(users)
-            .then(|(key_pair, initial_grants)| {
+            .enumerate()
+            .then(|(i, (key_pair, initial_grants))| {
                 let ledger = ledger.clone();
+                let path = TempDir::new(&format!("cape_wallet_{}", i))
+                    .unwrap()
+                    .into_path();
+                temp_paths.push(path.clone());
                 let mut loader = MockCapeWalletLoader {
-                    path: temp_path.clone(),
+                    path: path.clone(),
                     key: KeyTree::random(&mut rng),
                     key_pair,
                 };
-                println!("init grants: {:?}", initial_grants);
                 async move {
                     Wallet::new(
                         LocalCapeBackend::new(ledger, &mut loader, initial_grants.to_vec())
@@ -867,15 +870,10 @@ pub mod test_helpers {
             })
             .collect()
             .await;
-        //TODO !keyao Balance should be non-zero.
-        println!(
-            "balance: {:?}",
-            &wallets[0].balance(&AssetCode::native()).await
-        );
 
         println!("Wallets set up: {}s", now.elapsed().as_secs_f32());
         *now = Instant::now();
-        (ledger, wallets, temp_path)
+        (ledger, wallets, temp_paths)
     }
 
     // // This function checks probabilistic equality for two wallet states, comparing hashes for
@@ -969,8 +967,8 @@ mod tests {
         // native coins from Alice.
         let alice_grant = 5;
         let bob_grant = 1;
-        // TODO !keyao Delete temp_path.
-        let (_ledger, mut wallets, _temp_path) = create_test_network(
+        // TODO !keyao Delete temp_paths.
+        let (_ledger, mut wallets, _temp_paths) = create_test_network(
             &[(num_inputs, num_outputs)],
             vec![alice_grant, bob_grant],
             &mut now,
@@ -980,8 +978,7 @@ mod tests {
         let bob_address = wallets[1].address();
 
         // Verify initial wallet state.
-        // TODO !keyao assertion fails
-        // assert_ne!(alice_address, bob_address);
+        assert_ne!(alice_address, bob_address);
         assert_eq!(wallets[0].balance(&AssetCode::native()).await, alice_grant);
         assert_eq!(wallets[1].balance(&AssetCode::native()).await, bob_grant);
 
