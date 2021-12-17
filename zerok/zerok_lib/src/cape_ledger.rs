@@ -1,7 +1,10 @@
 use crate::{
     api::FromError,
     cape_state::*,
-    ledger::{traits::*, AAPTransactionKind},
+    ledger::{
+        open_aap_audit_memo, open_xfr_audit_memo, traits::*, AAPTransactionKind, AuditError,
+        AuditMemoOpening,
+    },
     node::{LedgerEvent, QueryServiceError},
     state::{key_set::SizedKey, ProverKeySet, ValidationError, VerifierKeySet, MERKLE_HEIGHT},
     txn_builder::RecordDatabase,
@@ -9,8 +12,8 @@ use crate::{
     universal_params::UNIVERSAL_PARAM,
     util::commit::{Commitment, Committable, RawCommitmentBuilder},
     wallet::{
-        persistence::{AtomicWalletStorage, WalletLoader},
-        CryptoError, WalletBackend, WalletError, WalletImmutableKeySet, WalletState,
+        hd::KeyTree, loader::WalletLoader, persistence::AtomicWalletStorage, CryptoError,
+        WalletBackend, WalletError, WalletState,
     },
 };
 use async_std::sync::{Mutex, MutexGuard};
@@ -21,13 +24,14 @@ use futures::{
     stream::{iter, Stream},
 };
 use itertools::izip;
-use jf_txn::{
-    keys::{UserAddress, UserKeyPair, UserPubKey},
+use jf_aap::{
+    keys::{AuditorKeyPair, AuditorPubKey, UserAddress, UserPubKey},
     proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
-    structs::{AssetDefinition, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
+    structs::{
+        AssetCode, AssetDefinition, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening,
+    },
     MerklePath, MerkleTree, Signature, TransactionNote,
 };
-use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;
 use std::collections::{BTreeMap, HashMap};
@@ -119,18 +123,19 @@ impl Transaction for CapeTransition {
         Self::Transaction(CapeTransaction::AAP(note))
     }
 
-    fn as_aap(&self) -> Option<TransactionNote> {
+    fn open_audit_memo(
+        &self,
+        assets: &HashMap<AssetCode, AssetDefinition>,
+        keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
+    ) -> Result<AuditMemoOpening, AuditError> {
         match self {
-            Self::Transaction(CapeTransaction::AAP(note)) => Some(note.clone()),
-            Self::Transaction(CapeTransaction::Burn { xfr, .. }) =>
-            // What to do in this case? Currently, this function is only used for auditing, so
-            // it probably makes sense to treat burns as transfers so we get thet most
-            // information possible out of auditing. But in general it may not be great to
-            // identify burns and transfers.
-            {
-                Some(TransactionNote::Transfer(xfr.clone()))
+            Self::Transaction(CapeTransaction::AAP(note)) => {
+                open_aap_audit_memo(assets, keys, note)
             }
-            _ => None,
+            Self::Transaction(CapeTransaction::Burn { xfr, .. }) => {
+                open_xfr_audit_memo(assets, keys, xfr)
+            }
+            _ => Err(AuditError::NoAuditMemos),
         }
     }
 
@@ -426,9 +431,9 @@ impl LocalCapeLedger {
 
 pub struct LocalCapeBackend<'a, Meta: Serialize + DeserializeOwned> {
     storage: Arc<Mutex<AtomicWalletStorage<'a, CapeLedger, Meta>>>,
-    key_pair: Option<UserKeyPair>,
     network: Arc<Mutex<LocalCapeLedger>>,
     initial_grants: Vec<(RecordOpening, u64)>,
+    key_stream: KeyTree,
 }
 
 impl<'a, Meta: Serialize + DeserializeOwned + Send> LocalCapeBackend<'a, Meta> {
@@ -437,9 +442,10 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> LocalCapeBackend<'a, Meta> {
         loader: &mut impl WalletLoader<Meta = Meta>,
         initial_grants: Vec<(RecordOpening, u64)>,
     ) -> Result<Self, WalletError> {
+        let storage = AtomicWalletStorage::new(loader)?;
         Ok(Self {
-            storage: Arc::new(Mutex::new(AtomicWalletStorage::new(loader)?)),
-            key_pair: loader.key_pair(),
+            key_stream: storage.key_stream(),
+            storage: Arc::new(Mutex::new(storage)),
             network,
             initial_grants,
         })
@@ -458,12 +464,11 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
     }
 
     async fn create(&mut self) -> Result<WalletState<'a, CapeLedger>, WalletError> {
-        let mut rng = ChaChaRng::from_entropy();
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = &*UNIVERSAL_PARAM;
-        let mut network = self.network.lock().await;
+        let network = self.network.lock().await;
         let proving_keys = Arc::new(ProverKeySet {
-            mint: jf_txn::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
+            mint: jf_aap::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
                 .context(CryptoError)?
                 .0,
             freeze: network
@@ -473,7 +478,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                 .iter()
                 .map(|k| {
                     Ok::<FreezeProvingKey, WalletError>(
-                        jf_txn::proof::freeze::preprocess(
+                        jf_aap::proof::freeze::preprocess(
                             univ_param,
                             k.num_inputs(),
                             MERKLE_HEIGHT,
@@ -490,7 +495,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                 .iter()
                 .map(|k| {
                     Ok::<TransferProvingKey, WalletError>(
-                        jf_txn::proof::transfer::preprocess(
+                        jf_aap::proof::transfer::preprocess(
                             univ_param,
                             k.num_inputs(),
                             k.num_outputs(),
@@ -524,9 +529,6 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
 
         let state = WalletState {
             proving_keys,
-            immutable_keys: Arc::new(WalletImmutableKeySet {
-                key_pair: key_pair.clone(),
-            }),
             txn_state: TransactionState {
                 validator: CapeTruster::new(network.block_height, record_mt.num_leaves()),
                 nullifiers: Default::default(),
@@ -544,17 +546,14 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
 
                 transactions: Default::default(),
             },
+            key_scans: Default::default(),
+            key_state: Default::default(),
             auditable_assets: Default::default(),
             audit_keys: Default::default(),
             freeze_keys: Default::default(),
+            user_keys: Default::default(),
             defined_assets: Default::default(),
         };
-
-        // Publish the address of the new wallet.
-        network.address_map.insert(
-            state.immutable_keys.key_pair.address(),
-            state.immutable_keys.key_pair.pub_key(),
-        );
 
         drop(network);
         self.storage().await.create(&state).await?;
@@ -599,6 +598,15 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
             .clone())
     }
 
+    async fn register_user_key(&mut self, pub_key: &UserPubKey) -> Result<(), WalletError> {
+        self.network
+            .lock()
+            .await
+            .address_map
+            .insert(pub_key.address(), pub_key.clone());
+        Ok(())
+    }
+
     async fn get_nullifier_proof(
         &self,
         nullifiers: &mut CapeNullifierSet,
@@ -636,6 +644,10 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
             .ok_or(QueryServiceError::InvalidTxnId {})?
             .txn
             .clone())
+    }
+
+    fn key_stream(&self) -> KeyTree {
+        self.key_stream.clone()
     }
 
     async fn submit(&mut self, txn: CapeTransition) -> Result<(), WalletError> {

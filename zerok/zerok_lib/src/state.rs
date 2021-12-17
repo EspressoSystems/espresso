@@ -13,7 +13,7 @@ use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
-use jf_txn::{
+use jf_aap::{
     errors::TxnApiError,
     proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
     structs::{Nullifier, RecordCommitment},

@@ -7,7 +7,7 @@
 
 mod cli_client;
 
-use jf_txn::proof::UniversalParam;
+use jf_aap::proof::UniversalParam;
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
@@ -15,8 +15,8 @@ use zerok_lib::{
     ledger::AAPLedger,
     wallet::{
         cli::*,
+        loader::{LoadMethod, LoaderMetadata, WalletLoader},
         network::{NetworkBackend, Url},
-        persistence::WalletLoader,
         WalletError,
     },
 };
@@ -28,12 +28,6 @@ pub struct Args {
     /// The keys are stored in FILE and FILE.pub.
     #[structopt(short = "g", long)]
     pub key_gen: Option<PathBuf>,
-
-    /// Path to a private key file to use for the wallet.
-    ///
-    /// If not given, new keys are generated randomly.
-    #[structopt(short, long)]
-    pub key_path: Option<PathBuf>,
 
     /// Path to a saved wallet, or a new directory where this wallet will be saved.
     ///
@@ -51,6 +45,10 @@ pub struct Args {
     /// password will always be required if the wallet was created without the --unencrypted flag.
     #[structopt(long)]
     pub unencrypted: bool,
+
+    /// Load the wallet using a password and salt, rather than a mnemonic phrase.
+    #[structopt(long)]
+    pub password: bool,
 
     /// Create a new wallet and store it an a temporary location which will be deleted on exit.
     ///
@@ -80,16 +78,20 @@ impl CLIArgs for Args {
         self.storage.clone()
     }
 
-    fn key_path(&self) -> Option<PathBuf> {
-        self.key_path.clone()
-    }
-
     fn interactive(&self) -> bool {
         !self.non_interactive
     }
 
     fn encrypted(&self) -> bool {
         !self.unencrypted
+    }
+
+    fn load_method(&self) -> LoadMethod {
+        if self.password {
+            LoadMethod::Password
+        } else {
+            LoadMethod::Mnemonic
+        }
     }
 
     fn use_tmp_storage(&self) -> bool {
@@ -101,13 +103,13 @@ struct AapCli;
 
 impl<'a> CLI<'a> for AapCli {
     type Ledger = AAPLedger;
-    type Backend = NetworkBackend<'a, WalletMetadata>;
+    type Backend = NetworkBackend<'a, LoaderMetadata>;
     type Args = Args;
 
     fn init_backend(
         univ_param: &'a UniversalParam,
         args: &'a Self::Args,
-        loader: &mut impl WalletLoader<Meta = WalletMetadata>,
+        loader: &mut impl WalletLoader<Meta = LoaderMetadata>,
     ) -> Result<Self::Backend, WalletError> {
         let server = args.server.clone().ok_or(WalletError::Failed {
             msg: String::from("server is required"),

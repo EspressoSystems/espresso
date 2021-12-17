@@ -2049,99 +2049,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 
 [[package]]
+<<<<<<< HEAD
 name = "jf-plonk"
+=======
+name = "jf-aap"
+>>>>>>> main
 version = "0.0.1"
-source = "git+ssh://git@github.com/spectrum-eco/jellyfish.git?rev=f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc#f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc"
-dependencies = [
- "ark-bls12-377",
- "ark-bls12-381",
- "ark-bn254",
- "ark-bw6-761",
- "ark-ec",
- "ark-ed-on-bls12-381-bandersnatch",
- "ark-ff",
- "ark-poly",
- "ark-poly-commit",
- "ark-serialize",
- "ark-std",
- "derivative",
- "displaydoc",
- "downcast-rs",
- "itertools 0.10.3",
- "jf-rescue",
- "jf-utils",
- "merlin",
- "num-bigint 0.4.3",
- "rand_chacha 0.3.1",
- "rayon",
- "serde",
- "thiserror",
- "tiny-keccak",
-]
-
-[[package]]
-name = "jf-primitives"
-version = "0.0.1"
-source = "git+ssh://git@github.com/spectrum-eco/jellyfish.git?rev=f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc#f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc"
-dependencies = [
- "ark-bls12-377",
- "ark-bls12-381",
- "ark-bn254",
- "ark-bw6-761",
- "ark-ec",
- "ark-ed-on-bls12-377",
- "ark-ed-on-bls12-381",
- "ark-ed-on-bls12-381-bandersnatch",
- "ark-ed-on-bn254",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "crypto_box",
- "derivative",
- "displaydoc",
- "generic-array",
- "itertools 0.10.3",
- "jf-plonk",
- "jf-rescue",
- "jf-utils",
- "rayon",
- "serde",
- "thiserror",
- "zeroize",
-]
-
-[[package]]
-name = "jf-rescue"
-version = "0.0.1"
-source = "git+ssh://git@github.com/spectrum-eco/jellyfish.git?rev=f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc#f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc"
-dependencies = [
- "ark-bls12-377",
- "ark-bls12-381",
- "ark-bn254",
- "ark-bw6-761",
- "ark-ec",
- "ark-ed-on-bls12-377",
- "ark-ed-on-bls12-381",
- "ark-ed-on-bn254",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "crypto_box",
- "derivative",
- "displaydoc",
- "generic-array",
- "itertools 0.10.3",
- "jf-utils",
- "rayon",
- "serde",
- "thiserror",
- "zeroize",
-]
-
-[[package]]
-name = "jf-txn"
-version = "0.0.1"
-source = "git+ssh://git@github.com/spectrum-eco/jellyfish.git?rev=f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc#f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
 dependencies = [
  "anyhow",
  "ark-bls12-377",
@@ -2158,9 +2072,14 @@ dependencies = [
  "csv",
  "derivative",
  "displaydoc",
+<<<<<<< HEAD
+ "downcast-rs",
+ "itertools 0.10.3",
+=======
  "itertools 0.10.3",
  "jf-plonk",
  "jf-primitives",
+>>>>>>> main
  "jf-rescue",
  "jf-utils",
  "num_cpus",
@@ -2177,9 +2096,115 @@ dependencies = [
 ]
 
 [[package]]
+name = "jf-plonk"
+version = "0.0.1"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
+dependencies = [
+ "ark-bls12-377",
+ "ark-bls12-381",
+ "ark-bn254",
+ "ark-bw6-761",
+ "ark-ec",
+ "ark-ed-on-bls12-381-bandersnatch",
+ "ark-ff",
+ "ark-poly",
+ "ark-poly-commit",
+ "ark-serialize",
+ "ark-std",
+ "derivative",
+ "displaydoc",
+<<<<<<< HEAD
+ "generic-array",
+ "itertools 0.10.3",
+ "jf-plonk",
+=======
+ "downcast-rs",
+ "itertools 0.10.3",
+>>>>>>> main
+ "jf-rescue",
+ "jf-utils",
+ "merlin",
+ "num-bigint 0.4.3",
+ "rand_chacha 0.3.1",
+ "rayon",
+ "serde",
+ "thiserror",
+ "tiny-keccak",
+]
+
+[[package]]
+name = "jf-primitives"
+version = "0.0.1"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
+dependencies = [
+ "ark-bls12-377",
+ "ark-bls12-381",
+ "ark-bn254",
+ "ark-bw6-761",
+ "ark-ec",
+ "ark-ed-on-bls12-377",
+ "ark-ed-on-bls12-381",
+ "ark-ed-on-bls12-381-bandersnatch",
+ "ark-ed-on-bn254",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
+ "crypto_box",
+ "derivative",
+ "displaydoc",
+ "generic-array",
+ "itertools 0.10.3",
+<<<<<<< HEAD
+=======
+ "jf-plonk",
+ "jf-rescue",
+>>>>>>> main
+ "jf-utils",
+ "rayon",
+ "serde",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
+name = "jf-rescue"
+version = "0.0.1"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
+dependencies = [
+ "ark-bls12-377",
+ "ark-bls12-381",
+ "ark-bn254",
+ "ark-bw6-761",
+ "ark-ec",
+ "ark-ed-on-bls12-377",
+ "ark-ed-on-bls12-381",
+ "ark-ed-on-bn254",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
+ "crypto_box",
+ "derivative",
+ "displaydoc",
+<<<<<<< HEAD
+ "itertools 0.10.3",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-rescue",
+=======
+ "generic-array",
+ "itertools 0.10.3",
+>>>>>>> main
+ "jf-utils",
+ "rayon",
+ "serde",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@github.com/spectrum-eco/jellyfish.git?rev=f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc#f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
 dependencies = [
  "anyhow",
  "ark-ec",
@@ -2196,7 +2221,7 @@ dependencies = [
 [[package]]
 name = "jf-utils-derive"
 version = "0.1.0"
-source = "git+ssh://git@github.com/spectrum-eco/jellyfish.git?rev=f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc#f0d1fb72a2f67c55d8735c3cc43c4a9f11c007dc"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
 dependencies = [
  "ark-serialize",
  "ark-std",
@@ -2361,6 +2386,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mnemonic"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29fae0e4c0b155d3b019a7cbc27abe4a90e15c06814d27889ce9f5f44e2faf77"
+dependencies = [
+ "byteorder",
+ "lazy_static",
+]
+
+[[package]]
 name = "multi_machine"
 version = "0.1.0"
 dependencies = [
@@ -2371,9 +2406,12 @@ dependencies = [
  "futures",
  "futures-util",
  "itertools 0.10.3",
+<<<<<<< HEAD
+=======
+ "jf-aap",
+>>>>>>> main
  "jf-plonk",
  "jf-primitives",
- "jf-txn",
  "jf-utils",
  "markdown",
  "phaselock",
@@ -2648,7 +2686,7 @@ dependencies = [
 [[package]]
 name = "phaselock"
 version = "0.0.5"
-source = "git+ssh://git@gitlab.com/translucence/systems/phaselock.git?rev=14586ed218a35cb48675b73d4a34ae7ae55c67e6#14586ed218a35cb48675b73d4a34ae7ae55c67e6"
+source = "git+ssh://git@github.com/SpectrumXYZ/phaselock.git?rev=14586ed218a35cb48675b73d4a34ae7ae55c67e6#14586ed218a35cb48675b73d4a34ae7ae55c67e6"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",
@@ -3771,14 +3809,17 @@ dependencies = [
 [[package]]
 name = "tagged-base64"
 version = "0.1.0"
+<<<<<<< HEAD
 source = "git+ssh://git@gitlab.com/translucence/common/tagged-base64.git?branch=main#16a47b4228790a8f678115e0a6b7c2d3684b2074"
+=======
+source = "git+ssh://git@github.com/SpectrumXYZ/tagged-base64.git?branch=main#e2a8cacdf937208625952df057bbb8d4a1d92b6e"
+>>>>>>> main
 dependencies = [
  "base64 0.13.0",
  "console_error_panic_hook",
  "crc-any",
  "futures-channel",
  "js-sys",
- "serde",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -4604,9 +4645,9 @@ dependencies = [
  "bincode",
  "escargot",
  "futures",
+ "jf-aap",
  "jf-plonk",
  "jf-primitives",
- "jf-txn",
  "jf-utils",
  "lazy_static",
  "rand 0.8.4",
@@ -4650,11 +4691,15 @@ dependencies = [
  "hex",
  "hmac 0.11.0",
  "itertools 0.10.3",
+<<<<<<< HEAD
+=======
+ "jf-aap",
+>>>>>>> main
  "jf-plonk",
  "jf-primitives",
- "jf-txn",
  "jf-utils",
  "lazy_static",
+ "mnemonic",
  "phaselock",
  "procfs",
  "proptest",

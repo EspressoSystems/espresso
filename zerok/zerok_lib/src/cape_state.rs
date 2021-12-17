@@ -3,13 +3,13 @@
 use crate::state::VerifierKeySet;
 use core::convert::TryFrom;
 use core::fmt::Debug;
-use jf_primitives::merkle_tree::FilledMTBuilder;
-use jf_txn::{
+use jf_aap::{
     errors::TxnApiError,
     structs::{AssetDefinition, Nullifier, RecordCommitment, RecordOpening},
     transfer::TransferNote,
     txn_batch_verify, MerkleCommitment, MerkleFrontier, MerkleTree, NodeValue, TransactionNote,
 };
+use jf_primitives::merkle_tree::FilledMTBuilder;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -47,7 +47,11 @@ impl CapeTransaction {
 
     pub fn commitments(&self) -> Vec<RecordCommitment> {
         match self {
-            CapeTransaction::Burn { xfr, .. } => xfr.output_commitments.clone(),
+            CapeTransaction::Burn { xfr, .. } => {
+                // All valid burn transactions have two outputs, but only the first one (the fee
+                // change output) is added to the Merkle tree. The second output is burned.
+                vec![xfr.output_commitments[0]]
+            }
             CapeTransaction::AAP(note) => note.output_commitments(),
         }
     }
@@ -349,6 +353,7 @@ impl CapeContractState {
                     let mut records_to_insert = vec![];
                     // TODO: the workflow code puts these after the things
                     // in the transactions -- which choice is correct?
+                    let wrapped_commitments = new_state.erc20_deposits.clone();
                     records_to_insert.append(&mut new_state.erc20_deposits);
 
                     // past this point, if any validation error occurs the
@@ -507,11 +512,12 @@ impl CapeContractState {
                         };
 
                         verif_keys.push(vkey);
-                        if !new_state
-                            .ledger
-                            .past_record_merkle_roots
-                            .0
-                            .contains(&merkle_root)
+                        if merkle_root != new_state.ledger.record_merkle_commitment.root_value
+                            && !new_state
+                                .ledger
+                                .past_record_merkle_roots
+                                .0
+                                .contains(&merkle_root)
                         {
                             return Err(CapeValidationError::BadMerkleRoot {});
                         }
@@ -568,7 +574,7 @@ impl CapeContractState {
                     new_state.ledger.record_merkle_frontier = record_merkle_frontier;
 
                     effects.push(CapeEthEffect::Emit(CapeEvent::BlockCommitted {
-                        wraps: self.erc20_deposits.clone(),
+                        wraps: wrapped_commitments,
                         txns: filtered_txns,
                     }))
                 }
