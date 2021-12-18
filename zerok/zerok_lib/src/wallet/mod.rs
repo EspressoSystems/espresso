@@ -1879,7 +1879,7 @@ pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = AAPLedger> {
     task_scope: AsyncScope<'a, ()>,
 }
 
-struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
+pub struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
     state: WalletState<'a, L>,
     session: WalletSession<'a, L, Backend>,
     sync_handles: HashMap<u64, Vec<oneshot::Sender<()>>>,

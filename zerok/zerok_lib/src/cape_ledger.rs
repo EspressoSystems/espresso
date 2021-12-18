@@ -427,6 +427,53 @@ impl LocalCapeLedger {
         // the past.
         self.events.push(event);
     }
+
+    // pub fn now(&self) -> u64 {
+    //     self.events.len() as u64
+    // }
+
+    // pub fn flush(&mut self) {
+    //     if self.current_block.block.0.is_empty() {
+    //         return;
+    //     }
+
+    //     let block = std::mem::replace(&mut self.current_block, self.validator.next_block());
+    //     match self.validator.validate_and_apply(
+    //         self.validator.prev_commit_time + 1,
+    //         block.block.clone(),
+    //         block.proofs.clone(),
+    //     ) {
+    //         Ok(mut uids) => {
+    //             // Add nullifiers
+    //             for txn in &block.block.0 {
+    //                 for nullifier in txn.nullifiers() {
+    //                     self.nullifiers.insert(nullifier);
+    //                 }
+    //                 for record in txn.output_commitments() {
+    //                     self.records.push(record.to_field_element())
+    //                 }
+    //             }
+
+    //             // Broadcast the new block
+    //             self.generate_event(LedgerEvent::Commit {
+    //                 block: block.clone(),
+    //                 block_id: self.committed_blocks.len() as u64,
+    //                 state_comm: self.validator.commit(),
+    //             });
+
+    //             // Store the block in the history
+    //             let mut block_uids = vec![];
+    //             for txn in block.block.0.iter() {
+    //                 let mut this_txn_uids = uids;
+    //                 uids = this_txn_uids.split_off(txn.output_len());
+    //                 assert_eq!(this_txn_uids.len(), txn.output_len());
+    //                 block_uids.push(this_txn_uids);
+    //             }
+    //             self.committed_blocks.push((block, block_uids));
+    //         }
+    //         Err(error) => self.send_event(LedgerEvent::Reject { block, error }),
+    //     }
+    // }
 }
 
 pub struct LocalCapeBackend<'a, Meta: Serialize + DeserializeOwned> {
@@ -508,10 +555,8 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                 .collect::<Result<_, _>>()?,
         });
 
-        let key_pair = self
-            .key_pair
-            .clone()
-            .unwrap_or_else(|| UserKeyPair::generate(&mut rng));
+        // TODO !keyao Make keypair id a const.
+        let key_pair = self.key_stream().derive_user_keypair(&[0u8; 32]);
 
         // `records` should be _almost_ completely sparse. However, even a fully pruned Merkle tree
         // contains the last leaf appended, but as a new wallet, we don't care about _any_ of the
@@ -743,15 +788,16 @@ pub mod test_helpers {
     use crate::{
         state::{key_set, VerifierKeySet, MERKLE_HEIGHT},
         universal_params::UNIVERSAL_PARAM,
-        wallet::{hd::KeyTree, Wallet},
+        wallet::{hd::KeyTree, Wallet /*, WalletSharedState*/},
     };
-
-    use jf_txn::{
+    use jf_aap::{
+        keys::UserKeyPair,
         structs::{FreezeFlag, RecordCommitment},
         MerkleTree, TransactionVerifyingKey,
     };
     use key_set::KeySet;
-    // use std::path::Path;
+    use rand_chacha::rand_core::SeedableRng;
+    use rand_chacha::ChaChaRng;
     use std::path::PathBuf;
     use std::time::Instant;
     use tempdir::TempDir;
@@ -759,7 +805,6 @@ pub mod test_helpers {
     struct MockCapeWalletLoader {
         path: PathBuf,
         key: KeyTree,
-        key_pair: UserKeyPair,
     }
 
     impl WalletLoader for MockCapeWalletLoader {
@@ -776,10 +821,6 @@ pub mod test_helpers {
         fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
             Ok(self.key.clone())
         }
-
-        fn key_pair(&self) -> Option<UserKeyPair> {
-            Some(self.key_pair.clone())
-        }
     }
 
     pub async fn create_test_network<'a>(
@@ -788,7 +829,10 @@ pub mod test_helpers {
         now: &mut Instant,
     ) -> (
         Arc<Mutex<LocalCapeLedger>>,
-        Vec<Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>>,
+        Vec<(
+            Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>,
+            UserAddress,
+        )>,
         Vec<PathBuf>,
     ) {
         let mut rng = ChaChaRng::from_seed([42u8; 32]);
@@ -797,23 +841,25 @@ pub mod test_helpers {
         // non-zero initial grant. Collect user-specific info (keys and record openings
         // corresponding to grants) in `users`, which will be used to create the wallets later.
         let mut record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
-        let mut users: Vec<(UserKeyPair, Vec<(RecordOpening, u64)>)> = vec![];
+        let mut users: Vec<(KeyTree, UserKeyPair, Vec<(RecordOpening, u64)>)> = vec![];
         for amount in initial_grants {
-            let key = UserKeyPair::generate(&mut rng);
+            let key_stream = KeyTree::random(&mut rng).unwrap().0;
+            let key_pair = key_stream.derive_user_keypair(&[0u8; 32]);
+
             if amount > 0 {
                 let ro = RecordOpening::new(
                     &mut rng,
                     amount,
                     AssetDefinition::native(),
-                    key.pub_key(),
+                    key_pair.pub_key(),
                     FreezeFlag::Unfrozen,
                 );
                 let comm = RecordCommitment::from(&ro);
                 let uid = record_merkle_tree.num_leaves();
                 record_merkle_tree.push(comm.to_field_element());
-                users.push((key, vec![(ro, uid)]));
+                users.push((key_stream, key_pair, vec![(ro, uid)]));
             } else {
-                users.push((key, vec![]));
+                users.push((key_stream, key_pair, vec![]));
             }
         }
 
@@ -827,7 +873,7 @@ pub mod test_helpers {
         let mut xfr_prove_keys = vec![];
         let mut xfr_verif_keys = vec![];
         for (num_inputs, num_outputs) in xfr_sizes {
-            let (xfr_prove_key, xfr_verif_key, _) = jf_txn::proof::transfer::preprocess(
+            let (xfr_prove_key, xfr_verif_key, _) = jf_aap::proof::transfer::preprocess(
                 &*UNIVERSAL_PARAM,
                 *num_inputs,
                 *num_outputs,
@@ -838,9 +884,9 @@ pub mod test_helpers {
             xfr_verif_keys.push(TransactionVerifyingKey::Transfer(xfr_verif_key));
         }
         let (_, mint_verif_key, _) =
-            jf_txn::proof::mint::preprocess(&*UNIVERSAL_PARAM, MERKLE_HEIGHT).unwrap();
+            jf_aap::proof::mint::preprocess(&*UNIVERSAL_PARAM, MERKLE_HEIGHT).unwrap();
         let (_, freeze_verif_key, _) =
-            jf_txn::proof::freeze::preprocess(&*UNIVERSAL_PARAM, 2, MERKLE_HEIGHT).unwrap();
+            jf_aap::proof::freeze::preprocess(&*UNIVERSAL_PARAM, 2, MERKLE_HEIGHT).unwrap();
         let verif_crs = VerifierKeySet {
             xfr: KeySet::new(xfr_verif_keys.into_iter()).unwrap(),
             mint: TransactionVerifyingKey::Mint(mint_verif_key),
@@ -858,9 +904,12 @@ pub mod test_helpers {
         // Create a wallet for each user based on the validator and the per-user information
         // computed above.
         let mut temp_paths: Vec<PathBuf> = Vec::new();
-        let wallets: Vec<Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>> = iter(users)
+        let wallets: Vec<(
+            Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>,
+            UserAddress,
+        )> = iter(users)
             .enumerate()
-            .then(|(i, (key_pair, initial_grants))| {
+            .then(|(i, (key_stream, key_pair, initial_grants))| {
                 let ledger = ledger.clone();
                 let path = TempDir::new(&format!("cape_wallet_{}", i))
                     .unwrap()
@@ -868,16 +917,17 @@ pub mod test_helpers {
                 temp_paths.push(path.clone());
                 let mut loader = MockCapeWalletLoader {
                     path: path.clone(),
-                    key: KeyTree::random(&mut rng),
-                    key_pair,
+                    key: key_stream,
                 };
                 async move {
-                    Wallet::new(
+                    let mut wallet = Wallet::new(
                         LocalCapeBackend::new(ledger, &mut loader, initial_grants.to_vec())
                             .unwrap(),
                     )
                     .await
-                    .unwrap()
+                    .unwrap();
+                    wallet.add_user_key(key_pair.clone(), 0).await.unwrap();
+                    (wallet, key_pair.address())
                 }
             })
             .collect()
@@ -950,9 +1000,12 @@ pub mod test_helpers {
     //     // be in a stable state once they have processed up to that event. Check that each wallet
     //     // has persisted all of its in-memory state at this point.
     //     let ledger = ledger.lock().await;
-    //     for wallet in wallets.iter(){
+    //     for wallet in wallets.iter() {
     //         let WalletSharedState { state, .. } = &*wallet.mutex.lock().await;
-    //         assert_wallet_states_eq(state, wallet.storage.lock().await.committed.as_ref().unwrap());
+    //         assert_wallet_states_eq(
+    //             state,
+    //             wallet.storage.lock().await.committed.as_ref().unwrap(),
+    //         );
     //     }
     // }
 }
@@ -961,7 +1014,7 @@ pub mod test_helpers {
 mod tests {
     use super::*;
     use crate::wallet::Wallet;
-    use jf_txn::structs::AssetCode;
+    use jf_aap::structs::AssetCode;
     use std::time::Instant;
     // use tempdir::TempDir;
     // use std::fs;
@@ -986,36 +1039,57 @@ mod tests {
             &mut now,
         )
         .await;
-        let alice_address = wallets[0].address();
-        let bob_address = wallets[1].address();
+        let alice_address = wallets[0].1.clone();
+        let bob_address = wallets[1].1.clone();
 
         // Verify initial wallet state.
         assert_ne!(alice_address, bob_address);
-        assert_eq!(wallets[0].balance(&AssetCode::native()).await, alice_grant);
-        assert_eq!(wallets[1].balance(&AssetCode::native()).await, bob_grant);
+        assert_eq!(
+            wallets[0]
+                .0
+                .balance(&alice_address, &AssetCode::native())
+                .await,
+            alice_grant
+        );
+        assert_eq!(
+            wallets[1]
+                .0
+                .balance(&bob_address, &AssetCode::native())
+                .await,
+            bob_grant
+        );
 
         let coin = wallets[0]
+            .0
             .define_asset("Alice's asset".as_bytes(), Default::default())
             .await
             .unwrap();
         // Alice gives herself an initial grant of 5 coins.
         wallets[0]
-            .mint(1, &coin.code, 5, alice_address.clone())
+            .0
+            .mint(&alice_address, 1, &coin.code, 5, alice_address.clone())
             .await
             .unwrap();
         // sync(&ledger, &wallets).await;
         println!("Asset minted: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
-        assert_eq!(wallets[0].balance(&coin.code).await, 5);
-        assert_eq!(wallets[1].balance(&coin.code).await, 0);
+        assert_eq!(wallets[0].0.balance(&alice_address, &coin.code).await, 5);
+        assert_eq!(wallets[1].0.balance(&bob_address, &coin.code).await, 0);
 
-        let alice_initial_native_balance = wallets[0].balance(&AssetCode::native()).await;
-        let bob_initial_native_balance = wallets[1].balance(&AssetCode::native()).await;
+        let alice_initial_native_balance = wallets[0]
+            .0
+            .balance(&alice_address, &AssetCode::native())
+            .await;
+        let bob_initial_native_balance = wallets[1]
+            .0
+            .balance(&bob_address, &AssetCode::native())
+            .await;
 
         // Construct a transaction to transfer some coins from Alice to Bob.
         wallets[0]
-            .transfer(&coin.code, &[(bob_address, 3)], 1)
+            .0
+            .transfer(&alice_address, &coin.code, &[(bob_address.clone(), 3)], 1)
             .await
             .unwrap();
         // sync(&ledger, &wallets).await;
@@ -1026,15 +1100,21 @@ mod tests {
         // closure because rust infers the wrong lifetime for the references (it tries to use 'a,
         // which is longer than we want to borrow `wallets` for).
         async fn check_balance<'a>(
-            wallet: &Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>,
+            wallet: &(
+                Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>,
+                UserAddress,
+            ),
             expected_coin_balance: u64,
             starting_native_balance: u64,
             fees_paid: u64,
             coin: &AssetDefinition,
         ) {
-            assert_eq!(wallet.balance(&coin.code).await, expected_coin_balance);
             assert_eq!(
-                wallet.balance(&AssetCode::native()).await,
+                wallet.0.balance(&wallet.1, &coin.code).await,
+                expected_coin_balance
+            );
+            assert_eq!(
+                wallet.0.balance(&wallet.1, &AssetCode::native()).await,
                 starting_native_balance - fees_paid
             );
         }
@@ -1048,7 +1128,8 @@ mod tests {
         // transferred back to Bob, since Bob's only sufficient record has an amount of 3 coins, but
         // the sum of the outputs and fee of this transaction is only 2.
         wallets[1]
-            .transfer(&coin.code, &[(alice_address, 1)], 1)
+            .0
+            .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1)
             .await
             .unwrap();
         // sync(&ledger, &wallets).await;
