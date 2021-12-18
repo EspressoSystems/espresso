@@ -361,11 +361,21 @@ impl LocalCapeLedger {
                 for comm in &wraps {
                     self.records.push(comm.to_field_element());
                 }
-                for txn in &txns {
+                txns.iter().enumerate().for_each(|(i, txn)| {
+                    let mut uids = Vec::new();
                     for comm in txn.commitments() {
                         self.records.push(comm.to_field_element());
+                        uids.push(self.records.num_leaves());
                     }
-                }
+                    self.txns.insert(
+                        (self.block_height, i as u64),
+                        CommittedTransaction {
+                            txn: CapeTransition::Transaction(txn.clone()),
+                            uids,
+                            memos: None,
+                        },
+                    );
+                });
 
                 // Wrap each transaction and wrap event into a CapeTransition, build a
                 // CapeBlock, and broadcast it to subscribers.
@@ -392,7 +402,7 @@ impl LocalCapeLedger {
                 self.send_event(LedgerEvent::Commit {
                     block,
                     block_id: self.block_height,
-                    state_comm: self.block_height,
+                    state_comm: self.block_height + 1,
                 });
                 self.block_height += 1;
             }
@@ -427,53 +437,6 @@ impl LocalCapeLedger {
         // the past.
         self.events.push(event);
     }
-
-    // pub fn now(&self) -> u64 {
-    //     self.events.len() as u64
-    // }
-
-    // pub fn flush(&mut self) {
-    //     if self.current_block.block.0.is_empty() {
-    //         return;
-    //     }
-
-    //     let block = std::mem::replace(&mut self.current_block, self.validator.next_block());
-    //     match self.validator.validate_and_apply(
-    //         self.validator.prev_commit_time + 1,
-    //         block.block.clone(),
-    //         block.proofs.clone(),
-    //     ) {
-    //         Ok(mut uids) => {
-    //             // Add nullifiers
-    //             for txn in &block.block.0 {
-    //                 for nullifier in txn.nullifiers() {
-    //                     self.nullifiers.insert(nullifier);
-    //                 }
-    //                 for record in txn.output_commitments() {
-    //                     self.records.push(record.to_field_element())
-    //                 }
-    //             }
-
-    //             // Broadcast the new block
-    //             self.generate_event(LedgerEvent::Commit {
-    //                 block: block.clone(),
-    //                 block_id: self.committed_blocks.len() as u64,
-    //                 state_comm: self.validator.commit(),
-    //             });
-
-    //             // Store the block in the history
-    //             let mut block_uids = vec![];
-    //             for txn in block.block.0.iter() {
-    //                 let mut this_txn_uids = uids;
-    //                 uids = this_txn_uids.split_off(txn.output_len());
-    //                 assert_eq!(this_txn_uids.len(), txn.output_len());
-    //                 block_uids.push(this_txn_uids);
-    //             }
-    //             self.committed_blocks.push((block, block_uids));
-    //         }
-    //         Err(error) => self.send_event(LedgerEvent::Reject { block, error }),
-    //     }
-    // }
 }
 
 pub struct LocalCapeBackend<'a, Meta: Serialize + DeserializeOwned> {
@@ -937,77 +900,6 @@ pub mod test_helpers {
         *now = Instant::now();
         (ledger, wallets, temp_paths)
     }
-
-    // // This function checks probabilistic equality for two wallet states, comparing hashes for
-    // // fields that cannot directly be compared for equality. It is sufficient for tests that want
-    // // to compare wallet states (like round-trip serialization tests) but since it is deterministic,
-    // // we shouldn't make it into a PartialEq instance.
-    // pub fn assert_wallet_states_eq(w1: &WalletState, w2: &WalletState) {
-    //     assert_eq!(w1.txn_state.now, w2.txn_state.now);
-    //     assert_eq!(
-    //         w1.txn_state.validator.commit(),
-    //         w2.txn_state.validator.commit()
-    //     );
-    //     assert_eq!(w1.proving_keys, w2.proving_keys);
-    //     assert_eq!(w1.txn_state.records, w2.txn_state.records);
-    //     assert_eq!(w1.auditable_assets, w2.auditable_assets);
-    //     assert_eq!(
-    //         w1.audit_keys.keys().collect::<Vec<_>>(),
-    //         w2.audit_keys.keys().collect::<Vec<_>>()
-    //     );
-    //     assert_eq!(
-    //         w1.freeze_keys.keys().collect::<Vec<_>>(),
-    //         w2.freeze_keys.keys().collect::<Vec<_>>()
-    //     );
-    //     assert_eq!(
-    //         w1.txn_state.nullifiers.hash(),
-    //         w2.txn_state.nullifiers.hash()
-    //     );
-    //     assert_eq!(
-    //         w1.txn_state.record_mt.commitment(),
-    //         w2.txn_state.record_mt.commitment()
-    //     );
-    //     assert_eq!(w1.defined_assets, w2.defined_assets);
-    //     assert_eq!(w1.txn_state.transactions, w2.txn_state.transactions);
-    // }
-
-    // pub async fn sync_with<'a>(
-    //     wallets: &[Wallet<'a, impl 'a + WalletBackend<'a, CapeLedger> + Send + Sync, CapeLedger>],
-    //     t: u64,
-    // ) {
-    //     println!("waiting for sync point {}", t);
-    //     future::join_all(wallets.iter().map(|wallet| wallet.sync(t))).await;
-    // }
-
-    // pub async fn sync<'a, Meta>(
-    //     ledger: &Arc<Mutex<LocalCapeLedger>>,
-    //     wallets: &[Wallet<'a, impl 'a + WalletBackend<'a, CapeLedger> + Send + Sync, CapeLedger>],
-    // ) {
-    //     let t = {
-    //         let mut ledger = ledger.lock().await;
-    //         ledger.flush();
-    //         if let Some(LedgerEvent::Commit { block, .. }) = ledger.events.last() {
-    //             // If the last event is a Commit, wait until all of the senders from the block
-    //             // receive the Commit event and post the receiver memos, generating new Memos events.
-    //             ledger.now() + (block.0.len() as u64)
-    //         } else {
-    //             ledger.now()
-    //         }
-    //     };
-    //     sync_with(wallets, t).await;
-
-    //     // Since we're syncing with the time stamp from the most recent event, the wallets should
-    //     // be in a stable state once they have processed up to that event. Check that each wallet
-    //     // has persisted all of its in-memory state at this point.
-    //     let ledger = ledger.lock().await;
-    //     for wallet in wallets.iter() {
-    //         let WalletSharedState { state, .. } = &*wallet.mutex.lock().await;
-    //         assert_wallet_states_eq(
-    //             state,
-    //             wallet.storage.lock().await.committed.as_ref().unwrap(),
-    //         );
-    //     }
-    // }
 }
 
 #[cfg(test)]
@@ -1016,8 +908,6 @@ mod tests {
     use crate::wallet::Wallet;
     use jf_aap::structs::AssetCode;
     use std::time::Instant;
-    // use tempdir::TempDir;
-    // use std::fs;
     use test_helpers::*;
 
     async fn test_two_wallets() {
@@ -1070,7 +960,6 @@ mod tests {
             .mint(&alice_address, 1, &coin.code, 5, alice_address.clone())
             .await
             .unwrap();
-        // sync(&ledger, &wallets).await;
         println!("Asset minted: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
@@ -1092,7 +981,6 @@ mod tests {
             .transfer(&alice_address, &coin.code, &[(bob_address.clone(), 3)], 1)
             .await
             .unwrap();
-        // sync(&ledger, &wallets).await;
         println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
@@ -1132,7 +1020,6 @@ mod tests {
             .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1)
             .await
             .unwrap();
-        // sync(&ledger, &wallets).await;
         println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
         // now = Instant::now();
 
