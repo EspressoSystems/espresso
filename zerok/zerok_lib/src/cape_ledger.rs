@@ -747,7 +747,7 @@ impl<'a, Meta: 'a + Serialize + DeserializeOwned + Send> LocalCapeWallet<'a, Met
         let seed = AssetCodeSeed::generate(&mut self.rng);
         //todo Include CAPE-specific domain separator in AssetCode derivation, once Jellyfish adds
         // support for domain separators.
-        let code = AssetCode::new(seed, aap_asset_desc);
+        let code = AssetCode::new_domestic(seed, aap_asset_desc);
         let asset = AssetDefinition::new(code, aap_asset_policy).context(CryptoError)?;
 
         self.network
