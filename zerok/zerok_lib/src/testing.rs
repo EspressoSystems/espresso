@@ -196,7 +196,7 @@ impl MultiXfrTestState {
             .collect();
         let asset_defs: Vec<AssetDefinition> = once(Ok(native_token.clone()))
             .chain(asset_seeds.iter().map(|(seed, desc)| {
-                AssetDefinition::new(AssetCode::new(*seed, desc), Default::default())
+                AssetDefinition::new(AssetCode::new_domestic(*seed, desc), Default::default())
             }))
             .collect::<Result<Vec<_>, _>>()?;
 

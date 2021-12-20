@@ -859,7 +859,7 @@ impl<L: Ledger> TransactionState<L> {
         policy: AssetPolicy,
     ) -> Result<(AssetCodeSeed, AssetCode, AssetDefinition), TransactionError> {
         let seed = AssetCodeSeed::generate(rng);
-        let code = AssetCode::new(seed, description);
+        let code = AssetCode::new_domestic(seed, description);
         let asset_definition = AssetDefinition::new(code, policy).context(CryptoError)?;
         Ok((seed, code, asset_definition))
     }
