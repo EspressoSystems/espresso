@@ -358,9 +358,7 @@ impl LocalCapeLedger {
     fn handle_event(&mut self, event: CapeEvent) {
         match event {
             CapeEvent::BlockCommitted { wraps, txns } => {
-                for comm in &wraps {
-                    self.records.push(comm.to_field_element());
-                }
+                let num_txns = txns.len();
                 txns.iter().enumerate().for_each(|(i, txn)| {
                     let mut uids = Vec::new();
                     for comm in txn.commitments() {
@@ -382,7 +380,11 @@ impl LocalCapeLedger {
                 let block = CapeBlock::new(
                     wraps
                         .into_iter()
-                        .map(|comm| {
+                        .enumerate()
+                        .map(|(i, comm)| {
+                            self.records.push(comm.to_field_element());
+                            let uids = vec![self.records.num_leaves()];
+
                             // Look up the auxiliary information associated with this deposit which
                             // we saved when we processed the deposit event. This lookup cannot
                             // fail, because the contract only finalizes a Wrap operation after it
@@ -390,11 +392,20 @@ impl LocalCapeLedger {
                             // Erc20Deposited event.
                             let (erc20_code, src_addr, ro) =
                                 self.pending_erc20_deposits.remove(&comm).unwrap();
-                            CapeTransition::Wrap {
+                            let txn = CapeTransition::Wrap {
                                 erc20_code,
                                 src_addr,
                                 ro,
-                            }
+                            };
+                            self.txns.insert(
+                                (self.block_height, (num_txns + i) as u64),
+                                CommittedTransaction {
+                                    txn: txn.clone(),
+                                    uids,
+                                    memos: None,
+                                },
+                            );
+                            txn
                         })
                         .chain(txns.into_iter().map(CapeTransition::Transaction))
                         .collect(),
