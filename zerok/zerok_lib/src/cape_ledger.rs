@@ -13,7 +13,7 @@ use crate::{
     util::commit::{Commitment, Committable, RawCommitmentBuilder},
     wallet::{
         hd::KeyTree, loader::WalletLoader, persistence::AtomicWalletStorage, CryptoError,
-        WalletBackend, WalletError, WalletState,
+        KeyStreamState, WalletBackend, WalletError, WalletState,
     },
 };
 use async_std::sync::{Mutex, MutexGuard};
@@ -362,8 +362,8 @@ impl LocalCapeLedger {
                 txns.iter().enumerate().for_each(|(i, txn)| {
                     let mut uids = Vec::new();
                     for comm in txn.commitments() {
-                        self.records.push(comm.to_field_element());
                         uids.push(self.records.num_leaves());
+                        self.records.push(comm.to_field_element());
                     }
                     self.txns.insert(
                         (self.block_height, i as u64),
@@ -382,8 +382,8 @@ impl LocalCapeLedger {
                         .into_iter()
                         .enumerate()
                         .map(|(i, comm)| {
-                            self.records.push(comm.to_field_element());
                             let uids = vec![self.records.num_leaves()];
+                            self.records.push(comm.to_field_element());
 
                             // Look up the auxiliary information associated with this deposit which
                             // we saved when we processed the deposit event. This lookup cannot
@@ -485,6 +485,10 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
     }
 
     async fn create(&mut self) -> Result<WalletState<'a, CapeLedger>, WalletError> {
+        let key_id: u64 = 0;
+        let key_pair = self.key_stream().derive_user_keypair(&key_id.to_le_bytes());
+        self.register_user_key(&key_pair.pub_key()).await?;
+
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = &*UNIVERSAL_PARAM;
         let network = self.network.lock().await;
@@ -529,9 +533,6 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                 .collect::<Result<_, _>>()?,
         });
 
-        // TODO !keyao Make keypair id a const.
-        let key_pair = self.key_stream().derive_user_keypair(&[0u8; 32]);
-
         // `records` should be _almost_ completely sparse. However, even a fully pruned Merkle tree
         // contains the last leaf appended, but as a new wallet, we don't care about _any_ of the
         // leaves, so make a note to forget the last one once more leaves have been appended.
@@ -566,7 +567,11 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                 transactions: Default::default(),
             },
             key_scans: Default::default(),
-            key_state: Default::default(),
+            key_state: KeyStreamState {
+                auditor: 0,
+                freezer: 0,
+                user: 1,
+            },
             auditable_assets: Default::default(),
             audit_keys: Default::default(),
             freeze_keys: Default::default(),
@@ -752,6 +757,8 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         };
         network.send_event(event);
 
+        println!("Memos posted");
+
         Ok(())
     }
 }
@@ -818,7 +825,9 @@ pub mod test_helpers {
         let mut users: Vec<(KeyTree, UserKeyPair, Vec<(RecordOpening, u64)>)> = vec![];
         for amount in initial_grants {
             let key_stream = KeyTree::random(&mut rng).unwrap().0;
-            let key_pair = key_stream.derive_user_keypair(&[0u8; 32]);
+            let key_id: u64 = 0;
+            let key_pair = key_stream.derive_user_keypair(&key_id.to_le_bytes());
+            println!("\nAccount created: {:?}", key_pair.pub_key());
 
             if amount > 0 {
                 let ro = RecordOpening::new(
@@ -971,6 +980,8 @@ mod tests {
             .mint(&alice_address, 1, &coin.code, 5, alice_address.clone())
             .await
             .unwrap();
+        wallets[0].0.sync(2).await.unwrap();
+        wallets[1].0.sync(2).await.unwrap();
         println!("Asset minted: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
@@ -992,6 +1003,8 @@ mod tests {
             .transfer(&alice_address, &coin.code, &[(bob_address.clone(), 3)], 1)
             .await
             .unwrap();
+        wallets[0].0.sync(4).await.unwrap();
+        wallets[1].0.sync(4).await.unwrap();
         println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
@@ -1031,6 +1044,8 @@ mod tests {
             .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1)
             .await
             .unwrap();
+        wallets[0].0.sync(6).await.unwrap();
+        wallets[1].0.sync(6).await.unwrap();
         println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
         // now = Instant::now();
 

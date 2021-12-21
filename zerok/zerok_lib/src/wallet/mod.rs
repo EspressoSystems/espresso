@@ -238,10 +238,10 @@ impl BackgroundKeyScan {
 
 #[ser_test(arbitrary, ark(false))]
 #[derive(Arbitrary, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct KeyStreamState {
-    auditor: u64,
-    freezer: u64,
-    user: u64,
+pub struct KeyStreamState {
+    pub auditor: u64,
+    pub freezer: u64,
+    pub user: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -713,8 +713,14 @@ impl<'a, L: Ledger> WalletState<'a, L> {
     }
 
     pub fn balance(&self, account: &UserAddress, asset: &AssetCode, frozen: FreezeFlag) -> u64 {
+        println!("\nAsset: {:?}", asset);
         match self.user_keys.get(account) {
-            Some(key) => self.txn_state.balance(asset, &key.pub_key(), frozen),
+            Some(key) => {
+                let balance = self.txn_state.balance(asset, &key.pub_key(), frozen);
+                println!("Account: {:?}", &key.pub_key());
+                println!("Balance: {:?}", balance);
+                balance
+            }
             None => 0,
         }
     }
@@ -932,6 +938,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     let records = self
                         .try_open_memos(session, &key_pair, &outputs, transaction, !self_published)
                         .await;
+                    for rec in records.clone() {
+                        println!("Decripted record: {:?}", rec.0);
+                    }
                     self.add_records(&key_pair, records);
                 }
             }
@@ -2677,6 +2686,7 @@ pub mod test_helpers {
                 ledger.now()
             }
         };
+        println!("Ledger time: {}", t);
         sync_with(wallets, t).await;
 
         // Since we're syncing with the time stamp from the most recent event, the wallets should
