@@ -6,7 +6,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use jf_aap::{
     keys::{AuditorKeyPair, AuditorPubKey},
     mint::MintNote,
-    structs::{AssetCode, AssetDefinition, AuditData, Nullifier, RecordCommitment},
+    structs::{AssetCode, AssetDefinition, AuditData, Nullifier, RecordCommitment, RecordOpening},
     transfer::TransferNote,
     TransactionNote,
 };
@@ -90,6 +90,14 @@ pub mod traits {
             &self,
         ) -> Vec<(Nullifier, <Self::NullifierSet as NullifierSet>::Proof)>;
         fn output_commitments(&self) -> Vec<RecordCommitment>;
+        // Tries to get record openings corresponding to the outputs of this transaction. If
+        // possible, the wallet should add any relevant openings right away when this transaction is
+        // received. Otherwise, it will wait for corresponding receiver memos.
+        fn output_openings(&self) -> Option<Vec<RecordOpening>> {
+            // Most transactions do not have attached record openings. Override this default if the
+            // implementing transaction type does.
+            None
+        }
         fn hash(&self) -> Self::Hash;
         fn kind(&self) -> Self::Kind;
 
