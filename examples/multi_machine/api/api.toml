@@ -15,7 +15,7 @@ HTML_TOP = """
 <html lang='en'>
   <head>
     <meta charset='utf-8'>
-    <title>Spectrum Web Help</title>
+    <title>Spectrum CAPE Web Help</title>
     <link rel='stylesheet' href='public/css/style.css'>
     <script src='public/js/script.js'></script>
   </head>
@@ -23,7 +23,8 @@ HTML_TOP = """
     <div><img src='public/media/Horizontal02.png'
               alt='Spectrum Logo'
               height='115'/></div>
-    <h1>Spectrum Web Interface</h1>
+    <h1>Spectrum CAPE Web Interface</h1>
+    <p>The Spectrum CAPE Web Inteface provides a way to create and interact with a local wallet that can be used to build, submit, and track transactions, as well as creating and managing new types of assets.</p>
 """
 
 HTML_BOTTOM = """
@@ -35,191 +36,21 @@ HEADING_ROUTES = "Routes"
 HEADING_PARAMETERS = "Parameters"
 HEADING_DESCRIPTION = "Description"
 
-# [route.getinfo]
-# PATH = [ "getinfo" ]
-# DOC = """
-# _This is preliminary:_
-# - version: full node version
-# - network_id
-# - blocks: total number of blocks (1 more than the latest block number if we start with block #0)
-# - transactions: total number of transactions
-# - records: total number of records (including spent)
-# - circulation: total number of XYZ tokens in circulation *(implementation note: XYZ-related items can wait until the native token is implemented).*
-# - blockchain_size: total size of all blocks (not the size of a full node; just bare blocks)
-# - current_block_size: size of latest block
-# - current_block_tx: number of transactions in latest block
-# - mempool_transactions: number of transactions in mempool (known to node)
-# - mempool_outputs: number of outputs in mempool (known to node)
-# - mempool_size: mempool size in bytes (known to node)
-# """
-
-[route.getblockhash]
-PATH = [ "getblockhash/latest", "getblockhash/:bkid", "getblockhash/index/:index" ]
-":bkid" = "TaggedBase64"
-":index" = "Integer"
-DOC = "Returns the designated block hash. If /latest is appended, returns the latest block hash."
-ERROR_bkid = """
-A valid block identifier is required. Block identifiers begin with BK~, for example, BK~Q3_ac7-.
-"""
-ERROR_index = """
-A valid block index is required. The index is a natural number between 0 and one less than the number of blocks.
-See also getblockcount.
-"""
-
-[route.getblockid]
-PATH = [ "getblockid/latest", "getblockid/index/:index", "getblockid/hash/:hash" ]
-":hash" = "TaggedBase64"
-":index" = "Integer"
-DOC = "Returns the designated block identifier. If /latest is appended, returns the latest block identifier."
-ERROR_index = """
-A valid block index is required. The index is a natural number between
-0 and one less than the number of blocks.
-
-See also getblockcount.
-"""
-ERROR_hash = """
-A valid block hash is required. Block hashes begin with HASH~, for example, HASH~qd47Ob5IQxCPqnCS7YRsXmukzJhFw2k0aAdX_N8i9LYmJ1JYvyELuzfB94TLin12IwwkjqTJebLmlV6vJ2eFl6g.
-"""
-
-[route.getblockcount]
-PATH = [ "getblockcount" ]
-DOC = "Returns the total number of blocks in decimal."
-
-[route.getblock]
-PATH = [ "getblock/latest", "getblock/:bkid", "getblock/hash/:hash", "getblock/index/:index" ]
-":hash" = "TaggedBase64"
-":bkid" = "TaggedBase64"
-":index" = "Integer"
-DOC = """
-Returns all block-specific information
-- block identifier
-- block hash
-- state_commitment
-- transaction_data: ordered list of transactions in block
-- etc...
-"""
-ERROR_bkid = """
-A valid block identifier is required. Block identifiers begin with BK~, for example, BK~Q3_ac7-.
-"""
-ERROR_hash = """
-A valid block hash is required. Block hashes begin with HASH~, for example, HASH~qd47Ob5IQxCPqnCS7YRsXmukzJhFw2k0aAdX_N8i9LYmJ1JYvyELuzfB94TLin12IwwkjqTJebLmlV6vJ2eFl6g.
-"""
-ERROR_index = """
-A valid block index is required. The index is a natural number between 0 and one less than the number of blocks.
-See also getblockcount. 
-"""
-
-[route.getmempool]
-PATH = [ "getmempool" ]
-DOC = """
-Returns a set of transaction IDs in memory pool.
-"""
-
-# TODO !corbett Does it makes sense to implement gettransaction/latest?
-[route.gettransaction]
-PATH = [ "gettransaction/:txid" ]
-":txid" = "TaggedBase64"
-DOC = "Get transaction data associated with a transaction identifier, or an error if no such transaction exists."
-ERROR_txid = "A valid transaction identifier is required. Transaction identifiers begin with TX~, for example, TX~Ab-3D_x5."
-
-# TODO !corbett Is this possible in JF?
-[route.getunspentrecordsetinfo]
-PATH = [ "getunspentrecordsetinfo" ]
-DOC = """
-Returns statistics about unspent record set including the number of unspent records.
-"""
-
-# Does this work in JF?
-# TODO !corbett If it does, do we care that it leaks information about the number of outputs in every transaction?
-[route.getunspentrecord]
-PATH = ["getunspentrecord/:txid/:output_index/:mempool"]
-":txid" = "TaggedBase64"
-":output_index" = "Integer"
-":mempool" = "Boolean"
-DOC = """
-record_data: details about an unspent record from the *n*th output of the given transaction
-"""
-ERROR_txid = "A valid transaction identifier is required. Transaction identifiers begin with TX~, for example, TX~Ab-3D_x5."
-ERROR_output_index = "No such output. The output index must be non-negative and less than the number of outputs."
-ERROR_mempool = "The mempool parameter must be Boolean. The value 'true' indicates mempool information is wanted."
-
-[route.subscribe]
-PATH = ["subscribe/:index"]
-WEB_SOCKET = true
-":index" = "Integer"
-DOC = """
-A server-sent event (SSE) endpoint which opens a data stream between the server and client. Each
-time the state of the ledger changes or something of interest happens, the query service will
-generate an event and send it over the stream. For example, events are generated when new blocks are
-added to the ledger, when submitted blocks are rejected by validators, and when receiver memos are
-posted for a previously accepted block.
-
-The :index URL parameter can be used to subscribe starting a particular event index. Use :index 0 to
-subscribe to all events in the history of the network.
-"""
-ERROR_index = "The event index must be a non-negative integer."
-
-[route.getsnapshot]
-PATH = ["getsnapshot/:index/:sparse", "getsnapshot/latest/:sparse"]
-":index" = "Integer"
-":sparse" = "Boolean"
-DOC = """
-Get a snapshot of the edger at the specified time. If :index is given, it is the 0-based index of
-the desired snapshot, starting from the genesis of the ledger. If using `getsnapshot/latest`, the
-most recent snapshot is returned. If `:sparse`, the resulting snapshot is sparse, containing only
-root hashes for the UTXO and nullifiers sets. Otherwise, the snapshot contains the full sets.
-"""
-ERROR_index = "The index must be a non-negative integer."
-ERROR_sparse = "The sparse flag must be Boolean."
-
-[route.getuser]
-PATH = ["getuser/:address"]
-":address" = "TaggedBase64"
-DOC = "Returns the public key of a user with a specified address."
-ERROR_address = "A valid user address is required. User addresses begin with ADDR~, for example, ADDR~Ab12whatever."
-
-[route.getusers]
-PATH = ["getusers"]
-DOC = "Returns a list of the public keys of all known users."
-
-[route.getnullifier]
-PATH = ["getnullifier/:root/:nullifier"]
-":root" = "TaggedBase64"
-":nullifier" = "TaggedBase64"
-DOC = """
-Returns whether the designated nullifier has been spent, along with a proof relative to the
-requested root hash. The root must be a historical root hash of the ledger's nullifier set.
-"""
-ERROR_root = "A valid Merkle set root hash is required. Hashes begin with HASH~."
-ERROR_nullifier = "A valid nullifier is required. Nullifiers begin with NUL~."
-
-[route.getstatecomm]
-PATH = ["getstatecomm/:index", "getstatecomm/latest"]
-":index" = "Integer"
-DOC = """
-Gets the requested state commitment. Indexing is the same as for `getsnapshot`.
-"""
-ERROR_index = "The index must be a non-negative integer."
-
-[route.getevent]
-PATH = ["getevent/:index"]
-":index" = "Integer"
-DOC = """
-Get the event with the designated index.
-"""
-
-# CAPE routes
-
 # TODO !corbett How do transaction notifications work in CAPE?
-# TODO !corbett Where do fees fit in?
+# TODO !corbett Where do fees fit in? Do we need fees in more places?
 # TODO !corbett Need a better way to send the password than in the URL.
-# TODO !corbett Consider increasing the syntaxtic distance between freeze and unfreeze.
-# TODO !corbett Is there an operation that both defines an asset and issues units of it? Should this be a single operation or two separate operations? Is it allowed to issue more of an asset later after the asset is already defined?
-# TODO !corbett Is okay to use 'mint' as the term for defining and issuing an asset?
+# TODO !corbett Consider increasing the syntaxtic distance between freeze and unfreeze. Two letters isn't much and easy to mess up with copy/paste or not reading slowly enough.
 # TODO !corbett getinfo isn't the only entry point for getting information. How do we make it consistent?
 # TODO !corbett several entries have 'get' as a prefix. Some don't. It's unclear whether 'get' is useful.
-# TODO !corbett Between the words 'transfer' and 'send', we use transfer more often, but send seems more specific and intuitive. Send is also shorter.
-# TODO !corbett 'send' and 'spend' are annoyingly similar.
+# TODO !corbett Among the words 'transfer', 'spend', and 'send', we use transfer more often, but send seems more specific and intuitive. Send is also shorter. Is spend better?
+# TODO !corbett Selective reveal interface is needed
+# TODO !corbett TaggedBase64 ends up being a catch-all for structured parameters and parameters that may include spaces. Do we need more specific types?
+# TODO !corbett The caller never needs to type the parameter names, so should we add underscores for readability?
+# TODO !corbett Document errors.
+# TODO !corbett the toml reader alphabetizes the routes. Not ideal.
+# TODO !corbett the toml reader alphabetizes the parameters. Also not ideal.
+# TODO !corbett How do we lookup existing asset definitions?
+# TODO !corbett How do we generate a one-time receiving address?
 
 [route.newwallet]
 PATH = ["newwallet/:mnemonic"]
@@ -262,66 +93,84 @@ DOC = """
 Get the addresses, public keys, and asset types for the current wallet.
 """
 
-[route.genkey]
-PATH = ["getkey/send", "genkey/trace", "genkey/freeze"]
+[route.newkey]
+PATH = ["newkey/send", "newkey/trace", "newkey/freeze"]
 DOC = """
 Generate a key of the given type to be used to define assets.
 """
 
 [route.importkey]
-PATH = ["importkey/tracekey/:freezekey", "importkey/spendkey/:spendkey", "importkey/tracekey/:tracekey" ]
-":freezekey" = "TaggedBase64"
-":spendkey" = "TaggedBase64"
-":tracekey" = "TaggedBase64"
+PATH = ["importkey/freeze/:freeze", "importkey/send/:send", "importkey/send/:send/:index", "importkey/trace/:trace" ]
+":freeze" = "TaggedBase64"
+":send" = "TaggedBase64"
+":index" = "Integer"
+":trace" = "TaggedBase64"
 DOC = """
-Import the given key into the current wallet.
+Import the given key into the current wallet. For transfer (send) keys, the optional scan index give a block index at which to begin scanning. If omitted, the entire ledger is scanned for transactions using the key.
 """
 
 [route.send]
-PATH = ["send/amount/:amount/asset/:asset/recipient/:recipient"]
+PATH = ["send/sender/:sender/amount/:amount/asset/:asset/recipient/:recipient"]
+":sender" = "TaggedBase64"
 ":amount" = "Integer"
 ":asset" = "TaggedBase64"
 ":recipient" = "TaggedBase64"
 DOC = """
-Transfer amount units of the given asset to the recipient. Returns a serialized receipt which can be used to track the transaction through the validation process.
+Transfer amount units of the given asset from the sender to the recipient. Returns a serialized receipt which can be used to track the transaction through the validation process.
+"""
+
+[route.newasset]
+PATH = ["newasset/:description/amount/:amount/sendkey/:sendkey/freezekey/:freezekey/tracekey/:tracekey/traceamount/:trace_amount/traceaddress/:trace_address"]
+":description" = "TaggedBase64"
+":amount" = "Integer"
+":sendkey" = "TaggedBase64"
+":freezekey" = "TaggedBase64"
+":tracekey" = "TaggedBase64"
+":trace_amount" = "Boolean"
+":trace_address" = "Boolean"
+DOC = """
+Mint amount units of a given asset code controlled by the current wallet. Reports the asset code associated with the given keys. Keys are generated with *newkey*.
 """
 
 [route.mint]
-PATH = ["mint/:description/amount/:amount/spendkey/:spendkey/freezekey/:freezekey/tracekey/:tracekey"]
-":description" = "TaggedBase64"
+PATH = ["mint/asset/:asset/amount/:amount/sendkey/:send_key/freezekey/:freeze_key/tracekey/:trace_key"]
+":asset" = "TaggedBase64"
 ":amount" = "Integer"
-":spendkey" = "TaggedBase64"
-":freezekey" = "TaggedBase64"
-":tracekey" = "TaggedBase64"
+":send_key" = "TaggedBase64"
+":freeze_key" = "TaggedBase64"
+":trace_key" = "TaggedBase64"
 DOC = """
-Mint amount units of a given asset code controlled by the current wallet. Reports the asset code associated with the given keys. Keys are generated with genkey.
+Mint amount units of a given asset code controlled by the current wallet. Reports the asset code associated with the given keys. Keys are generated with *newkey*.
 """
 
 # TODO !corbett This is also called sponsor, but that seems harder to understand than 'deposit' or 'wrap'.
 [route.deposit]
-PATH = ["deposit/erc20/:erc20/amount/:amount"]
+PATH = ["deposit/asset/:asset/erc20/:erc20/amount/:amount"]
+":asset" = "TaggedBase64"
 ":erc20" = "TaggedBase64"
 ":amount" = "Integer"
 DOC = """
 Deposit (wrap) ERC-20 into CAPE.
 """
 
-
 [route.freeze]
-PATH = ["freeze/:address/:freezekey/fee/:feeaddress/:feeamount"]
+PATH = ["freeze/:address/:asset/fee/:fee_address/:fee_amount"]
 ":address" = "TaggedBase64"
-":freezekey" = "TaggedBase64"
-":feeaddress" = "TaggedBase64"
-":feeamount" = "Integer"
+":asset" = "TaggedBase64"
+":fee_address" = "TaggedBase64"
+":fee_amount" = "Integer"
 DOC = """
-Freeze the asset associated with the given freezing key.
+Freeze the asset associated with the given address and asset type. Assumes the asset was defined with a freezing key. 
 """
 
 [route.unfreeze]
-PATH = ["unfreeze/:freezekey"]
-":freezekey" = "TaggedBase64"
+PATH = ["unfreeze/:address/:asset/fee/:fee_address/:fee_amount"]
+":address" = "TaggedBase64"
+":asset" = "TaggedBase64"
+":fee_address" = "TaggedBase64"
+":fee_amount" = "Integer"
 DOC = """
-Unfreeze the asset associated with the given freezing key.
+Unfreeze the asset associated with the given address and asset type. Assumes the asset was defined with a freezing key. 
 """
 
 [route.trace]

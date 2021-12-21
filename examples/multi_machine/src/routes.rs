@@ -14,7 +14,7 @@ use tagged_base64::TaggedBase64;
 use tide::http::{content::Accept, mime};
 use tide::StatusCode;
 use tide_websockets::WebSocketConnection;
-use tracing::{event, Level};
+//use tracing::{event, Level};
 use zerok_lib::api::*;
 use zerok_lib::node::{LedgerEvent, LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
 use zerok_lib::state::state_comm::LedgerStateCommitment;
@@ -108,22 +108,23 @@ pub struct RouteBinding {
 #[allow(non_camel_case_types)]
 #[derive(AsRefStr, Copy, Clone, Debug, EnumIter, EnumString)]
 pub enum ApiRouteKey {
-    getblock,
-    getblockcount,
-    getblockhash,
-    getblockid,
-    getevent,
-    getinfo,
-    getmempool,
-    getnullifier,
-    getsnapshot,
-    getstatecomm,
-    gettransaction,
-    getunspentrecord,
-    getunspentrecordsetinfo,
-    getuser,
-    getusers,
-    subscribe,
+    // getblock,
+    // getblockcount,
+    // getblockhash,
+    // getblockid,
+    // getevent,
+    // getinfo,
+    // getmempool,
+    // getnullifier,
+    // getsnapshot,
+    // getstatecomm,
+    // gettransaction,
+    // getunspentrecord,
+    // getunspentrecordsetinfo,
+    // getuser,
+    // getusers,
+    // subscribe,
+    newwallet,
 }
 
 /// Verifiy that every variant of enum ApiRouteKey is defined in api.toml
@@ -461,9 +462,9 @@ async fn get_event(
 }
 
 async fn subscribe(
-    req: tide::Request<WebState>,
-    conn: WebSocketConnection,
-    bindings: &HashMap<String, RouteBinding>,
+    _req: tide::Request<WebState>,
+    _conn: WebSocketConnection,
+    _bindings: &HashMap<String, RouteBinding>,
 ) -> Result<(), tide::Error> {
     // let response_type = best_response_type(
     //     &mut Accept::from_headers(&req)?,
@@ -487,7 +488,7 @@ async fn subscribe(
 pub async fn dispatch_url(
     req: tide::Request<WebState>,
     route_pattern: &str,
-    bindings: &HashMap<String, RouteBinding>,
+    _bindings: &HashMap<String, RouteBinding>,
 ) -> Result<tide::Response, tide::Error> {
     let first_segment = route_pattern
         .split_once('/')
@@ -495,7 +496,7 @@ pub async fn dispatch_url(
         .0;
     let key = ApiRouteKey::from_str(first_segment).expect("Unknown route");
     let query_service_guard = req.state().node.read().await;
-    let query_service = &*query_service_guard;
+    let _query_service = &*query_service_guard;
     match key {
         // ApiRouteKey::getblock => response(&req, get_block(bindings, query_service).await?),
         // ApiRouteKey::getblockcount => response(&req, get_block_count(query_service).await?),
@@ -536,7 +537,7 @@ pub async fn dispatch_web_socket(
         .0;
     let key = ApiRouteKey::from_str(first_segment).expect("Unknown route");
     match key {
-        ApiRouteKey::subscribe => subscribe(req, conn, bindings).await,
+        // ApiRouteKey::subscribe => subscribe(req, conn, bindings).await,
         _ => Err(tide::Error::from_str(
             StatusCode::InternalServerError,
             "server called dispatch_web_socket with an unsupported route",
