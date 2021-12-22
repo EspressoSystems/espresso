@@ -757,7 +757,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         };
         network.send_event(event);
 
-        println!("Memos posted");
+        println!("\nMemos posted");
 
         Ok(())
     }
@@ -982,6 +982,15 @@ mod tests {
             .unwrap();
         wallets[0].0.sync(2).await.unwrap();
         wallets[1].0.sync(2).await.unwrap();
+        // TODO !keyao The balance of native asset is incorrect. Spend record isn't removed.
+        let _ = wallets[0]
+            .0
+            .balance(&alice_address, &AssetCode::native())
+            .await;
+        let _ = wallets[1]
+            .0
+            .balance(&bob_address, &AssetCode::native())
+            .await;
         println!("Asset minted: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 

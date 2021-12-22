@@ -788,6 +788,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 block_id,
                 state_comm,
             } => {
+                println!("\nReceived Commit event");
                 // Don't trust the network connection that provided us this event; validate it
                 // against our local mirror of the ledger and bail out if it is invalid.
                 let mut uids = match self.txn_state.validator.validate_and_apply(block.clone()) {
@@ -821,9 +822,12 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 // the validator state.
                 for txn in block.txns() {
                     let nullifiers = txn.input_nullifiers();
+                    println!("\nTxn: {:?}", txn);
+
                     // Remove spent records.
                     for n in &nullifiers {
                         if let Some(record) = self.txn_state.records.remove_by_nullifier(*n) {
+                            println!("Spent records removed");
                             self.txn_state.forget_merkle_leaf(record.uid);
                         }
                     }

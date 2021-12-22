@@ -219,7 +219,10 @@ impl RecordDatabase {
     }
 
     pub fn remove_by_nullifier(&mut self, nullifier: Nullifier) -> Option<RecordInfo> {
+        println!("\nAll nullifiers: {:?}", self.nullifier_records);
         self.nullifier_records.remove(&nullifier).map(|uid| {
+            println!("uid: {}", uid);
+
             let record = self.record_info.remove(&uid).unwrap();
 
             // Remove the record from `asset_records`, and if the sub-collection it was in becomes
@@ -1258,6 +1261,8 @@ impl<L: Ledger> TransactionState<L> {
                 Some(1),
             )
             .map(|(ros, _change)| ros.into_iter().next().unwrap())?;
+
+        println!("Fee: {:?}", ro);
 
         Ok(FeeInput {
             ro,
