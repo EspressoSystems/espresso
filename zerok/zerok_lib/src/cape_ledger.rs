@@ -484,6 +484,10 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         self.storage.lock().await
     }
 
+    // TODO !keyao Handle initialization with initial records more similar to how the Spectrum
+    // backend does it. Create the validator with some initial records, and generate a Memos
+    // event straight away for those records. Then the records are added to the apporpriate
+    // wallets automatically, with no special handling for initial records
     async fn create(&mut self) -> Result<WalletState<'a, CapeLedger>, WalletError> {
         let key_id: u64 = 0;
         let key_pair = self.key_stream().derive_user_keypair(&key_id.to_le_bytes());
@@ -757,8 +761,6 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         };
         network.send_event(event);
 
-        println!("\nMemos posted");
-
         Ok(())
     }
 }
@@ -825,8 +827,9 @@ pub mod test_helpers {
         let mut users: Vec<(KeyTree, UserKeyPair, Vec<(RecordOpening, u64)>)> = vec![];
         for amount in initial_grants {
             let key_stream = KeyTree::random(&mut rng).unwrap().0;
+            let wallet_key_stream = key_stream.derive_sub_tree("wallet".as_bytes());
             let key_id: u64 = 0;
-            let key_pair = key_stream.derive_user_keypair(&key_id.to_le_bytes());
+            let key_pair = wallet_key_stream.derive_user_keypair(&key_id.to_le_bytes());
             println!("\nAccount created: {:?}", key_pair.pub_key());
 
             if amount > 0 {
@@ -982,15 +985,6 @@ mod tests {
             .unwrap();
         wallets[0].0.sync(2).await.unwrap();
         wallets[1].0.sync(2).await.unwrap();
-        // TODO !keyao The balance of native asset is incorrect. Spend record isn't removed.
-        let _ = wallets[0]
-            .0
-            .balance(&alice_address, &AssetCode::native())
-            .await;
-        let _ = wallets[1]
-            .0
-            .balance(&bob_address, &AssetCode::native())
-            .await;
         println!("Asset minted: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
@@ -1014,7 +1008,7 @@ mod tests {
             .unwrap();
         wallets[0].0.sync(4).await.unwrap();
         wallets[1].0.sync(4).await.unwrap();
-        println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
+        println!("First transfer generated: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
 
         // Check that both wallets reflect the new balances (less any fees). This cannot be a
@@ -1053,9 +1047,9 @@ mod tests {
             .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1)
             .await
             .unwrap();
-        wallets[0].0.sync(6).await.unwrap();
-        wallets[1].0.sync(6).await.unwrap();
-        println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
+        // wallets[0].0.sync(6).await.unwrap();
+        // wallets[1].0.sync(6).await.unwrap();
+        println!("Second transfer generated: {}s", now.elapsed().as_secs_f32());
         // now = Instant::now();
 
         check_balance(&wallets[0], 3, alice_initial_native_balance, 1, &coin).await;
