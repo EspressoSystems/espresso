@@ -45,12 +45,14 @@ HEADING_DESCRIPTION = "Description"
 # TODO !corbett Among the words 'transfer', 'spend', and 'send', we use transfer more often, but send seems more specific and intuitive. Send is also shorter. Is spend better?
 # TODO !corbett Selective reveal interface is needed
 # TODO !corbett TaggedBase64 ends up being a catch-all for structured parameters and parameters that may include spaces. Do we need more specific types?
+# TOOD !corbett Document the prefix on all TaggedBase64 values.
 # TODO !corbett The caller never needs to type the parameter names, so should we add underscores for readability?
 # TODO !corbett Document errors.
 # TODO !corbett the toml reader alphabetizes the routes. Not ideal.
 # TODO !corbett the toml reader alphabetizes the parameters. Also not ideal.
 # TODO !corbett How do we lookup existing asset definitions?
 # TODO !corbett How do we generate a one-time receiving address?
+# TODO !corbett Better way to specify optional elements to avoid combinatorial explosion. See newasset for an example.
 
 [route.newwallet]
 PATH = ["newwallet/:mnemonic"]
@@ -119,9 +121,43 @@ DOC = """
 Transfer amount units of the given asset from the sender to the recipient. Returns a serialized receipt which can be used to track the transaction through the validation process.
 """
 
+[route.wrap]
+PATH = ["wrap/address/:address/amount/:amount/asset/:asset"]
+":address" = "TaggedBase64"
+":amount" = "Integer"
+":asset" = "TaggedBase64"
+DOC = """
+Wrap amount units of the given asset from the address. Returns a serialized receipt which can be used to track the transaction through the validation process.
+"""
+
+[route.unwrap]
+PATH = ["unwrap/asset/:asset/amount/:amount/erc20/:erc20"]
+":asset" = "TaggedBase64"
+":amount" = "Integer"
+":erc20" = "TaggedBase64"
+DOC = """
+Unwrap amount units of the given asset into the given ERC-20 address. Returns a serialized receipt which can be used to track the transaction through the validation process.
+"""
+
 [route.newasset]
-PATH = ["newasset/:description/amount/:amount/sendkey/:sendkey/freezekey/:freezekey/tracekey/:tracekey/traceamount/:trace_amount/traceaddress/:trace_address"]
+PATH = [
+     "newasset/erc20/:erc20/symbol/:symbol/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/freezekey/:freezekey/tracekey/:tracekey/traceamount/:trace_amount/traceaddress/:trace_address",
+     "newasset/erc20/:erc20/symbol/:symbol/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/freezekey/:freezekey/tracekey/:tracekey/traceamount/:trace_amount/traceaddress/:trace_address",
+     "newasset/erc20/:erc20/symbol/:symbol/description/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/freezekey/:freezekey",
+     "newasset/erc20/:erc20/symbol/:symbol/description/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/freezekey/:freezekey",
+     "newasset/erc20/:erc20/symbol/:symbol/description/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/tracekey/:tracekey/traceamount/:trace_amount/traceaddress/:trace_address",
+     "newasset/erc20/:erc20/symbol/:symbol/description/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/tracekey/:tracekey/traceamount/:trace_amount/traceaddress/:trace_address",
+     "newasset/symbol/:symbol/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/freezekey/:freezekey/tracekey/:tracekey/traceamount/:trace_amount/traceaddress/:trace_address",
+     "newasset/symbol/:symbol/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/freezekey/:freezekey/tracekey/:tracekey/traceamount/:trace_amount/traceaddress/:trace_address",
+     "newasset/symbol/:symbol/description/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/freezekey/:freezekey",
+     "newasset/symbol/:symbol/description/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/freezekey/:freezekey",
+     "newasset/symbol/:symbol/description/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/tracekey/:tracekey/traceamount/:trace_amount/traceaddress/:trace_address",
+     "newasset/symbol/:symbol/description/:description/issuer/:issuer/amount/:amount/sendkey/:sendkey/tracekey/:tracekey/traceamount/:trace_amount/traceaddress/:trace_address"
+]
+":erc20" = "TaggedBase64"
+":symbol" = "String"
 ":description" = "TaggedBase64"
+":issuer" = "String"
 ":amount" = "Integer"
 ":sendkey" = "TaggedBase64"
 ":freezekey" = "TaggedBase64"
