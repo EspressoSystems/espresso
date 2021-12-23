@@ -1050,7 +1050,10 @@ mod tests {
             .unwrap();
         wallets[0].0.sync(6).await.unwrap();
         wallets[1].0.sync(6).await.unwrap();
-        println!("Second transfer generated: {}s", now.elapsed().as_secs_f32());
+        println!(
+            "Second transfer generated: {}s",
+            now.elapsed().as_secs_f32()
+        );
         // now = Instant::now();
 
         check_balance(&wallets[0], 3, alice_initial_native_balance, 1, &coin).await;
