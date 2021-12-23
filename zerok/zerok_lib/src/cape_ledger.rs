@@ -831,7 +831,6 @@ pub mod test_helpers {
             let wallet_key_stream = key_stream.derive_sub_tree("wallet".as_bytes());
             let key_id: u64 = 0;
             let key_pair = wallet_key_stream.derive_user_keypair(&key_id.to_le_bytes());
-            println!("\nAccount created: {:?}", key_pair.pub_key());
 
             if amount > 0 {
                 let ro = RecordOpening::new(
@@ -931,6 +930,7 @@ mod tests {
     use super::*;
     use crate::wallet::Wallet;
     use jf_aap::structs::AssetCode;
+    use std::fs;
     use std::time::Instant;
     use test_helpers::*;
 
@@ -941,13 +941,12 @@ mod tests {
         let num_inputs = 3;
         let num_outputs = 4;
 
-        // Give Alice an initial grant of 5 native coins. Give Bob an
-        // initial grant with which to pay his transaction fee, since he will not be receiving any
-        // native coins from Alice.
+        // Give Alice an initial grant of 5 native coins and Bob an initial grant of 1 native
+        // coin.
         let alice_grant = 5;
         let bob_grant = 1;
         // TODO !keyao Delete temp_paths.
-        let (_ledger, mut wallets, _temp_paths) = create_test_network(
+        let (_ledger, mut wallets, temp_paths) = create_test_network(
             &[(num_inputs, num_outputs)],
             vec![alice_grant, bob_grant],
             &mut now,
@@ -1041,8 +1040,8 @@ mod tests {
         // transferring some back to Alice.
         //
         // This transaction should also result in a non-zero fee change record being
-        // transferred back to Bob, since Bob's only sufficient record has an amount of 3 coins, but
-        // the sum of the outputs and fee of this transaction is only 2.
+        // transferred back to Bob, since Bob's only sufficient record has an amount of 3
+        // coins, but the sum of the outputs and fee of this transaction is only 2.
         wallets[1]
             .0
             .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1)
@@ -1054,12 +1053,13 @@ mod tests {
             "Second transfer generated: {}s",
             now.elapsed().as_secs_f32()
         );
-        // now = Instant::now();
 
         check_balance(&wallets[0], 3, alice_initial_native_balance, 1, &coin).await;
         check_balance(&wallets[1], 2, bob_initial_native_balance, 1, &coin).await;
 
-        // fs::remove_dir_all(temp_path).unwrap();
+        for path in temp_paths {
+            fs::remove_dir_all(path).unwrap();
+        }
     }
 
     #[async_std::test]

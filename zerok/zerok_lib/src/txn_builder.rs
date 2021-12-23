@@ -220,8 +220,6 @@ impl RecordDatabase {
 
     pub fn remove_by_nullifier(&mut self, nullifier: Nullifier) -> Option<RecordInfo> {
         self.nullifier_records.remove(&nullifier).map(|uid| {
-            println!("Removing uid: {}", uid);
-
             let record = self.record_info.remove(&uid).unwrap();
 
             // Remove the record from `asset_records`, and if the sub-collection it was in becomes
@@ -1269,7 +1267,6 @@ impl<L: Ledger> TransactionState<L> {
     }
 
     fn get_merkle_proof(&self, leaf: u64) -> AccMemberWitness {
-        println!("Looking up leaf: {}", leaf);
         // The transaction builder never needs a Merkle proof that isn't guaranteed to already be in the Merkle
         // tree, so this unwrap() should never fail.
         AccMemberWitness::lookup_from_tree(&self.record_mt, leaf)
