@@ -545,28 +545,29 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         // from somewhere (probably the complete tree in the query service) and remember them into
         // our sparse tree.
         let record_mt = network.records.clone();
-        let merkle_leaf_to_forget = if record_mt.num_leaves() > 0 {
+        let mut merkle_leaf_to_forget = if record_mt.num_leaves() > 0 {
             Some(record_mt.num_leaves() - 1)
         } else {
             None
         };
+        let mut records = RecordDatabase::default();
+        for (ro, uid) in self.initial_grants.iter() {
+            if merkle_leaf_to_forget == Some(*uid) {
+                merkle_leaf_to_forget = None;
+            }
+            records.insert(ro.clone(), *uid, &key_pair.clone());
+        }
 
         let state = WalletState {
             proving_keys,
             txn_state: TransactionState {
                 validator: CapeTruster::new(network.block_height, record_mt.num_leaves()),
+                now: 0,
                 nullifiers: Default::default(),
                 // Completely sparse nullifier set
                 record_mt,
+                records,
                 merkle_leaf_to_forget,
-                now: 0,
-                records: {
-                    let mut db: RecordDatabase = Default::default();
-                    for (ro, uid) in self.initial_grants.iter() {
-                        db.insert(ro.clone(), *uid, &key_pair.clone());
-                    }
-                    db
-                },
 
                 transactions: Default::default(),
             },
@@ -1047,8 +1048,8 @@ mod tests {
             .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1)
             .await
             .unwrap();
-        // wallets[0].0.sync(6).await.unwrap();
-        // wallets[1].0.sync(6).await.unwrap();
+        wallets[0].0.sync(6).await.unwrap();
+        wallets[1].0.sync(6).await.unwrap();
         println!("Second transfer generated: {}s", now.elapsed().as_secs_f32());
         // now = Instant::now();
 
