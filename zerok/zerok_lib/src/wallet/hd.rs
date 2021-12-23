@@ -122,6 +122,8 @@ impl KeyTree {
         Self::from_password_and_salt(decoded_seed.as_ref(), salt.as_bytes())
     }
 
+    // TODO !keyao Make it more explicit when to use the key stream directly and when to use the
+    // sub-tree to derive a key.
     pub fn derive_sub_tree(&self, id: &[u8]) -> KeyTree {
         // Note that the hash for deriving a new sub-tree does not need to include a commitment to
         // the role of the key (sub-tree vs key) because sub-trees and keys are different sizes and

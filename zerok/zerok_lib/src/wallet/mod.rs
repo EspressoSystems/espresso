@@ -815,7 +815,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 // the validator state.
                 for txn in block.txns() {
                     let nullifiers = txn.input_nullifiers();
-
                     // Remove spent records.
                     for n in &nullifiers {
                         if let Some(record) = self.txn_state.records.remove_by_nullifier(*n) {
@@ -1880,7 +1879,7 @@ pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = AAPLedger> {
     task_scope: AsyncScope<'a, ()>,
 }
 
-pub struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
+struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
     state: WalletState<'a, L>,
     session: WalletSession<'a, L, Backend>,
     sync_handles: HashMap<u64, Vec<oneshot::Sender<()>>>,
@@ -2678,7 +2677,6 @@ pub mod test_helpers {
                 ledger.now()
             }
         };
-        println!("Ledger time: {}", t);
         sync_with(wallets, t).await;
 
         // Since we're syncing with the time stamp from the most recent event, the wallets should
