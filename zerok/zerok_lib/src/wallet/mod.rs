@@ -714,10 +714,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 
     pub fn balance(&self, account: &UserAddress, asset: &AssetCode, frozen: FreezeFlag) -> u64 {
         match self.user_keys.get(account) {
-            Some(key) => {
-                let balance = self.txn_state.balance(asset, &key.pub_key(), frozen);
-                balance
-            }
+            Some(key) => self.txn_state.balance(asset, &key.pub_key(), frozen),
             None => 0,
         }
     }
