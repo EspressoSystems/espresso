@@ -2051,7 +2051,7 @@ checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 [[package]]
 name = "jf-aap"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=2a40d01c938cdcc716071af5a0dc9b3242181c2c#2a40d01c938cdcc716071af5a0dc9b3242181c2c"
 dependencies = [
  "anyhow",
  "ark-bls12-377",
@@ -2082,6 +2082,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "sha2",
+ "sha3",
  "structopt",
  "thiserror",
 ]
@@ -2089,7 +2090,7 @@ dependencies = [
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=2a40d01c938cdcc716071af5a0dc9b3242181c2c#2a40d01c938cdcc716071af5a0dc9b3242181c2c"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2113,14 +2114,14 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rayon",
  "serde",
+ "sha3",
  "thiserror",
- "tiny-keccak",
 ]
 
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=2a40d01c938cdcc716071af5a0dc9b3242181c2c#2a40d01c938cdcc716071af5a0dc9b3242181c2c"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2151,7 +2152,7 @@ dependencies = [
 [[package]]
 name = "jf-rescue"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=2a40d01c938cdcc716071af5a0dc9b3242181c2c#2a40d01c938cdcc716071af5a0dc9b3242181c2c"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2179,7 +2180,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=2a40d01c938cdcc716071af5a0dc9b3242181c2c#2a40d01c938cdcc716071af5a0dc9b3242181c2c"
 dependencies = [
  "anyhow",
  "ark-ec",
@@ -2196,7 +2197,7 @@ dependencies = [
 [[package]]
 name = "jf-utils-derive"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=529a2e41b06d39144885c8482b7c230143567d10#529a2e41b06d39144885c8482b7c230143567d10"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git?rev=2a40d01c938cdcc716071af5a0dc9b3242181c2c#2a40d01c938cdcc716071af5a0dc9b3242181c2c"
 dependencies = [
  "ark-serialize",
  "ark-std",

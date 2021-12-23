@@ -63,6 +63,12 @@ pub struct Erc20Code([u8; 32]);
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EthereumAddr([u8; 20]);
 
+impl EthereumAddr {
+    pub fn as_bytes(&self) -> &[u8; 20] {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CapeOperation {
     SubmitBlock(Vec<CapeTransaction>),

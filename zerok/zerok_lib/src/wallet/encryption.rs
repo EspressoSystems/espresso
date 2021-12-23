@@ -164,3 +164,85 @@ impl CanonicalDeserialize for CipherText {
         Ok(Self { nonce, hmac, bytes })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hd::KeyTree;
+    use rand_chacha::{
+        rand_core::{RngCore, SeedableRng},
+        ChaChaRng,
+    };
+
+    fn random_cipher(rng: &mut ChaChaRng) -> Cipher {
+        Cipher::new(
+            KeyTree::random(rng).unwrap().0,
+            ChaChaRng::from_rng(rng).unwrap(),
+        )
+    }
+
+    fn corrupt(rng: &mut ChaChaRng, data: &mut [u8]) {
+        let index = rng.next_u64() as usize % data.len();
+        data[index] = !data[index];
+    }
+
+    fn assert_invalid_hmac(cipher: &Cipher, data: &CipherText) {
+        match cipher.decrypt(data) {
+            Err(Error::InvalidHmac { .. }) => {}
+            res => {
+                panic!("expected InvalidHmac, got {:?}", res);
+            }
+        }
+    }
+
+    #[test]
+    fn round_trip() {
+        let mut rng = ChaChaRng::from_seed([42; 32]);
+        let mut cipher = random_cipher(&mut rng);
+
+        let mut plaintext = vec![0u8; 1024];
+        rng.fill_bytes(&mut plaintext);
+        let ciphertext = cipher.encrypt(&plaintext).unwrap();
+        assert_eq!(plaintext, cipher.decrypt(&ciphertext).unwrap());
+    }
+
+    #[test]
+    fn decrypt_incorrect_key() {
+        let mut rng = ChaChaRng::from_seed([42; 32]);
+        let mut cipher1 = random_cipher(&mut rng);
+
+        let mut plaintext = vec![0u8; 1024];
+        rng.fill_bytes(&mut plaintext);
+        let ciphertext = cipher1.encrypt(&plaintext).unwrap();
+
+        let cipher2 = random_cipher(&mut rng);
+        assert_invalid_hmac(&cipher2, &ciphertext);
+        assert_eq!(plaintext, cipher1.decrypt(&ciphertext).unwrap());
+    }
+
+    #[test]
+    fn decrypt_corrupt() {
+        let mut rng = ChaChaRng::from_seed([42; 32]);
+        let mut cipher = random_cipher(&mut rng);
+
+        let mut plaintext = vec![0u8; 1024];
+        rng.fill_bytes(&mut plaintext);
+        let ciphertext = cipher.encrypt(&plaintext).unwrap();
+        assert_eq!(plaintext, cipher.decrypt(&ciphertext).unwrap());
+
+        // Corrupt a random byte in the HMAC.
+        let mut corrupt_hmac = ciphertext.clone();
+        corrupt(&mut rng, &mut corrupt_hmac.hmac);
+        assert_invalid_hmac(&cipher, &corrupt_hmac);
+
+        // Corrupt a random byte in the nonce.
+        let mut corrupt_nonce = ciphertext.clone();
+        corrupt(&mut rng, &mut corrupt_nonce.nonce);
+        assert_invalid_hmac(&cipher, &corrupt_nonce);
+
+        // Corrupt a random byte in the payload.
+        let mut corrupt_payload = ciphertext.clone();
+        corrupt(&mut rng, &mut corrupt_payload.bytes);
+        assert_invalid_hmac(&cipher, &corrupt_payload);
+    }
+}
