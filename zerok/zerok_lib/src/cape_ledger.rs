@@ -493,9 +493,10 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
     }
 
     // TODO !keyao Handle initialization with initial records more similar to how the Spectrum
-    // backend does it. Create the validator with some initial records, and generate a Memos
-    // event straight away for those records. Then the records are added to the apporpriate
-    // wallets automatically, with no special handling for initial records
+    // backend does it. Create the validator with some initial records and generate a Memos for
+    // those records. Then the records are added to the wallets automatically, with no special
+    // handling for initial records.
+    // Issue: https://github.com/SpectrumXYZ/spectrum/issues/40.
     async fn create(&mut self) -> Result<WalletState<'a, CapeLedger>, WalletError> {
         let key_id: u64 = 0;
         let key_pair = self.key_stream().derive_user_keypair(&key_id.to_le_bytes());
@@ -1085,7 +1086,6 @@ mod tests {
         // coin.
         let alice_grant = 5;
         let bob_grant = 1;
-        // TODO !keyao Delete temp_paths.
         let (_ledger, mut wallets, temp_paths) = create_test_network(
             &[(num_inputs, num_outputs)],
             vec![alice_grant, bob_grant],
@@ -1197,6 +1197,8 @@ mod tests {
         check_balance(&wallets[0], 3, alice_initial_native_balance, 1, &coin).await;
         check_balance(&wallets[1], 2, bob_initial_native_balance, 1, &coin).await;
 
+        // TODO !keyao Directories may not be removed properly if a test panics.
+        // Issue: https://github.com/SpectrumXYZ/spectrum/issues/39.
         for path in temp_paths {
             fs::remove_dir_all(path).unwrap();
         }
