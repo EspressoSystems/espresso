@@ -241,10 +241,10 @@ impl BackgroundKeyScan {
 
 #[ser_test(arbitrary, ark(false))]
 #[derive(Arbitrary, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct KeyStreamState {
-    auditor: u64,
-    freezer: u64,
-    user: u64,
+pub struct KeyStreamState {
+    pub auditor: u64,
+    pub freezer: u64,
+    pub user: u64,
 }
 
 #[derive(Debug, Clone)]
