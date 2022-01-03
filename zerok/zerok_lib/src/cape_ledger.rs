@@ -520,11 +520,6 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         self.storage.lock().await
     }
 
-    // TODO !keyao Handle initialization with initial records more similar to how the Spectrum
-    // backend does it. Create the validator with some initial records and generate a Memos for
-    // those records. Then the records are added to the wallets automatically, with no special
-    // handling for initial records.
-    // Issue: https://github.com/SpectrumXYZ/spectrum/issues/40.
     async fn create(&mut self) -> Result<WalletState<'a, CapeLedger>, WalletError> {
         let key_id: u64 = 0;
         let key_pair = self.key_stream().derive_user_keypair(&key_id.to_le_bytes());
