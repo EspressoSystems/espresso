@@ -301,18 +301,49 @@ pub struct LocalCapeLedger {
 }
 
 impl LocalCapeLedger {
-    pub fn new(verif_crs: VerifierKeySet, record_merkle_frontier: MerkleTree) -> Self {
-        Self {
-            contract: CapeContractState::new(verif_crs, record_merkle_frontier.clone()),
+    pub fn new(
+        verif_crs: VerifierKeySet,
+        records: MerkleTree,
+        initial_grant_memos: Vec<(ReceiverMemo, u64)>,
+    ) -> Self {
+        let mut ledger = Self {
+            contract: CapeContractState::new(verif_crs, records.clone()),
             block_height: 0,
-            records: record_merkle_frontier,
+            records,
             pending_erc20_deposits: Default::default(),
             events: Default::default(),
             subscribers: Default::default(),
             pending_subscribers: Default::default(),
             txns: Default::default(),
             address_map: Default::default(),
-        }
+        };
+
+        // Broadcast receiver memos for the records which are included in the tree from the start,
+        // so that clients can access records they have been granted at ledger setup time in a
+        // uniform way.
+        let memo_outputs = initial_grant_memos
+            .into_iter()
+            .map(|(memo, uid)| {
+                let (comm, merkle_path) = ledger
+                    .records
+                    .get_leaf(uid)
+                    .expect_ok()
+                    .map(|(_, proof)| {
+                        (
+                            RecordCommitment::from_field_element(proof.leaf.0),
+                            proof.path,
+                        )
+                    })
+                    .unwrap();
+                (memo, comm, uid, merkle_path)
+            })
+            .collect();
+        ledger.send_event(LedgerEvent::Memos {
+            outputs: memo_outputs,
+            transaction: None,
+        });
+
+        ledger
     }
 
     pub fn register_erc20(
@@ -461,7 +492,6 @@ impl LocalCapeLedger {
 pub struct LocalCapeBackend<'a, Meta: Serialize + DeserializeOwned> {
     storage: Arc<Mutex<AtomicWalletStorage<'a, CapeLedger, Meta>>>,
     network: Arc<Mutex<LocalCapeLedger>>,
-    initial_grants: Vec<(RecordOpening, u64)>,
     key_stream: KeyTree,
 }
 
@@ -469,14 +499,12 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> LocalCapeBackend<'a, Meta> {
     pub fn new(
         network: Arc<Mutex<LocalCapeLedger>>,
         loader: &mut impl WalletLoader<Meta = Meta>,
-        initial_grants: Vec<(RecordOpening, u64)>,
     ) -> Result<Self, WalletError> {
         let storage = AtomicWalletStorage::new(loader)?;
         Ok(Self {
             key_stream: storage.key_stream(),
             storage: Arc::new(Mutex::new(storage)),
             network,
-            initial_grants,
         })
     }
 }
@@ -492,11 +520,6 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         self.storage.lock().await
     }
 
-    // TODO !keyao Handle initialization with initial records more similar to how the Spectrum
-    // backend does it. Create the validator with some initial records and generate a Memos for
-    // those records. Then the records are added to the wallets automatically, with no special
-    // handling for initial records.
-    // Issue: https://github.com/SpectrumXYZ/spectrum/issues/40.
     async fn create(&mut self) -> Result<WalletState<'a, CapeLedger>, WalletError> {
         let key_id: u64 = 0;
         let key_pair = self.key_stream().derive_user_keypair(&key_id.to_le_bytes());
@@ -549,23 +572,12 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         // `records` should be _almost_ completely sparse. However, even a fully pruned Merkle tree
         // contains the last leaf appended, but as a new wallet, we don't care about _any_ of the
         // leaves, so make a note to forget the last one once more leaves have been appended.
-        //
-        // TODO: Better way of getting `record_mt`: when we get initial grants, grab the MerklePaths
-        // from somewhere (probably the complete tree in the query service) and remember them into
-        // our sparse tree.
         let record_mt = network.records.clone();
-        let mut merkle_leaf_to_forget = if record_mt.num_leaves() > 0 {
+        let merkle_leaf_to_forget = if record_mt.num_leaves() > 0 {
             Some(record_mt.num_leaves() - 1)
         } else {
             None
         };
-        let mut records = RecordDatabase::default();
-        for (ro, uid) in self.initial_grants.iter() {
-            if merkle_leaf_to_forget == Some(*uid) {
-                merkle_leaf_to_forget = None;
-            }
-            records.insert(ro.clone(), *uid, &key_pair.clone());
-        }
 
         let state = WalletState {
             proving_keys,
@@ -575,7 +587,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                 nullifiers: Default::default(),
                 // Completely sparse nullifier set
                 record_mt,
-                records,
+                records: RecordDatabase::default(),
                 merkle_leaf_to_forget,
 
                 transactions: Default::default(),
@@ -966,7 +978,8 @@ pub mod test_helpers {
         // non-zero initial grant. Collect user-specific info (keys and record openings
         // corresponding to grants) in `users`, which will be used to create the wallets later.
         let mut record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
-        let mut users: Vec<(KeyTree, UserKeyPair, Vec<(RecordOpening, u64)>)> = vec![];
+        let mut initial_grant_memos = Vec::new();
+        let mut users: Vec<(KeyTree, UserKeyPair)> = vec![];
         for amount in initial_grants {
             let key_stream = KeyTree::random(&mut rng).unwrap().0;
             let wallet_key_stream = key_stream.derive_sub_tree("wallet".as_bytes());
@@ -984,9 +997,13 @@ pub mod test_helpers {
                 let comm = RecordCommitment::from(&ro);
                 let uid = record_merkle_tree.num_leaves();
                 record_merkle_tree.push(comm.to_field_element());
-                users.push((key_stream, key_pair, vec![(ro, uid)]));
+
+                let memo = ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap();
+                initial_grant_memos.push((memo, uid));
+
+                users.push((key_stream, key_pair));
             } else {
-                users.push((key_stream, key_pair, vec![]));
+                users.push((key_stream, key_pair));
             }
         }
 
@@ -1026,6 +1043,7 @@ pub mod test_helpers {
         let ledger = Arc::new(Mutex::new(LocalCapeLedger::new(
             verif_crs,
             record_merkle_tree,
+            initial_grant_memos,
         )));
 
         // Create a wallet for each user based on the validator and the per-user information
@@ -1036,7 +1054,7 @@ pub mod test_helpers {
             UserAddress,
         )> = iter(users)
             .enumerate()
-            .then(|(i, (key_stream, key_pair, initial_grants))| {
+            .then(|(i, (key_stream, key_pair))| {
                 let ledger = ledger.clone();
                 let path = TempDir::new(&format!("cape_wallet_{}", i))
                     .unwrap()
@@ -1047,12 +1065,10 @@ pub mod test_helpers {
                     key: key_stream,
                 };
                 async move {
-                    let mut wallet = Wallet::new(
-                        LocalCapeBackend::new(ledger, &mut loader, initial_grants.to_vec())
-                            .unwrap(),
-                    )
-                    .await
-                    .unwrap();
+                    let mut wallet =
+                        Wallet::new(LocalCapeBackend::new(ledger, &mut loader).unwrap())
+                            .await
+                            .unwrap();
                     wallet.add_user_key(key_pair.clone(), 0).await.unwrap();
                     (wallet, key_pair.address())
                 }
