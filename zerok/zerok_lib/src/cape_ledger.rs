@@ -925,7 +925,7 @@ pub mod test_helpers {
     use crate::{
         state::{key_set, VerifierKeySet, MERKLE_HEIGHT},
         universal_params::UNIVERSAL_PARAM,
-        wallet::{hd::KeyTree, Wallet /*, WalletSharedState*/},
+        wallet::{hd::KeyTree, Wallet},
     };
     use jf_aap::{
         keys::UserKeyPair,
@@ -970,7 +970,7 @@ pub mod test_helpers {
             Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>,
             UserAddress,
         )>,
-        Vec<PathBuf>,
+        Vec<TempDir>,
     ) {
         let mut rng = ChaChaRng::from_seed([42u8; 32]);
 
@@ -1048,7 +1048,7 @@ pub mod test_helpers {
 
         // Create a wallet for each user based on the validator and the per-user information
         // computed above.
-        let mut temp_paths: Vec<PathBuf> = Vec::new();
+        let mut temp_dirs: Vec<TempDir> = Vec::new();
         let wallets: Vec<(
             Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>,
             UserAddress,
@@ -1056,12 +1056,12 @@ pub mod test_helpers {
             .enumerate()
             .then(|(i, (key_stream, key_pair))| {
                 let ledger = ledger.clone();
-                let path = TempDir::new(&format!("cape_wallet_{}", i))
-                    .unwrap()
-                    .into_path();
-                temp_paths.push(path.clone());
+                let temp_dir = TempDir::new(&format!("cape_wallet_{}", i)).unwrap();
+                let mut path = PathBuf::new();
+                path.push(temp_dir.path());
+                temp_dirs.push(temp_dir);
                 let mut loader = MockCapeWalletLoader {
-                    path: path.clone(),
+                    path,
                     key: key_stream,
                 };
                 async move {
@@ -1078,7 +1078,10 @@ pub mod test_helpers {
 
         println!("Wallets set up: {}s", now.elapsed().as_secs_f32());
         *now = Instant::now();
-        (ledger, wallets, temp_paths)
+
+        // Return the temporary directories to prevent them from being deleted now. They will
+        // be automatically deleted when they are out of scope in the caller function.
+        (ledger, wallets, temp_dirs)
     }
 }
 
@@ -1087,7 +1090,6 @@ mod tests {
     use super::*;
     use crate::wallet::Wallet;
     use jf_aap::structs::AssetCode;
-    use std::fs;
     use std::time::Instant;
     use test_helpers::*;
 
@@ -1102,7 +1104,7 @@ mod tests {
         // coin.
         let alice_grant = 5;
         let bob_grant = 1;
-        let (_ledger, mut wallets, temp_paths) = create_test_network(
+        let (_ledger, mut wallets, _temp_dir) = create_test_network(
             &[(num_inputs, num_outputs)],
             vec![alice_grant, bob_grant],
             &mut now,
@@ -1212,12 +1214,6 @@ mod tests {
 
         check_balance(&wallets[0], 3, alice_initial_native_balance, 1, &coin).await;
         check_balance(&wallets[1], 2, bob_initial_native_balance, 1, &coin).await;
-
-        // TODO !keyao Directories may not be removed properly if a test panics.
-        // Issue: https://github.com/SpectrumXYZ/spectrum/issues/39.
-        for path in temp_paths {
-            fs::remove_dir_all(path).unwrap();
-        }
     }
 
     #[async_std::test]
