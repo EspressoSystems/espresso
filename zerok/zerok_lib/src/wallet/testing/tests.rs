@@ -1,7 +1,209 @@
+use super::*;
+use chrono::Duration;
+
+#[derive(Clone, Debug)]
+pub struct TxnHistoryWithTimeTolerantEq<L: Ledger>(pub TransactionHistoryEntry<L>);
+
+impl<L: Ledger> PartialEq<Self> for TxnHistoryWithTimeTolerantEq<L> {
+    fn eq(&self, other: &Self) -> bool {
+        let time_tolerance = Duration::minutes(5);
+        let times_eq = if self.0.time < other.0.time {
+            other.0.time - self.0.time < time_tolerance
+        } else {
+            self.0.time - other.0.time < time_tolerance
+        };
+        times_eq
+            && self.0.asset == other.0.asset
+            && self.0.kind == other.0.kind
+            && self.0.receivers == other.0.receivers
+            && self.0.receipt == other.0.receipt
+    }
+}
+
 #[cfg(test)]
 #[generic_tests::define(attrs(test, async_std::test))]
 mod tests {
-    use super::super::*;
+    use super::*;
+
+    /*
+     * Test idea: simulate two wallets transferring funds back and forth. After initial
+     * setup, the wallets only receive publicly visible information (e.g. block commitment
+     * events and receiver memos posted on bulletin boards). Check that both wallets are
+     * able to maintain accurate balance statements and enough state to construct new transfers.
+     *
+     * - Alice magically starts with some coins, Bob starts empty.
+     * - Alice transfers some coins to Bob using exact change.
+     * - Alice and Bob check their balances, then Bob transfers some coins back to Alice, in an
+     *   amount that requires a fee change record.
+     *
+     * Limitations:
+     * - Parts of the system are mocked (e.g. consensus is replaced by one omniscient validator,
+     *   info event streams, query services, and bulletin boards is provided directly to the
+     *   wallets by the test)
+     */
+    #[allow(unused_assignments)]
+    async fn test_two_wallets<'a, T: SystemUnderTest<'a>>(native: bool) {
+        let mut t = T::default();
+        let mut now = Instant::now();
+
+        // One more input and one more output than we will ever need, to test dummy records.
+        let num_inputs = 3;
+        let num_outputs = 4;
+
+        // Give Alice an initial grant of 5 native coins. If using non-native transfers, give Bob an
+        // initial grant with which to pay his transaction fee, since he will not be receiving any
+        // native coins from Alice.
+        let alice_grant = 5;
+        let bob_grant = if native { 0 } else { 1 };
+        let (ledger, mut wallets) = t
+            .create_test_network(
+                &[(num_inputs, num_outputs)],
+                vec![alice_grant, bob_grant],
+                &mut now,
+            )
+            .await;
+        let alice_address = wallets[0].1.clone();
+        let bob_address = wallets[1].1.clone();
+
+        // Verify initial wallet state.
+        assert_ne!(alice_address, bob_address);
+        assert_eq!(
+            wallets[0]
+                .0
+                .balance(&alice_address, &AssetCode::native())
+                .await,
+            alice_grant
+        );
+        assert_eq!(
+            wallets[1]
+                .0
+                .balance(&bob_address, &AssetCode::native())
+                .await,
+            bob_grant
+        );
+
+        let coin = if native {
+            AssetDefinition::native()
+        } else {
+            let coin = wallets[0]
+                .0
+                .define_asset("Alice's asset".as_bytes(), Default::default())
+                .await
+                .unwrap();
+            // Alice gives herself an initial grant of 5 coins.
+            wallets[0]
+                .0
+                .mint(&alice_address, 1, &coin.code, 5, alice_address.clone())
+                .await
+                .unwrap();
+            t.sync(&ledger, &wallets).await;
+            println!("Asset minted: {}s", now.elapsed().as_secs_f32());
+            now = Instant::now();
+
+            assert_eq!(wallets[0].0.balance(&alice_address, &coin.code).await, 5);
+            assert_eq!(wallets[1].0.balance(&bob_address, &coin.code).await, 0);
+
+            coin
+        };
+
+        let alice_initial_native_balance = wallets[0]
+            .0
+            .balance(&alice_address, &AssetCode::native())
+            .await;
+        let bob_initial_native_balance = wallets[1]
+            .0
+            .balance(&bob_address, &AssetCode::native())
+            .await;
+
+        // Construct a transaction to transfer some coins from Alice to Bob.
+        wallets[0]
+            .0
+            .transfer(&alice_address, &coin.code, &[(bob_address.clone(), 3)], 1)
+            .await
+            .unwrap();
+        t.sync(&ledger, &wallets).await;
+        println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+
+        // Check that both wallets reflect the new balances (less any fees). This cannot be a
+        // closure because rust infers the wrong lifetime for the references (it tries to use 'a,
+        // which is longer than we want to borrow `wallets` for).
+        async fn check_balance<'b, L: 'static + Ledger>(
+            wallet: &(
+                Wallet<'b, impl WalletBackend<'b, L> + Sync + 'b, L>,
+                UserAddress,
+            ),
+            expected_coin_balance: u64,
+            starting_native_balance: u64,
+            fees_paid: u64,
+            coin: &AssetDefinition,
+            native: bool,
+        ) {
+            if native {
+                assert_eq!(
+                    wallet.0.balance(&wallet.1, &coin.code).await,
+                    expected_coin_balance - fees_paid
+                );
+            } else {
+                assert_eq!(
+                    wallet.0.balance(&wallet.1, &coin.code).await,
+                    expected_coin_balance
+                );
+                assert_eq!(
+                    wallet.0.balance(&wallet.1, &AssetCode::native()).await,
+                    starting_native_balance - fees_paid
+                );
+            }
+        }
+        check_balance(
+            &wallets[0],
+            2,
+            alice_initial_native_balance,
+            1,
+            &coin,
+            native,
+        )
+        .await;
+        check_balance(&wallets[1], 3, bob_initial_native_balance, 0, &coin, native).await;
+
+        // Check that Bob's wallet has sufficient information to access received funds by
+        // transferring some back to Alice.
+        //
+        // This transaction should also result in a non-zero fee change record being
+        // transferred back to Bob, since Bob's only sufficient record has an amount of 3 coins, but
+        // the sum of the outputs and fee of this transaction is only 2.
+        wallets[1]
+            .0
+            .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1)
+            .await
+            .unwrap();
+        t.sync(&ledger, &wallets).await;
+        println!("Transfer generated: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+
+        check_balance(
+            &wallets[0],
+            3,
+            alice_initial_native_balance,
+            1,
+            &coin,
+            native,
+        )
+        .await;
+        check_balance(&wallets[1], 2, bob_initial_native_balance, 1, &coin, native).await;
+    }
+
+    #[async_std::test]
+    async fn test_two_wallets_native<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()> {
+        test_two_wallets::<T>(true).await;
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_two_wallets_non_native<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()> {
+        test_two_wallets::<T>(false).await;
+        Ok(())
+    }
 
     // Test transactions that fail to complete.
     //
@@ -331,6 +533,211 @@ mod tests {
     async fn test_wallet_rejected_non_native_freeze_timeout<'a, T: SystemUnderTest<'a>>(
     ) -> std::io::Result<()> {
         test_wallet_rejected::<T>(false, false, true, true).await;
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_wallet_freeze<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()> {
+        let mut t = T::default();
+        let mut now = Instant::now();
+
+        // The sender wallet (wallets[0]) gets an initial grant of 1 for a transfer fee. wallets[1]
+        // will act as the receiver, and wallets[2] will be a third party which issues and freezes
+        // some of wallets[0]'s assets. It gets a grant of 3, for a mint fee, a freeze fee and an
+        // unfreeze fee.
+        //
+        // Note that the transfer proving key size (3, 4) used here is chosen to be 1 larger than
+        // necessary in both inputs and outputs, to test dummy records.
+        let (ledger, mut wallets) = t
+            .create_test_network(&[(3, 4)], vec![1, 0, 3], &mut now)
+            .await;
+
+        let asset = {
+            let mut rng = ChaChaRng::from_seed([42u8; 32]);
+            let audit_key = AuditorKeyPair::generate(&mut rng);
+            let freeze_key = FreezerKeyPair::generate(&mut rng);
+            let policy = AssetPolicy::default()
+                .set_auditor_pub_key(audit_key.pub_key())
+                .set_freezer_pub_key(freeze_key.pub_key())
+                .reveal_record_opening()
+                .unwrap();
+            wallets[2].0.add_audit_key(audit_key).await.unwrap();
+            wallets[2].0.add_freeze_key(freeze_key).await.unwrap();
+            let asset = wallets[2]
+                .0
+                .define_asset("test asset".as_bytes(), policy)
+                .await
+                .unwrap();
+
+            // wallets[0] gets 1 coin to transfer to wallets[1].
+            let src = wallets[2].1.clone();
+            let dst = wallets[0].1.clone();
+            wallets[2]
+                .0
+                .mint(&src, 1, &asset.code, 1, dst)
+                .await
+                .unwrap();
+            t.sync(&ledger, &wallets).await;
+
+            asset
+        };
+        assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 1);
+        assert_eq!(
+            wallets[0]
+                .0
+                .frozen_balance(&wallets[0].1, &asset.code)
+                .await,
+            0
+        );
+
+        // Now freeze wallets[0]'s record.
+        println!(
+            "generating a freeze transaction: {}s",
+            now.elapsed().as_secs_f32()
+        );
+        now = Instant::now();
+        let src = wallets[2].1.clone();
+        let dst = wallets[0].1.clone();
+        ledger.lock().await.hold_next_transaction();
+        wallets[2]
+            .0
+            .freeze(&src, 1, &asset, 1, dst.clone())
+            .await
+            .unwrap();
+
+        // Check that, like transfer inputs, freeze inputs are placed on hold and unusable while a
+        // freeze that uses them is pending.
+        match wallets[2].0.freeze(&src, 1, &asset, 1, dst).await {
+            Err(WalletError::TransactionError {
+                source: TransactionError::InsufficientBalance { .. },
+            }) => {}
+            ret => panic!("expected InsufficientBalance, got {:?}", ret.map(|_| ())),
+        }
+
+        // Now go ahead with the original freeze.
+        ledger.lock().await.release_held_transaction();
+        t.sync(&ledger, &wallets).await;
+        assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 0);
+        assert_eq!(
+            wallets[0]
+                .0
+                .frozen_balance(&wallets[0].1, &asset.code)
+                .await,
+            1
+        );
+
+        // Check that trying to transfer fails due to frozen balance.
+        println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+        let src = wallets[0].1.clone();
+        let dst = wallets[1].1.clone();
+        match wallets[0]
+            .0
+            .transfer(&src, &asset.code, &[(dst, 1)], 1)
+            .await
+        {
+            Err(WalletError::TransactionError {
+                source: TransactionError::InsufficientBalance { .. },
+            }) => {
+                println!(
+                    "transfer correctly failed due to frozen balance: {}s",
+                    now.elapsed().as_secs_f32()
+                );
+                now = Instant::now();
+            }
+            ret => panic!("expected InsufficientBalance, got {:?}", ret.map(|_| ())),
+        }
+
+        // Now unfreeze the asset and try again.
+        println!(
+            "generating an unfreeze transaction: {}s",
+            now.elapsed().as_secs_f32()
+        );
+        now = Instant::now();
+        let src = wallets[2].1.clone();
+        let dst = wallets[0].1.clone();
+        wallets[2]
+            .0
+            .unfreeze(&src, 1, &asset, 1, dst)
+            .await
+            .unwrap();
+        t.sync(&ledger, &wallets).await;
+        assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 1);
+        assert_eq!(
+            wallets[0]
+                .0
+                .frozen_balance(&wallets[0].1, &asset.code)
+                .await,
+            0
+        );
+
+        println!("generating a transfer: {}s", now.elapsed().as_secs_f32());
+        let src = wallets[0].1.clone();
+        let dst = wallets[1].1.clone();
+        let xfr_receipt = wallets[0]
+            .0
+            .transfer(&src, &asset.code, &[(dst, 1)], 1)
+            .await
+            .unwrap();
+        t.sync(&ledger, &wallets).await;
+        assert_eq!(wallets[0].0.balance(&wallets[0].1, &asset.code).await, 0);
+        assert_eq!(
+            wallets[0]
+                .0
+                .frozen_balance(&wallets[0].1, &asset.code)
+                .await,
+            0
+        );
+        assert_eq!(wallets[1].0.balance(&wallets[1].1, &asset.code).await, 1);
+
+        // Check that the history properly accounts for freezes and unfreezes.
+        let expected_history = vec![
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: asset.code,
+                kind: TransactionKind::<T::Ledger>::mint(),
+                sender: None,
+                receivers: vec![(wallets[0].1.clone(), 1)],
+                receipt: None,
+            },
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: asset.code,
+                kind: TransactionKind::<T::Ledger>::freeze(),
+                sender: None,
+                receivers: vec![(wallets[0].1.clone(), 1)],
+                receipt: None,
+            },
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: asset.code,
+                kind: TransactionKind::<T::Ledger>::unfreeze(),
+                sender: None,
+                receivers: vec![(wallets[0].1.clone(), 1)],
+                receipt: None,
+            },
+            TransactionHistoryEntry {
+                time: Local::now(),
+                asset: asset.code,
+                kind: TransactionKind::<T::Ledger>::send(),
+                sender: Some(wallets[0].1.clone()),
+                receivers: vec![(wallets[1].1.clone(), 1)],
+                receipt: Some(xfr_receipt),
+            },
+        ]
+        .into_iter()
+        .map(TxnHistoryWithTimeTolerantEq)
+        .collect::<Vec<_>>();
+        let actual_history = wallets[0]
+            .0
+            .transaction_history()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(TxnHistoryWithTimeTolerantEq)
+            .collect::<Vec<_>>();
+        assert_eq!(actual_history, expected_history);
+
         Ok(())
     }
 

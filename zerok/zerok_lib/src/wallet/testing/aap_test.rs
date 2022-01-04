@@ -347,3 +347,92 @@ impl<'a> testing::SystemUnderTest<'a> for AAPTest {
         }
     }
 }
+
+// AAP-specific tests
+mod aap_wallet_tests {
+    use super::*;
+
+    #[async_std::test]
+    async fn test_resubmit() -> std::io::Result<()> {
+        let mut t = AAPTest::default();
+        let mut now = Instant::now();
+
+        // The sender wallet (wallets[0]) gets an initial grant of 2 for a transaction fee and a
+        // payment. wallets[1] will act as the receiver, and wallets[2] will be a third party
+        // which generates RECORD_ROOT_HISTORY_SIZE-1 transfers while a transfer from wallets[0] is
+        // pending, after which we will check if the pending transaction can be updated and
+        // resubmitted.
+        let (ledger, mut wallets) = t
+            .create_test_network(
+                &[(1, 2)],
+                vec![
+                    2,
+                    0,
+                    2 * (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64,
+                ],
+                &mut now,
+            )
+            .await;
+
+        println!("generating transaction: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+        ledger.lock().await.hold_next_transaction();
+        let sender = wallets[0].1.clone();
+        let receiver = wallets[1].1.clone();
+        wallets[0]
+            .0
+            .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
+            .await
+            .unwrap();
+        println!("transfer generated: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+
+        // Generate a transaction, invalidating the pending transfer.
+        println!(
+            "generating {} transfers to invalidate the original transfer: {}s",
+            ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1,
+            now.elapsed().as_secs_f32(),
+        );
+        now = Instant::now();
+        for _ in 0..ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1 {
+            let sender = wallets[2].1.clone();
+            wallets[2]
+                .0
+                .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
+                .await
+                .unwrap();
+            t.sync(&ledger, &wallets).await;
+        }
+
+        // Check that the pending transaction eventually succeeds, after being automatically
+        // resubmitted by the wallet.
+        println!(
+            "submitting invalid transaction: {}s",
+            now.elapsed().as_secs_f32()
+        );
+        let ledger_time = ledger.lock().await.now();
+        ledger.lock().await.release_held_transaction().unwrap();
+        ledger.lock().await.flush().unwrap();
+        // Wait for the Reject event.
+        t.sync_with(&wallets, ledger_time + 1).await;
+        // Wait for the Commit and Memos events after the wallet resubmits.
+        ledger.lock().await.flush().unwrap();
+        t.sync_with(&wallets, ledger_time + 3).await;
+        assert_eq!(
+            wallets[0]
+                .0
+                .balance(&wallets[0].1, &AssetCode::native())
+                .await,
+            0
+        );
+        assert_eq!(
+            wallets[1]
+                .0
+                .balance(&wallets[1].1, &AssetCode::native())
+                .await,
+            1 + (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64
+        );
+
+        Ok(())
+    }
+}
