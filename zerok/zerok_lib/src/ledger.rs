@@ -120,7 +120,14 @@ pub mod traits {
     pub trait Block: Clone + Debug + Serialize + DeserializeOwned + Send + Sync {
         type Transaction: Transaction;
         fn new(txns: Vec<Self::Transaction>) -> Self;
+        fn add_transaction(&mut self, txn: Self::Transaction) -> Result<(), ValidationError>;
         fn txns(&self) -> Vec<Self::Transaction>;
+        fn len(&self) -> usize {
+            self.txns().len()
+        }
+        fn is_empty(&self) -> bool {
+            self.len() == 0
+        }
     }
 
     pub trait Validator:
@@ -134,7 +141,7 @@ pub mod traits {
         fn validate_and_apply(&mut self, block: Self::Block) -> Result<Vec<u64>, ValidationError>;
     }
 
-    pub trait Ledger: Copy + Send + Sync {
+    pub trait Ledger: Copy + Debug + Send + Sync {
         type Validator: traits::Validator;
     }
 }
@@ -343,6 +350,12 @@ impl traits::Block for ElaboratedBlock {
                 proofs: proofs.clone(),
             })
             .collect()
+    }
+
+    fn add_transaction(&mut self, txn: Self::Transaction) -> Result<(), ValidationError> {
+        use phaselock::BlockContents;
+        *self = self.add_transaction_raw(&txn)?;
+        Ok(())
     }
 }
 
