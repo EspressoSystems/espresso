@@ -8,7 +8,93 @@ use crate::{
 use futures::channel::mpsc;
 use itertools::izip;
 use std::pin::Pin;
-use test_helpers::MockWalletStorage;
+
+#[derive(Clone, Debug, Default)]
+pub struct MockStorage<'a> {
+    committed: Option<WalletState<'a>>,
+    working: Option<WalletState<'a>>,
+    txn_history: Vec<TransactionHistoryEntry<AAPLedger>>,
+}
+
+#[async_trait]
+impl<'a> WalletStorage<'a, AAPLedger> for MockStorage<'a> {
+    fn exists(&self) -> bool {
+        self.committed.is_some()
+    }
+
+    async fn load(&mut self) -> Result<WalletState<'a>, WalletError> {
+        Ok(self.committed.as_ref().unwrap().clone())
+    }
+
+    async fn store_snapshot(&mut self, state: &WalletState<'a>) -> Result<(), WalletError> {
+        if let Some(working) = &mut self.working {
+            working.txn_state = state.txn_state.clone();
+            working.key_scans = state.key_scans.clone();
+            working.key_state = state.key_state.clone();
+        }
+        Ok(())
+    }
+
+    async fn store_auditable_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
+        if let Some(working) = &mut self.working {
+            working.auditable_assets.insert(asset.code, asset.clone());
+        }
+        Ok(())
+    }
+
+    async fn store_key(&mut self, key: &RoleKeyPair) -> Result<(), WalletError> {
+        if let Some(working) = &mut self.working {
+            match key {
+                RoleKeyPair::Auditor(key) => {
+                    working.audit_keys.insert(key.pub_key(), key.clone());
+                }
+                RoleKeyPair::Freezer(key) => {
+                    working.freeze_keys.insert(key.pub_key(), key.clone());
+                }
+                RoleKeyPair::User(key) => {
+                    working.user_keys.insert(key.address(), key.clone());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn store_defined_asset(
+        &mut self,
+        asset: &AssetDefinition,
+        seed: AssetCodeSeed,
+        desc: &[u8],
+    ) -> Result<(), WalletError> {
+        if let Some(working) = &mut self.working {
+            working
+                .defined_assets
+                .insert(asset.code, (asset.clone(), seed, desc.to_vec()));
+        }
+        Ok(())
+    }
+
+    async fn store_transaction(
+        &mut self,
+        txn: TransactionHistoryEntry<AAPLedger>,
+    ) -> Result<(), WalletError> {
+        self.txn_history.push(txn);
+        Ok(())
+    }
+
+    async fn transaction_history(
+        &mut self,
+    ) -> Result<Vec<TransactionHistoryEntry<AAPLedger>>, WalletError> {
+        Ok(self.txn_history.clone())
+    }
+
+    async fn commit(&mut self) {
+        self.committed = self.working.clone();
+    }
+
+    async fn revert(&mut self) {
+        self.working = self.committed.clone();
+    }
+}
 
 pub struct MockAAPNetwork<'a> {
     validator: ValidatorState,
@@ -19,42 +105,6 @@ pub struct MockAAPNetwork<'a> {
     proving_keys: Arc<ProverKeySet<'a, key_set::OrderByOutputs>>,
     address_map: HashMap<UserAddress, UserPubKey>,
     events: Vec<LedgerEvent>,
-}
-
-impl<'a> MockAAPNetwork<'a> {
-    fn post_memos(
-        &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), WalletError> {
-        let (block, block_uids) = &self.committed_blocks[block_id as usize];
-        let txn = &block.block.0[txn_id as usize];
-        let comms = txn.output_commitments();
-        let uids = block_uids[txn_id as usize].clone();
-
-        txn.verify_receiver_memos_signature(&memos, &sig)
-            .context(CryptoError)?;
-
-        let merkle_paths = uids
-            .iter()
-            .map(|uid| {
-                self.records
-                    .get_leaf(*uid)
-                    .expect_ok()
-                    .map(|(_, proof)| (proof.leaf.0, proof.path))
-                    .unwrap()
-                    .1
-            })
-            .collect::<Vec<_>>();
-        self.generate_event(LedgerEvent::<AAPLedger>::Memos {
-            outputs: izip!(memos, comms, uids, merkle_paths).collect(),
-            transaction: Some((block_id, txn_id)),
-        });
-
-        Ok(())
-    }
 }
 
 impl<'a> MockNetwork<'a, AAPLedger> for MockAAPNetwork<'a> {
@@ -102,6 +152,40 @@ impl<'a> MockNetwork<'a, AAPLedger> for MockAAPNetwork<'a> {
         Ok(())
     }
 
+    fn post_memos(
+        &mut self,
+        block_id: u64,
+        txn_id: u64,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+    ) -> Result<(), WalletError> {
+        let (block, block_uids) = &self.committed_blocks[block_id as usize];
+        let txn = &block.block.0[txn_id as usize];
+        let comms = txn.output_commitments();
+        let uids = block_uids[txn_id as usize].clone();
+
+        txn.verify_receiver_memos_signature(&memos, &sig)
+            .context(CryptoError)?;
+
+        let merkle_paths = uids
+            .iter()
+            .map(|uid| {
+                self.records
+                    .get_leaf(*uid)
+                    .expect_ok()
+                    .map(|(_, proof)| (proof.leaf.0, proof.path))
+                    .unwrap()
+                    .1
+            })
+            .collect::<Vec<_>>();
+        self.generate_event(LedgerEvent::<AAPLedger>::Memos {
+            outputs: izip!(memos, comms, uids, merkle_paths).collect(),
+            transaction: Some((block_id, txn_id)),
+        });
+
+        Ok(())
+    }
+
     fn generate_event(&mut self, e: LedgerEvent) {
         println!(
             "generating event {}: {}",
@@ -126,25 +210,21 @@ impl<'a> MockNetwork<'a, AAPLedger> for MockAAPNetwork<'a> {
             })
             .collect();
     }
-
-    fn last_event(&self) -> Option<LedgerEvent<AAPLedger>> {
-        self.events.last().cloned()
-    }
 }
 
 #[derive(Clone)]
 pub struct MockAAPBackend<'a> {
     key_pair: UserKeyPair,
-    ledger: Arc<Mutex<MockLedger<'a, AAPLedger, MockAAPNetwork<'a>, MockWalletStorage<'a>>>>,
+    ledger: Arc<Mutex<MockLedger<'a, AAPLedger, MockAAPNetwork<'a>, MockStorage<'a>>>>,
     initial_grants: Vec<(RecordOpening, u64)>,
     seed: [u8; 32],
-    storage: Arc<Mutex<MockWalletStorage<'a>>>,
+    storage: Arc<Mutex<MockStorage<'a>>>,
 }
 
 #[async_trait]
 impl<'a> WalletBackend<'a, AAPLedger> for MockAAPBackend<'a> {
     type EventStream = Pin<Box<dyn Stream<Item = LedgerEvent> + Send>>;
-    type Storage = MockWalletStorage<'a>;
+    type Storage = MockStorage<'a>;
 
     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
         self.storage.lock().await
@@ -185,7 +265,8 @@ impl<'a> WalletBackend<'a, AAPLedger> for MockAAPBackend<'a> {
 
         // Persist the initial state.
         let mut storage = self.storage().await;
-        storage.store_initial_state(&state);
+        storage.committed = Some(state.clone());
+        storage.working = Some(state.clone());
 
         Ok(state)
     }
@@ -292,7 +373,6 @@ impl<'a> WalletBackend<'a, AAPLedger> for MockAAPBackend<'a> {
         self.ledger
             .lock()
             .await
-            .network()
             .post_memos(block_id, txn_id, memos, sig)
     }
 }
@@ -305,7 +385,7 @@ impl<'a> testing::SystemUnderTest<'a> for AAPTest {
     type Ledger = AAPLedger;
     type MockBackend = MockAAPBackend<'a>;
     type MockNetwork = MockAAPNetwork<'a>;
-    type MockStorage = MockWalletStorage<'a>;
+    type MockStorage = MockStorage<'a>;
 
     async fn create_network(
         &mut self,

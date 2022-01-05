@@ -270,6 +270,65 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
         self.submit_operations(ops).map_err(cape_to_wallet_err)
     }
 
+    fn post_memos(
+        &mut self,
+        block_id: u64,
+        txn_id: u64,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+    ) -> Result<(), WalletError> {
+        let txn = match self.txns.get_mut(&(block_id, txn_id)) {
+            Some(txn) => txn,
+            None => return Err(QueryServiceError::InvalidTxnId {}.into()),
+        };
+        if txn.memos.is_some() {
+            return Err(QueryServiceError::MemosAlreadyPosted {}.into());
+        }
+        // Validate the new memos.
+        match &txn.txn {
+            CapeTransition::Transaction(CapeTransaction::AAP(note)) => {
+                if note.verify_receiver_memos_signature(&memos, &sig).is_err() {
+                    return Err(QueryServiceError::InvalidSignature {}.into());
+                }
+            }
+            _ => {
+                // Wrap/burn transactions don't get memos.
+                return Err(QueryServiceError::InvalidTxnId {}.into());
+            }
+        }
+        if memos.len() != txn.txn.output_len() {
+            return Err(QueryServiceError::WrongNumberOfMemos {
+                expected: txn.txn.output_len(),
+            }
+            .into());
+        }
+
+        // Authenticate the validity of the records corresponding to the memos.
+        let merkle_tree = &self.records;
+        let merkle_paths = txn
+            .uids
+            .iter()
+            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path)
+            .collect::<Vec<_>>();
+
+        // Store and broadcast the new memos.
+        let memos = izip!(
+            memos,
+            txn.txn.output_commitments(),
+            txn.uids.iter().cloned(),
+            merkle_paths
+        )
+        .collect::<Vec<_>>();
+        txn.memos = Some((memos.clone(), sig));
+        let event = LedgerEvent::Memos {
+            outputs: memos,
+            transaction: Some((block_id as u64, txn_id as u64)),
+        };
+        self.generate_event(event);
+
+        Ok(())
+    }
+
     fn generate_event(&mut self, event: LedgerEvent<CapeLedger>) {
         // Subscribers who asked for a subscription starting from the current time can now be added
         // to the list of active subscribers.
@@ -288,10 +347,6 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
         // Save the event so we can feed it to later subscribers who want to start from some time in
         // the past.
         self.events.push(event);
-    }
-
-    fn last_event(&self) -> Option<LedgerEvent<CapeLedger>> {
-        self.events.last().cloned()
     }
 }
 
@@ -342,10 +397,6 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
     }
 
     async fn create(&mut self) -> Result<WalletState<'a, CapeLedger>, WalletError> {
-        let key_id: u64 = 0;
-        let key_pair = self.key_stream().derive_user_keypair(&key_id.to_le_bytes());
-        self.register_user_key(&key_pair.pub_key()).await?;
-
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = &*UNIVERSAL_PARAM;
         let mut ledger = self.ledger.lock().await;
@@ -511,10 +562,8 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         block_id: u64,
         txn_id: u64,
     ) -> Result<CapeTransition, WalletError> {
-        Ok(self
-            .ledger
-            .lock()
-            .await
+        let ledger = self.ledger.lock().await;
+        Ok(ledger
             .network
             .txns
             .get(&(block_id, txn_id))
@@ -538,59 +587,10 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         memos: Vec<ReceiverMemo>,
         sig: Signature,
     ) -> Result<(), WalletError> {
-        println!("Posting memos for {}:{}", block_id, txn_id);
-        let ledger = &mut *self.ledger.lock().await;
-        let network = ledger.network();
-        let txn = match network.txns.get_mut(&(block_id, txn_id)) {
-            Some(txn) => txn,
-            None => return Err(QueryServiceError::InvalidTxnId {}.into()),
-        };
-        if txn.memos.is_some() {
-            return Err(QueryServiceError::MemosAlreadyPosted {}.into());
-        }
-        // Validate the new memos.
-        match &txn.txn {
-            CapeTransition::Transaction(CapeTransaction::AAP(note)) => {
-                if note.verify_receiver_memos_signature(&memos, &sig).is_err() {
-                    return Err(QueryServiceError::InvalidSignature {}.into());
-                }
-            }
-            _ => {
-                // Wrap/burn transactions don't get memos.
-                return Err(QueryServiceError::InvalidTxnId {}.into());
-            }
-        }
-        if memos.len() != txn.txn.output_len() {
-            return Err(QueryServiceError::WrongNumberOfMemos {
-                expected: txn.txn.output_len(),
-            }
-            .into());
-        }
-
-        // Authenticate the validity of the records corresponding to the memos.
-        let merkle_tree = &network.records;
-        let merkle_paths = txn
-            .uids
-            .iter()
-            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path)
-            .collect::<Vec<_>>();
-
-        // Store and broadcast the new memos.
-        let memos = izip!(
-            memos,
-            txn.txn.output_commitments(),
-            txn.uids.iter().cloned(),
-            merkle_paths
-        )
-        .collect::<Vec<_>>();
-        txn.memos = Some((memos.clone(), sig));
-        let event = LedgerEvent::Memos {
-            outputs: memos,
-            transaction: Some((block_id as u64, txn_id as u64)),
-        };
-        network.generate_event(event);
-
-        Ok(())
+        self.ledger
+            .lock()
+            .await
+            .post_memos(block_id, txn_id, memos, sig)
     }
 }
 
@@ -813,284 +813,5 @@ impl<'a> SystemUnderTest<'a> for CapeTest {
         MockCapeBackend::new_for_test(ledger, storage)
             .await
             .unwrap()
-    }
-}
-
-#[cfg(any(test, fuzzing))]
-pub mod test_helpers {
-    use super::*;
-    use crate::{
-        state::{key_set, VerifierKeySet, MERKLE_HEIGHT},
-        universal_params::UNIVERSAL_PARAM,
-        wallet::{hd::KeyTree, Wallet},
-    };
-    use jf_aap::{
-        keys::UserKeyPair,
-        structs::{FreezeFlag, RecordCommitment},
-        MerkleTree, TransactionVerifyingKey,
-    };
-    use key_set::KeySet;
-    use rand_chacha::rand_core::SeedableRng;
-    use rand_chacha::ChaChaRng;
-    use std::path::PathBuf;
-    use std::time::Instant;
-    use tempdir::TempDir;
-
-    pub async fn create_test_network<'a>(
-        xfr_sizes: &[(usize, usize)],
-        initial_grants: Vec<u64>,
-        now: &mut Instant,
-    ) -> (
-        Arc<Mutex<MockCapeLedger<'a>>>,
-        Vec<(Wallet<'a, MockCapeBackend<'a, ()>, CapeLedger>, UserAddress)>,
-        Vec<TempDir>,
-    ) {
-        let mut rng = ChaChaRng::from_seed([42u8; 32]);
-
-        // Populate the unpruned record merkle tree with an initial record commitment for each
-        // non-zero initial grant. Collect user-specific info (keys and record openings
-        // corresponding to grants) in `users`, which will be used to create the wallets later.
-        let mut record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
-        let mut initial_grant_memos = Vec::new();
-        let mut users: Vec<(KeyTree, UserKeyPair)> = vec![];
-        for amount in initial_grants {
-            let key_stream = KeyTree::random(&mut rng).unwrap().0;
-            let wallet_key_stream = key_stream.derive_sub_tree("wallet".as_bytes());
-            let key_id: u64 = 0;
-            let key_pair = wallet_key_stream.derive_user_keypair(&key_id.to_le_bytes());
-
-            if amount > 0 {
-                let ro = RecordOpening::new(
-                    &mut rng,
-                    amount,
-                    AssetDefinition::native(),
-                    key_pair.pub_key(),
-                    FreezeFlag::Unfrozen,
-                );
-                let comm = RecordCommitment::from(&ro);
-                let uid = record_merkle_tree.num_leaves();
-                record_merkle_tree.push(comm.to_field_element());
-
-                let memo = ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap();
-                initial_grant_memos.push((memo, uid));
-
-                users.push((key_stream, key_pair));
-            } else {
-                users.push((key_stream, key_pair));
-            }
-        }
-
-        // Create the validator using the ledger state containing the initial grants, computed above.
-        println!(
-            "Generating validator keys: {}s",
-            now.elapsed().as_secs_f32()
-        );
-        *now = Instant::now();
-
-        let mut xfr_prove_keys = vec![];
-        let mut xfr_verif_keys = vec![];
-        for (num_inputs, num_outputs) in xfr_sizes {
-            let (xfr_prove_key, xfr_verif_key, _) = jf_aap::proof::transfer::preprocess(
-                &*UNIVERSAL_PARAM,
-                *num_inputs,
-                *num_outputs,
-                MERKLE_HEIGHT,
-            )
-            .unwrap();
-            xfr_prove_keys.push(xfr_prove_key);
-            xfr_verif_keys.push(TransactionVerifyingKey::Transfer(xfr_verif_key));
-        }
-        let (_, mint_verif_key, _) =
-            jf_aap::proof::mint::preprocess(&*UNIVERSAL_PARAM, MERKLE_HEIGHT).unwrap();
-        let (_, freeze_verif_key, _) =
-            jf_aap::proof::freeze::preprocess(&*UNIVERSAL_PARAM, 2, MERKLE_HEIGHT).unwrap();
-        let verif_crs = VerifierKeySet {
-            xfr: KeySet::new(xfr_verif_keys.into_iter()).unwrap(),
-            mint: TransactionVerifyingKey::Mint(mint_verif_key),
-            freeze: KeySet::new(
-                vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
-            )
-            .unwrap(),
-        };
-
-        let ledger = Arc::new(Mutex::new(MockLedger::new(MockCapeNetwork::new(
-            verif_crs,
-            record_merkle_tree,
-            initial_grant_memos,
-        ))));
-
-        // Create a wallet for each user based on the validator and the per-user information
-        // computed above.
-        let mut temp_dirs: Vec<TempDir> = Vec::new();
-        let wallets: Vec<(Wallet<'a, MockCapeBackend<'a, ()>, CapeLedger>, UserAddress)> =
-            iter(users)
-                .enumerate()
-                .then(|(i, (key_stream, key_pair))| {
-                    let ledger = ledger.clone();
-                    let temp_dir = TempDir::new(&format!("cape_wallet_{}", i)).unwrap();
-                    let mut path = PathBuf::new();
-                    path.push(temp_dir.path());
-                    temp_dirs.push(temp_dir);
-                    let path = TempDir::new(&format!("cape_wallet_{}", i))
-                        .unwrap()
-                        .into_path();
-                    let mut loader = MockCapeWalletLoader {
-                        path,
-                        key: key_stream,
-                    };
-                    async move {
-                        let mut wallet =
-                            Wallet::new(MockCapeBackend::new(ledger, &mut loader).unwrap())
-                                .await
-                                .unwrap();
-                        wallet.add_user_key(key_pair.clone(), 0).await.unwrap();
-                        (wallet, key_pair.address())
-                    }
-                })
-                .collect()
-                .await;
-
-        println!("Wallets set up: {}s", now.elapsed().as_secs_f32());
-        *now = Instant::now();
-
-        // Return the temporary directories to prevent them from being deleted now. They will
-        // be automatically deleted when they are out of scope in the caller function.
-        (ledger, wallets, temp_dirs)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::wallet::Wallet;
-    use jf_aap::structs::AssetCode;
-    use std::time::Instant;
-    use test_helpers::*;
-
-    async fn test_two_wallets() {
-        let mut now = Instant::now();
-
-        // One more input and one more output than we will ever need, to test dummy records.
-        let num_inputs = 3;
-        let num_outputs = 4;
-
-        // Give Alice an initial grant of 5 native coins and Bob an initial grant of 1 native
-        // coin.
-        let alice_grant = 5;
-        let bob_grant = 1;
-        let (ledger, mut wallets, _temp_dir) = create_test_network(
-            &[(num_inputs, num_outputs)],
-            vec![alice_grant, bob_grant],
-            &mut now,
-        )
-        .await;
-        ledger.lock().await.set_block_size(1).unwrap();
-        let alice_address = wallets[0].1.clone();
-        let bob_address = wallets[1].1.clone();
-
-        // Verify initial wallet state.
-        assert_ne!(alice_address, bob_address);
-        assert_eq!(
-            wallets[0]
-                .0
-                .balance(&alice_address, &AssetCode::native())
-                .await,
-            alice_grant
-        );
-        assert_eq!(
-            wallets[1]
-                .0
-                .balance(&bob_address, &AssetCode::native())
-                .await,
-            bob_grant
-        );
-
-        let coin = wallets[0]
-            .0
-            .define_asset("Alice's asset".as_bytes(), Default::default())
-            .await
-            .unwrap();
-        // Alice gives herself an initial grant of 5 coins.
-        wallets[0]
-            .0
-            .mint(&alice_address, 1, &coin.code, 5, alice_address.clone())
-            .await
-            .unwrap();
-        wallets[0].0.sync(2).await.unwrap();
-        wallets[1].0.sync(2).await.unwrap();
-        println!("Asset minted: {}s", now.elapsed().as_secs_f32());
-        now = Instant::now();
-
-        assert_eq!(wallets[0].0.balance(&alice_address, &coin.code).await, 5);
-        assert_eq!(wallets[1].0.balance(&bob_address, &coin.code).await, 0);
-
-        let alice_initial_native_balance = wallets[0]
-            .0
-            .balance(&alice_address, &AssetCode::native())
-            .await;
-        let bob_initial_native_balance = wallets[1]
-            .0
-            .balance(&bob_address, &AssetCode::native())
-            .await;
-
-        // Construct a transaction to transfer some coins from Alice to Bob.
-        wallets[0]
-            .0
-            .transfer(&alice_address, &coin.code, &[(bob_address.clone(), 3)], 1)
-            .await
-            .unwrap();
-        wallets[0].0.sync(4).await.unwrap();
-        wallets[1].0.sync(4).await.unwrap();
-        println!("First transfer generated: {}s", now.elapsed().as_secs_f32());
-        now = Instant::now();
-
-        // Check that both wallets reflect the new balances (less any fees). This cannot be a
-        // closure because rust infers the wrong lifetime for the references (it tries to use 'a,
-        // which is longer than we want to borrow `wallets` for).
-        async fn check_balance<'a>(
-            wallet: &(Wallet<'a, MockCapeBackend<'a, ()>, CapeLedger>, UserAddress),
-            expected_coin_balance: u64,
-            starting_native_balance: u64,
-            fees_paid: u64,
-            coin: &AssetDefinition,
-        ) {
-            assert_eq!(
-                wallet.0.balance(&wallet.1, &coin.code).await,
-                expected_coin_balance
-            );
-            assert_eq!(
-                wallet.0.balance(&wallet.1, &AssetCode::native()).await,
-                starting_native_balance - fees_paid
-            );
-        }
-        check_balance(&wallets[0], 2, alice_initial_native_balance, 1, &coin).await;
-        check_balance(&wallets[1], 3, bob_initial_native_balance, 0, &coin).await;
-
-        // Check that Bob's wallet has sufficient information to access received funds by
-        // transferring some back to Alice.
-        //
-        // This transaction should also result in a non-zero fee change record being
-        // transferred back to Bob, since Bob's only sufficient record has an amount of 3
-        // coins, but the sum of the outputs and fee of this transaction is only 2.
-        wallets[1]
-            .0
-            .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1)
-            .await
-            .unwrap();
-        wallets[0].0.sync(6).await.unwrap();
-        wallets[1].0.sync(6).await.unwrap();
-        println!(
-            "Second transfer generated: {}s",
-            now.elapsed().as_secs_f32()
-        );
-
-        check_balance(&wallets[0], 3, alice_initial_native_balance, 1, &coin).await;
-        check_balance(&wallets[1], 2, bob_initial_native_balance, 1, &coin).await;
-    }
-
-    #[async_std::test]
-    async fn test_xfr() -> std::io::Result<()> {
-        test_two_wallets().await;
-        Ok(())
     }
 }

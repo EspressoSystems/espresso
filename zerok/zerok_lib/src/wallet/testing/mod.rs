@@ -35,8 +35,14 @@ use std::time::Instant;
 pub trait MockNetwork<'a, L: Ledger> {
     fn now(&self) -> u64;
     fn submit(&mut self, block: Block<L>) -> Result<(), WalletError>;
+    fn post_memos(
+        &mut self,
+        block_id: u64,
+        txn_id: u64,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+    ) -> Result<(), WalletError>;
     fn generate_event(&mut self, event: LedgerEvent<L>);
-    fn last_event(&self) -> Option<LedgerEvent<L>>;
 }
 
 pub struct MockLedger<'a, L: Ledger, N: MockNetwork<'a, L>, S: WalletStorage<'a, L>> {
@@ -47,6 +53,7 @@ pub struct MockLedger<'a, L: Ledger, N: MockNetwork<'a, L>, S: WalletStorage<'a,
     held_transaction: Option<Transaction<L>>,
     mangled: bool,
     storage: Vec<Arc<Mutex<S>>>,
+    missing_memos: usize,
     _phantom: std::marker::PhantomData<&'a ()>,
 }
 
@@ -60,6 +67,7 @@ impl<'a, L: Ledger, N: MockNetwork<'a, L>, S: WalletStorage<'a, L>> MockLedger<'
             held_transaction: None,
             mangled: false,
             storage: Default::default(),
+            missing_memos: 0,
             _phantom: Default::default(),
         }
     }
@@ -78,7 +86,10 @@ impl<'a, L: Ledger, N: MockNetwork<'a, L>, S: WalletStorage<'a, L>> MockLedger<'
         }
 
         let block = std::mem::replace(&mut self.current_block, Block::<L>::new(vec![]));
-        self.network.submit(block)
+        let block_size = block.len();
+        self.network.submit(block)?;
+        self.missing_memos += block_size;
+        Ok(())
     }
 
     pub fn hold_next_transaction(&mut self) {
@@ -129,6 +140,19 @@ impl<'a, L: Ledger, N: MockNetwork<'a, L>, S: WalletStorage<'a, L>> MockLedger<'
             }
         }
 
+        Ok(())
+    }
+
+    pub fn post_memos(
+        &mut self,
+        block_id: u64,
+        txn_id: u64,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
+    ) -> Result<(), WalletError> {
+        self.network.post_memos(block_id, txn_id, memos, sig)?;
+        assert!(self.missing_memos >= 1);
+        self.missing_memos -= 1;
         Ok(())
     }
 
@@ -314,13 +338,9 @@ pub trait SystemUnderTest<'a>: Default + Send + Sync {
         let t = {
             let mut ledger = ledger.lock().await;
             ledger.flush().unwrap();
-            if let Some(LedgerEvent::Commit { block, .. }) = ledger.network().last_event() {
-                // If the last event is a Commit, wait until all of the senders from the block
-                // receive the Commit event and post the receiver memos, generating new Memos events.
-                ledger.now() + (block.len() as u64)
-            } else {
-                ledger.now()
-            }
+            // Wait for all of the wallets to process all of the events which have already been
+            // generated, plus any memos events that we expect to be published shortly.
+            ledger.now() + (ledger.missing_memos as u64)
         };
         self.sync_with(wallets, t).await;
 
