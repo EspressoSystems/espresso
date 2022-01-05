@@ -225,8 +225,8 @@ fn is_erc20_asset_def_valid(
 
 #[allow(unused_variables)]
 fn is_aap_asset_def_valid(def: &AssetDefinition) -> bool {
-    // TODO: should verify_domestic be exposed and used here? Should we
-    // assume that jf processes that?
+    // NOTE: we assume that this gets checked by jellyfish's MintNote
+    // validation
     true
 }
 
