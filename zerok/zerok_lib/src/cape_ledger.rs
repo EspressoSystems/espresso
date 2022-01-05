@@ -1083,6 +1083,106 @@ pub mod test_helpers {
         // be automatically deleted when they are out of scope in the caller function.
         (ledger, wallets, temp_dirs)
     }
+
+    pub async fn create_test_cape_wallet<'a>(
+        xfr_sizes: &[(usize, usize)],
+        initial_grant: u64,
+        now: &mut Instant,
+    ) -> (
+        Arc<Mutex<LocalCapeLedger>>,
+        Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger>,
+        UserAddress,
+        TempDir,
+    ) {
+        let mut rng = ChaChaRng::from_seed([42u8; 32]);
+
+        // Populate the unpruned record merkle tree with an initial record commitment for each
+        // non-zero initial grant.
+        let mut record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
+        let mut initial_grant_memos = Vec::new();
+        let key_stream = KeyTree::random(&mut rng).unwrap().0;
+        let wallet_key_stream = key_stream.derive_sub_tree("wallet".as_bytes());
+        let key_id: u64 = 0;
+        let key_pair = wallet_key_stream.derive_user_keypair(&key_id.to_le_bytes());
+
+        if initial_grant > 0 {
+            let ro = RecordOpening::new(
+                &mut rng,
+                initial_grant,
+                AssetDefinition::native(),
+                key_pair.pub_key(),
+                FreezeFlag::Unfrozen,
+            );
+            let comm = RecordCommitment::from(&ro);
+            let uid = record_merkle_tree.num_leaves();
+            record_merkle_tree.push(comm.to_field_element());
+
+            let memo = ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap();
+            initial_grant_memos.push((memo, uid));
+        }
+
+        // Create the validator using the ledger state containing the initial grant, computed above.
+        println!(
+            "Generating validator keys: {}s",
+            now.elapsed().as_secs_f32()
+        );
+        *now = Instant::now();
+
+        let mut xfr_prove_keys = vec![];
+        let mut xfr_verif_keys = vec![];
+        for (num_inputs, num_outputs) in xfr_sizes {
+            let (xfr_prove_key, xfr_verif_key, _) = jf_aap::proof::transfer::preprocess(
+                &*UNIVERSAL_PARAM,
+                *num_inputs,
+                *num_outputs,
+                MERKLE_HEIGHT,
+            )
+            .unwrap();
+            xfr_prove_keys.push(xfr_prove_key);
+            xfr_verif_keys.push(TransactionVerifyingKey::Transfer(xfr_verif_key));
+        }
+        let (_, mint_verif_key, _) =
+            jf_aap::proof::mint::preprocess(&*UNIVERSAL_PARAM, MERKLE_HEIGHT).unwrap();
+        let (_, freeze_verif_key, _) =
+            jf_aap::proof::freeze::preprocess(&*UNIVERSAL_PARAM, 2, MERKLE_HEIGHT).unwrap();
+        let verif_crs = VerifierKeySet {
+            xfr: KeySet::new(xfr_verif_keys.into_iter()).unwrap(),
+            mint: TransactionVerifyingKey::Mint(mint_verif_key),
+            freeze: KeySet::new(
+                vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
+            )
+            .unwrap(),
+        };
+
+        let ledger = Arc::new(Mutex::new(LocalCapeLedger::new(
+            verif_crs,
+            record_merkle_tree,
+            initial_grant_memos,
+        )));
+
+        // Create a wallet based on the validator and the per-user information
+        // computed above.
+        let ledger = ledger.clone();
+        let temp_dir = TempDir::new(&format!("cape_wallet")).unwrap();
+        let mut path = PathBuf::new();
+        path.push(temp_dir.path());
+        let mut loader = MockCapeWalletLoader {
+            path,
+            key: key_stream,
+        };
+        let mut wallet: Wallet<'a, LocalCapeBackend<'a, ()>, CapeLedger> =
+            Wallet::new(LocalCapeBackend::new(ledger.clone(), &mut loader).unwrap())
+                .await
+                .unwrap();
+        wallet.add_user_key(key_pair.clone(), 0).await.unwrap();
+
+        println!("Wallets set up: {}s", now.elapsed().as_secs_f32());
+        *now = Instant::now();
+
+        // Return the temporary directory to prevent it from being deleted now. It will
+        // be automatically deleted when it's out of scope in the caller function.
+        (ledger, wallet, key_pair.address(), temp_dir)
+    }
 }
 
 #[cfg(test)]
@@ -1090,10 +1190,12 @@ mod tests {
     use super::*;
     use crate::wallet::Wallet;
     use jf_aap::structs::AssetCode;
+    use rand_chacha::rand_core::SeedableRng;
     use std::time::Instant;
     use test_helpers::*;
 
-    async fn test_two_wallets() {
+    #[async_std::test]
+    async fn test_two_wallets_basic() -> std::io::Result<()> {
         let mut now = Instant::now();
 
         // One more input and one more output than we will ever need, to test dummy records.
@@ -1214,11 +1316,56 @@ mod tests {
 
         check_balance(&wallets[0], 3, alice_initial_native_balance, 1, &coin).await;
         check_balance(&wallets[1], 2, bob_initial_native_balance, 1, &coin).await;
+
+        Ok(())
     }
 
     #[async_std::test]
-    async fn test_xfr() -> std::io::Result<()> {
-        test_two_wallets().await;
+    async fn test_cape_wallet() -> std::io::Result<()> {
+        let mut now = Instant::now();
+
+        // Initialize a ledger and wallet, and get the owner address.
+        let num_inputs = 3;
+        let num_outputs = 4;
+        let initial_grant = 10;
+        let (ledger, wallet, owner, _temp_dir) =
+            create_test_cape_wallet(&[(num_inputs, num_outputs)], initial_grant, &mut now).await;
+
+        // Initialize a CAPE wallet.
+        let rng = ChaChaRng::from_seed([42u8; 32]);
+        let mut cape_wallet = LocalCapeWallet {
+            wallet: wallet,
+            network: ledger,
+            rng,
+        };
+
+        // Create an ERC20 code, sponsor address, and asset information.
+        let erc20_code = Erc20Code([1u8; 32]);
+        let sponsor_addr = EthereumAddr([2u8; 20]);
+        let aap_asset_desc = &[];
+        let aap_asset_policy = AssetPolicy::default();
+
+        // Sponsor the ERC20 token.
+        let aap_asset = cape_wallet
+            .sponsor(
+                erc20_code,
+                sponsor_addr.clone(),
+                aap_asset_desc,
+                aap_asset_policy,
+            )
+            .await
+            .unwrap();
+        println!("Sponsor completed: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
+
+        // Wrap some assets.
+        let amount = 2;
+        cape_wallet
+            .wrap(sponsor_addr, aap_asset, owner, amount)
+            .await
+            .unwrap();
+        println!("Wrap completed: {}s", now.elapsed().as_secs_f32());
+
         Ok(())
     }
 }

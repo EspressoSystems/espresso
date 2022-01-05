@@ -58,10 +58,10 @@ impl CapeTransaction {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Erc20Code([u8; 32]);
+pub struct Erc20Code(pub [u8; 32]);
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EthereumAddr([u8; 20]);
+pub struct EthereumAddr(pub [u8; 20]);
 
 impl EthereumAddr {
     pub fn as_bytes(&self) -> &[u8; 20] {
