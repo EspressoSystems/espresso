@@ -1334,10 +1334,12 @@ mod tests {
         // Initialize a CAPE wallet.
         let rng = ChaChaRng::from_seed([42u8; 32]);
         let mut cape_wallet = LocalCapeWallet {
-            wallet: wallet,
+            wallet,
             network: ledger,
             rng,
         };
+        println!("CAPE wallet created: {}s", now.elapsed().as_secs_f32());
+        now = Instant::now();
 
         // Create an ERC20 code, sponsor address, and asset information.
         let erc20_code = Erc20Code([1u8; 32]);
@@ -1356,15 +1358,78 @@ mod tests {
             .await
             .unwrap();
         println!("Sponsor completed: {}s", now.elapsed().as_secs_f32());
+
+        // Wrapping an undefined asset should fail.
+        let wrap_amount = 1;
+        match cape_wallet
+            .wrap(
+                sponsor_addr.clone(),
+                AssetDefinition::dummy(),
+                owner.clone(),
+                wrap_amount,
+            )
+            .await
+        {
+            Err(WalletError::UndefinedAsset { asset: _ }) => {}
+            _ => {
+                panic!("Expected WalletError::UndefinedAsset");
+            }
+        };
         now = Instant::now();
 
-        // Wrap some assets.
-        let amount = 2;
+        // Wrap the sponsored asset.
+        let wrap_amount = 6;
         cape_wallet
-            .wrap(sponsor_addr, aap_asset, owner, amount)
+            .wrap(
+                sponsor_addr.clone(),
+                aap_asset.clone(),
+                owner.clone(),
+                wrap_amount,
+            )
             .await
             .unwrap();
         println!("Wrap completed: {}s", now.elapsed().as_secs_f32());
+
+        // Make dummy transactions to finalize the wrap.
+        let dummy_coin = cape_wallet
+            .wallet
+            .define_asset("Dummy asset".as_bytes(), Default::default())
+            .await
+            .unwrap();
+        cape_wallet
+            .wallet
+            .mint(&owner, 1, &dummy_coin.code, 5, owner.clone())
+            .await
+            .unwrap();
+        cape_wallet.wallet.sync(1).await.unwrap();
+
+        // Check the wrapped record.
+        println!("Assets: {:?}", cape_wallet.wallet.assets().await);
+        assert_eq!(cape_wallet.wallet.balance(&owner, &aap_asset.code).await, 6);
+        now = Instant::now();
+
+        // Burn some of the wrapped asset.
+        let burn_amount_some = 3;
+        let fee = 1;
+        cape_wallet
+            .burn(
+                &owner,
+                sponsor_addr.clone(),
+                &aap_asset.code.clone(),
+                burn_amount_some,
+                fee,
+            )
+            .await
+            .unwrap();
+        cape_wallet.wallet.sync(2).await.unwrap();
+        println!("Burn completed: {}s", now.elapsed().as_secs_f32());
+
+        // Burning more wrapped asset than owned should fail.
+        let burn_amount_more = 4;
+        assert!(cape_wallet
+            .burn(&owner, sponsor_addr, &aap_asset.code, burn_amount_more, fee)
+            .await
+            .is_ok());
 
         Ok(())
     }
