@@ -16,9 +16,10 @@ use core::fmt::Debug;
 use jf_aap::{
     errors::TxnApiError,
     proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
-    structs::{Nullifier, RecordCommitment},
+    structs::{Nullifier, RecordCommitment, BlindFactor},
     txn_batch_verify, MerkleCommitment, MerkleFrontier, MerkleLeafProof, MerkleTree, NodeValue,
-    TransactionNote, TransactionVerifyingKey,
+    TransactionNote, TransactionVerifyingKey,derive_txns_fee_record,
+    keys::UserPubKey,
 };
 use jf_utils::tagged_blob;
 use phaselock::{traits::state::State, BlockContents, H_256};
@@ -82,7 +83,11 @@ pub struct ElaboratedTransactionHash(pub(crate) Commitment<ElaboratedTransaction
     Eq,
     Hash,
 )]
-pub struct Block(pub Vec<TransactionNote>);
+pub struct Block{
+    pub txns: Vec<TransactionNote>,
+    pub fee_blind: BlindFactor,
+    pub proposer_pub_key: UserPubKey,
+}
 
 // A block with nullifier set non-membership proofs
 #[ser_test]
@@ -130,7 +135,7 @@ impl BlockContents<H_256> for ElaboratedBlock {
 
         let mut nulls = self
             .block
-            .0
+            .txns
             .iter()
             .flat_map(|x| x.nullifiers().into_iter())
             .collect::<HashSet<_>>();
@@ -141,7 +146,7 @@ impl BlockContents<H_256> for ElaboratedBlock {
             nulls.insert(*n);
         }
 
-        ret.block.0.push(txn.txn.clone());
+        ret.block.txns.push(txn.txn.clone());
         ret.proofs.push(txn.proofs.clone());
 
         Ok(ret)
@@ -492,7 +497,7 @@ impl Committable for Block {
         commit::RawCommitmentBuilder::new("Block Comm")
             .array_field(
                 "txns",
-                &self.0.iter().map(|x| x.commit()).collect::<Vec<_>>(),
+                &self.txns.iter().map(|x| x.commit()).collect::<Vec<_>>(),
             )
             .finalize()
     }
@@ -656,6 +661,7 @@ impl ValidatorState {
             )),
             nullifiers_root: nullifiers.hash(),
             prev_block: BlockCommitment(Block::default().commit()),
+            //block_owner: UserPubKey,
         }
     }
 
@@ -703,7 +709,7 @@ impl ValidatorState {
         use ValidationError::*;
         for (pf, n) in null_pfs
             .iter()
-            .zip(txns.0.iter())
+            .zip(txns.txns.iter())
             .flat_map(|(pfs, txn)| pfs.iter().zip(txn.nullifiers().into_iter()))
         {
             if nulls.contains(&n)
@@ -718,7 +724,7 @@ impl ValidatorState {
         }
 
         let verif_keys = txns
-            .0
+            .txns
             .iter()
             .map(|txn| match txn {
                 TransactionNote::Mint(_) => Ok(&self.verif_crs.mint),
@@ -744,11 +750,11 @@ impl ValidatorState {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        if !txns.0.is_empty() {
+        if !txns.txns.is_empty() {
             txn_batch_verify(
-                &txns.0,
+                &txns.txns,
                 &txns
-                    .0
+                    .txns
                     .iter()
                     .map(|note| {
                         // Only validate transactions if we can confirm that the record Merkle root
@@ -794,7 +800,7 @@ impl ValidatorState {
         self.prev_block = BlockCommitment(txns.commit());
 
         let nullifiers = txns
-            .0
+            .txns
             .iter()
             .zip(null_pfs.into_iter())
             .flat_map(|(txn, null_pfs)| txn.nullifiers().into_iter().zip(null_pfs.into_iter()))
@@ -812,7 +818,7 @@ impl ValidatorState {
         let mut ret = vec![];
         let mut uid = self.record_merkle_commitment.num_leaves;
         for o in txns
-            .0
+            .txns
             .iter()
             .flat_map(|x| x.output_commitments().into_iter())
         {
@@ -824,6 +830,16 @@ impl ValidatorState {
             uid += 1;
             assert_eq!(uid, record_merkle_frontier.num_leaves());
         }
+
+        //TODO: make own function to clone key, etc?
+        let fee_record_commitment = derive_txns_fee_record(&txns.txns, txns.proposer_pub_key.clone(), txns.fee_blind)?;
+        record_merkle_frontier.push(fee_record_commitment.to_field_element());
+        if uid > 0 {
+            record_merkle_frontier.forget(uid - 1).expect_ok().unwrap();
+        }
+        ret.push(uid);
+        uid += 1;
+        assert_eq!(uid, record_merkle_frontier.num_leaves());
 
         if self.past_record_merkle_roots.0.len() >= Self::RECORD_ROOT_HISTORY_SIZE {
             self.past_record_merkle_roots.0.pop_back();

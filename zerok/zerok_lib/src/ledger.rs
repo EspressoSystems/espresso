@@ -328,14 +328,14 @@ impl traits::Block for ElaboratedBlock {
         let (txns, proofs): (Vec<TransactionNote>, Vec<_>) =
             txns.into_iter().map(|txn| (txn.txn, txn.proofs)).unzip();
         Self {
-            block: crate::state::Block(txns),
+            block: crate::state::Block{txns: txns, },
             proofs,
         }
     }
 
     fn txns(&self) -> Vec<Self::Transaction> {
         self.block
-            .0
+            .txns
             .iter()
             .zip(&self.proofs)
             .map(|(txn, proofs)| ElaboratedTransaction {

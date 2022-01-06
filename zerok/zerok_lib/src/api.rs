@@ -129,7 +129,7 @@ impl From<&CommittedBlock> for ElaboratedBlock {
             .map(|tx| (tx.data.clone(), tx.proofs.clone()))
             .unzip();
         Self {
-            block: Block(txs),
+            block: Block{txs: txns, },
             proofs,
         }
     }

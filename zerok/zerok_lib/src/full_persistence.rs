@@ -110,7 +110,7 @@ impl FullPersistence {
         self.block_history.store_resource(block).unwrap();
         for comm in block
             .block
-            .0
+            .txns
             .iter()
             .flat_map(|txn| txn.output_commitments().into_iter())
         {

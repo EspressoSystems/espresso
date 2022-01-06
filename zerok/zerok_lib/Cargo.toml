@@ -18,7 +18,8 @@ jf-primitives = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jell
 jf-aap = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git", rev = "2a40d01c938cdcc716071af5a0dc9b3242181c2c"}
 jf-utils = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git", rev = "2a40d01c938cdcc716071af5a0dc9b3242181c2c"}
 # phaselock = { version = "0.0.2", registry = "translucence"}
-phaselock = { git = "ssh://git@github.com/SpectrumXYZ/phaselock.git", rev = "14586ed218a35cb48675b73d4a34ae7ae55c67e6" }
+#phaselock = { git = "ssh://git@github.com/SpectrumXYZ/phaselock.git", rev = "14586ed218a35cb48675b73d4a34ae7ae55c67e6" }
+phaselock = {path = "/Users/chicoine/phaselock"}
 ark-std = { version = "0.3.0", default-features = false }
 ark-ff = { version = "0.3.0", default-features = false }
 ark-serialize = { version = "0.3.0", features = ["derive"] }

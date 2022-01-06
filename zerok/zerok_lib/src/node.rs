@@ -25,9 +25,9 @@ use jf_aap::{
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use ledger::{AAPLedger, Block, Ledger, StateCommitment};
 use phaselock::{
-    error::PhaseLockError,
-    event::EventType,
-    handle::{HandleError, PhaseLockHandle},
+    types::error::PhaseLockError,
+    types::event::EventType,
+    types::handle::{HandleError, PhaseLockHandle},
     BlockContents, H_256,
 };
 use serde::{Deserialize, Serialize};
@@ -398,7 +398,7 @@ impl FullState {
                                 .insert(Vec::from(block.hash().as_ref()), block_index);
                             let block_uids = block
                                 .block
-                                .0
+                                .txns
                                 .iter()
                                 .map(|txn| {
                                     // Split the uids corresponding to this transaction off the front of
@@ -411,12 +411,12 @@ impl FullState {
                                 .collect::<Vec<_>>();
                             self.full_persisted.store_block_uids(&block_uids);
                             self.full_persisted
-                                .store_memos(&vec![None; block.block.0.len()]);
+                                .store_memos(&vec![None; block.block.txns.len()]);
 
                             // Add the results of this block to our current state.
                             let mut nullifiers =
                                 self.full_persisted.get_latest_nullifier_set().unwrap();
-                            for txn in block.block.0.iter() {
+                            for txn in block.block.txns.iter() {
                                 for n in txn.nullifiers() {
                                     nullifiers.insert(n);
                                 }
@@ -424,7 +424,7 @@ impl FullState {
                                     self.records_pending_memos.push(o.to_field_element());
                                 }
                             }
-                            self.num_txns += block.block.0.len();
+                            self.num_txns += block.block.txns.len();
                             assert_eq!(nullifiers.hash(), self.validator.nullifiers_root);
                             assert_eq!(
                                 self.records_pending_memos.commitment(),
@@ -608,7 +608,7 @@ impl FullState {
         let LedgerTransition {
             block, uids, memos, ..
         } = self.get_block(block_id)?;
-        let num_txns = block.block.0.len();
+        let num_txns = block.block.txns.len();
         assert_eq!(uids.len(), num_txns);
         assert_eq!(block.proofs.len(), num_txns);
 
@@ -616,7 +616,7 @@ impl FullState {
         if txn_id >= num_txns {
             return Err(QueryServiceError::InvalidTxnId {});
         }
-        let txn = &block.block.0[txn_id];
+        let txn = &block.block.txns[txn_id];
         let uids = &uids[txn_id];
 
         // Validate the new memos.
