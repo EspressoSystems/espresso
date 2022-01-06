@@ -8,6 +8,7 @@ pub mod api;
 pub mod cape_ledger;
 pub mod cape_state;
 pub mod committee;
+pub mod events;
 pub mod full_persistence;
 pub mod ledger;
 pub mod lw_persistence;

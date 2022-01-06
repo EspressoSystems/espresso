@@ -27,13 +27,16 @@ use crate::{
     universal_params::UNIVERSAL_PARAM,
 };
 use async_std::sync::{Arc, Mutex};
+use futures::channel::mpsc;
 use jf_aap::{MerkleTree, TransactionVerifyingKey};
 use rand_chacha::rand_core::RngCore;
+use std::collections::BTreeMap;
+use std::pin::Pin;
 use std::time::Instant;
 
 #[async_trait]
 pub trait MockNetwork<'a, L: Ledger> {
-    fn now(&self) -> u64;
+    fn now(&self) -> EventIndex;
     fn submit(&mut self, block: Block<L>) -> Result<(), WalletError>;
     fn post_memos(
         &mut self,
@@ -42,6 +45,7 @@ pub trait MockNetwork<'a, L: Ledger> {
         memos: Vec<ReceiverMemo>,
         sig: Signature,
     ) -> Result<(), WalletError>;
+    fn memos_source(&self) -> EventSource;
     fn generate_event(&mut self, event: LedgerEvent<L>);
 }
 
@@ -76,7 +80,7 @@ impl<'a, L: Ledger, N: MockNetwork<'a, L>, S: WalletStorage<'a, L>> MockLedger<'
         &mut self.network
     }
 
-    pub fn now(&self) -> u64 {
+    pub fn now(&self) -> EventIndex {
         self.network.now()
     }
 
@@ -321,12 +325,19 @@ pub trait SystemUnderTest<'a>: Default + Send + Sync {
             )
             .await
             .unwrap();
-            wallet.add_user_key(key_pair.clone(), 0).await.unwrap();
+            wallet
+                .add_user_key(key_pair.clone(), Default::default())
+                .await
+                .unwrap();
             wallets.push((wallet, key_pair.address()));
         }
 
         println!("Wallets set up: {}s", now.elapsed().as_secs_f32());
         *now = Instant::now();
+
+        // Sync with any events that were emitted during ledger setup.
+        self.sync(&ledger, &wallets).await;
+
         (ledger, wallets)
     }
 
@@ -340,7 +351,9 @@ pub trait SystemUnderTest<'a>: Default + Send + Sync {
             ledger.flush().unwrap();
             // Wait for all of the wallets to process all of the events which have already been
             // generated, plus any memos events that we expect to be published shortly.
-            ledger.now() + (ledger.missing_memos as u64)
+            ledger
+                .now()
+                .add_from_source(ledger.network.memos_source(), ledger.missing_memos)
         };
         self.sync_with(wallets, t).await;
 
@@ -357,10 +370,109 @@ pub trait SystemUnderTest<'a>: Default + Send + Sync {
     async fn sync_with(
         &self,
         wallets: &[(Wallet<'a, Self::MockBackend, Self::Ledger>, UserAddress)],
-        t: u64,
+        t: EventIndex,
     ) {
         println!("waiting for sync point {}", t);
         future::join_all(wallets.iter().map(|(wallet, _)| wallet.sync(t))).await;
+    }
+}
+
+type EventSender<L> = mpsc::UnboundedSender<(LedgerEvent<L>, EventSource)>;
+
+// Useful helper type for developing mock networks.
+pub struct MockEventSource<L: Ledger> {
+    source: EventSource,
+    events: Vec<LedgerEvent<L>>,
+    subscribers: Vec<EventSender<L>>,
+    // Clients which have subscribed to events starting at some time in the future, to be added to
+    // `subscribers` when the time comes.
+    pending_subscribers: BTreeMap<usize, Vec<EventSender<L>>>,
+}
+
+impl<L: Ledger + 'static> MockEventSource<L> {
+    pub fn new(source_type: EventSource) -> Self {
+        Self {
+            source: source_type,
+            events: Default::default(),
+            subscribers: Default::default(),
+            pending_subscribers: Default::default(),
+        }
+    }
+
+    pub fn now(&self) -> EventIndex {
+        EventIndex::from_source(self.source, self.events.len())
+    }
+
+    pub fn subscribe(
+        &mut self,
+        from: EventIndex,
+        to: Option<EventIndex>,
+    ) -> Pin<Box<dyn Stream<Item = (LedgerEvent<L>, EventSource)> + Send>> {
+        let from = from.index(self.source);
+        let to = to.map(|to| to.index(self.source));
+
+        if from < self.events.len() {
+            // If the start time is in the past, send the subscriber all saved events since the
+            // start time and make them an active subscriber starting now.
+            let past_events = self
+                .events
+                .iter()
+                .skip(from)
+                .cloned()
+                .map(|event| (event, self.source))
+                .collect::<Vec<_>>();
+
+            if let Some(to) = to {
+                if to - from <= past_events.len() {
+                    // If the subscription ends before the current time, just send them the past
+                    // events they requested and don't create a new channel.
+                    return Box::pin(iter(past_events.into_iter().take(to - from)));
+                }
+            }
+
+            let (sender, receiver) = mpsc::unbounded();
+            self.subscribers.push(sender);
+            let subscription: Pin<Box<dyn Stream<Item = _> + Send>> = if let Some(to) = to {
+                Box::pin(receiver.take(to - from - past_events.len()))
+            } else {
+                Box::pin(receiver)
+            };
+
+            Box::pin(iter(past_events).chain(subscription))
+        } else {
+            // Otherwise, add the subscriber to the list of pending subscribers to start receiving
+            // events at time `from`.
+            let (sender, receiver) = mpsc::unbounded();
+            self.pending_subscribers
+                .entry(from)
+                .or_default()
+                .push(sender);
+            if let Some(to) = to {
+                Box::pin(receiver.take(to - from))
+            } else {
+                Box::pin(receiver)
+            }
+        }
+    }
+
+    pub fn publish(&mut self, event: LedgerEvent<L>) {
+        // Subscribers who asked for a subscription starting from the current time can now be added
+        // to the list of active subscribers.
+        let now = self.events.len();
+        if let Some(new_subscribers) = self.pending_subscribers.remove(&now) {
+            self.subscribers.extend(new_subscribers);
+        }
+
+        // Send the message to all active subscribers. Filter out subscribers where the send fails,
+        // which means that the client has disconnected.
+        self.subscribers = std::mem::take(&mut self.subscribers)
+            .into_iter()
+            .filter(|s| s.unbounded_send((event.clone(), self.source)).is_ok())
+            .collect();
+
+        // Save the event so we can feed it to later subscribers who want to start from some time in
+        // the past.
+        self.events.push(event);
     }
 }
 

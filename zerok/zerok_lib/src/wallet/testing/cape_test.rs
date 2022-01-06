@@ -3,7 +3,8 @@ use crate::{
     api::FromError,
     cape_ledger::*,
     cape_state::*,
-    node::{LedgerEvent, QueryServiceError},
+    events::LedgerEvent,
+    node::QueryServiceError,
     state::{
         key_set::{OrderByOutputs, SizedKey},
         ProverKeySet, VerifierKeySet, MERKLE_HEIGHT,
@@ -17,11 +18,7 @@ use crate::{
 };
 use async_std::sync::{Mutex, MutexGuard};
 use async_trait::async_trait;
-use futures::{
-    channel::mpsc,
-    prelude::*,
-    stream::{iter, Stream},
-};
+use futures::stream::Stream;
 use itertools::izip;
 use jf_aap::{
     keys::{UserAddress, UserPubKey},
@@ -35,7 +32,7 @@ use jf_aap::{
 use rand_chacha::ChaChaRng;
 use serde::{de::DeserializeOwned, Serialize};
 use snafu::ResultExt;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -65,11 +62,8 @@ pub struct MockCapeNetwork {
     // pending finalization.
     pending_erc20_deposits:
         HashMap<RecordCommitment, (Erc20Code, EthereumAddr, Box<RecordOpening>)>,
-    events: Vec<LedgerEvent<CapeLedger>>,
-    subscribers: Vec<mpsc::UnboundedSender<LedgerEvent<CapeLedger>>>,
-    // Clients which have subscribed to events starting at some time in the future, to be added to
-    // `subscribers` when the time comes.
-    pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<LedgerEvent<CapeLedger>>>>,
+    query_service_events: MockEventSource<CapeLedger>,
+    memo_events: MockEventSource<CapeLedger>,
     txns: HashMap<(u64, u64), CommittedTransaction>,
     address_map: HashMap<UserAddress, UserPubKey>,
 }
@@ -85,9 +79,8 @@ impl MockCapeNetwork {
             block_height: 0,
             records,
             pending_erc20_deposits: Default::default(),
-            events: Default::default(),
-            subscribers: Default::default(),
-            pending_subscribers: Default::default(),
+            query_service_events: MockEventSource::new(EventSource::QueryService),
+            memo_events: MockEventSource::new(EventSource::BulletinBoard),
             txns: Default::default(),
             address_map: Default::default(),
         };
@@ -244,8 +237,8 @@ impl MockCapeNetwork {
 }
 
 impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
-    fn now(&self) -> u64 {
-        self.events.len() as u64
+    fn now(&self) -> EventIndex {
+        self.query_service_events.now() + self.memo_events.now()
     }
 
     fn submit(&mut self, block: Block<CapeLedger>) -> Result<(), WalletError> {
@@ -329,24 +322,15 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
         Ok(())
     }
 
+    fn memos_source(&self) -> EventSource {
+        EventSource::BulletinBoard
+    }
+
     fn generate_event(&mut self, event: LedgerEvent<CapeLedger>) {
-        // Subscribers who asked for a subscription starting from the current time can now be added
-        // to the list of active subscribers.
-        let now = self.events.len() as u64;
-        if let Some(new_subscribers) = self.pending_subscribers.remove(&now) {
-            self.subscribers.extend(new_subscribers);
+        match event {
+            LedgerEvent::Memos { .. } => self.memo_events.publish(event),
+            _ => self.query_service_events.publish(event),
         }
-
-        // Send the message to all active subscribers. Filter out subscribers where the send fails,
-        // which means that the client has disconnected.
-        self.subscribers = std::mem::take(&mut self.subscribers)
-            .into_iter()
-            .filter(|subscriber| subscriber.unbounded_send(event.clone()).is_ok())
-            .collect();
-
-        // Save the event so we can feed it to later subscribers who want to start from some time in
-        // the past.
-        self.events.push(event);
     }
 }
 
@@ -389,7 +373,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> MockCapeBackend<'a, Meta> {
 impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger>
     for MockCapeBackend<'a, Meta>
 {
-    type EventStream = Pin<Box<dyn Stream<Item = LedgerEvent<CapeLedger>> + Send>>;
+    type EventStream = Pin<Box<dyn Stream<Item = (LedgerEvent<CapeLedger>, EventSource)> + Send>>;
     type Storage = AtomicWalletStorage<'a, CapeLedger, Meta>;
 
     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
@@ -456,7 +440,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
             proving_keys,
             txn_state: TransactionState {
                 validator: CapeTruster::new(network.block_height, record_mt.num_leaves()),
-                now: 0,
+                now: Default::default(),
                 nullifiers: Default::default(),
                 // Completely sparse nullifier set
                 record_mt,
@@ -484,31 +468,13 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         Ok(state)
     }
 
-    async fn subscribe(&self, t: u64) -> Self::EventStream {
-        let (sender, receiver) = mpsc::unbounded();
+    async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream {
         let mut ledger = self.ledger.lock().await;
         let network = ledger.network();
-        if (t as usize) < network.events.len() {
-            // If the start time is in the past, send the subscriber all saved events since the
-            // start time and make them an active subscriber starting now.
-            network.subscribers.push(sender);
-            let past_events = network
-                .events
-                .iter()
-                .skip(t as usize)
-                .cloned()
-                .collect::<Vec<_>>();
-            Box::pin(iter(past_events).chain(receiver))
-        } else {
-            // Otherwise, add the subscriber to the list of pending subscribers to start receiving
-            // events at time `t`.
-            network
-                .pending_subscribers
-                .entry(t)
-                .or_default()
-                .push(sender);
-            Box::pin(receiver)
-        }
+        Box::pin(futures::stream::select(
+            network.query_service_events.subscribe(from, to),
+            network.memo_events.subscribe(from, to),
+        ))
     }
 
     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {

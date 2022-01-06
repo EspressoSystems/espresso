@@ -9,11 +9,11 @@ mod secret;
 mod testing;
 
 use crate::api;
-use crate::node::LedgerEvent;
 use crate::state::key_set;
 use crate::txn_builder::*;
 use crate::util::arbitrary_wrappers::{ArbitraryNullifier, ArbitraryUserKeyPair};
 use crate::{
+    events::{EventIndex, EventSource, LedgerEvent},
     ledger, ser_test,
     state::{ProverKeySet, ValidationError},
 };
@@ -160,8 +160,8 @@ impl From<crate::node::QueryServiceError> for WalletError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct BackgroundKeyScan {
     key: UserKeyPair,
-    next_event: u64,
-    to_event: u64,
+    next_event: EventIndex,
+    to_event: EventIndex,
     // Record openings we have discovered which belong to these key. These records are kept in a
     // separate pool until the scan is complete so that if the scan encounters an event which spends
     // some of these records, we can remove the spent records without ever reflecting them in the
@@ -565,7 +565,7 @@ impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> Drop
 
 #[async_trait]
 pub trait WalletBackend<'a, L: Ledger>: Send {
-    type EventStream: 'a + Stream<Item = LedgerEvent<L>> + Unpin + Send;
+    type EventStream: 'a + Stream<Item = (LedgerEvent<L>, EventSource)> + Unpin + Send;
     type Storage: WalletStorage<'a, L> + Send;
 
     /// Access the persistent storage layer.
@@ -626,7 +626,7 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
 
     // Querying the ledger
     async fn create(&mut self) -> Result<WalletState<'a, L>, WalletError>;
-    async fn subscribe(&self, starting_at: u64) -> Self::EventStream;
+    async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream;
     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError>;
     async fn get_nullifier_proof(
         &self,
@@ -754,8 +754,9 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         event: LedgerEvent<L>,
+        source: EventSource,
     ) -> EventSummary<L> {
-        self.txn_state.now += 1;
+        self.txn_state.now += EventIndex::from_source(source, 1);
         let mut summary = EventSummary::default();
         match event {
             LedgerEvent::Commit {
@@ -1002,6 +1003,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         key: &UserKeyPair,
         event: LedgerEvent<L>,
+        source: EventSource,
     ) {
         let scan = match event {
             LedgerEvent::Memos {
@@ -1031,7 +1033,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             _ => self.key_scans.get_mut(&key.address()).unwrap(),
         };
 
-        scan.next_event += 1;
+        scan.next_event += EventIndex::from_source(source, 1);
         if let Err(err) = session
             .backend
             .store(|mut t| async {
@@ -1464,7 +1466,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         user_key: UserKeyPair,
-        scan_from: Option<u64>,
+        scan_from: Option<EventIndex>,
     ) -> Result<(), WalletError> {
         Self::add_key(session, &mut self.user_keys, user_key.clone()).await?;
 
@@ -1760,7 +1762,7 @@ pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = AAPLedger> {
 struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
     state: WalletState<'a, L>,
     session: WalletSession<'a, L, Backend>,
-    sync_handles: HashMap<u64, Vec<oneshot::Sender<()>>>,
+    sync_handles: Vec<(EventIndex, oneshot::Sender<()>)>,
     txn_subscribers: HashMap<TransactionUID<L>, Vec<oneshot::Sender<TransactionStatus>>>,
     pending_foreign_txns: HashMap<Nullifier, Vec<oneshot::Sender<TransactionStatus>>>,
 }
@@ -1770,16 +1772,20 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
 {
     pub async fn new(mut backend: Backend) -> Result<Wallet<'a, Backend, L>, WalletError> {
         let state = backend.load().await?;
-        let mut events = backend.subscribe(state.txn_state.now).await;
+        let mut events = backend.subscribe(state.txn_state.now, None).await;
         let mut key_scans = vec![];
         for scan in state.key_scans.values() {
-            assert!(scan.next_event < scan.to_event);
+            if let Some(ord) = scan.next_event.partial_cmp(&scan.to_event) {
+                // `next_event` could be incomparable with `to_event`, if our position in some event
+                // sources is greater than in `to_event`, but we have not finished scanning _all_
+                // event sources. However, if comparable, `next_event` must be before `to_event`.
+                assert_eq!(ord, std::cmp::Ordering::Less);
+            }
             key_scans.push((
                 scan.key.clone(),
                 backend
-                    .subscribe(scan.next_event)
-                    .await
-                    .take((scan.to_event - scan.next_event) as usize),
+                    .subscribe(scan.next_event, Some(scan.to_event))
+                    .await,
             ));
         }
         let key_tree = backend.key_stream();
@@ -1792,7 +1798,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
             _marker: Default::default(),
             _marker2: Default::default(),
         };
-        let sync_handles = HashMap::new();
+        let sync_handles = Vec::new();
         let txn_subscribers = HashMap::new();
         let pending_foreign_txns = HashMap::new();
         let mutex = Arc::new(Mutex::new(WalletSharedState {
@@ -1823,7 +1829,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
             scope.spawn_cancellable(
                 async move {
                     let mut foreign_txns_awaiting_memos = HashMap::new();
-                    while let Some(event) = events.next().await {
+                    while let Some((event, source)) = events.next().await {
                         let WalletSharedState {
                             state,
                             session,
@@ -1833,7 +1839,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
                             ..
                         } = &mut *mutex.lock().await;
                         // handle an event
-                        let summary = state.handle_event(session, event).await;
+                        let summary = state.handle_event(session, event, source).await;
                         for (txn_uid, status) in summary.updated_txns {
                             // signal any await_transaction() futures which should complete due to a
                             // transaction having been completed.
@@ -1880,12 +1886,14 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
                             }
                         }
 
-                        // signal any sync() futures which should complete after the last event
-                        for handle in sync_handles
-                            .remove(&state.txn_state.now)
-                            .into_iter()
-                            .flatten()
-                        {
+                        // Keep all the sync() futures whose index is still in the future, and
+                        // signal the rest.
+                        let (sync_handles_to_keep, sync_handles_to_signal) =
+                            std::mem::take(sync_handles)
+                                .into_iter()
+                                .partition(|(index, _)| *index > state.txn_state.now);
+                        *sync_handles = sync_handles_to_keep;
+                        for (_, handle) in sync_handles_to_signal {
                             handle.send(()).ok();
                         }
                     }
@@ -2048,7 +2056,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     pub async fn add_user_key(
         &mut self,
         user_key: UserKeyPair,
-        scan_from: u64,
+        scan_from: EventIndex,
     ) -> Result<(), WalletError> {
         let mut guard = self.mutex.lock().await;
         let WalletSharedState { state, session, .. } = &mut *guard;
@@ -2059,9 +2067,8 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         // Start a background task to scan for records belonging to the new key.
         let events = session
             .backend
-            .subscribe(scan_from)
-            .await
-            .take((state.txn_state.now - scan_from) as usize);
+            .subscribe(scan_from, Some(state.txn_state.now))
+            .await;
         drop(guard);
         self.spawn_key_scan(user_key, events);
         Ok(())
@@ -2074,7 +2081,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     /// to the new key.
     pub async fn generate_user_key(
         &mut self,
-        scan_from: Option<u64>,
+        scan_from: Option<EventIndex>,
     ) -> Result<UserPubKey, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         let user_key = session
@@ -2250,7 +2257,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         }
     }
 
-    pub async fn sync(&self, t: u64) -> Result<(), oneshot::Canceled> {
+    pub async fn sync(&self, t: EventIndex) -> Result<(), oneshot::Canceled> {
         let mut guard = self.mutex.lock().await;
         let WalletSharedState {
             state,
@@ -2258,27 +2265,34 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
             ..
         } = &mut *guard;
 
-        if state.txn_state.now < t {
+        // It's important that we do the comparison this way (now >= t) rather than comparing
+        // now < t and switching the branches of the `if`. This is because the partial order of
+        // EventIndex tells us when _all_ event streams in `now` are at an index >= t, which is the
+        // terminating condition for `sync()`: it should wait until _all_ event streams have been
+        // processed at least to time `t`.
+        if state.txn_state.now >= t {
+            Ok(())
+        } else {
             let (sender, receiver) = oneshot::channel();
-            sync_handles.entry(t).or_insert_with(Vec::new).push(sender);
+            sync_handles.push((t, sender));
             drop(guard);
             receiver.await
-        } else {
-            Ok(())
         }
     }
 
     fn spawn_key_scan(
         &mut self,
         key: UserKeyPair,
-        mut events: impl 'a + Stream<Item = LedgerEvent<L>> + Unpin + Send,
+        mut events: impl 'a + Stream<Item = (LedgerEvent<L>, EventSource)> + Unpin + Send,
     ) {
         let mutex = self.mutex.clone();
         self.task_scope.spawn_cancellable(
             async move {
-                while let Some(event) = events.next().await {
+                while let Some((event, source)) = events.next().await {
                     let WalletSharedState { state, session, .. } = &mut *mutex.lock().await;
-                    state.handle_retroactive_event(session, &key, event).await;
+                    state
+                        .handle_retroactive_event(session, &key, event, source)
+                        .await;
                 }
 
                 let WalletSharedState { state, session, .. } = &mut *mutex.lock().await;

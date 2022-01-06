@@ -39,7 +39,8 @@ use wallet::{
     KeyError, Wallet, WalletError,
 };
 use zerok_lib::api::*;
-use zerok_lib::node::{LedgerEvent, LedgerSummary, QueryServiceError};
+use zerok_lib::events::LedgerEvent;
+use zerok_lib::node::{LedgerSummary, QueryServiceError};
 use zerok_lib::wallet;
 use zerok_lib::{state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM};
 
