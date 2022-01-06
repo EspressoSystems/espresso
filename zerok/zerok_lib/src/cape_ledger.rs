@@ -117,7 +117,7 @@ impl Committable for CapeTransition {
 
 impl Transaction for CapeTransition {
     type NullifierSet = CapeNullifierSet;
-    type Hash = ();
+    type Hash = Commitment<Self>;
     type Kind = CapeTransactionKind;
 
     fn aap(note: TransactionNote, _proofs: Vec<()>) -> Self {
@@ -162,7 +162,9 @@ impl Transaction for CapeTransition {
         }
     }
 
-    fn hash(&self) {}
+    fn hash(&self) -> Self::Hash {
+        self.commit()
+    }
 
     fn kind(&self) -> CapeTransactionKind {
         match self {
@@ -397,23 +399,7 @@ impl LocalCapeLedger {
     fn handle_event(&mut self, event: CapeEvent) {
         match event {
             CapeEvent::BlockCommitted { wraps, txns } => {
-                let num_txns = txns.len();
-                txns.iter().enumerate().for_each(|(i, txn)| {
-                    let mut uids = Vec::new();
-                    for comm in txn.commitments() {
-                        uids.push(self.records.num_leaves());
-                        self.records.push(comm.to_field_element());
-                    }
-                    self.txns.insert(
-                        (self.block_height, i as u64),
-                        CommittedTransaction {
-                            txn: CapeTransition::Transaction(txn.clone()),
-                            uids,
-                            memos: None,
-                        },
-                    );
-                });
-
+                let num_wraps = wraps.len();
                 // Wrap each transaction and wrap event into a CapeTransition, build a
                 // CapeBlock, and broadcast it to subscribers.
                 let block = CapeBlock::new(
@@ -422,6 +408,7 @@ impl LocalCapeLedger {
                         .enumerate()
                         .map(|(i, comm)| {
                             let uids = vec![self.records.num_leaves()];
+                            println!("Wrap uids: {:?}", uids);
                             self.records.push(comm.to_field_element());
 
                             // Look up the auxiliary information associated with this deposit which
@@ -437,7 +424,7 @@ impl LocalCapeLedger {
                                 ro,
                             };
                             self.txns.insert(
-                                (self.block_height, (num_txns + i) as u64),
+                                (self.block_height, i as u64),
                                 CommittedTransaction {
                                     txn: txn.clone(),
                                     uids,
@@ -446,9 +433,25 @@ impl LocalCapeLedger {
                             );
                             txn
                         })
-                        .chain(txns.into_iter().map(CapeTransition::Transaction))
+                        .chain(txns.clone().into_iter().map(CapeTransition::Transaction))
                         .collect(),
                 );
+                txns.iter().enumerate().for_each(|(i, txn)| {
+                    let mut uids = Vec::new();
+                    for comm in txn.commitments() {
+                        uids.push(self.records.num_leaves());
+                        self.records.push(comm.to_field_element());
+                    }
+                    println!("Txn uids: {:?}", uids);
+                    self.txns.insert(
+                        (self.block_height, (num_wraps + i) as u64),
+                        CommittedTransaction {
+                            txn: CapeTransition::Transaction(txn.clone()),
+                            uids,
+                            memos: None,
+                        },
+                    );
+                });
                 self.send_event(LedgerEvent::Commit {
                     block,
                     block_id: self.block_height,
@@ -730,6 +733,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         memos: Vec<ReceiverMemo>,
         sig: Signature,
     ) -> Result<(), WalletError> {
+        println!("Posting memos for {}:{}", block_id, txn_id);
         let network = &mut *self.network.lock().await;
         let txn = match network.txns.get_mut(&(block_id, txn_id)) {
             Some(txn) => txn,
@@ -746,7 +750,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                 }
             }
             _ => {
-                // Wrap/burn transactions don't get memos.
+                println!("Wrap/burn transactions don't get memos");
                 return Err(QueryServiceError::InvalidTxnId {}.into());
             }
         }
@@ -1322,9 +1326,8 @@ mod tests {
 
     #[async_std::test]
     async fn test_cape_wallet() -> std::io::Result<()> {
-        let mut now = Instant::now();
-
         // Initialize a ledger and wallet, and get the owner address.
+        let mut now = Instant::now();
         let num_inputs = 3;
         let num_outputs = 4;
         let initial_grant = 10;
@@ -1339,9 +1342,9 @@ mod tests {
             rng,
         };
         println!("CAPE wallet created: {}s", now.elapsed().as_secs_f32());
-        now = Instant::now();
 
         // Create an ERC20 code, sponsor address, and asset information.
+        now = Instant::now();
         let erc20_code = Erc20Code([1u8; 32]);
         let sponsor_addr = EthereumAddr([2u8; 20]);
         let aap_asset_desc = &[];
@@ -1359,25 +1362,25 @@ mod tests {
             .unwrap();
         println!("Sponsor completed: {}s", now.elapsed().as_secs_f32());
 
-        // Wrapping an undefined asset should fail.
-        let wrap_amount = 1;
-        match cape_wallet
-            .wrap(
-                sponsor_addr.clone(),
-                AssetDefinition::dummy(),
-                owner.clone(),
-                wrap_amount,
-            )
-            .await
-        {
-            Err(WalletError::UndefinedAsset { asset: _ }) => {}
-            _ => {
-                panic!("Expected WalletError::UndefinedAsset");
-            }
-        };
-        now = Instant::now();
+        // // Wrapping an undefined asset should fail.
+        // let wrap_amount = 1;
+        // match cape_wallet
+        //     .wrap(
+        //         sponsor_addr.clone(),
+        //         AssetDefinition::dummy(),
+        //         owner.clone(),
+        //         wrap_amount,
+        //     )
+        //     .await
+        // {
+        //     Err(WalletError::UndefinedAsset { asset: _ }) => {}
+        //     _ => {
+        //         panic!("Expected WalletError::UndefinedAsset");
+        //     }
+        // };
 
         // Wrap the sponsored asset.
+        now = Instant::now();
         let wrap_amount = 6;
         cape_wallet
             .wrap(
@@ -1389,45 +1392,80 @@ mod tests {
             .await
             .unwrap();
         println!("Wrap completed: {}s", now.elapsed().as_secs_f32());
+        assert_eq!(cape_wallet.wallet.balance(&owner, &aap_asset.code).await, 0);
 
-        // Make dummy transactions to finalize the wrap.
+        // Submit dummy transactions to finalize the wrap.
+        now = Instant::now();
         let dummy_coin = cape_wallet
             .wallet
             .define_asset("Dummy asset".as_bytes(), Default::default())
             .await
             .unwrap();
+        let mint_fee = 1;
         cape_wallet
             .wallet
-            .mint(&owner, 1, &dummy_coin.code, 5, owner.clone())
+            .mint(&owner, mint_fee, &dummy_coin.code, 5, owner.clone())
             .await
             .unwrap();
-        cape_wallet.wallet.sync(1).await.unwrap();
+        cape_wallet.wallet.sync(3).await.unwrap();
+        println!(
+            "Dummy transactions submitted and wrap finalized: {}s",
+            now.elapsed().as_secs_f32()
+        );
 
-        // Check the wrapped record.
-        println!("Assets: {:?}", cape_wallet.wallet.assets().await);
-        assert_eq!(cape_wallet.wallet.balance(&owner, &aap_asset.code).await, 6);
-        now = Instant::now();
+        // Check the balance after the wrap.
+        assert_eq!(
+            cape_wallet
+                .wallet
+                .balance(&owner, &AssetCode::native())
+                .await,
+            initial_grant - mint_fee
+        );
+        assert_eq!(
+            cape_wallet.wallet.balance(&owner, &aap_asset.code).await,
+            wrap_amount
+        );
 
         // Burn some of the wrapped asset.
-        let burn_amount_some = 3;
-        let fee = 1;
+        now = Instant::now();
+        let burn_amount = wrap_amount;
+        let burn_fee = 1;
         cape_wallet
             .burn(
                 &owner,
                 sponsor_addr.clone(),
                 &aap_asset.code.clone(),
-                burn_amount_some,
-                fee,
+                burn_amount,
+                burn_fee,
             )
             .await
             .unwrap();
-        cape_wallet.wallet.sync(2).await.unwrap();
+        cape_wallet.wallet.sync(4).await.unwrap();
         println!("Burn completed: {}s", now.elapsed().as_secs_f32());
+
+        // Check the balance after the burn.
+        assert_eq!(
+            cape_wallet
+                .wallet
+                .balance(&owner, &AssetCode::native())
+                .await,
+            initial_grant - mint_fee - burn_fee
+        );
+        assert_eq!(
+            cape_wallet.wallet.balance(&owner, &aap_asset.code).await,
+            wrap_amount - burn_amount
+        );
 
         // Burning more wrapped asset than owned should fail.
         let burn_amount_more = 4;
         assert!(cape_wallet
-            .burn(&owner, sponsor_addr, &aap_asset.code, burn_amount_more, fee)
+            .burn(
+                &owner,
+                sponsor_addr,
+                &aap_asset.code,
+                burn_amount_more,
+                burn_fee
+            )
             .await
             .is_ok());
 

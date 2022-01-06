@@ -173,6 +173,7 @@ pub mod commit {
     use bitvec::vec::BitVec;
     use core::marker::PhantomData;
     use generic_array::{ArrayLength, GenericArray};
+    use serde::{Deserialize, Serialize};
     use sha3::digest::Digest;
     use sha3::Keccak256;
     use std::convert::TryInto;
@@ -213,6 +214,8 @@ pub mod commit {
         fn commit(&self) -> Commitment<Self>;
     }
 
+    #[derive(Serialize, Deserialize)]
+    #[serde(bound = "")]
     pub struct Commitment<T: ?Sized + Committable>(Array, PhantomData<T>);
 
     impl<T: ?Sized + Committable> AsRef<[u8]> for Commitment<T> {

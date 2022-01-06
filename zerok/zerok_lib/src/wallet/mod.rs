@@ -842,13 +842,16 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     // output UIDs of the same transaction, so that we can tell when the memos
                     // arrive for the transaction which spent this nullifier (completing the
                     // transaction's life cycle) by looking at the UIDs attached to the memos.
-                    summary.spent_nullifiers.extend(
-                        txn.input_nullifiers()
-                            .into_iter()
-                            .zip(repeat(this_txn_uids[0].0)),
-                    );
-                    if retired {
-                        summary.retired_nullifiers.push(txn.input_nullifiers()[0]);
+                    // TODO: Stop identifying transactions by input nullifier and instead use hashes.
+                    if txn.input_nullifiers().len() > 0 {
+                        summary.spent_nullifiers.extend(
+                            txn.input_nullifiers()
+                                .into_iter()
+                                .zip(repeat(this_txn_uids[0].0)),
+                        );
+                        if retired {
+                            summary.retired_nullifiers.push(txn.input_nullifiers()[0]);
+                        }
                     }
 
                     // Different concerns within the wallet consume transactions in different ways.
