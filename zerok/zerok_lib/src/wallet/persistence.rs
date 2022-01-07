@@ -482,7 +482,7 @@ mod tests {
     use std::iter::repeat_with;
     use std::path::PathBuf;
     use tempdir::TempDir;
-    use test_helpers::*;
+    use testing::assert_wallet_states_eq;
 
     struct MockWalletLoader {
         dir: TempDir,
