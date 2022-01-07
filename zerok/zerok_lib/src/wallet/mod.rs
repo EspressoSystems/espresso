@@ -843,7 +843,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     // arrive for the transaction which spent this nullifier (completing the
                     // transaction's life cycle) by looking at the UIDs attached to the memos.
                     // TODO: Stop identifying transactions by input nullifier and instead use hashes.
-                    if txn.input_nullifiers().len() > 0 {
+                    if !txn.input_nullifiers().is_empty() {
                         summary.spent_nullifiers.extend(
                             txn.input_nullifiers()
                                 .into_iter()
@@ -1532,6 +1532,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn build_transfer(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,

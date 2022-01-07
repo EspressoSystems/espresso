@@ -1514,13 +1514,11 @@ impl<L: Ledger> TransactionState<L> {
         match xfr_size_requirement {
             Some((input_size, output_size)) => {
                 match proving_keys.exact_fit_key(input_size, output_size) {
-                    Some(key) => return Ok((key, 0)),
-                    None => {
-                        return Err(TransactionError::NoFitKey {
-                            num_inputs: input_size,
-                            num_outputs: output_size,
-                        })
-                    }
+                    Some(key) => Ok((key, 0)),
+                    None => Err(TransactionError::NoFitKey {
+                        num_inputs: input_size,
+                        num_outputs: output_size,
+                    }),
                 }
             }
             None => {
@@ -1574,9 +1572,9 @@ impl<L: Ledger> TransactionState<L> {
                 // because it requires creating a new dummy key pair and then borrowing from the key pair to
                 // form the transfer input, so the key pair must be owned by the caller.
                 let dummy_inputs = key_inputs.saturating_sub(min_num_inputs);
-                return Ok((proving_key, dummy_inputs));
+                Ok((proving_key, dummy_inputs))
             }
-        };
+        }
     }
 
     fn freeze_proving_key<'a, 'k>(
