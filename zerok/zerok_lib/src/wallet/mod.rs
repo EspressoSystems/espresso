@@ -1540,6 +1540,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         receivers: &[(UserAddress, u64)],
         fee: u64,
         bound_data: Vec<u8>,
+        xfr_size_requirement: Option<(usize, usize)>,
     ) -> Result<(TransferNote, TransactionInfo<L>), WalletError> {
         let receivers = iter(receivers)
             .then(|(addr, amt)| {
@@ -1563,6 +1564,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     bound_data,
                 },
                 &self.proving_keys.xfr,
+                xfr_size_requirement,
                 &mut session.rng,
             )
             .context(TransactionError)
@@ -1954,9 +1956,10 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset: &AssetCode,
         receivers: &[(UserAddress, u64)],
         fee: u64,
+        xfr_size_requirement: Option<(usize, usize)>,
     ) -> Result<TransactionReceipt<L>, WalletError> {
         let (note, info) = self
-            .build_transfer(account, asset, receivers, fee, vec![])
+            .build_transfer(account, asset, receivers, fee, vec![], xfr_size_requirement)
             .await?;
         self.submit_aap(TransactionNote::Transfer(Box::new(note)), info)
             .await
@@ -1969,10 +1972,19 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         receivers: &[(UserAddress, u64)],
         fee: u64,
         bound_data: Vec<u8>,
+        xfr_size_requirement: Option<(usize, usize)>,
     ) -> Result<(TransferNote, TransactionInfo<L>), WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state
-            .build_transfer(session, account, asset, receivers, fee, bound_data)
+            .build_transfer(
+                session,
+                account,
+                asset,
+                receivers,
+                fee,
+                bound_data,
+                xfr_size_requirement,
+            )
             .await
     }
 
@@ -3304,6 +3316,7 @@ pub mod test_helpers {
                         &asset.code,
                         &[(receiver.clone(), amount)],
                         1,
+                        None,
                     )
                     .await
                 {
@@ -3336,6 +3349,7 @@ pub mod test_helpers {
                                     &asset.code,
                                     &[(receiver.clone(), amount)],
                                     1,
+                                    None,
                                 )
                                 .await
                                 .unwrap()
@@ -3370,6 +3384,7 @@ pub mod test_helpers {
                                 &asset.code,
                                 &[(receiver.clone(), amount)],
                                 1,
+                                None,
                             )
                             .await
                             .unwrap()
@@ -3538,7 +3553,13 @@ mod tests {
         // Construct a transaction to transfer some coins from Alice to Bob.
         wallets[0]
             .0
-            .transfer(&alice_address, &coin.code, &[(bob_address.clone(), 3)], 1)
+            .transfer(
+                &alice_address,
+                &coin.code,
+                &[(bob_address.clone(), 3)],
+                1,
+                None,
+            )
             .await
             .unwrap();
         sync(&ledger, &wallets).await;
@@ -3591,7 +3612,7 @@ mod tests {
         // the sum of the outputs and fee of this transaction is only 2.
         wallets[1]
             .0
-            .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1)
+            .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1, None)
             .await
             .unwrap();
         sync(&ledger, &wallets).await;
@@ -3749,7 +3770,7 @@ mod tests {
         } else {
             wallets[0]
                 .0
-                .transfer(&sender, &asset.code, &[(receiver.clone(), 1)], 1)
+                .transfer(&sender, &asset.code, &[(receiver.clone(), 1)], 1, None)
                 .await
                 .unwrap();
         }
@@ -3793,7 +3814,7 @@ mod tests {
                 let sender = wallets[2].1.clone();
                 wallets[2]
                     .0
-                    .transfer(&sender, &asset.code, &[(receiver.clone(), 1)], 1)
+                    .transfer(&sender, &asset.code, &[(receiver.clone(), 1)], 1, None)
                     .await
                     .unwrap();
                 sync(&ledger, &wallets).await;
@@ -3871,7 +3892,7 @@ mod tests {
         } else {
             wallets[0]
                 .0
-                .transfer(&sender, &asset.code, &[(receiver, 1)], 1)
+                .transfer(&sender, &asset.code, &[(receiver, 1)], 1, None)
                 .await
                 .unwrap();
         }
@@ -3965,7 +3986,13 @@ mod tests {
         let receiver = wallets[1].1.clone();
         wallets[0]
             .0
-            .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
+            .transfer(
+                &sender,
+                &AssetCode::native(),
+                &[(receiver.clone(), 1)],
+                1,
+                None,
+            )
             .await
             .unwrap();
         println!("transfer generated: {}s", now.elapsed().as_secs_f32());
@@ -3982,7 +4009,13 @@ mod tests {
             let sender = wallets[2].1.clone();
             wallets[2]
                 .0
-                .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
+                .transfer(
+                    &sender,
+                    &AssetCode::native(),
+                    &[(receiver.clone(), 1)],
+                    1,
+                    None,
+                )
                 .await
                 .unwrap();
             sync(&ledger, &wallets).await;
@@ -4114,7 +4147,7 @@ mod tests {
         let dst = wallets[1].1.clone();
         match wallets[0]
             .0
-            .transfer(&src, &asset.code, &[(dst, 1)], 1)
+            .transfer(&src, &asset.code, &[(dst, 1)], 1, None)
             .await
         {
             Err(WalletError::TransactionError {
@@ -4157,7 +4190,7 @@ mod tests {
         let dst = wallets[1].1.clone();
         let xfr_receipt = wallets[0]
             .0
-            .transfer(&src, &asset.code, &[(dst, 1)], 1)
+            .transfer(&src, &asset.code, &[(dst, 1)], 1, None)
             .await
             .unwrap();
         sync(&ledger, &wallets).await;

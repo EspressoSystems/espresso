@@ -56,6 +56,10 @@ pub enum TransactionError {
         num_receivers: usize,
         num_change_records: usize,
     },
+    NoFitKey {
+        num_inputs: usize,
+        num_outputs: usize,
+    },
     CryptoError {
         source: TxnApiError,
     },
@@ -935,12 +939,13 @@ impl<L: Ledger> TransactionState<L> {
         &mut self,
         spec: TransferSpec<'k>,
         proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
+        xfr_size_requirement: Option<(usize, usize)>,
         rng: &mut ChaChaRng,
     ) -> Result<(TransferNote, TransactionInfo<L>), TransactionError> {
         if *spec.asset == AssetCode::native() {
-            self.transfer_native(spec, proving_keys, rng)
+            self.transfer_native(spec, proving_keys, xfr_size_requirement, rng)
         } else {
-            self.transfer_non_native(spec, proving_keys, rng)
+            self.transfer_non_native(spec, proving_keys, xfr_size_requirement, rng)
         }
     }
 
@@ -948,6 +953,7 @@ impl<L: Ledger> TransactionState<L> {
         &mut self,
         spec: TransferSpec<'k>,
         proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
+        xfr_size_requirement: Option<(usize, usize)>,
         rng: &mut ChaChaRng,
     ) -> Result<(TransferNote, TransactionInfo<L>), TransactionError> {
         let total_output_amount: u64 = spec
@@ -997,6 +1003,7 @@ impl<L: Ledger> TransactionState<L> {
             &AssetDefinition::native(),
             &mut inputs,
             &mut outputs,
+            xfr_size_requirement,
             false,
         )?;
         // pad with dummy inputs if necessary
@@ -1068,6 +1075,7 @@ impl<L: Ledger> TransactionState<L> {
         &mut self,
         spec: TransferSpec<'k>,
         proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
+        xfr_size_requirement: Option<(usize, usize)>,
         rng: &mut ChaChaRng,
     ) -> Result<(TransferNote, TransactionInfo<L>), TransactionError> {
         assert_ne!(
@@ -1130,6 +1138,7 @@ impl<L: Ledger> TransactionState<L> {
             &asset,
             &mut inputs,
             &mut outputs,
+            xfr_size_requirement,
             change > 0,
         )?;
         // pad with dummy inputs if necessary
@@ -1476,6 +1485,8 @@ impl<L: Ledger> TransactionState<L> {
     // `proving_keys` should always be `&self.proving_key`. This is a non-member function in order
     // to prove to the compiler that the result only borrows from `&self.proving_key`, not all of
     // `&self`.
+    //
+    // `xfr_size_requirement` - If specified, the proving keys must be the exact size.
     #[allow(clippy::too_many_arguments)]
     fn xfr_proving_key<'a, 'k>(
         rng: &mut ChaChaRng,
@@ -1484,6 +1495,7 @@ impl<L: Ledger> TransactionState<L> {
         asset: &AssetDefinition,
         inputs: &mut Vec<TransferNoteInput<'k>>,
         outputs: &mut Vec<RecordOpening>,
+        xfr_size_requirement: Option<(usize, usize)>,
         change_record: bool,
     ) -> Result<(&'k TransferProvingKey<'a>, usize), TransactionError> {
         let total_output_amount = outputs.iter().map(|ro| ro.amount).sum();
@@ -1497,59 +1509,74 @@ impl<L: Ledger> TransactionState<L> {
         // automatically generated and not included in `outputs`.
         let fee_outputs = 1;
 
-        let num_inputs = inputs.len() + fee_inputs;
-        let num_outputs = outputs.len() + fee_outputs;
-        let (key_inputs, key_outputs, proving_key) = proving_keys
-            .best_fit_key(num_inputs, num_outputs)
-            .map_err(|(max_inputs, max_outputs)| {
-                if max_outputs >= num_outputs {
-                    // If there is a key that can fit the correct number of outputs had we only
-                    // managed to find fewer inputs, call this a fragmentation error.
-                    TransactionError::Fragmentation {
-                        asset: asset.code,
-                        amount: total_output_amount,
-                        suggested_amount: inputs
-                            .iter()
-                            .take(max_inputs - fee_inputs)
-                            .map(|input| input.ro.amount)
-                            .sum(),
-                        max_records: max_inputs,
+        let min_num_inputs = inputs.len() + fee_inputs;
+        let min_num_outputs = outputs.len() + fee_outputs;
+        match xfr_size_requirement {
+            Some((input_size, output_size)) => {
+                match proving_keys.exact_fit_key(input_size, output_size) {
+                    Some(key) => return Ok((key, 0)),
+                    None => {
+                        return Err(TransactionError::NoFitKey {
+                            num_inputs: input_size,
+                            num_outputs: output_size,
+                        })
                     }
-                } else {
-                    // Otherwise, we just have too many outputs for any of our available keys. There
-                    // is nothing we can do about that on the transaction builder side.
-                    TransactionError::TooManyOutputs {
-                        asset: asset.code,
-                        max_records: max_outputs,
-                        num_receivers: outputs.len() - change_record as usize,
-                        num_change_records: 1 + change_record as usize,
-                    }
-                }
-            })?;
-        assert!(num_inputs <= key_inputs);
-        assert!(num_outputs <= key_outputs);
-
-        if num_outputs < key_outputs {
-            // pad with dummy (0-amount) outputs,leaving room for the fee change output
-            loop {
-                outputs.push(RecordOpening::new(
-                    rng,
-                    0,
-                    asset.clone(),
-                    me.clone(),
-                    FreezeFlag::Unfrozen,
-                ));
-                if outputs.len() >= key_outputs - fee_outputs {
-                    break;
                 }
             }
-        }
+            None => {
+                let (key_inputs, key_outputs, proving_key) = proving_keys
+                    .best_fit_key(min_num_inputs, min_num_outputs)
+                    .map_err(|(max_inputs, max_outputs)| {
+                        if max_outputs >= min_num_outputs {
+                            // If there is a key that can fit the correct number of outputs had we only
+                            // managed to find fewer inputs, call this a fragmentation error.
+                            TransactionError::Fragmentation {
+                                asset: asset.code,
+                                amount: total_output_amount,
+                                suggested_amount: inputs
+                                    .iter()
+                                    .take(max_inputs - fee_inputs)
+                                    .map(|input| input.ro.amount)
+                                    .sum(),
+                                max_records: max_inputs,
+                            }
+                        } else {
+                            // Otherwise, we just have too many outputs for any of our available keys. There
+                            // is nothing we can do about that on the transaction builder side.
+                            TransactionError::TooManyOutputs {
+                                asset: asset.code,
+                                max_records: max_outputs,
+                                num_receivers: outputs.len() - change_record as usize,
+                                num_change_records: 1 + change_record as usize,
+                            }
+                        }
+                    })?;
+                assert!(min_num_inputs <= key_inputs);
+                assert!(min_num_outputs <= key_outputs);
 
-        // Return the required number of dummy inputs. We can't easily create the dummy inputs here,
-        // because it requires creating a new dummy key pair and then borrowing from the key pair to
-        // form the transfer input, so the key pair must be owned by the caller.
-        let dummy_inputs = key_inputs.saturating_sub(num_inputs);
-        Ok((proving_key, dummy_inputs))
+                if min_num_outputs < key_outputs {
+                    // pad with dummy (0-amount) outputs,leaving room for the fee change output
+                    loop {
+                        outputs.push(RecordOpening::new(
+                            rng,
+                            0,
+                            asset.clone(),
+                            me.clone(),
+                            FreezeFlag::Unfrozen,
+                        ));
+                        if outputs.len() >= key_outputs - fee_outputs {
+                            break;
+                        }
+                    }
+                }
+
+                // Return the required number of dummy inputs. We can't easily create the dummy inputs here,
+                // because it requires creating a new dummy key pair and then borrowing from the key pair to
+                // form the transfer input, so the key pair must be owned by the caller.
+                let dummy_inputs = key_inputs.saturating_sub(min_num_inputs);
+                return Ok((proving_key, dummy_inputs));
+            }
+        };
     }
 
     fn freeze_proving_key<'a, 'k>(
