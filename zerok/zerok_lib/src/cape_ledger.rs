@@ -7,7 +7,7 @@ use crate::{
     },
     node::{LedgerEvent, QueryServiceError},
     state::{key_set::SizedKey, ProverKeySet, ValidationError, VerifierKeySet, MERKLE_HEIGHT},
-    txn_builder::{RecordDatabase, /*TransactionError,*/ TransactionReceipt, TransactionState,},
+    txn_builder::{RecordDatabase, TransactionReceipt, TransactionState},
     universal_params::UNIVERSAL_PARAM,
     util::commit::{Commitment, Committable, RawCommitmentBuilder},
     wallet::{
