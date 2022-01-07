@@ -61,6 +61,7 @@ chrono = "0.4.19"
 mnemonic = "1.0.1"
 
 [dev-dependencies]
+generic-tests = "0.1.2"
 quickcheck = "1.0"
 quickcheck_macros = "1.0"
 proptest = "0.8.7"

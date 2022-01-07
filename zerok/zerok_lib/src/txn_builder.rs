@@ -32,6 +32,7 @@ use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
 use std::ops::{Index, IndexMut};
@@ -70,7 +71,7 @@ pub enum TransactionError {
 }
 
 #[ser_test(arbitrary, ark(false))]
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub struct RecordInfo {
     pub ro: RecordOpening,
     pub uid: u64,
@@ -106,11 +107,12 @@ impl<'a> Arbitrary<'a> for RecordInfo {
 }
 
 #[ser_test(ark(false))]
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(from = "Vec<RecordInfo>", into = "Vec<RecordInfo>")]
 pub struct RecordDatabase {
-    // all records in the database, by uid
-    record_info: HashMap<u64, RecordInfo>,
+    // all records in the database, by uid. We use a BTreeMap so that equivalent databases have a
+    // consistent ordering for iteration and comparison.
+    record_info: BTreeMap<u64, RecordInfo>,
     // record (size, uid) indexed by asset type, owner, and freeze status, for easy allocation as
     // transfer or freeze inputs. The records for each asset are ordered by increasing size, which
     // makes it easy to implement a worst-fit allocator that minimizes fragmentation.
@@ -120,6 +122,33 @@ pub struct RecordDatabase {
 }
 
 impl RecordDatabase {
+    // Panic if the auxiliary indexes are not consistent with the authoritative `record_info`.
+    #[cfg(any(test, debug_assertions))]
+    fn check(&self) {
+        for (uid, record) in &self.record_info {
+            assert_eq!(*uid, record.uid);
+            assert!(self.asset_records[&(
+                record.ro.asset_def.code,
+                record.ro.pub_key.clone(),
+                record.ro.freeze_flag
+            )]
+                .contains(&(record.ro.amount, *uid)));
+            assert_eq!(*uid, self.nullifier_records[&record.nullifier]);
+        }
+        assert_eq!(
+            self.record_info.len(),
+            self.asset_records
+                .values()
+                .map(|set| set.len())
+                .sum::<usize>()
+        );
+        assert_eq!(self.record_info.len(), self.nullifier_records.len());
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &RecordInfo> {
+        self.record_info.values()
+    }
+
     pub fn assets(&'_ self) -> impl '_ + Iterator<Item = AssetDefinition> {
         self.record_info
             .values()
@@ -185,6 +214,7 @@ impl RecordDatabase {
     }
 
     pub fn insert(&mut self, ro: RecordOpening, uid: u64, key_pair: &UserKeyPair) {
+        assert_eq!(key_pair.pub_key(), ro.pub_key);
         let nullifier = key_pair.nullify(
             ro.asset_def.policy_ref().freezer_pub_key(),
             uid,
@@ -208,6 +238,10 @@ impl RecordDatabase {
     }
 
     pub fn insert_record(&mut self, rec: RecordInfo) {
+        if let Some(old) = self.record_info.insert(rec.uid, rec.clone()) {
+            assert_eq!(rec, old);
+            return;
+        }
         self.asset_records
             .entry((
                 rec.ro.asset_def.code,
@@ -217,11 +251,13 @@ impl RecordDatabase {
             .or_insert_with(BTreeSet::new)
             .insert((rec.ro.amount, rec.uid));
         self.nullifier_records.insert(rec.nullifier, rec.uid);
-        self.record_info.insert(rec.uid, rec);
+
+        #[cfg(any(test, debug_assertions))]
+        self.check();
     }
 
     pub fn remove_by_nullifier(&mut self, nullifier: Nullifier) -> Option<RecordInfo> {
-        self.nullifier_records.remove(&nullifier).map(|uid| {
+        let record = self.nullifier_records.remove(&nullifier).map(|uid| {
             let record = self.record_info.remove(&uid).unwrap();
 
             // Remove the record from `asset_records`, and if the sub-collection it was in becomes
@@ -232,13 +268,18 @@ impl RecordDatabase {
                 record.ro.freeze_flag,
             );
             let asset_records = self.asset_records.get_mut(asset_key).unwrap();
-            asset_records.remove(&(record.ro.amount, uid));
+            assert!(asset_records.remove(&(record.ro.amount, uid)));
             if asset_records.is_empty() {
                 self.asset_records.remove(asset_key);
             }
 
             record
-        })
+        });
+
+        #[cfg(any(test, debug_assertions))]
+        self.check();
+
+        record
     }
 }
 
@@ -280,6 +321,33 @@ impl From<RecordDatabase> for Vec<RecordInfo> {
 impl<'a> Arbitrary<'a> for RecordDatabase {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Self::from(u.arbitrary::<Vec<RecordInfo>>()?))
+    }
+}
+
+impl PartialEq<Self> for RecordDatabase {
+    fn eq(&self, other: &Self) -> bool {
+        #[cfg(any(test, debug_assertions))]
+        self.check();
+
+        self.record_info == other.record_info
+    }
+}
+
+impl Debug for RecordDatabase {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let hline = String::from_iter(std::iter::repeat('-').take(80));
+        writeln!(f, "{}", hline)?;
+        for (i, record) in self.iter().enumerate() {
+            writeln!(f, "Record {}", i + 1)?;
+            writeln!(f, "  Owner: {}", record.ro.pub_key)?;
+            writeln!(f, "  Asset: {}", record.ro.asset_def.code)?;
+            writeln!(f, "  Amount: {}", record.ro.amount)?;
+            writeln!(f, "  UID: {}", record.uid)?;
+            writeln!(f, "  Nullifier: {}", record.nullifier)?;
+            writeln!(f, "  On hold until: {:?}", record.hold_until)?;
+            writeln!(f, "{}", hline)?;
+        }
+        Ok(())
     }
 }
 
