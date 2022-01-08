@@ -58,7 +58,7 @@ impl CapeTransaction {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Erc20Code(pub [u8; 32]);
+pub struct Erc20Code(EthereumAddr);
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EthereumAddr(pub [u8; 20]);
@@ -210,19 +210,23 @@ pub struct CapeContractState {
     pub erc20_deposits: Vec<RecordCommitment>,
 }
 
-#[allow(unused_variables)]
 fn is_erc20_asset_def_valid(
     def: &AssetDefinition,
     erc20_code: &Erc20Code,
     sponsor: &EthereumAddr,
 ) -> bool {
-    // TODO
-    true
+    let description = format!(
+        "TRICAPE ERC20 {} sponsored by {}",
+        hex::encode(&(erc20_code.0).0),
+        hex::encode(&sponsor.0)
+    );
+    def.code.verify_foreign(description.as_bytes()).is_ok()
 }
 
 #[allow(unused_variables)]
 fn is_aap_asset_def_valid(def: &AssetDefinition) -> bool {
-    // TODO
+    // NOTE: we assume that this gets checked by jellyfish's MintNote
+    // validation
     true
 }
 
