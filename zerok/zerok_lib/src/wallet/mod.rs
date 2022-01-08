@@ -1,3 +1,4 @@
+pub mod cape;
 pub mod cli;
 pub mod encryption;
 pub mod hd;
@@ -1763,12 +1764,26 @@ pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = AAPLedger> {
     task_scope: AsyncScope<'a, ()>,
 }
 
-struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
+pub struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
     state: WalletState<'a, L>,
     session: WalletSession<'a, L, Backend>,
     sync_handles: HashMap<u64, Vec<oneshot::Sender<()>>>,
     txn_subscribers: HashMap<TransactionUID<L>, Vec<oneshot::Sender<TransactionStatus>>>,
     pending_foreign_txns: HashMap<Nullifier, Vec<oneshot::Sender<TransactionStatus>>>,
+}
+
+impl<'a, L: Ledger, Backend: WalletBackend<'a, L>> WalletSharedState<'a, L, Backend> {
+    pub fn backend(&self) -> &Backend {
+        &self.session.backend
+    }
+
+    pub fn backend_mut(&mut self) -> &mut Backend {
+        &mut self.session.backend
+    }
+
+    pub fn rng(&mut self) -> &mut ChaChaRng {
+        &mut self.session.rng
+    }
 }
 
 impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
@@ -1912,6 +1927,10 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         }
 
         Ok(wallet)
+    }
+
+    pub async fn lock(&self) -> MutexGuard<'_, WalletSharedState<'a, L, Backend>> {
+        self.mutex.lock().await
     }
 
     pub async fn pub_keys(&self) -> Vec<UserPubKey> {
