@@ -1,9 +1,5 @@
 use super::{CryptoError, Wallet, WalletBackend, WalletError};
-use crate::{
-    cape_ledger::*,
-    cape_state::*,
-    txn_builder::{TransactionError, TransactionReceipt},
-};
+use crate::{cape_ledger::*, cape_state::*, txn_builder::TransactionReceipt};
 use async_trait::async_trait;
 use jf_aap::{
     keys::UserAddress,

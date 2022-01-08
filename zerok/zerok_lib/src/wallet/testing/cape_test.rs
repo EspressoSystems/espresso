@@ -181,7 +181,6 @@ impl MockCapeNetwork {
                         .enumerate()
                         .map(|(i, comm)| {
                             let uids = vec![self.records.num_leaves()];
-                            println!("Wrap uids: {:?}", uids);
                             self.records.push(comm.to_field_element());
 
                             // Look up the auxiliary information associated with this deposit which
@@ -215,7 +214,6 @@ impl MockCapeNetwork {
                         uids.push(self.records.num_leaves());
                         self.records.push(comm.to_field_element());
                     }
-                    println!("Txn uids: {:?}", uids);
                     self.txns.insert(
                         (self.block_height, (num_wraps + i) as u64),
                         CommittedTransaction {
@@ -776,22 +774,11 @@ mod cape_wallet_tests {
             .await;
         assert_eq!(wallets.len(), 1);
         let owner = wallets[0].1.clone();
-
-        // Initialize a CAPE wallet.
-        let rng = ChaChaRng::from_seed([42u8; 32]);
-        let mut cape_wallet = LocalCapeWallet {
-            wallet: wallets.remove(0).0,
-            network: Arc::new(Mutex::new(ledger.lock().await.network.clone())),
-            rng,
-        };
         println!("CAPE wallet created: {}s", now.elapsed().as_secs_f32());
 
         // Check the balance after CAPE wallet initialization.
         assert_eq!(
-            cape_wallet
-                .wallet
-                .balance(&owner, &AssetCode::native())
-                .await,
+            wallets[0].0.balance(&owner, &AssetCode::native()).await,
             initial_grant
         );
 
@@ -803,7 +790,8 @@ mod cape_wallet_tests {
         let aap_asset_policy = AssetPolicy::default();
 
         // Sponsor the ERC20 token.
-        let aap_asset = cape_wallet
+        let aap_asset = wallets[0]
+            .0
             .sponsor(
                 erc20_code,
                 sponsor_addr.clone(),
@@ -816,7 +804,8 @@ mod cape_wallet_tests {
 
         // Wrapping an undefined asset should fail.
         let wrap_amount = 6;
-        match cape_wallet
+        match wallets[0]
+            .0
             .wrap(
                 sponsor_addr.clone(),
                 AssetDefinition::dummy(),
@@ -833,7 +822,8 @@ mod cape_wallet_tests {
 
         // Wrap the sponsored asset.
         now = Instant::now();
-        cape_wallet
+        wallets[0]
+            .0
             .wrap(
                 sponsor_addr.clone(),
                 aap_asset.clone(),
@@ -843,23 +833,22 @@ mod cape_wallet_tests {
             .await
             .unwrap();
         println!("Wrap completed: {}s", now.elapsed().as_secs_f32());
-        assert_eq!(cape_wallet.wallet.balance(&owner, &aap_asset.code).await, 0);
+        assert_eq!(wallets[0].0.balance(&owner, &aap_asset.code).await, 0);
 
         // Submit dummy transactions to finalize the wrap.
         now = Instant::now();
-        let dummy_coin = cape_wallet
-            .wallet
+        let dummy_coin = wallets[0]
+            .0
             .define_asset("Dummy asset".as_bytes(), Default::default())
             .await
             .unwrap();
         let mint_fee = 1;
-        cape_wallet
-            .wallet
+        wallets[0]
+            .0
             .mint(&owner, mint_fee, &dummy_coin.code, 5, owner.clone())
             .await
             .unwrap();
-        // TODO !keyao Use SystemUnderTest::sync to sync.
-        cape_wallet.wallet.sync(3).await.unwrap();
+        t.sync(&ledger, &wallets).await;
         println!(
             "Dummy transactions submitted and wrap finalized: {}s",
             now.elapsed().as_secs_f32()
@@ -867,21 +856,19 @@ mod cape_wallet_tests {
 
         // Check the balance after the wrap.
         assert_eq!(
-            cape_wallet
-                .wallet
-                .balance(&owner, &AssetCode::native())
-                .await,
+            wallets[0].0.balance(&owner, &AssetCode::native()).await,
             initial_grant - mint_fee
         );
         assert_eq!(
-            cape_wallet.wallet.balance(&owner, &aap_asset.code).await,
+            wallets[0].0.balance(&owner, &aap_asset.code).await,
             wrap_amount
         );
 
         // Burning an amount more than the wrapped asset should fail.
         let mut burn_amount = wrap_amount + 1;
         let burn_fee = 1;
-        match cape_wallet
+        match wallets[0]
+            .0
             .burn(
                 &owner,
                 sponsor_addr.clone(),
@@ -899,7 +886,8 @@ mod cape_wallet_tests {
 
         // Burning an amount not corresponding to the wrapped asset should fail.
         burn_amount = wrap_amount - 1;
-        match cape_wallet
+        match wallets[0]
+            .0
             .burn(
                 &owner,
                 sponsor_addr.clone(),
@@ -918,7 +906,8 @@ mod cape_wallet_tests {
         // Burn the wrapped asset.
         now = Instant::now();
         burn_amount = wrap_amount;
-        cape_wallet
+        wallets[0]
+            .0
             .burn(
                 &owner,
                 sponsor_addr.clone(),
@@ -928,17 +917,13 @@ mod cape_wallet_tests {
             )
             .await
             .unwrap();
-        // TODO !keyao Use SystemUnderTest::sync to sync.
-        cape_wallet.wallet.sync(5).await.unwrap();
+        t.sync(&ledger, &wallets).await;
         println!("Burn completed: {}s", now.elapsed().as_secs_f32());
 
         // Check the balance after the burn.
-        assert_eq!(cape_wallet.wallet.balance(&owner, &aap_asset.code).await, 0);
+        assert_eq!(wallets[0].0.balance(&owner, &aap_asset.code).await, 0);
         assert_eq!(
-            cape_wallet
-                .wallet
-                .balance(&owner, &AssetCode::native())
-                .await,
+            wallets[0].0.balance(&owner, &AssetCode::native()).await,
             initial_grant - mint_fee - burn_fee
         );
 
