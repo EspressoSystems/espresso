@@ -261,7 +261,7 @@ impl RecordDatabase {
     }
 
     pub fn remove_by_nullifier(&mut self, nullifier: Nullifier) -> Option<RecordInfo> {
-        let record = self.nullifier_records.remove(&nullifier).map(|uid| {
+        self.nullifier_records.remove(&nullifier).map(|uid| {
             let record = self.record_info.remove(&uid).unwrap();
 
             // Remove the record from `asset_records`, and if the sub-collection it was in becomes
@@ -277,13 +277,11 @@ impl RecordDatabase {
                 self.asset_records.remove(asset_key);
             }
 
+            #[cfg(any(test, debug_assertions))]
+            self.check();
+
             record
-        });
-
-        #[cfg(any(test, debug_assertions))]
-        self.check();
-
-        record
+        })
     }
 }
 
@@ -837,6 +835,7 @@ pub struct TransferSpec<'a> {
     pub receivers: &'a [(UserPubKey, u64)],
     pub fee: u64,
     pub bound_data: Vec<u8>,
+    pub xfr_size_requirement: Option<(usize, usize)>,
 }
 
 // how long (in number of validator states) a record used as an input to an unconfirmed transaction
@@ -1007,13 +1006,12 @@ impl<L: Ledger> TransactionState<L> {
         &mut self,
         spec: TransferSpec<'k>,
         proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
-        xfr_size_requirement: Option<(usize, usize)>,
         rng: &mut ChaChaRng,
     ) -> Result<(TransferNote, TransactionInfo<L>), TransactionError> {
         if *spec.asset == AssetCode::native() {
-            self.transfer_native(spec, proving_keys, xfr_size_requirement, rng)
+            self.transfer_native(spec, proving_keys, rng)
         } else {
-            self.transfer_non_native(spec, proving_keys, xfr_size_requirement, rng)
+            self.transfer_non_native(spec, proving_keys, rng)
         }
     }
 
@@ -1021,7 +1019,6 @@ impl<L: Ledger> TransactionState<L> {
         &mut self,
         spec: TransferSpec<'k>,
         proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
-        xfr_size_requirement: Option<(usize, usize)>,
         rng: &mut ChaChaRng,
     ) -> Result<(TransferNote, TransactionInfo<L>), TransactionError> {
         let total_output_amount: u64 = spec
@@ -1071,7 +1068,7 @@ impl<L: Ledger> TransactionState<L> {
             &AssetDefinition::native(),
             &mut inputs,
             &mut outputs,
-            xfr_size_requirement,
+            spec.xfr_size_requirement,
             false,
         )?;
         // pad with dummy inputs if necessary
@@ -1143,7 +1140,6 @@ impl<L: Ledger> TransactionState<L> {
         &mut self,
         spec: TransferSpec<'k>,
         proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
-        xfr_size_requirement: Option<(usize, usize)>,
         rng: &mut ChaChaRng,
     ) -> Result<(TransferNote, TransactionInfo<L>), TransactionError> {
         assert_ne!(
@@ -1206,7 +1202,7 @@ impl<L: Ledger> TransactionState<L> {
             &asset,
             &mut inputs,
             &mut outputs,
-            xfr_size_requirement,
+            spec.xfr_size_requirement,
             change > 0,
         )?;
         // pad with dummy inputs if necessary

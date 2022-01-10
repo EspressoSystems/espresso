@@ -121,13 +121,7 @@ mod tests {
         // Construct a transaction to transfer some coins from Alice to Bob.
         wallets[0]
             .0
-            .transfer(
-                &alice_address,
-                &coin.code,
-                &[(bob_address.clone(), 3)],
-                1,
-                None,
-            )
+            .transfer(&alice_address, &coin.code, &[(bob_address.clone(), 3)], 1)
             .await
             .unwrap();
         t.sync(&ledger, &wallets).await;
@@ -183,7 +177,7 @@ mod tests {
         // the sum of the outputs and fee of this transaction is only 2.
         wallets[1]
             .0
-            .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1, None)
+            .transfer(&bob_address, &coin.code, &[(alice_address, 1)], 1)
             .await
             .unwrap();
         t.sync(&ledger, &wallets).await;
@@ -349,7 +343,7 @@ mod tests {
         } else {
             wallets[0]
                 .0
-                .transfer(&sender, &asset.code, &[(receiver.clone(), 1)], 1, None)
+                .transfer(&sender, &asset.code, &[(receiver.clone(), 1)], 1)
                 .await
                 .unwrap();
         }
@@ -393,7 +387,7 @@ mod tests {
                 let sender = wallets[2].1.clone();
                 wallets[2]
                     .0
-                    .transfer(&sender, &asset.code, &[(receiver.clone(), 1)], 1, None)
+                    .transfer(&sender, &asset.code, &[(receiver.clone(), 1)], 1)
                     .await
                     .unwrap();
                 t.sync(&ledger, &wallets).await;
@@ -470,7 +464,7 @@ mod tests {
         } else {
             wallets[0]
                 .0
-                .transfer(&sender, &asset.code, &[(receiver, 1)], 1, None)
+                .transfer(&sender, &asset.code, &[(receiver, 1)], 1)
                 .await
                 .unwrap();
         }
@@ -642,7 +636,7 @@ mod tests {
         let dst = wallets[1].1.clone();
         match wallets[0]
             .0
-            .transfer(&src, &asset.code, &[(dst, 1)], 1, None)
+            .transfer(&src, &asset.code, &[(dst, 1)], 1)
             .await
         {
             Err(WalletError::TransactionError {
@@ -685,7 +679,7 @@ mod tests {
         let dst = wallets[1].1.clone();
         let xfr_receipt = wallets[0]
             .0
-            .transfer(&src, &asset.code, &[(dst, 1)], 1, None)
+            .transfer(&src, &asset.code, &[(dst, 1)], 1)
             .await
             .unwrap();
         t.sync(&ledger, &wallets).await;
@@ -1081,7 +1075,6 @@ mod tests {
                         &asset.code,
                         &[(receiver.clone(), amount)],
                         1,
-                        None,
                     )
                     .await
                 {
@@ -1114,7 +1107,6 @@ mod tests {
                                     &asset.code,
                                     &[(receiver.clone(), amount)],
                                     1,
-                                    None,
                                 )
                                 .await
                                 .unwrap()
@@ -1149,7 +1141,6 @@ mod tests {
                                 &asset.code,
                                 &[(receiver.clone(), amount)],
                                 1,
-                                None,
                             )
                             .await
                             .unwrap()

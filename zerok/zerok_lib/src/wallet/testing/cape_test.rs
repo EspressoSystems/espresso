@@ -173,56 +173,63 @@ impl MockCapeNetwork {
             CapeEvent::BlockCommitted { wraps, txns } => {
                 let num_wraps = wraps.len();
 
-                // Wrap each transaction and wrap event into a CapeTransition, build a
+                // Wrap each wrap and transaction event into a CapeTransition, build a
                 // CapeBlock, and broadcast it to subscribers.
-                let block = CapeBlock::new(
-                    wraps
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, comm)| {
-                            let uids = vec![self.records.num_leaves()];
-                            self.records.push(comm.to_field_element());
-
-                            // Look up the auxiliary information associated with this deposit which
-                            // we saved when we processed the deposit event. This lookup cannot
-                            // fail, because the contract only finalizes a Wrap operation after it
-                            // has already processed the deposit, which involves emitting an
-                            // Erc20Deposited event.
-                            let (erc20_code, src_addr, ro) =
-                                self.pending_erc20_deposits.remove(&comm).unwrap();
-                            let txn = CapeTransition::Wrap {
-                                erc20_code,
-                                src_addr,
-                                ro,
-                            };
-                            self.txns.insert(
-                                (self.block_height, i as u64),
-                                CommittedTransaction {
-                                    txn: txn.clone(),
-                                    uids,
-                                    memos: None,
-                                },
-                            );
-                            txn
-                        })
-                        .chain(txns.clone().into_iter().map(CapeTransition::Transaction))
-                        .collect(),
-                );
-                txns.iter().enumerate().for_each(|(i, txn)| {
-                    let mut uids = Vec::new();
-                    for comm in txn.commitments() {
-                        uids.push(self.records.num_leaves());
+                let wrap_block = wraps
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, comm)| {
+                        let uids = vec![self.records.num_leaves()];
                         self.records.push(comm.to_field_element());
-                    }
-                    self.txns.insert(
-                        (self.block_height, (num_wraps + i) as u64),
-                        CommittedTransaction {
-                            txn: CapeTransition::Transaction(txn.clone()),
-                            uids,
-                            memos: None,
-                        },
-                    );
-                });
+
+                        // Look up the auxiliary information associated with this deposit which
+                        // we saved when we processed the deposit event. This lookup cannot
+                        // fail, because the contract only finalizes a Wrap operation after it
+                        // has already processed the deposit, which involves emitting an
+                        // Erc20Deposited event.
+                        let (erc20_code, src_addr, ro) =
+                            self.pending_erc20_deposits.remove(&comm).unwrap();
+                        let wrap = CapeTransition::Wrap {
+                            erc20_code,
+                            src_addr,
+                            ro,
+                        };
+                        self.txns.insert(
+                            (self.block_height, i as u64),
+                            CommittedTransaction {
+                                txn: wrap.clone(),
+                                uids,
+                                memos: None,
+                            },
+                        );
+                        wrap
+                    })
+                    .collect();
+                let mut txn_block = txns
+                    .clone()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, txn)| {
+                        let mut uids = Vec::new();
+                        for comm in txn.commitments() {
+                            uids.push(self.records.num_leaves());
+                            self.records.push(comm.to_field_element());
+                        }
+                        let txn = CapeTransition::Transaction(txn.clone());
+                        self.txns.insert(
+                            (self.block_height, (num_wraps + i) as u64),
+                            CommittedTransaction {
+                                txn: txn.clone(),
+                                uids,
+                                memos: None,
+                            },
+                        );
+                        txn
+                    })
+                    .collect();
+                let mut block: Vec<CapeTransition> = wrap_block;
+                block.append(&mut txn_block);
+                let block = CapeBlock::new(block);
                 self.generate_event(LedgerEvent::Commit {
                     block,
                     block_id: self.block_height,
@@ -322,6 +329,8 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
         // Store and broadcast the new memos.
         let memos = match &txn.txn {
             // In the case of a burn transaction, only post memos for fee change output.
+            // TODO !keyao Skip the memos of burned record when calling MockCapeNetwork::post_memos.
+            // (https://github.com/SpectrumXYZ/cape/issues/278.)
             CapeTransition::Transaction(CapeTransaction::Burn { .. }) => izip!(
                 vec![memos[0].clone()],
                 txn.txn.output_commitments(),
@@ -787,6 +796,8 @@ mod cape_wallet_tests {
         let erc20_addr = EthereumAddr([1u8; 20]);
         let erc20_code = Erc20Code(erc20_addr);
         let sponsor_addr = EthereumAddr([2u8; 20]);
+        // TODO !keyao Add description creation for a wrapped asset.
+        // (https://github.com/SpectrumXYZ/cape/issues/276.)
         let description = format!(
             "TRICAPE ERC20 {} sponsored by {}",
             hex::encode(&(erc20_code.0).0),

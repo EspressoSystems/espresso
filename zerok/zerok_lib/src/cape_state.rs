@@ -215,6 +215,8 @@ fn is_erc20_asset_def_valid(
     erc20_code: &Erc20Code,
     sponsor: &EthereumAddr,
 ) -> bool {
+    // TODO !keyao Add description creation for a wrapped asset.
+    // (https://github.com/SpectrumXYZ/cape/issues/276.)
     let description = format!(
         "TRICAPE ERC20 {} sponsored by {}",
         hex::encode(&(erc20_code.0).0),

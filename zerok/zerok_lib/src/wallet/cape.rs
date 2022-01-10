@@ -98,7 +98,7 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
             .await
     }
 
-    /// The amount to burn should be the same as a wrapped record.
+    /// For now, the amount to burn should be the same as a wrapped record.
     pub async fn burn(
         &mut self,
         account: &UserAddress,

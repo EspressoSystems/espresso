@@ -253,7 +253,7 @@ async fn main() {
             recipient,
         );
         let txn = match wallet
-            .transfer(&address, asset, &[(recipient.address(), amount)], fee, None)
+            .transfer(&address, asset, &[(recipient.address(), amount)], fee)
             .await
         {
             Ok(txn) => txn,

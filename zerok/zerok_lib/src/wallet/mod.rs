@@ -844,7 +844,8 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     // output UIDs of the same transaction, so that we can tell when the memos
                     // arrive for the transaction which spent this nullifier (completing the
                     // transaction's life cycle) by looking at the UIDs attached to the memos.
-                    // TODO: Stop identifying transactions by input nullifier and instead use hashes.
+                    // TODO !keyao Stop identifying transactions by input nullifier and instead use hashes.
+                    // (https://github.com/SpectrumXYZ/cape/issues/275.)
                     if !txn.input_nullifiers().is_empty() {
                         summary.spent_nullifiers.extend(
                             txn.input_nullifiers()
@@ -1534,42 +1535,13 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn build_transfer(
+    pub fn build_transfer<'k>(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        account: &UserAddress,
-        asset: &AssetCode,
-        receivers: &[(UserAddress, u64)],
-        fee: u64,
-        bound_data: Vec<u8>,
-        xfr_size_requirement: Option<(usize, usize)>,
+        spec: TransferSpec<'k>,
     ) -> Result<(TransferNote, TransactionInfo<L>), WalletError> {
-        let receivers = iter(receivers)
-            .then(|(addr, amt)| {
-                let session = &session;
-                async move {
-                    Ok::<(UserPubKey, u64), WalletError>((
-                        session.backend.get_public_key(addr).await?,
-                        *amt,
-                    ))
-                }
-            })
-            .try_collect::<Vec<_>>()
-            .await?;
         self.txn_state
-            .transfer(
-                TransferSpec {
-                    owner_keypair: &self.account_keypair(account)?.clone(),
-                    asset,
-                    receivers: &receivers,
-                    fee,
-                    bound_data,
-                },
-                &self.proving_keys.xfr,
-                xfr_size_requirement,
-                &mut session.rng,
-            )
+            .transfer(spec, &self.proving_keys.xfr, &mut session.rng)
             .context(TransactionError)
     }
 
@@ -1654,7 +1626,6 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             .context(TransactionError)
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn submit_transaction(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
@@ -1971,16 +1942,17 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         storage.transaction_history().await
     }
 
+    /// Basic transfer without customization.
+    /// To add transfer size requirement, call `build_transfer` with a specified `xfr_size_requirement`.
     pub async fn transfer(
         &mut self,
         account: &UserAddress,
         asset: &AssetCode,
         receivers: &[(UserAddress, u64)],
         fee: u64,
-        xfr_size_requirement: Option<(usize, usize)>,
     ) -> Result<TransactionReceipt<L>, WalletError> {
         let (note, info) = self
-            .build_transfer(account, asset, receivers, fee, vec![], xfr_size_requirement)
+            .build_transfer(account, asset, receivers, fee, vec![], None)
             .await?;
         self.submit_aap(TransactionNote::Transfer(Box::new(note)), info)
             .await
@@ -1996,17 +1968,27 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         xfr_size_requirement: Option<(usize, usize)>,
     ) -> Result<(TransferNote, TransactionInfo<L>), WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        state
-            .build_transfer(
-                session,
-                account,
-                asset,
-                receivers,
-                fee,
-                bound_data,
-                xfr_size_requirement,
-            )
-            .await
+        let receivers = iter(receivers)
+            .then(|(addr, amt)| {
+                let session = &session;
+                async move {
+                    Ok::<(UserPubKey, u64), WalletError>((
+                        session.backend.get_public_key(addr).await?,
+                        *amt,
+                    ))
+                }
+            })
+            .try_collect::<Vec<_>>()
+            .await?;
+        let spec = TransferSpec {
+            owner_keypair: &state.account_keypair(account)?.clone(),
+            asset,
+            receivers: &receivers,
+            fee,
+            bound_data,
+            xfr_size_requirement,
+        };
+        state.build_transfer(session, spec)
     }
 
     pub async fn submit(

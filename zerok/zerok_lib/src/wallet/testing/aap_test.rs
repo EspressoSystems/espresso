@@ -461,13 +461,7 @@ mod aap_wallet_tests {
         let receiver = wallets[1].1.clone();
         wallets[0]
             .0
-            .transfer(
-                &sender,
-                &AssetCode::native(),
-                &[(receiver.clone(), 1)],
-                1,
-                None,
-            )
+            .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
             .await
             .unwrap();
         println!("transfer generated: {}s", now.elapsed().as_secs_f32());
@@ -484,13 +478,7 @@ mod aap_wallet_tests {
             let sender = wallets[2].1.clone();
             wallets[2]
                 .0
-                .transfer(
-                    &sender,
-                    &AssetCode::native(),
-                    &[(receiver.clone(), 1)],
-                    1,
-                    None,
-                )
+                .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
                 .await
                 .unwrap();
             t.sync(&ledger, &wallets).await;

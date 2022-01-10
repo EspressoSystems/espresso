@@ -433,7 +433,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
             C,
             |wallet, asset: ListItem<AssetCode>, from: UserAddress, to: UserAddress, amount: u64, fee: u64; wait: Option<bool>| {
                 match wallet
-                    .transfer(&from.0, &asset.item, &[(to.0, amount)], fee, None)
+                    .transfer(&from.0, &asset.item, &[(to.0, amount)], fee)
                     .await
                 {
                     Ok(receipt) => {
