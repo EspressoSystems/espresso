@@ -8,11 +8,12 @@ use crate::{
         key_set::{OrderByOutputs, SizedKey},
         ProverKeySet, VerifierKeySet, MERKLE_HEIGHT,
     },
-    txn_builder::{RecordDatabase, TransactionError, TransactionReceipt, TransactionState},
+    txn_builder::{RecordDatabase, TransactionState},
     universal_params::UNIVERSAL_PARAM,
     wallet::{
-        hd::KeyTree, loader::WalletLoader, persistence::AtomicWalletStorage, CryptoError,
-        KeyStreamState, Wallet, WalletBackend, WalletError, WalletState,
+        cape::CapeWalletBackend, hd::KeyTree, loader::WalletLoader,
+        persistence::AtomicWalletStorage, CryptoError, KeyStreamState, WalletBackend, WalletError,
+        WalletState,
     },
 };
 use async_std::sync::{Mutex, MutexGuard};
@@ -26,10 +27,7 @@ use itertools::izip;
 use jf_aap::{
     keys::{UserAddress, UserPubKey},
     proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
-    structs::{
-        AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FreezeFlag, Nullifier,
-        ReceiverMemo, RecordCommitment, RecordOpening,
-    },
+    structs::{AssetDefinition, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
     MerklePath, MerkleTree, Signature,
 };
 use rand_chacha::ChaChaRng;
@@ -594,132 +592,54 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
     }
 }
 
-// Wrapper around a generic wallet adding CAPE-specific wallet functions.
-pub struct LocalCapeWallet<'a, Meta: Serialize + DeserializeOwned + Send> {
-    wallet: Wallet<'a, MockCapeBackend<'a, Meta>, CapeLedger>,
-    // For actions submitted directly to the contract, such as sponsor and wrap.
-    network: Arc<Mutex<MockCapeNetwork>>,
-    rng: ChaChaRng,
-}
-
-impl<'a, Meta: 'a + Serialize + DeserializeOwned + Send> LocalCapeWallet<'a, Meta> {
-    pub async fn sponsor(
+#[async_trait]
+impl<'a, Meta: Serialize + DeserializeOwned + Send> CapeWalletBackend<'a>
+    for MockCapeBackend<'a, Meta>
+{
+    async fn register_wrapped_asset(
         &mut self,
+        asset: &AssetDefinition,
         erc20_code: Erc20Code,
-        sponsor_addr: EthereumAddr,
-        aap_asset_desc: &[u8],
-        aap_asset_policy: AssetPolicy,
-    ) -> Result<AssetDefinition, WalletError> {
-        let seed = AssetCodeSeed::generate(&mut self.rng);
-        //todo Include CAPE-specific domain separator in AssetCode derivation, once Jellyfish adds
-        // support for domain separators.
-        let code = AssetCode::new_domestic(seed, aap_asset_desc);
-        let asset = AssetDefinition::new(code, aap_asset_policy).context(CryptoError)?;
-
-        self.network
+        sponsor: EthereumAddr,
+    ) -> Result<(), WalletError> {
+        self.ledger
             .lock()
             .await
-            .register_erc20(asset.clone(), erc20_code, sponsor_addr)
-            .map_err(cape_to_wallet_err)?;
-
-        Ok(asset)
-    }
-
-    pub async fn wrap(
-        &mut self,
-        src_addr: EthereumAddr,
-        // We take as input the target asset, not the source ERC20 code, because there may be more
-        // than one AAP asset for a given ERC20 token. We need the user to disambiguate (probably
-        // using a list of approved (AAP, ERC20) pairs provided by the query service).
-        aap_asset: AssetDefinition,
-        owner: UserAddress,
-        amount: u64,
-    ) -> Result<(), WalletError> {
-        let mut network = self.network.lock().await;
-        let erc20_code = match network.contract.erc20_registrar.get(&aap_asset) {
-            Some((erc20_code, _)) => erc20_code.clone(),
-            None => {
-                return Err(WalletError::UndefinedAsset {
-                    asset: aap_asset.code,
-                })
-            }
-        };
-
-        let pub_key = match network.address_map.get(&owner) {
-            Some(pub_key) => pub_key.clone(),
-            None => return Err(WalletError::InvalidAddress { address: owner }),
-        };
-
-        //todo Along with this wrap operation submitted to the contract, we must also transfer some
-        // of the ERC20 token to the contract using an Ethereum wallet.
-        network
-            .wrap_erc20(
-                erc20_code,
-                src_addr,
-                RecordOpening::new(
-                    &mut self.rng,
-                    amount,
-                    aap_asset,
-                    pub_key,
-                    FreezeFlag::Unfrozen,
-                ),
-            )
+            .network()
+            .register_erc20(asset.clone(), erc20_code, sponsor)
             .map_err(cape_to_wallet_err)
     }
 
-    pub async fn burn(
-        &mut self,
-        account: &UserAddress,
-        dst_addr: EthereumAddr,
-        aap_asset: &AssetCode,
-        amount: u64,
-        fee: u64,
-    ) -> Result<TransactionReceipt<CapeLedger>, WalletError> {
-        // A burn note is just a transfer note with a special `proof_bound_data` field consisting of
-        // the magic burn bytes followed by the destination address.
-        let bound_data = CAPE_BURN_MAGIC_BYTES
-            .as_bytes()
-            .iter()
-            .chain(dst_addr.as_bytes())
-            .cloned()
-            .collect::<Vec<_>>();
-        let (xfr, mut info) = self
-            .wallet
-            // The owner public key of the new record opening is ignored when processing a burn. We
-            // need to put some address in the receiver field though, so just use the one we have
-            // handy.
-            .build_transfer(
-                account,
-                aap_asset,
-                &[(account.clone(), amount)],
-                fee,
-                bound_data,
-            )
-            .await?;
-        assert!(info.outputs.len() >= 2);
-        if info.outputs.len() > 2 {
-            return Err(WalletError::TransactionError {
-                source: TransactionError::Fragmentation {
-                    asset: *aap_asset,
-                    amount,
-                    suggested_amount: info.outputs[1].amount,
-                    max_records: 1,
-                },
-            });
+    async fn get_wrapped_erc20_code(
+        &self,
+        asset: &AssetDefinition,
+    ) -> Result<Erc20Code, WalletError> {
+        match self
+            .ledger
+            .lock()
+            .await
+            .network()
+            .contract
+            .erc20_registrar
+            .get(asset)
+        {
+            Some((erc20_code, _)) => Ok(erc20_code.clone()),
+            None => Err(WalletError::UndefinedAsset { asset: asset.code }),
         }
-        if let Some(history) = &mut info.history {
-            history.kind = CapeTransactionKind::Burn;
-        }
-
-        let txn = CapeTransition::Transaction(CapeTransaction::Burn {
-            xfr: Box::new(xfr),
-            ro: Box::new(info.outputs[1].clone()),
-        });
-        self.wallet.submit(txn, info).await
     }
 
-    pub async fn approved_assets(&self) -> Vec<(AssetDefinition, Erc20Code)> {
-        unimplemented!()
+    async fn wrap_erc20(
+        &mut self,
+        erc20_code: Erc20Code,
+        src_addr: EthereumAddr,
+        ro: RecordOpening,
+    ) -> Result<(), WalletError> {
+        self.ledger
+            .lock()
+            .await
+            .network()
+            .wrap_erc20(erc20_code, src_addr, ro)
+            .map_err(cape_to_wallet_err)
     }
 }
 
