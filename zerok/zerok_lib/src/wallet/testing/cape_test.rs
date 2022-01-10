@@ -784,9 +784,15 @@ mod cape_wallet_tests {
 
         // Create an ERC20 code, sponsor address, and asset information.
         now = Instant::now();
-        let erc20_code = Erc20Code([1u8; 32]);
+        let erc20_addr = EthereumAddr([1u8; 20]);
+        let erc20_code = Erc20Code(erc20_addr);
         let sponsor_addr = EthereumAddr([2u8; 20]);
-        let aap_asset_desc = &[];
+        let description = format!(
+            "TRICAPE ERC20 {} sponsored by {}",
+            hex::encode(&(erc20_code.0).0),
+            hex::encode(&sponsor_addr.0)
+        );
+        let aap_asset_desc = description.as_bytes();
         let aap_asset_policy = AssetPolicy::default();
 
         // Sponsor the ERC20 token.

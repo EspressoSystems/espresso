@@ -58,7 +58,7 @@ impl CapeTransaction {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Erc20Code(EthereumAddr);
+pub struct Erc20Code(pub EthereumAddr);
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EthereumAddr(pub [u8; 20]);

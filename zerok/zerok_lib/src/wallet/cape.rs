@@ -3,7 +3,7 @@ use crate::{cape_ledger::*, cape_state::*, txn_builder::TransactionReceipt};
 use async_trait::async_trait;
 use jf_aap::{
     keys::UserAddress,
-    structs::{AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FreezeFlag, RecordOpening},
+    structs::{AssetCode, AssetDefinition, AssetPolicy, FreezeFlag, RecordOpening},
 };
 use snafu::ResultExt;
 
@@ -56,10 +56,9 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
         aap_asset_policy: AssetPolicy,
     ) -> Result<AssetDefinition, WalletError> {
         let mut state = self.lock().await;
-        let seed = AssetCodeSeed::generate(state.rng());
         //todo Include CAPE-specific domain separator in AssetCode derivation, once Jellyfish adds
         // support for domain separators.
-        let code = AssetCode::new_domestic(seed, aap_asset_desc);
+        let code = AssetCode::new_foreign(aap_asset_desc);
         let asset = AssetDefinition::new(code, aap_asset_policy).context(CryptoError)?;
 
         state
