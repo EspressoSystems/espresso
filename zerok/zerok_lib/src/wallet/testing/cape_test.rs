@@ -797,25 +797,12 @@ mod cape_wallet_tests {
         let erc20_addr = EthereumAddr([1u8; 20]);
         let erc20_code = Erc20Code(erc20_addr);
         let sponsor_addr = EthereumAddr([2u8; 20]);
-        // TODO !keyao Add description creation for a wrapped asset.
-        // (https://github.com/SpectrumXYZ/cape/issues/276.)
-        let description = format!(
-            "TRICAPE ERC20 {} sponsored by {}",
-            hex::encode(&(erc20_code.0).0),
-            hex::encode(&sponsor_addr.0)
-        );
-        let aap_asset_desc = description.as_bytes();
         let aap_asset_policy = AssetPolicy::default();
 
         // Sponsor the ERC20 token.
         let aap_asset = wallets[0]
             .0
-            .sponsor(
-                erc20_code,
-                sponsor_addr.clone(),
-                aap_asset_desc,
-                aap_asset_policy,
-            )
+            .sponsor(erc20_code, sponsor_addr.clone(), aap_asset_policy)
             .await
             .unwrap();
         println!("Sponsor completed: {}s", now.elapsed().as_secs_f32());
@@ -896,9 +883,11 @@ mod cape_wallet_tests {
             )
             .await
         {
-            Err(WalletError::TransactionError { source: _ }) => {}
+            Err(WalletError::TransactionError {
+                source: TransactionError::InsufficientBalance { .. },
+            }) => {}
             e => {
-                panic!("Expected WalletError::TransactionError, found {:?}", e);
+                panic!("Expected TransactionError::InsufficientBalance, found {:?}", e);
             }
         }
 
@@ -915,9 +904,11 @@ mod cape_wallet_tests {
             )
             .await
         {
-            Err(WalletError::TransactionError { source: _ }) => {}
+            Err(WalletError::TransactionError {
+                source: TransactionError::InvalidSize { .. },
+            }) => {}
             e => {
-                panic!("Expected WalletError::TransactionError, found {:?}", e);
+                panic!("Expected TransactionError::InvalidSize, found {:?}", e);
             }
         }
 

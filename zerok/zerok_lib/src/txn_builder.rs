@@ -57,6 +57,13 @@ pub enum TransactionError {
         num_receivers: usize,
         num_change_records: usize,
     },
+    InvalidSize {
+        asset: AssetCode,
+        num_inputs_required: usize,
+        num_inputs_actual: usize,
+        num_outputs_required: usize,
+        num_outputs_actual: usize,
+    },
     NoFitKey {
         num_inputs: usize,
         num_outputs: usize,
@@ -1577,6 +1584,15 @@ impl<L: Ledger> TransactionState<L> {
         let min_num_outputs = outputs.len() + fee_outputs;
         match xfr_size_requirement {
             Some((input_size, output_size)) => {
+                if (input_size, output_size) != (min_num_inputs, min_num_outputs) {
+                    return Err(TransactionError::InvalidSize {
+                        asset: asset.code,
+                        num_inputs_required: input_size,
+                        num_inputs_actual: min_num_inputs,
+                        num_outputs_required: output_size,
+                        num_outputs_actual: min_num_outputs,
+                    });
+                }
                 match proving_keys.exact_fit_key(input_size, output_size) {
                     Some(key) => Ok((key, 0)),
                     None => Err(TransactionError::NoFitKey {

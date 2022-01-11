@@ -210,18 +210,20 @@ pub struct CapeContractState {
     pub erc20_deposits: Vec<RecordCommitment>,
 }
 
+pub fn erc20_asset_description(erc20_code: &Erc20Code, sponsor: &EthereumAddr) -> String {
+    format!(
+        "TRICAPE ERC20 {} sponsored by {}",
+        hex::encode(&(erc20_code.0).0),
+        hex::encode(&sponsor.0)
+    )
+}
+
 fn is_erc20_asset_def_valid(
     def: &AssetDefinition,
     erc20_code: &Erc20Code,
     sponsor: &EthereumAddr,
 ) -> bool {
-    // TODO !keyao Add description creation for a wrapped asset.
-    // (https://github.com/SpectrumXYZ/cape/issues/276.)
-    let description = format!(
-        "TRICAPE ERC20 {} sponsored by {}",
-        hex::encode(&(erc20_code.0).0),
-        hex::encode(&sponsor.0)
-    );
+    let description = erc20_asset_description(erc20_code, sponsor);
     def.code.verify_foreign(description.as_bytes()).is_ok()
 }
 

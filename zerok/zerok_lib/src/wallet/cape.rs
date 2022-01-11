@@ -52,13 +52,15 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
         &mut self,
         erc20_code: Erc20Code,
         sponsor_addr: EthereumAddr,
-        aap_asset_desc: &[u8],
         aap_asset_policy: AssetPolicy,
     ) -> Result<AssetDefinition, WalletError> {
         let mut state = self.lock().await;
+
+        let description = erc20_asset_description(&erc20_code, &sponsor_addr);
+
         //todo Include CAPE-specific domain separator in AssetCode derivation, once Jellyfish adds
         // support for domain separators.
-        let code = AssetCode::new_foreign(aap_asset_desc);
+        let code = AssetCode::new_foreign(description.as_bytes());
         let asset = AssetDefinition::new(code, aap_asset_policy).context(CryptoError)?;
 
         state
