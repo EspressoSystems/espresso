@@ -783,6 +783,7 @@ mod cape_wallet_tests {
             .await;
         assert_eq!(wallets.len(), 1);
         let owner = wallets[0].1.clone();
+        t.sync(&ledger, &wallets).await;
         println!("CAPE wallet created: {}s", now.elapsed().as_secs_f32());
 
         // Check the balance after CAPE wallet initialization.
