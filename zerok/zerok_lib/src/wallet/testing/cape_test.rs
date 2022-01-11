@@ -887,7 +887,10 @@ mod cape_wallet_tests {
                 source: TransactionError::InsufficientBalance { .. },
             }) => {}
             e => {
-                panic!("Expected TransactionError::InsufficientBalance, found {:?}", e);
+                panic!(
+                    "Expected TransactionError::InsufficientBalance, found {:?}",
+                    e
+                );
             }
         }
 
