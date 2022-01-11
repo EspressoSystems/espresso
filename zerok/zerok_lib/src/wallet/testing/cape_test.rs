@@ -39,6 +39,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tempdir::TempDir;
 
+#[derive(Clone)]
 struct CommittedTransaction {
     txn: CapeTransition,
     uids: Vec<u64>,
@@ -50,6 +51,7 @@ struct CommittedTransaction {
 }
 
 // A mock implementation of a CAPE network which maintains the full state of a CAPE ledger locally.
+#[derive(Clone)]
 pub struct MockCapeNetwork {
     contract: CapeContractState,
 
@@ -169,58 +171,65 @@ impl MockCapeNetwork {
     fn handle_event(&mut self, event: CapeEvent) {
         match event {
             CapeEvent::BlockCommitted { wraps, txns } => {
-                let num_txns = txns.len();
-                txns.iter().enumerate().for_each(|(i, txn)| {
-                    let mut uids = Vec::new();
-                    for comm in txn.commitments() {
-                        uids.push(self.records.num_leaves());
-                        self.records.push(comm.to_field_element());
-                    }
-                    self.txns.insert(
-                        (self.block_height, i as u64),
-                        CommittedTransaction {
-                            txn: CapeTransition::Transaction(txn.clone()),
-                            uids,
-                            memos: None,
-                        },
-                    );
-                });
+                let num_wraps = wraps.len();
 
-                // Wrap each transaction and wrap event into a CapeTransition, build a
+                // Wrap each wrap and transaction event into a CapeTransition, build a
                 // CapeBlock, and broadcast it to subscribers.
-                let block = CapeBlock::new(
-                    wraps
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, comm)| {
-                            let uids = vec![self.records.num_leaves()];
-                            self.records.push(comm.to_field_element());
+                let wrap_block = wraps
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, comm)| {
+                        let uids = vec![self.records.num_leaves()];
+                        self.records.push(comm.to_field_element());
 
-                            // Look up the auxiliary information associated with this deposit which
-                            // we saved when we processed the deposit event. This lookup cannot
-                            // fail, because the contract only finalizes a Wrap operation after it
-                            // has already processed the deposit, which involves emitting an
-                            // Erc20Deposited event.
-                            let (erc20_code, src_addr, ro) =
-                                self.pending_erc20_deposits.remove(&comm).unwrap();
-                            let txn = CapeTransition::Wrap {
-                                erc20_code,
-                                src_addr,
-                                ro,
-                            };
-                            self.txns.insert(
-                                (self.block_height, (num_txns + i) as u64),
-                                CommittedTransaction {
-                                    txn: txn.clone(),
-                                    uids,
-                                    memos: None,
-                                },
-                            );
-                            txn
-                        })
-                        .chain(txns.into_iter().map(CapeTransition::Transaction))
-                        .collect(),
-                );
+                        // Look up the auxiliary information associated with this deposit which
+                        // we saved when we processed the deposit event. This lookup cannot
+                        // fail, because the contract only finalizes a Wrap operation after it
+                        // has already processed the deposit, which involves emitting an
+                        // Erc20Deposited event.
+                        let (erc20_code, src_addr, ro) =
+                            self.pending_erc20_deposits.remove(&comm).unwrap();
+                        let wrap = CapeTransition::Wrap {
+                            erc20_code,
+                            src_addr,
+                            ro,
+                        };
+                        self.txns.insert(
+                            (self.block_height, i as u64),
+                            CommittedTransaction {
+                                txn: wrap.clone(),
+                                uids,
+                                memos: None,
+                            },
+                        );
+                        wrap
+                    })
+                    .collect();
+                let mut txn_block = txns
+                    .clone()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, txn)| {
+                        let mut uids = Vec::new();
+                        for comm in txn.commitments() {
+                            uids.push(self.records.num_leaves());
+                            self.records.push(comm.to_field_element());
+                        }
+                        let txn = CapeTransition::Transaction(txn.clone());
+                        self.txns.insert(
+                            (self.block_height, (num_wraps + i) as u64),
+                            CommittedTransaction {
+                                txn: txn.clone(),
+                                uids,
+                                memos: None,
+                            },
+                        );
+                        txn
+                    })
+                    .collect();
+                let mut block: Vec<CapeTransition> = wrap_block;
+                block.append(&mut txn_block);
+                let block = CapeBlock::new(block);
                 self.generate_event(LedgerEvent::Commit {
                     block,
                     block_id: self.block_height,
@@ -288,17 +297,25 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
                 if note.verify_receiver_memos_signature(&memos, &sig).is_err() {
                     return Err(QueryServiceError::InvalidSignature {}.into());
                 }
+                if memos.len() != txn.txn.output_len() {
+                    return Err(QueryServiceError::WrongNumberOfMemos {
+                        expected: txn.txn.output_len(),
+                    }
+                    .into());
+                }
+            }
+            CapeTransition::Transaction(CapeTransaction::Burn { xfr, .. }) => {
+                if TransactionNote::Transfer(Box::new(*xfr.clone()))
+                    .verify_receiver_memos_signature(&memos, &sig)
+                    .is_err()
+                {
+                    return Err(QueryServiceError::InvalidSignature {}.into());
+                }
             }
             _ => {
-                // Wrap/burn transactions don't get memos.
+                println!("Wrap transactions don't get memos");
                 return Err(QueryServiceError::InvalidTxnId {}.into());
             }
-        }
-        if memos.len() != txn.txn.output_len() {
-            return Err(QueryServiceError::WrongNumberOfMemos {
-                expected: txn.txn.output_len(),
-            }
-            .into());
         }
 
         // Authenticate the validity of the records corresponding to the memos.
@@ -310,13 +327,25 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
             .collect::<Vec<_>>();
 
         // Store and broadcast the new memos.
-        let memos = izip!(
-            memos,
-            txn.txn.output_commitments(),
-            txn.uids.iter().cloned(),
-            merkle_paths
-        )
-        .collect::<Vec<_>>();
+        let memos = match &txn.txn {
+            // In the case of a burn transaction, only post memos for fee change output.
+            // TODO !keyao Skip the memos of burned record when calling MockCapeNetwork::post_memos.
+            // (https://github.com/SpectrumXYZ/cape/issues/278.)
+            CapeTransition::Transaction(CapeTransaction::Burn { .. }) => izip!(
+                vec![memos[0].clone()],
+                txn.txn.output_commitments(),
+                txn.uids.iter().cloned(),
+                merkle_paths
+            )
+            .collect::<Vec<_>>(),
+            _ => izip!(
+                memos,
+                txn.txn.output_commitments(),
+                txn.uids.iter().cloned(),
+                merkle_paths
+            )
+            .collect::<Vec<_>>(),
+        };
         txn.memos = Some((memos.clone(), sig));
         let event = LedgerEvent::Memos {
             outputs: memos,
@@ -733,5 +762,183 @@ impl<'a> SystemUnderTest<'a> for CapeTest {
         MockCapeBackend::new_for_test(ledger, storage)
             .await
             .unwrap()
+    }
+}
+
+// CAPE-specific tests
+mod cape_wallet_tests {
+    use super::*;
+
+    #[async_std::test]
+    async fn test_cape_wallet() -> std::io::Result<()> {
+        let mut t = CapeTest::default();
+
+        // Initialize a ledger and wallet, and get the owner address.
+        let mut now = Instant::now();
+        let num_inputs = 2;
+        let num_outputs = 2;
+        let initial_grant = 10;
+        let (ledger, mut wallets) = t
+            .create_test_network(&[(num_inputs, num_outputs)], vec![initial_grant], &mut now)
+            .await;
+        assert_eq!(wallets.len(), 1);
+        let owner = wallets[0].1.clone();
+        t.sync(&ledger, &wallets).await;
+        println!("CAPE wallet created: {}s", now.elapsed().as_secs_f32());
+
+        // Check the balance after CAPE wallet initialization.
+        assert_eq!(
+            wallets[0].0.balance(&owner, &AssetCode::native()).await,
+            initial_grant
+        );
+
+        // Create an ERC20 code, sponsor address, and asset information.
+        now = Instant::now();
+        let erc20_addr = EthereumAddr([1u8; 20]);
+        let erc20_code = Erc20Code(erc20_addr);
+        let sponsor_addr = EthereumAddr([2u8; 20]);
+        let aap_asset_policy = AssetPolicy::default();
+
+        // Sponsor the ERC20 token.
+        let aap_asset = wallets[0]
+            .0
+            .sponsor(erc20_code, sponsor_addr.clone(), aap_asset_policy)
+            .await
+            .unwrap();
+        println!("Sponsor completed: {}s", now.elapsed().as_secs_f32());
+
+        // Wrapping an undefined asset should fail.
+        let wrap_amount = 6;
+        match wallets[0]
+            .0
+            .wrap(
+                sponsor_addr.clone(),
+                AssetDefinition::dummy(),
+                owner.clone(),
+                wrap_amount,
+            )
+            .await
+        {
+            Err(WalletError::UndefinedAsset { asset: _ }) => {}
+            e => {
+                panic!("Expected WalletError::UndefinedAsset, found {:?}", e);
+            }
+        };
+
+        // Wrap the sponsored asset.
+        now = Instant::now();
+        wallets[0]
+            .0
+            .wrap(
+                sponsor_addr.clone(),
+                aap_asset.clone(),
+                owner.clone(),
+                wrap_amount,
+            )
+            .await
+            .unwrap();
+        println!("Wrap completed: {}s", now.elapsed().as_secs_f32());
+        assert_eq!(wallets[0].0.balance(&owner, &aap_asset.code).await, 0);
+
+        // Submit dummy transactions to finalize the wrap.
+        now = Instant::now();
+        let dummy_coin = wallets[0]
+            .0
+            .define_asset("Dummy asset".as_bytes(), Default::default())
+            .await
+            .unwrap();
+        let mint_fee = 1;
+        wallets[0]
+            .0
+            .mint(&owner, mint_fee, &dummy_coin.code, 5, owner.clone())
+            .await
+            .unwrap();
+        t.sync(&ledger, &wallets).await;
+        println!(
+            "Dummy transactions submitted and wrap finalized: {}s",
+            now.elapsed().as_secs_f32()
+        );
+
+        // Check the balance after the wrap.
+        assert_eq!(
+            wallets[0].0.balance(&owner, &AssetCode::native()).await,
+            initial_grant - mint_fee
+        );
+        assert_eq!(
+            wallets[0].0.balance(&owner, &aap_asset.code).await,
+            wrap_amount
+        );
+
+        // Burning an amount more than the wrapped asset should fail.
+        let mut burn_amount = wrap_amount + 1;
+        let burn_fee = 1;
+        match wallets[0]
+            .0
+            .burn(
+                &owner,
+                sponsor_addr.clone(),
+                &aap_asset.code.clone(),
+                burn_amount,
+                burn_fee,
+            )
+            .await
+        {
+            Err(WalletError::TransactionError {
+                source: TransactionError::InsufficientBalance { .. },
+            }) => {}
+            e => {
+                panic!(
+                    "Expected TransactionError::InsufficientBalance, found {:?}",
+                    e
+                );
+            }
+        }
+
+        // Burning an amount not corresponding to the wrapped asset should fail.
+        burn_amount = wrap_amount - 1;
+        match wallets[0]
+            .0
+            .burn(
+                &owner,
+                sponsor_addr.clone(),
+                &aap_asset.code.clone(),
+                burn_amount,
+                burn_fee,
+            )
+            .await
+        {
+            Err(WalletError::TransactionError {
+                source: TransactionError::InvalidSize { .. },
+            }) => {}
+            e => {
+                panic!("Expected TransactionError::InvalidSize, found {:?}", e);
+            }
+        }
+
+        // Burn the wrapped asset.
+        now = Instant::now();
+        burn_amount = wrap_amount;
+        wallets[0]
+            .0
+            .burn(
+                &owner,
+                sponsor_addr.clone(),
+                &aap_asset.code.clone(),
+                burn_amount,
+                burn_fee,
+            )
+            .await
+            .unwrap();
+        t.sync(&ledger, &wallets).await;
+        println!("Burn completed: {}s", now.elapsed().as_secs_f32());
+
+        // Check the balance after the burn.
+        assert_eq!(wallets[0].0.balance(&owner, &aap_asset.code).await, 0);
+        assert_eq!(
+            wallets[0].0.balance(&owner, &AssetCode::native()).await,
+            initial_grant - mint_fee - burn_fee
+        );
+
+        Ok(())
     }
 }

@@ -1,13 +1,9 @@
 use super::{CryptoError, Wallet, WalletBackend, WalletError};
-use crate::{
-    cape_ledger::*,
-    cape_state::*,
-    txn_builder::{TransactionError, TransactionReceipt},
-};
+use crate::{cape_ledger::*, cape_state::*, txn_builder::TransactionReceipt};
 use async_trait::async_trait;
 use jf_aap::{
     keys::UserAddress,
-    structs::{AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FreezeFlag, RecordOpening},
+    structs::{AssetCode, AssetDefinition, AssetPolicy, FreezeFlag, RecordOpening},
 };
 use snafu::ResultExt;
 
@@ -56,14 +52,15 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
         &mut self,
         erc20_code: Erc20Code,
         sponsor_addr: EthereumAddr,
-        aap_asset_desc: &[u8],
         aap_asset_policy: AssetPolicy,
     ) -> Result<AssetDefinition, WalletError> {
         let mut state = self.lock().await;
-        let seed = AssetCodeSeed::generate(state.rng());
+
+        let description = erc20_asset_description(&erc20_code, &sponsor_addr);
+
         //todo Include CAPE-specific domain separator in AssetCode derivation, once Jellyfish adds
         // support for domain separators.
-        let code = AssetCode::new_domestic(seed, aap_asset_desc);
+        let code = AssetCode::new_foreign(description.as_bytes());
         let asset = AssetDefinition::new(code, aap_asset_policy).context(CryptoError)?;
 
         state
@@ -103,6 +100,7 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
             .await
     }
 
+    /// For now, the amount to burn should be the same as a wrapped record.
     pub async fn burn(
         &mut self,
         account: &UserAddress,
@@ -129,26 +127,18 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
                 &[(account.clone(), amount)],
                 fee,
                 bound_data,
+                Some((2, 2)),
             )
             .await?;
-        assert!(info.outputs.len() >= 2);
-        if info.outputs.len() > 2 {
-            return Err(WalletError::TransactionError {
-                source: TransactionError::Fragmentation {
-                    asset: *aap_asset,
-                    amount,
-                    suggested_amount: info.outputs[1].amount,
-                    max_records: 1,
-                },
-            });
-        }
+        assert_eq!(xfr.inputs_nullifiers.len(), 2);
+        assert_eq!(xfr.output_commitments.len(), 2);
         if let Some(history) = &mut info.history {
             history.kind = CapeTransactionKind::Burn;
         }
 
         let txn = CapeTransition::Transaction(CapeTransaction::Burn {
             xfr: Box::new(xfr),
-            ro: Box::new(info.outputs[1].clone()),
+            ro: Box::new(info.outputs[0].clone()),
         });
         self.submit(txn, info).await
     }
