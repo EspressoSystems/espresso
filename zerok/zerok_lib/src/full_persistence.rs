@@ -1,5 +1,5 @@
 use crate::{
-    node::LedgerEvent,
+    events::LedgerEvent,
     state::{ElaboratedBlock, SetMerkleTree, ValidatorState},
 };
 use atomic_store::{

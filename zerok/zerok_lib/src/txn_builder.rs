@@ -1,6 +1,7 @@
 use crate::node::MerkleTreeWithArbitrary;
 use crate::util::arbitrary_wrappers::*;
 use crate::{
+    events::EventIndex,
     ledger,
     ledger::traits::{Transaction as _, Validator as _},
     ser_test,
@@ -859,7 +860,7 @@ pub const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_aap::constants::MAX_TIMESTAMP
 #[serde(bound = "")]
 pub struct TransactionState<L: Ledger = AAPLedger> {
     // sequence number of the last event processed
-    pub now: u64,
+    pub now: EventIndex,
     // validator
     pub validator: Validator<L>,
     // all records we care about, including records we own, records we have audited, and records we

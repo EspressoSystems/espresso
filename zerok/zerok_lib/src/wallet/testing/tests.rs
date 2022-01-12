@@ -22,7 +22,7 @@ impl<L: Ledger> PartialEq<Self> for TxnHistoryWithTimeTolerantEq<L> {
 
 #[cfg(test)]
 #[generic_tests::define(attrs(test, ignore, async_std::test))]
-mod tests {
+mod generic_wallet_tests {
     use super::*;
     use async_std::task::block_on;
     use proptest::{collection::vec, strategy::Strategy, test_runner, test_runner::TestRunner};

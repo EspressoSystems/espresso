@@ -3,6 +3,7 @@ use super::loader::WalletLoader;
 use super::persistence::AtomicWalletStorage;
 use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
 use crate::api;
+use crate::events::{EventIndex, EventSource, LedgerEvent};
 use crate::ledger::AAPLedger;
 use crate::node;
 use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
@@ -20,10 +21,11 @@ use jf_aap::keys::{UserAddress, UserPubKey};
 use jf_aap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
 use jf_aap::structs::{Nullifier, ReceiverMemo};
 use jf_aap::Signature;
-use node::{LedgerEvent, LedgerSnapshot};
+use node::LedgerSnapshot;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;
 use std::convert::TryInto;
+use std::pin::Pin;
 use surf::http::content::{Accept, MediaTypeProposal};
 use surf::http::{headers, mime};
 pub use surf::Url;
@@ -110,7 +112,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
 impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
     for NetworkBackend<'a, Meta>
 {
-    type EventStream = node::EventStream<LedgerEvent>;
+    type EventStream = node::EventStream<(LedgerEvent, EventSource)>;
     type Storage = AtomicWalletStorage<'a, AAPLedger, Meta>;
 
     async fn create(&mut self) -> Result<WalletState<'a>, WalletError> {
@@ -179,7 +181,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                 nullifiers,
                 record_mt: records.0,
                 merkle_leaf_to_forget,
-                now: 0,
+                now: Default::default(),
                 records: Default::default(),
 
                 transactions: Default::default(),
@@ -205,34 +207,50 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
         self.key_stream.clone()
     }
 
-    async fn subscribe(&self, starting_at: u64) -> Self::EventStream {
+    async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream {
+        // In the current setup, all events come from a single source, which we call the query
+        // service even though it has the responsibilties of query service and bulletin board. In
+        // the future, these should be split into different services and treated as different event
+        // sources.
+        let from = from.index(EventSource::QueryService);
+        let to = to.map(|to| to.index(EventSource::QueryService));
+
         let mut url = self
             .query_client
             .config()
             .base_url
             .as_ref()
             .unwrap()
-            .join(&format!("subscribe/{}", starting_at))
+            .join(&format!("subscribe/{}", from))
             .unwrap();
         url.set_scheme("ws").unwrap();
 
         //todo !jeb.bearer handle connection failures.
         // This should only fail if the server is incorrect or down, so we should handle by retrying
         // or failing over to a different server.
+        let all_events = connect_async(url)
+            .await
+            .expect("failed to connect to server")
+            .0;
+        let chosen_events: Pin<Box<dyn Stream<Item = _> + Send>> = if let Some(to) = to {
+            Box::pin(all_events.take(to - from))
+        } else {
+            Box::pin(all_events)
+        };
+
         Box::pin(
-            connect_async(url)
-                .await
-                .expect("failed to connect to server")
-                .0
+            chosen_events
                 //todo !jeb.bearer handle stream errors
                 // If there is an error in the stream, or the server sends us invalid data, we
                 // should retry or fail over to a different server.
                 .filter_map(|msg| {
-                    ready(match msg {
+                    let item = match msg {
                         Ok(Message::Binary(bytes)) => bincode::deserialize(&bytes).ok(),
                         Ok(Message::Text(json)) => serde_json::from_str(&json).ok(),
                         _ => None,
-                    })
+                    }
+                    .map(|event| (event, EventSource::QueryService));
+                    ready(item)
                 }),
         )
     }

@@ -37,7 +37,7 @@ use wallet::hd::KeyTree;
 use wallet::loader::WalletLoader;
 use wallet::network::{NetworkBackend, Url};
 use wallet::{KeyError, WalletError};
-use zerok_lib::{api::client, universal_params::UNIVERSAL_PARAM, wallet};
+use zerok_lib::{api::client, events::EventIndex, universal_params::UNIVERSAL_PARAM, wallet};
 
 type Wallet = wallet::Wallet<'static, NetworkBackend<'static, ()>>;
 
@@ -117,7 +117,7 @@ async fn main() {
                     bincode::deserialize(&bytes).unwrap_or_else(|err| {
                         panic!("invalid private key file: {}", err);
                     }),
-                    0,
+                    EventIndex::default(),
                 )
                 .await
                 .unwrap_or_else(|err| {

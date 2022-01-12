@@ -5,7 +5,6 @@ use crate::{
     set_merkle_tree::SetMerkleProof,
     state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
 };
-use futures::channel::mpsc;
 use itertools::izip;
 use std::pin::Pin;
 
@@ -100,16 +99,15 @@ pub struct MockAAPNetwork<'a> {
     validator: ValidatorState,
     nullifiers: SetMerkleTree,
     records: MerkleTree,
-    subscribers: Vec<mpsc::UnboundedSender<LedgerEvent>>,
     committed_blocks: Vec<(ElaboratedBlock, Vec<Vec<u64>>)>,
     proving_keys: Arc<ProverKeySet<'a, key_set::OrderByOutputs>>,
     address_map: HashMap<UserAddress, UserPubKey>,
-    events: Vec<LedgerEvent>,
+    events: MockEventSource<AAPLedger>,
 }
 
 impl<'a> MockNetwork<'a, AAPLedger> for MockAAPNetwork<'a> {
-    fn now(&self) -> u64 {
-        self.events.len() as u64
+    fn now(&self) -> EventIndex {
+        self.events.now()
     }
 
     fn submit(&mut self, block: ElaboratedBlock) -> Result<(), WalletError> {
@@ -186,29 +184,21 @@ impl<'a> MockNetwork<'a, AAPLedger> for MockAAPNetwork<'a> {
         Ok(())
     }
 
+    fn memos_source(&self) -> EventSource {
+        EventSource::QueryService
+    }
+
     fn generate_event(&mut self, e: LedgerEvent) {
         println!(
             "generating event {}: {}",
-            self.events.len(),
+            self.now(),
             match &e {
                 LedgerEvent::Commit { .. } => "Commit",
                 LedgerEvent::Reject { .. } => "Reject",
                 LedgerEvent::Memos { .. } => "Memos",
             }
         );
-        self.events.push(e.clone());
-        self.subscribers = std::mem::take(&mut self.subscribers)
-            .into_iter()
-            .filter_map(|mut s| {
-                if s.start_send(e.clone()).is_ok() {
-                    // Errors indicate that the subscriber has disconnected, so we only want to
-                    // retain the subscriber if the send is successful.
-                    Some(s)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        self.events.publish(e);
     }
 }
 
@@ -223,7 +213,7 @@ pub struct MockAAPBackend<'a> {
 
 #[async_trait]
 impl<'a> WalletBackend<'a, AAPLedger> for MockAAPBackend<'a> {
-    type EventStream = Pin<Box<dyn Stream<Item = LedgerEvent> + Send>>;
+    type EventStream = Pin<Box<dyn Stream<Item = (LedgerEvent, EventSource)> + Send>>;
     type Storage = MockStorage<'a>;
 
     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
@@ -250,7 +240,7 @@ impl<'a> WalletBackend<'a, AAPLedger> for MockAAPBackend<'a> {
                     record_mt: ledger.network().records.clone(),
                     merkle_leaf_to_forget: None,
 
-                    now: 0,
+                    now: Default::default(),
                     transactions: Default::default(),
                 },
                 key_state: Default::default(),
@@ -276,25 +266,9 @@ impl<'a> WalletBackend<'a, AAPLedger> for MockAAPBackend<'a> {
         hd::KeyTree::random(&mut rng).unwrap().0
     }
 
-    async fn subscribe(&self, starting_at: u64) -> Self::EventStream {
+    async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream {
         let mut ledger = self.ledger.lock().await;
-
-        assert!(
-            starting_at <= ledger.now(),
-            "subscribing from a future state is not supported in the MockAAPBackend"
-        );
-        let past_events = ledger
-            .network()
-            .events
-            .iter()
-            .skip(starting_at as usize)
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let (sender, receiver) = mpsc::unbounded();
-        ledger.network().subscribers.push(sender);
-
-        Box::pin(iter(past_events).chain(receiver))
+        ledger.network.events.subscribe(from, to)
     }
 
     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
@@ -398,11 +372,10 @@ impl<'a> testing::SystemUnderTest<'a> for AAPTest {
             validator: ValidatorState::new(verif_crs, records.clone()),
             records,
             nullifiers: SetMerkleTree::default(),
-            subscribers: Vec::new(),
             committed_blocks: Vec::new(),
             proving_keys: Arc::new(proof_crs),
             address_map: HashMap::default(),
-            events: Vec::new(),
+            events: MockEventSource::new(EventSource::QueryService),
         }
     }
 
@@ -494,10 +467,18 @@ mod aap_wallet_tests {
         ledger.lock().await.release_held_transaction().unwrap();
         ledger.lock().await.flush().unwrap();
         // Wait for the Reject event.
-        t.sync_with(&wallets, ledger_time + 1).await;
+        t.sync_with(
+            &wallets,
+            ledger_time.add_from_source(EventSource::QueryService, 1),
+        )
+        .await;
         // Wait for the Commit and Memos events after the wallet resubmits.
         ledger.lock().await.flush().unwrap();
-        t.sync_with(&wallets, ledger_time + 3).await;
+        t.sync_with(
+            &wallets,
+            ledger_time.add_from_source(EventSource::QueryService, 3),
+        )
+        .await;
         assert_eq!(
             wallets[0]
                 .0

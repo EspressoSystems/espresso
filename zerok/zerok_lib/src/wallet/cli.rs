@@ -5,7 +5,7 @@
 // allows the user to enter commands for a wallet interactively.
 //
 
-use crate::{api, universal_params::UNIVERSAL_PARAM, wallet};
+use crate::{api, events::EventIndex, universal_params::UNIVERSAL_PARAM, wallet};
 use api::{MerklePath, UserAddress};
 use async_std::task::block_on;
 use async_trait::async_trait;
@@ -111,7 +111,7 @@ macro_rules! cli_input_from_str {
 
 cli_input_from_str! {
     bool, u64, String, AssetCode, AuditorPubKey, FreezerPubKey, UserAddress, PathBuf, ReceiverMemo,
-    RecordCommitment, MerklePath
+    RecordCommitment, MerklePath, EventIndex
 }
 
 impl<'a, C: CLI<'a>, L: Ledger> CLIInput<'a, C> for TransactionReceipt<L> {
@@ -596,7 +596,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
             gen_key,
             "generate new keys",
             C,
-            |wallet, key_type: KeyType; scan_from: Option<u64>| {
+            |wallet, key_type: KeyType; scan_from: Option<EventIndex>| {
                 match key_type {
                     KeyType::Audit => match wallet.generate_audit_key().await {
                         Ok(pub_key) => println!("{}", pub_key),
@@ -617,7 +617,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
             load_key,
             "load a key from a file",
             C,
-            |wallet, key_type: KeyType, path: PathBuf; scan_from: Option<u64>| {
+            |wallet, key_type: KeyType, path: PathBuf; scan_from: Option<EventIndex>| {
                 let mut file = match File::open(path.clone()).context(IoError) {
                     Ok(file) => file,
                     Err(err) => {
@@ -651,7 +651,10 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                         }
                     },
                     KeyType::Spend => match bincode::deserialize::<UserKeyPair>(&bytes) {
-                        Ok(key) => match wallet.add_user_key(key.clone(), scan_from.unwrap_or(0)).await {
+                        Ok(key) => match wallet.add_user_key(
+                            key.clone(),
+                            scan_from.unwrap_or_default(),
+                        ).await {
                             Ok(()) => {
                                 println!(
                                     "Note: assets belonging to this key will become available after\
