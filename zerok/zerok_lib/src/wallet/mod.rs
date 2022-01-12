@@ -7,7 +7,8 @@ pub mod network;
 pub mod persistence;
 pub mod reader;
 mod secret;
-mod testing;
+#[cfg(any(test, feature = "mocks"))]
+pub mod testing;
 
 use crate::api;
 use crate::state::key_set;

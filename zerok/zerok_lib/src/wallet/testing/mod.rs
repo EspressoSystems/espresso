@@ -1,4 +1,3 @@
-#![cfg(test)]
 #![allow(dead_code)]
 
 /// This module contains testing utilities and unit tests for the generic wallet interface.
@@ -19,7 +18,6 @@
 /// `wallet::testing`.
 use super::*;
 use crate::{
-    set_merkle_tree::SetMerkleTree,
     state::{
         key_set::{KeySet, OrderByOutputs},
         ProverKeySet, VerifierKeySet, MERKLE_HEIGHT,
@@ -33,6 +31,8 @@ use rand_chacha::rand_core::RngCore;
 use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::time::Instant;
+
+pub mod mocks;
 
 #[async_trait]
 pub trait MockNetwork<'a, L: Ledger> {
@@ -380,6 +380,7 @@ pub trait SystemUnderTest<'a>: Default + Send + Sync {
 type EventSender<L> = mpsc::UnboundedSender<(LedgerEvent<L>, EventSource)>;
 
 // Useful helper type for developing mock networks.
+#[derive(Clone)]
 pub struct MockEventSource<L: Ledger> {
     source: EventSource,
     events: Vec<LedgerEvent<L>>,
