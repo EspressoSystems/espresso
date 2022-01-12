@@ -83,6 +83,7 @@ impl EventIndex {
         }
     }
 
+    #[must_use]
     pub fn add_from_source(mut self, source: EventSource, amount: usize) -> Self {
         match source {
             EventSource::QueryService => self.query_service += amount,
