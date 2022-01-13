@@ -326,6 +326,11 @@ pub mod key_set {
                 .ok_or_else(|| self.max_size())
         }
 
+        /// Return the key whose size is (num_inputs, num_outputs).
+        pub fn exact_fit_key(&self, num_inputs: usize, num_outputs: usize) -> Option<&K> {
+            self.keys.get(&Order::sort_key(num_inputs, num_outputs))
+        }
+
         pub fn iter(&self) -> impl Iterator<Item = &K> {
             self.keys.values()
         }

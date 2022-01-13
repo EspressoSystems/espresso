@@ -1,46 +1,46 @@
-use super::*;
 use crate::{
     api::FromError,
     cape_ledger::*,
     cape_state::*,
-    node::{LedgerEvent, QueryServiceError},
+    events::{EventIndex, EventSource, LedgerEvent},
+    ledger::{
+        traits::{Block as _, Transaction as _},
+        Block,
+    },
+    node::QueryServiceError,
     state::{
         key_set::{OrderByOutputs, SizedKey},
         ProverKeySet, VerifierKeySet, MERKLE_HEIGHT,
     },
-    txn_builder::{RecordDatabase, TransactionError, TransactionReceipt, TransactionState},
+    txn_builder::{RecordDatabase, TransactionState},
     universal_params::UNIVERSAL_PARAM,
     wallet::{
-        hd::KeyTree, loader::WalletLoader, persistence::AtomicWalletStorage, CryptoError,
-        KeyStreamState, Wallet, WalletBackend, WalletError, WalletState,
+        cape::CapeWalletBackend, hd::KeyTree, loader::WalletLoader,
+        persistence::AtomicWalletStorage, testing, CryptoError, KeyStreamState, WalletBackend,
+        WalletError, WalletState,
     },
 };
 use async_std::sync::{Mutex, MutexGuard};
 use async_trait::async_trait;
-use futures::{
-    channel::mpsc,
-    prelude::*,
-    stream::{iter, Stream},
-};
+use futures::stream::Stream;
 use itertools::izip;
 use jf_aap::{
-    keys::{UserAddress, UserPubKey},
+    keys::{UserAddress, UserKeyPair, UserPubKey},
     proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
-    structs::{
-        AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FreezeFlag, Nullifier,
-        ReceiverMemo, RecordCommitment, RecordOpening,
-    },
-    MerklePath, MerkleTree, Signature,
+    structs::{AssetDefinition, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
+    MerklePath, MerkleTree, Signature, TransactionNote,
 };
-use rand_chacha::ChaChaRng;
+use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Serialize};
 use snafu::ResultExt;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use tempdir::TempDir;
+use testing::{MockEventSource, MockLedger, MockNetwork, SystemUnderTest};
 
+#[derive(Clone)]
 struct CommittedTransaction {
     txn: CapeTransition,
     uids: Vec<u64>,
@@ -52,6 +52,7 @@ struct CommittedTransaction {
 }
 
 // A mock implementation of a CAPE network which maintains the full state of a CAPE ledger locally.
+#[derive(Clone)]
 pub struct MockCapeNetwork {
     contract: CapeContractState,
 
@@ -65,11 +66,8 @@ pub struct MockCapeNetwork {
     // pending finalization.
     pending_erc20_deposits:
         HashMap<RecordCommitment, (Erc20Code, EthereumAddr, Box<RecordOpening>)>,
-    events: Vec<LedgerEvent<CapeLedger>>,
-    subscribers: Vec<mpsc::UnboundedSender<LedgerEvent<CapeLedger>>>,
-    // Clients which have subscribed to events starting at some time in the future, to be added to
-    // `subscribers` when the time comes.
-    pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<LedgerEvent<CapeLedger>>>>,
+    query_service_events: MockEventSource<CapeLedger>,
+    memo_events: MockEventSource<CapeLedger>,
     txns: HashMap<(u64, u64), CommittedTransaction>,
     address_map: HashMap<UserAddress, UserPubKey>,
 }
@@ -85,9 +83,8 @@ impl MockCapeNetwork {
             block_height: 0,
             records,
             pending_erc20_deposits: Default::default(),
-            events: Default::default(),
-            subscribers: Default::default(),
-            pending_subscribers: Default::default(),
+            query_service_events: MockEventSource::new(EventSource::QueryService),
+            memo_events: MockEventSource::new(EventSource::BulletinBoard),
             txns: Default::default(),
             address_map: Default::default(),
         };
@@ -171,58 +168,64 @@ impl MockCapeNetwork {
     fn handle_event(&mut self, event: CapeEvent) {
         match event {
             CapeEvent::BlockCommitted { wraps, txns } => {
-                let num_txns = txns.len();
-                txns.iter().enumerate().for_each(|(i, txn)| {
-                    let mut uids = Vec::new();
-                    for comm in txn.commitments() {
-                        uids.push(self.records.num_leaves());
-                        self.records.push(comm.to_field_element());
-                    }
-                    self.txns.insert(
-                        (self.block_height, i as u64),
-                        CommittedTransaction {
-                            txn: CapeTransition::Transaction(txn.clone()),
-                            uids,
-                            memos: None,
-                        },
-                    );
-                });
+                let num_wraps = wraps.len();
 
-                // Wrap each transaction and wrap event into a CapeTransition, build a
+                // Wrap each wrap and transaction event into a CapeTransition, build a
                 // CapeBlock, and broadcast it to subscribers.
-                let block = CapeBlock::new(
-                    wraps
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, comm)| {
-                            let uids = vec![self.records.num_leaves()];
-                            self.records.push(comm.to_field_element());
+                let wrap_block = wraps
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, comm)| {
+                        let uids = vec![self.records.num_leaves()];
+                        self.records.push(comm.to_field_element());
 
-                            // Look up the auxiliary information associated with this deposit which
-                            // we saved when we processed the deposit event. This lookup cannot
-                            // fail, because the contract only finalizes a Wrap operation after it
-                            // has already processed the deposit, which involves emitting an
-                            // Erc20Deposited event.
-                            let (erc20_code, src_addr, ro) =
-                                self.pending_erc20_deposits.remove(&comm).unwrap();
-                            let txn = CapeTransition::Wrap {
-                                erc20_code,
-                                src_addr,
-                                ro,
-                            };
-                            self.txns.insert(
-                                (self.block_height, (num_txns + i) as u64),
-                                CommittedTransaction {
-                                    txn: txn.clone(),
-                                    uids,
-                                    memos: None,
-                                },
-                            );
-                            txn
-                        })
-                        .chain(txns.into_iter().map(CapeTransition::Transaction))
-                        .collect(),
-                );
+                        // Look up the auxiliary information associated with this deposit which
+                        // we saved when we processed the deposit event. This lookup cannot
+                        // fail, because the contract only finalizes a Wrap operation after it
+                        // has already processed the deposit, which involves emitting an
+                        // Erc20Deposited event.
+                        let (erc20_code, src_addr, ro) =
+                            self.pending_erc20_deposits.remove(&comm).unwrap();
+                        let wrap = CapeTransition::Wrap {
+                            erc20_code,
+                            src_addr,
+                            ro,
+                        };
+                        self.txns.insert(
+                            (self.block_height, i as u64),
+                            CommittedTransaction {
+                                txn: wrap.clone(),
+                                uids,
+                                memos: None,
+                            },
+                        );
+                        wrap
+                    })
+                    .collect();
+                let mut txn_block = txns
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, txn)| {
+                        let mut uids = Vec::new();
+                        for comm in txn.commitments() {
+                            uids.push(self.records.num_leaves());
+                            self.records.push(comm.to_field_element());
+                        }
+                        let txn = CapeTransition::Transaction(txn);
+                        self.txns.insert(
+                            (self.block_height, (num_wraps + i) as u64),
+                            CommittedTransaction {
+                                txn: txn.clone(),
+                                uids,
+                                memos: None,
+                            },
+                        );
+                        txn
+                    })
+                    .collect();
+                let mut block: Vec<CapeTransition> = wrap_block;
+                block.append(&mut txn_block);
+                let block = CapeBlock::new(block);
                 self.generate_event(LedgerEvent::Commit {
                     block,
                     block_id: self.block_height,
@@ -244,8 +247,8 @@ impl MockCapeNetwork {
 }
 
 impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
-    fn now(&self) -> u64 {
-        self.events.len() as u64
+    fn now(&self) -> EventIndex {
+        self.query_service_events.now() + self.memo_events.now()
     }
 
     fn submit(&mut self, block: Block<CapeLedger>) -> Result<(), WalletError> {
@@ -290,17 +293,25 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
                 if note.verify_receiver_memos_signature(&memos, &sig).is_err() {
                     return Err(QueryServiceError::InvalidSignature {}.into());
                 }
+                if memos.len() != txn.txn.output_len() {
+                    return Err(QueryServiceError::WrongNumberOfMemos {
+                        expected: txn.txn.output_len(),
+                    }
+                    .into());
+                }
+            }
+            CapeTransition::Transaction(CapeTransaction::Burn { xfr, .. }) => {
+                if TransactionNote::Transfer(Box::new(*xfr.clone()))
+                    .verify_receiver_memos_signature(&memos, &sig)
+                    .is_err()
+                {
+                    return Err(QueryServiceError::InvalidSignature {}.into());
+                }
             }
             _ => {
-                // Wrap/burn transactions don't get memos.
+                println!("Wrap transactions don't get memos");
                 return Err(QueryServiceError::InvalidTxnId {}.into());
             }
-        }
-        if memos.len() != txn.txn.output_len() {
-            return Err(QueryServiceError::WrongNumberOfMemos {
-                expected: txn.txn.output_len(),
-            }
-            .into());
         }
 
         // Authenticate the validity of the records corresponding to the memos.
@@ -312,13 +323,25 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
             .collect::<Vec<_>>();
 
         // Store and broadcast the new memos.
-        let memos = izip!(
-            memos,
-            txn.txn.output_commitments(),
-            txn.uids.iter().cloned(),
-            merkle_paths
-        )
-        .collect::<Vec<_>>();
+        let memos = match &txn.txn {
+            // In the case of a burn transaction, only post memos for fee change output.
+            // TODO !keyao Skip the memos of burned record when calling MockCapeNetwork::post_memos.
+            // (https://github.com/SpectrumXYZ/cape/issues/278.)
+            CapeTransition::Transaction(CapeTransaction::Burn { .. }) => izip!(
+                vec![memos[0].clone()],
+                txn.txn.output_commitments(),
+                txn.uids.iter().cloned(),
+                merkle_paths
+            )
+            .collect::<Vec<_>>(),
+            _ => izip!(
+                memos,
+                txn.txn.output_commitments(),
+                txn.uids.iter().cloned(),
+                merkle_paths
+            )
+            .collect::<Vec<_>>(),
+        };
         txn.memos = Some((memos.clone(), sig));
         let event = LedgerEvent::Memos {
             outputs: memos,
@@ -329,24 +352,15 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
         Ok(())
     }
 
+    fn memos_source(&self) -> EventSource {
+        EventSource::BulletinBoard
+    }
+
     fn generate_event(&mut self, event: LedgerEvent<CapeLedger>) {
-        // Subscribers who asked for a subscription starting from the current time can now be added
-        // to the list of active subscribers.
-        let now = self.events.len() as u64;
-        if let Some(new_subscribers) = self.pending_subscribers.remove(&now) {
-            self.subscribers.extend(new_subscribers);
+        match event {
+            LedgerEvent::Memos { .. } => self.memo_events.publish(event),
+            _ => self.query_service_events.publish(event),
         }
-
-        // Send the message to all active subscribers. Filter out subscribers where the send fails,
-        // which means that the client has disconnected.
-        self.subscribers = std::mem::take(&mut self.subscribers)
-            .into_iter()
-            .filter(|subscriber| subscriber.unbounded_send(event.clone()).is_ok())
-            .collect();
-
-        // Save the event so we can feed it to later subscribers who want to start from some time in
-        // the past.
-        self.events.push(event);
     }
 }
 
@@ -389,7 +403,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> MockCapeBackend<'a, Meta> {
 impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger>
     for MockCapeBackend<'a, Meta>
 {
-    type EventStream = Pin<Box<dyn Stream<Item = LedgerEvent<CapeLedger>> + Send>>;
+    type EventStream = Pin<Box<dyn Stream<Item = (LedgerEvent<CapeLedger>, EventSource)> + Send>>;
     type Storage = AtomicWalletStorage<'a, CapeLedger, Meta>;
 
     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
@@ -456,7 +470,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
             proving_keys,
             txn_state: TransactionState {
                 validator: CapeTruster::new(network.block_height, record_mt.num_leaves()),
-                now: 0,
+                now: Default::default(),
                 nullifiers: Default::default(),
                 // Completely sparse nullifier set
                 record_mt,
@@ -484,31 +498,13 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         Ok(state)
     }
 
-    async fn subscribe(&self, t: u64) -> Self::EventStream {
-        let (sender, receiver) = mpsc::unbounded();
+    async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream {
         let mut ledger = self.ledger.lock().await;
         let network = ledger.network();
-        if (t as usize) < network.events.len() {
-            // If the start time is in the past, send the subscriber all saved events since the
-            // start time and make them an active subscriber starting now.
-            network.subscribers.push(sender);
-            let past_events = network
-                .events
-                .iter()
-                .skip(t as usize)
-                .cloned()
-                .collect::<Vec<_>>();
-            Box::pin(iter(past_events).chain(receiver))
-        } else {
-            // Otherwise, add the subscriber to the list of pending subscribers to start receiving
-            // events at time `t`.
-            network
-                .pending_subscribers
-                .entry(t)
-                .or_default()
-                .push(sender);
-            Box::pin(receiver)
-        }
+        Box::pin(futures::stream::select(
+            network.query_service_events.subscribe(from, to),
+            network.memo_events.subscribe(from, to),
+        ))
     }
 
     async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
@@ -594,132 +590,54 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
     }
 }
 
-// Wrapper around a generic wallet adding CAPE-specific wallet functions.
-pub struct LocalCapeWallet<'a, Meta: Serialize + DeserializeOwned + Send> {
-    wallet: Wallet<'a, MockCapeBackend<'a, Meta>, CapeLedger>,
-    // For actions submitted directly to the contract, such as sponsor and wrap.
-    network: Arc<Mutex<MockCapeNetwork>>,
-    rng: ChaChaRng,
-}
-
-impl<'a, Meta: 'a + Serialize + DeserializeOwned + Send> LocalCapeWallet<'a, Meta> {
-    pub async fn sponsor(
+#[async_trait]
+impl<'a, Meta: Serialize + DeserializeOwned + Send> CapeWalletBackend<'a>
+    for MockCapeBackend<'a, Meta>
+{
+    async fn register_wrapped_asset(
         &mut self,
+        asset: &AssetDefinition,
         erc20_code: Erc20Code,
-        sponsor_addr: EthereumAddr,
-        aap_asset_desc: &[u8],
-        aap_asset_policy: AssetPolicy,
-    ) -> Result<AssetDefinition, WalletError> {
-        let seed = AssetCodeSeed::generate(&mut self.rng);
-        //todo Include CAPE-specific domain separator in AssetCode derivation, once Jellyfish adds
-        // support for domain separators.
-        let code = AssetCode::new_domestic(seed, aap_asset_desc);
-        let asset = AssetDefinition::new(code, aap_asset_policy).context(CryptoError)?;
-
-        self.network
+        sponsor: EthereumAddr,
+    ) -> Result<(), WalletError> {
+        self.ledger
             .lock()
             .await
-            .register_erc20(asset.clone(), erc20_code, sponsor_addr)
-            .map_err(cape_to_wallet_err)?;
-
-        Ok(asset)
-    }
-
-    pub async fn wrap(
-        &mut self,
-        src_addr: EthereumAddr,
-        // We take as input the target asset, not the source ERC20 code, because there may be more
-        // than one AAP asset for a given ERC20 token. We need the user to disambiguate (probably
-        // using a list of approved (AAP, ERC20) pairs provided by the query service).
-        aap_asset: AssetDefinition,
-        owner: UserAddress,
-        amount: u64,
-    ) -> Result<(), WalletError> {
-        let mut network = self.network.lock().await;
-        let erc20_code = match network.contract.erc20_registrar.get(&aap_asset) {
-            Some((erc20_code, _)) => erc20_code.clone(),
-            None => {
-                return Err(WalletError::UndefinedAsset {
-                    asset: aap_asset.code,
-                })
-            }
-        };
-
-        let pub_key = match network.address_map.get(&owner) {
-            Some(pub_key) => pub_key.clone(),
-            None => return Err(WalletError::InvalidAddress { address: owner }),
-        };
-
-        //todo Along with this wrap operation submitted to the contract, we must also transfer some
-        // of the ERC20 token to the contract using an Ethereum wallet.
-        network
-            .wrap_erc20(
-                erc20_code,
-                src_addr,
-                RecordOpening::new(
-                    &mut self.rng,
-                    amount,
-                    aap_asset,
-                    pub_key,
-                    FreezeFlag::Unfrozen,
-                ),
-            )
+            .network()
+            .register_erc20(asset.clone(), erc20_code, sponsor)
             .map_err(cape_to_wallet_err)
     }
 
-    pub async fn burn(
-        &mut self,
-        account: &UserAddress,
-        dst_addr: EthereumAddr,
-        aap_asset: &AssetCode,
-        amount: u64,
-        fee: u64,
-    ) -> Result<TransactionReceipt<CapeLedger>, WalletError> {
-        // A burn note is just a transfer note with a special `proof_bound_data` field consisting of
-        // the magic burn bytes followed by the destination address.
-        let bound_data = CAPE_BURN_MAGIC_BYTES
-            .as_bytes()
-            .iter()
-            .chain(dst_addr.as_bytes())
-            .cloned()
-            .collect::<Vec<_>>();
-        let (xfr, mut info) = self
-            .wallet
-            // The owner public key of the new record opening is ignored when processing a burn. We
-            // need to put some address in the receiver field though, so just use the one we have
-            // handy.
-            .build_transfer(
-                account,
-                aap_asset,
-                &[(account.clone(), amount)],
-                fee,
-                bound_data,
-            )
-            .await?;
-        assert!(info.outputs.len() >= 2);
-        if info.outputs.len() > 2 {
-            return Err(WalletError::TransactionError {
-                source: TransactionError::Fragmentation {
-                    asset: *aap_asset,
-                    amount,
-                    suggested_amount: info.outputs[1].amount,
-                    max_records: 1,
-                },
-            });
+    async fn get_wrapped_erc20_code(
+        &self,
+        asset: &AssetDefinition,
+    ) -> Result<Erc20Code, WalletError> {
+        match self
+            .ledger
+            .lock()
+            .await
+            .network()
+            .contract
+            .erc20_registrar
+            .get(asset)
+        {
+            Some((erc20_code, _)) => Ok(erc20_code.clone()),
+            None => Err(WalletError::UndefinedAsset { asset: asset.code }),
         }
-        if let Some(history) = &mut info.history {
-            history.kind = CapeTransactionKind::Burn;
-        }
-
-        let txn = CapeTransition::Transaction(CapeTransaction::Burn {
-            xfr: Box::new(xfr),
-            ro: Box::new(info.outputs[1].clone()),
-        });
-        self.wallet.submit(txn, info).await
     }
 
-    pub async fn approved_assets(&self) -> Vec<(AssetDefinition, Erc20Code)> {
-        unimplemented!()
+    async fn wrap_erc20(
+        &mut self,
+        erc20_code: Erc20Code,
+        src_addr: EthereumAddr,
+        ro: RecordOpening,
+    ) -> Result<(), WalletError> {
+        self.ledger
+            .lock()
+            .await
+            .network()
+            .wrap_erc20(erc20_code, src_addr, ro)
+            .map_err(cape_to_wallet_err)
     }
 }
 
@@ -813,5 +731,187 @@ impl<'a> SystemUnderTest<'a> for CapeTest {
         MockCapeBackend::new_for_test(ledger, storage)
             .await
             .unwrap()
+    }
+}
+
+// CAPE-specific tests
+#[cfg(test)]
+mod cape_wallet_tests {
+    use super::*;
+    use crate::txn_builder::TransactionError;
+    use jf_aap::structs::{AssetCode, AssetPolicy};
+    use std::time::Instant;
+
+    #[async_std::test]
+    async fn test_cape_wallet() -> std::io::Result<()> {
+        let mut t = CapeTest::default();
+
+        // Initialize a ledger and wallet, and get the owner address.
+        let mut now = Instant::now();
+        let num_inputs = 2;
+        let num_outputs = 2;
+        let initial_grant = 10;
+        let (ledger, mut wallets) = t
+            .create_test_network(&[(num_inputs, num_outputs)], vec![initial_grant], &mut now)
+            .await;
+        assert_eq!(wallets.len(), 1);
+        let owner = wallets[0].1.clone();
+        t.sync(&ledger, &wallets).await;
+        println!("CAPE wallet created: {}s", now.elapsed().as_secs_f32());
+
+        // Check the balance after CAPE wallet initialization.
+        assert_eq!(
+            wallets[0].0.balance(&owner, &AssetCode::native()).await,
+            initial_grant
+        );
+
+        // Create an ERC20 code, sponsor address, and asset information.
+        now = Instant::now();
+        let erc20_addr = EthereumAddr([1u8; 20]);
+        let erc20_code = Erc20Code(erc20_addr);
+        let sponsor_addr = EthereumAddr([2u8; 20]);
+        let aap_asset_policy = AssetPolicy::default();
+
+        // Sponsor the ERC20 token.
+        let aap_asset = wallets[0]
+            .0
+            .sponsor(erc20_code, sponsor_addr.clone(), aap_asset_policy)
+            .await
+            .unwrap();
+        println!("Sponsor completed: {}s", now.elapsed().as_secs_f32());
+
+        // Wrapping an undefined asset should fail.
+        let wrap_amount = 6;
+        match wallets[0]
+            .0
+            .wrap(
+                sponsor_addr.clone(),
+                AssetDefinition::dummy(),
+                owner.clone(),
+                wrap_amount,
+            )
+            .await
+        {
+            Err(WalletError::UndefinedAsset { asset: _ }) => {}
+            e => {
+                panic!("Expected WalletError::UndefinedAsset, found {:?}", e);
+            }
+        };
+
+        // Wrap the sponsored asset.
+        now = Instant::now();
+        wallets[0]
+            .0
+            .wrap(
+                sponsor_addr.clone(),
+                aap_asset.clone(),
+                owner.clone(),
+                wrap_amount,
+            )
+            .await
+            .unwrap();
+        println!("Wrap completed: {}s", now.elapsed().as_secs_f32());
+        assert_eq!(wallets[0].0.balance(&owner, &aap_asset.code).await, 0);
+
+        // Submit dummy transactions to finalize the wrap.
+        now = Instant::now();
+        let dummy_coin = wallets[0]
+            .0
+            .define_asset("Dummy asset".as_bytes(), Default::default())
+            .await
+            .unwrap();
+        let mint_fee = 1;
+        wallets[0]
+            .0
+            .mint(&owner, mint_fee, &dummy_coin.code, 5, owner.clone())
+            .await
+            .unwrap();
+        t.sync(&ledger, &wallets).await;
+        println!(
+            "Dummy transactions submitted and wrap finalized: {}s",
+            now.elapsed().as_secs_f32()
+        );
+
+        // Check the balance after the wrap.
+        assert_eq!(
+            wallets[0].0.balance(&owner, &AssetCode::native()).await,
+            initial_grant - mint_fee
+        );
+        assert_eq!(
+            wallets[0].0.balance(&owner, &aap_asset.code).await,
+            wrap_amount
+        );
+
+        // Burning an amount more than the wrapped asset should fail.
+        let mut burn_amount = wrap_amount + 1;
+        let burn_fee = 1;
+        match wallets[0]
+            .0
+            .burn(
+                &owner,
+                sponsor_addr.clone(),
+                &aap_asset.code.clone(),
+                burn_amount,
+                burn_fee,
+            )
+            .await
+        {
+            Err(WalletError::TransactionError {
+                source: TransactionError::InsufficientBalance { .. },
+            }) => {}
+            e => {
+                panic!(
+                    "Expected TransactionError::InsufficientBalance, found {:?}",
+                    e
+                );
+            }
+        }
+
+        // Burning an amount not corresponding to the wrapped asset should fail.
+        burn_amount = wrap_amount - 1;
+        match wallets[0]
+            .0
+            .burn(
+                &owner,
+                sponsor_addr.clone(),
+                &aap_asset.code.clone(),
+                burn_amount,
+                burn_fee,
+            )
+            .await
+        {
+            Err(WalletError::TransactionError {
+                source: TransactionError::InvalidSize { .. },
+            }) => {}
+            e => {
+                panic!("Expected TransactionError::InvalidSize, found {:?}", e);
+            }
+        }
+
+        // Burn the wrapped asset.
+        now = Instant::now();
+        burn_amount = wrap_amount;
+        wallets[0]
+            .0
+            .burn(
+                &owner,
+                sponsor_addr.clone(),
+                &aap_asset.code.clone(),
+                burn_amount,
+                burn_fee,
+            )
+            .await
+            .unwrap();
+        t.sync(&ledger, &wallets).await;
+        println!("Burn completed: {}s", now.elapsed().as_secs_f32());
+
+        // Check the balance after the burn.
+        assert_eq!(wallets[0].0.balance(&owner, &aap_asset.code).await, 0);
+        assert_eq!(
+            wallets[0].0.balance(&owner, &AssetCode::native()).await,
+            initial_grant - mint_fee - burn_fee
+        );
+
+        Ok(())
     }
 }

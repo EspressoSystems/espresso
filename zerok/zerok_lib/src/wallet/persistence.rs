@@ -586,7 +586,7 @@ mod tests {
             }),
             txn_state: TransactionState {
                 validator,
-                now: 0,
+                now: Default::default(),
                 records: Default::default(),
                 nullifiers: Default::default(),
                 record_mt: record_merkle_tree,
@@ -653,7 +653,7 @@ mod tests {
         nullifiers.insert(Nullifier::random_for_test(&mut rng));
         stored.txn_state.validator.nullifiers_root = nullifiers.hash();
         stored.txn_state.nullifiers = nullifiers;
-        stored.txn_state.now += 1;
+        stored.txn_state.now += EventIndex::from_source(EventSource::QueryService, 1);
         stored.txn_state.records.insert(
             ro,
             stored

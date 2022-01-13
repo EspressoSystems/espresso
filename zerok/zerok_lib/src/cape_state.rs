@@ -48,8 +48,11 @@ impl CapeTransaction {
     pub fn commitments(&self) -> Vec<RecordCommitment> {
         match self {
             CapeTransaction::Burn { xfr, .. } => {
-                // All valid burn transactions have two outputs, but only the first one (the fee
-                // change output) is added to the Merkle tree. The second output is burned.
+                // All valid burn transactions have at least two outputs.
+                //
+                // The first output is the fee change record, the second
+                // output is burned, and the rest are normal outputs which
+                // get added to the Merkle tree
                 let mut ret = xfr.output_commitments.clone();
                 ret.remove(1); // remove the burnt record
                 ret
@@ -60,12 +63,12 @@ impl CapeTransaction {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EthereumAddr([u8; 20]);
+pub struct EthereumAddr(pub [u8; 20]);
 
 // ERC20 assets are identified by the address of the smart contract
 // controlling them.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Erc20Code(EthereumAddr);
+pub struct Erc20Code(pub EthereumAddr);
 
 impl EthereumAddr {
     pub fn as_bytes(&self) -> &[u8; 20] {
@@ -214,16 +217,20 @@ pub struct CapeContractState {
     pub erc20_deposits: Vec<RecordCommitment>,
 }
 
+pub fn erc20_asset_description(erc20_code: &Erc20Code, sponsor: &EthereumAddr) -> String {
+    format!(
+        "TRICAPE ERC20 {} sponsored by {}",
+        hex::encode(&(erc20_code.0).0),
+        hex::encode(&sponsor.0)
+    )
+}
+
 fn is_erc20_asset_def_valid(
     def: &AssetDefinition,
     erc20_code: &Erc20Code,
     sponsor: &EthereumAddr,
 ) -> bool {
-    let description = format!(
-        "TRICAPE ERC20 {} sponsored by {}",
-        hex::encode(&(erc20_code.0).0),
-        hex::encode(&sponsor.0)
-    );
+    let description = erc20_asset_description(erc20_code, sponsor);
     def.code.verify_foreign(description.as_bytes()).is_ok()
 }
 

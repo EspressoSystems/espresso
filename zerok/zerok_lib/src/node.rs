@@ -2,7 +2,8 @@ use crate::full_persistence::FullPersistence;
 pub use crate::state::state_comm::LedgerStateCommitment;
 use crate::util::arbitrary_wrappers::*;
 use crate::{
-    ledger, ser_test,
+    events::LedgerEvent,
+    ser_test,
     set_merkle_tree::*,
     state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
     validator_node::*,
@@ -20,10 +21,9 @@ use itertools::izip;
 use jf_aap::{
     keys::{UserAddress, UserPubKey},
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
-    MerklePath, MerkleTree, Signature,
+    MerkleTree, Signature,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
-use ledger::{AAPLedger, Block, Ledger, StateCommitment};
 use phaselock::{
     error::PhaseLockError,
     event::EventType,
@@ -146,41 +146,6 @@ pub struct LedgerTransition {
     // publicly.
     pub memos: Vec<Option<(Vec<ReceiverMemo>, Signature)>>,
     pub uids: Vec<Vec<u64>>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, strum_macros::AsStaticStr)]
-#[serde(bound = "")]
-pub enum LedgerEvent<L: Ledger = AAPLedger> {
-    /// A new block was added to the ledger.
-    ///
-    /// Includes the block contents, the unique identifier for the block, and the new state
-    /// commitment.
-    Commit {
-        block: Block<L>,
-        block_id: u64,
-        state_comm: StateCommitment<L>,
-    },
-
-    /// A proposed block was rejected.
-    ///
-    /// Includes the block contents and the reason for rejection.
-    Reject {
-        block: Block<L>,
-        error: ValidationError,
-    },
-
-    /// Receiver memos were posted for one or more previously accepted transactions.
-    ///
-    /// For each UTXO corresponding to the posted memos, includes the memo, the record commitment,
-    /// the unique identifier for the record, and a proof that the record commitment exists in the
-    /// current UTXO set.
-    ///
-    /// If these memos correspond to a committed transaction, the (block_id, transaction_id) are
-    /// included in `transaction`.
-    Memos {
-        outputs: Vec<(ReceiverMemo, RecordCommitment, u64, MerklePath)>,
-        transaction: Option<(u64, u64)>,
-    },
 }
 
 /// A QueryService accumulates the full state of the ledger, making it available for consumption by
@@ -1043,7 +1008,7 @@ mod tests {
     };
     use async_std::task::block_on;
     use jf_aap::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
-    use jf_primitives::jubjub_dsa::KeyPair;
+    use jf_primitives::schnorr_dsa::KeyPair;
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
     use tempdir::TempDir;
