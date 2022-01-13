@@ -284,32 +284,6 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
         if txn.memos.is_some() {
             return Err(QueryServiceError::MemosAlreadyPosted {}.into());
         }
-        // Validate the new memos.
-        match &txn.txn {
-            CapeTransition::Transaction(CapeTransaction::AAP(note)) => {
-                if note.verify_receiver_memos_signature(&memos, &sig).is_err() {
-                    return Err(QueryServiceError::InvalidSignature {}.into());
-                }
-                if memos.len() != txn.txn.output_len() {
-                    return Err(QueryServiceError::WrongNumberOfMemos {
-                        expected: txn.txn.output_len(),
-                    }
-                    .into());
-                }
-            }
-            CapeTransition::Transaction(CapeTransaction::Burn { xfr, .. }) => {
-                if TransactionNote::Transfer(Box::new(*xfr.clone()))
-                    .verify_receiver_memos_signature(&memos, &sig)
-                    .is_err()
-                {
-                    return Err(QueryServiceError::InvalidSignature {}.into());
-                }
-            }
-            _ => {
-                println!("Wrap transactions don't get memos");
-                return Err(QueryServiceError::InvalidTxnId {}.into());
-            }
-        }
 
         // Authenticate the validity of the records corresponding to the memos.
         let merkle_tree = &self.records;
@@ -320,25 +294,13 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
             .collect::<Vec<_>>();
 
         // Store and broadcast the new memos.
-        let memos = match &txn.txn {
-            // In the case of a burn transaction, only post memos for fee change output.
-            // TODO !keyao Skip the memos of burned record when calling MockCapeNetwork::post_memos.
-            // (https://github.com/SpectrumXYZ/cape/issues/278.)
-            CapeTransition::Transaction(CapeTransaction::Burn { .. }) => izip!(
-                vec![memos[0].clone()],
-                txn.txn.output_commitments(),
-                txn.uids.iter().cloned(),
-                merkle_paths
-            )
-            .collect::<Vec<_>>(),
-            _ => izip!(
-                memos,
-                txn.txn.output_commitments(),
-                txn.uids.iter().cloned(),
-                merkle_paths
-            )
-            .collect::<Vec<_>>(),
-        };
+        let memos = izip!(
+            memos,
+            txn.txn.output_commitments(),
+            txn.uids.iter().cloned(),
+            merkle_paths
+        )
+        .collect::<Vec<_>>();
         txn.memos = Some((memos.clone(), sig));
         let event = LedgerEvent::Memos {
             outputs: memos,
@@ -580,6 +542,42 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         memos: Vec<ReceiverMemo>,
         sig: Signature,
     ) -> Result<(), WalletError> {
+        let txn = self.get_transaction(block_id, txn_id).await?;
+
+        // Validate memos.
+        match &txn {
+            CapeTransition::Transaction(CapeTransaction::AAP(note)) => {
+                if note.verify_receiver_memos_signature(&memos, &sig).is_err() {
+                    return Err(QueryServiceError::InvalidSignature {}.into());
+                }
+                if memos.len() != txn.output_len() {
+                    return Err(QueryServiceError::WrongNumberOfMemos {
+                        expected: txn.output_len(),
+                    }
+                    .into());
+                }
+            }
+            CapeTransition::Transaction(CapeTransaction::Burn { xfr, .. }) => {
+                if TransactionNote::Transfer(Box::new(*xfr.clone()))
+                    .verify_receiver_memos_signature(&memos, &sig)
+                    .is_err()
+                {
+                    return Err(QueryServiceError::InvalidSignature {}.into());
+                }
+            }
+            _ => {
+                println!("Wrap transactions don't get memos");
+                return Err(QueryServiceError::InvalidTxnId {}.into());
+            }
+        }
+
+        // Construct memos to post.
+        let memos = match &txn {
+            // In the case of a burn transaction, only post memos for fee change output.
+            CapeTransition::Transaction(CapeTransaction::Burn { .. }) => vec![memos[0].clone()],
+            _ => memos,
+        };
+
         self.ledger
             .lock()
             .await

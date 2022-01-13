@@ -380,6 +380,7 @@ pub trait SystemUnderTest<'a>: Default + Send + Sync {
 type EventSender<L> = mpsc::UnboundedSender<(LedgerEvent<L>, EventSource)>;
 
 // Useful helper type for developing mock networks.
+#[derive(Clone)]
 pub struct MockEventSource<L: Ledger> {
     source: EventSource,
     events: Vec<LedgerEvent<L>>,
