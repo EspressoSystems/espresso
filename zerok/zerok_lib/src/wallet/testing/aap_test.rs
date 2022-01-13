@@ -1,12 +1,33 @@
 use super::*;
 use crate::{
     api::FromError,
+    ledger::AAPLedger,
     node,
-    set_merkle_tree::SetMerkleProof,
-    state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
+    set_merkle_tree::{SetMerkleProof, SetMerkleTree},
+    state::{
+        key_set, key_set::OrderByOutputs, ElaboratedBlock, ElaboratedTransaction, ProverKeySet,
+        ValidatorState, VerifierKeySet,
+    },
+    txn_builder::{RecordDatabase, TransactionHistoryEntry, TransactionState},
+    wallet::{
+        hd, testing, CryptoError, RoleKeyPair, WalletBackend, WalletError, WalletState,
+        WalletStorage,
+    },
 };
+use async_std::sync::{Arc, Mutex, MutexGuard};
+use async_trait::async_trait;
+use futures::stream::Stream;
 use itertools::izip;
+use jf_aap::{
+    keys::{UserAddress, UserKeyPair, UserPubKey},
+    structs::{AssetCodeSeed, AssetDefinition, Nullifier, ReceiverMemo, RecordOpening},
+    MerkleTree, Signature,
+};
+use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+use snafu::ResultExt;
+use std::collections::HashMap;
 use std::pin::Pin;
+use testing::{MockLedger, MockNetwork};
 
 #[derive(Clone, Debug, Default)]
 pub struct MockStorage<'a> {
@@ -402,8 +423,12 @@ impl<'a> testing::SystemUnderTest<'a> for AAPTest {
 }
 
 // AAP-specific tests
+#[cfg(test)]
 mod aap_wallet_tests {
     use super::*;
+    use jf_aap::structs::AssetCode;
+    use std::time::Instant;
+    use testing::SystemUnderTest;
 
     #[async_std::test]
     async fn test_resubmit() -> std::io::Result<()> {

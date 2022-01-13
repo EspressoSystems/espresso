@@ -7,7 +7,8 @@ pub mod network;
 pub mod persistence;
 pub mod reader;
 mod secret;
-mod testing;
+#[cfg(any(test, feature = "mocks"))]
+pub mod testing;
 
 use crate::api;
 use crate::state::key_set;
@@ -1759,10 +1760,29 @@ impl<'a, L: Ledger, Backend: WalletBackend<'a, L>> WalletSharedState<'a, L, Back
     }
 }
 
+// Fun fact: replacing `std::pin::Pin` with `Pin` and adding `use std::pin::Pin` causes the compiler
+// to panic where this type alias is used in `Wallet::new`. As a result, the type alias `BoxFuture`
+// from `futures::future` does not work, so we define our own.
+type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     Wallet<'a, Backend, L>
 {
-    pub async fn new(mut backend: Backend) -> Result<Wallet<'a, Backend, L>, WalletError> {
+    // This function suffers from github.com/rust-lang/rust/issues/89657, in which, if we define it
+    // as an async function, the compiler loses track of the fact that the resulting opaque Future
+    // implements Send, even though it does. Unfortunately, the workaround used for some other
+    // functions in this module (c.f. `submit_elaborated_transaction`) where we manually desugar the
+    // function signature to explicitly return `impl Future + Send` triggers a separate and possibly
+    // unrelated compiler bug, which results in a panic during compilation.
+    //
+    // Fortunately, there is a different workaround which does work. The idea is the same: to
+    // manually write out the opaque return type so that we can explicitly add the `Send` bound. The
+    // difference is that we use dynamic type erasure (Pin<Box<dyn Future>>) instead of static type
+    // erasure. I don't know why this doesn't crash the compiler, but it doesn't.
+    pub fn new(backend: Backend) -> BoxFuture<'a, Result<Wallet<'a, Backend, L>, WalletError>> {
+        Box::pin(async move { Self::new_impl(backend).await })
+    }
+    async fn new_impl(mut backend: Backend) -> Result<Wallet<'a, Backend, L>, WalletError> {
         let state = backend.load().await?;
         let mut events = backend.subscribe(state.txn_state.now, None).await;
         let mut key_scans = vec![];

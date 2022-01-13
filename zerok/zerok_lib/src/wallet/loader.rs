@@ -35,12 +35,94 @@ pub struct LoaderMetadata {
     check_data: CipherText,
 }
 
+enum LoaderInput {
+    User(Reader),
+    Literal(String),
+}
+
+impl LoaderInput {
+    fn create_password(&self) -> Result<String, WalletError> {
+        match self {
+            Self::User(reader) => loop {
+                let password = reader.read_password("Create password: ")?;
+                let confirm = reader.read_password("Retype password: ")?;
+                if password == confirm {
+                    return Ok(password);
+                } else {
+                    println!("Passwords do not match.");
+                }
+            },
+
+            Self::Literal(s) => Ok(s.clone()),
+        }
+    }
+
+    fn read_password(&self) -> Result<String, WalletError> {
+        match self {
+            Self::User(reader) => reader.read_password("Enter password: "),
+            Self::Literal(s) => Ok(s.clone()),
+        }
+    }
+
+    fn create_mnemonic(&mut self, rng: &mut ChaChaRng) -> Result<KeyTree, WalletError> {
+        match self {
+            Self::User(reader) => {
+                println!(
+                    "Your wallet will be identified by a secret mnemonic phrase. This phrase will \
+                     allow you to recover your wallet if you lose access to it. Anyone who has access \
+                     to this phrase will be able to view and spend your assets. Store this phrase in a \
+                     safe, private place."
+                );
+                'outer: loop {
+                    let (key, mnemonic) = KeyTree::random(rng).context(KeyError)?;
+                    println!("Your mnemonic phrase will be:");
+                    println!("{}", mnemonic);
+                    'inner: loop {
+                        println!("1) Accept phrase and create wallet");
+                        println!("2) Generate a new phrase");
+                        println!(
+                            "3) Manually enter a mnemonic (use this to recover a lost wallet)"
+                        );
+                        match reader.read_line() {
+                            Some(line) => match line.as_str().trim() {
+                                "1" => return Ok(key),
+                                "2" => continue 'outer,
+                                "3" => {
+                                    let mnemonic =
+                                        reader.read_password("Enter mnemonic phrase: ")?;
+                                    return KeyTree::from_mnemonic(mnemonic.as_bytes())
+                                        .context(KeyError);
+                                }
+                                _ => continue 'inner,
+                            },
+                            None => {
+                                return Err(WalletError::Failed {
+                                    msg: String::from("eof"),
+                                })
+                            }
+                        }
+                    }
+                }
+            }
+
+            Self::Literal(s) => KeyTree::from_mnemonic(s.as_bytes()).context(KeyError),
+        }
+    }
+
+    fn read_mnemonic(&self) -> Result<String, WalletError> {
+        match self {
+            Self::User(reader) => reader.read_password("Enter mnemonic phrase: "),
+            Self::Literal(s) => Ok(s.clone()),
+        }
+    }
+}
+
 pub struct Loader {
     method: LoadMethod,
     encrypted: bool,
     dir: PathBuf,
     rng: ChaChaRng,
-    reader: Reader,
+    input: LoaderInput,
 }
 
 impl Loader {
@@ -49,22 +131,24 @@ impl Loader {
             method,
             encrypted,
             dir,
-            reader,
+            input: LoaderInput::User(reader),
+            rng: ChaChaRng::from_entropy(),
+        }
+    }
+
+    pub fn from_mnemonic(mnemonic: String, encrypted: bool, dir: PathBuf) -> Self {
+        Self {
+            method: LoadMethod::Mnemonic,
+            encrypted,
+            dir,
+            input: LoaderInput::Literal(mnemonic),
             rng: ChaChaRng::from_entropy(),
         }
     }
 
     fn create_from_password(&mut self) -> Result<(KeyTree, Salt), WalletError> {
         let password = if self.encrypted {
-            loop {
-                let password = self.reader.read_password("Create password: ")?;
-                let confirm = self.reader.read_password("Retype password: ")?;
-                if password == confirm {
-                    break password;
-                } else {
-                    println!("Passwords do not match.");
-                }
-            }
+            self.input.create_password()?
         } else {
             self.dummy_password()
         };
@@ -73,7 +157,7 @@ impl Loader {
 
     fn load_from_password(&self, meta: &LoaderMetadata) -> Result<KeyTree, WalletError> {
         let password = if meta.encrypted {
-            self.reader.read_password("Enter password: ")?
+            self.input.read_password()?
         } else {
             self.dummy_password()
         };
@@ -86,40 +170,7 @@ impl Loader {
 
     fn create_from_mnemonic(&mut self) -> Result<KeyTree, WalletError> {
         if self.encrypted {
-            println!(
-                "Your wallet will be identified by a secret mnemonic phrase. This phrase will \
-                 allow you to recover your wallet if you lose access to it. Anyone who has access \
-                 to this phrase will be able to view and spend your assets. Store this phrase in a \
-                 safe, private place."
-            );
-            'outer: loop {
-                let (key, mnemonic) = KeyTree::random(&mut self.rng).context(KeyError)?;
-                println!("Your mnemonic phrase will be:");
-                println!("{}", mnemonic);
-                'inner: loop {
-                    println!("1) Accept phrase and create wallet");
-                    println!("2) Generate a new phrase");
-                    println!("3) Manually enter a mnemonic (use this to recover a lost wallet)");
-                    match self.reader.read_line() {
-                        Some(line) => match line.as_str().trim() {
-                            "1" => return Ok(key),
-                            "2" => continue 'outer,
-                            "3" => {
-                                let mnemonic =
-                                    self.reader.read_password("Enter mnemonic phrase: ")?;
-                                return KeyTree::from_mnemonic(mnemonic.as_bytes())
-                                    .context(KeyError);
-                            }
-                            _ => continue 'inner,
-                        },
-                        None => {
-                            return Err(WalletError::Failed {
-                                msg: String::from("eof"),
-                            })
-                        }
-                    }
-                }
-            }
+            self.input.create_mnemonic(&mut self.rng)
         } else {
             KeyTree::from_mnemonic(self.dummy_mnemonic().as_bytes()).context(KeyError)
         }
@@ -127,7 +178,7 @@ impl Loader {
 
     fn load_from_mnemonic(&self, meta: &LoaderMetadata) -> Result<KeyTree, WalletError> {
         let mnemonic = if meta.encrypted {
-            self.reader.read_password("Enter mnemonic phrase: ")?
+            self.input.read_mnemonic()?
         } else {
             self.dummy_mnemonic()
         };
