@@ -1,4 +1,3 @@
-#![cfg(test)]
 #![allow(dead_code)]
 
 /// This module contains testing utilities and unit tests for the generic wallet interface.
@@ -19,7 +18,6 @@
 /// `wallet::testing`.
 use super::*;
 use crate::{
-    set_merkle_tree::SetMerkleTree,
     state::{
         key_set::{KeySet, OrderByOutputs},
         ProverKeySet, VerifierKeySet, MERKLE_HEIGHT,
@@ -33,6 +31,8 @@ use rand_chacha::rand_core::RngCore;
 use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::time::Instant;
+
+pub mod mocks;
 
 #[async_trait]
 pub trait MockNetwork<'a, L: Ledger> {

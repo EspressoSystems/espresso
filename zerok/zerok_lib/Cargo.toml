@@ -70,3 +70,5 @@ rand_xoshiro = "0.4.0"
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.11.0"
 
+[features]
+mocks = []

@@ -1,9 +1,12 @@
-use super::*;
 use crate::{
     api::FromError,
     cape_ledger::*,
     cape_state::*,
-    events::LedgerEvent,
+    events::{EventIndex, EventSource, LedgerEvent},
+    ledger::{
+        traits::{Block as _, Transaction as _},
+        Block,
+    },
     node::QueryServiceError,
     state::{
         key_set::{OrderByOutputs, SizedKey},
@@ -13,8 +16,8 @@ use crate::{
     universal_params::UNIVERSAL_PARAM,
     wallet::{
         cape::CapeWalletBackend, hd::KeyTree, loader::WalletLoader,
-        persistence::AtomicWalletStorage, CryptoError, KeyStreamState, WalletBackend, WalletError,
-        WalletState,
+        persistence::AtomicWalletStorage, testing, CryptoError, KeyStreamState, WalletBackend,
+        WalletError, WalletState,
     },
 };
 use async_std::sync::{Mutex, MutexGuard};
@@ -22,12 +25,12 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use itertools::izip;
 use jf_aap::{
-    keys::{UserAddress, UserPubKey},
+    keys::{UserAddress, UserKeyPair, UserPubKey},
     proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
     structs::{AssetDefinition, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
-    MerklePath, MerkleTree, Signature,
+    MerklePath, MerkleTree, Signature, TransactionNote,
 };
-use rand_chacha::ChaChaRng;
+use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Serialize};
 use snafu::ResultExt;
 use std::collections::HashMap;
@@ -35,6 +38,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use tempdir::TempDir;
+use testing::{MockEventSource, MockLedger, MockNetwork, SystemUnderTest};
 
 #[derive(Clone)]
 struct CommittedTransaction {
@@ -199,7 +203,6 @@ impl MockCapeNetwork {
                     })
                     .collect();
                 let mut txn_block = txns
-                    .clone()
                     .into_iter()
                     .enumerate()
                     .map(|(i, txn)| {
@@ -208,7 +211,7 @@ impl MockCapeNetwork {
                             uids.push(self.records.num_leaves());
                             self.records.push(comm.to_field_element());
                         }
-                        let txn = CapeTransition::Transaction(txn.clone());
+                        let txn = CapeTransition::Transaction(txn);
                         self.txns.insert(
                             (self.block_height, (num_wraps + i) as u64),
                             CommittedTransaction {
@@ -730,8 +733,12 @@ impl<'a> SystemUnderTest<'a> for CapeTest {
 }
 
 // CAPE-specific tests
+#[cfg(test)]
 mod cape_wallet_tests {
     use super::*;
+    use crate::txn_builder::TransactionError;
+    use jf_aap::structs::{AssetCode, AssetPolicy};
+    use std::time::Instant;
 
     #[async_std::test]
     async fn test_cape_wallet() -> std::io::Result<()> {
