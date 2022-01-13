@@ -1008,7 +1008,7 @@ mod tests {
     };
     use async_std::task::block_on;
     use jf_aap::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
-    use jf_primitives::jubjub_dsa::KeyPair;
+    use jf_primitives::schnorr_dsa::KeyPair;
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
     use tempdir::TempDir;
