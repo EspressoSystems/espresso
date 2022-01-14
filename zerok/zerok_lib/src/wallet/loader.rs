@@ -115,6 +115,13 @@ impl LoaderInput {
             Self::Literal(s) => Ok(s.clone()),
         }
     }
+
+    fn interactive(&self) -> bool {
+        match self {
+            Self::User(..) => true,
+            Self::Literal(..) => false,
+        }
+    }
 }
 
 pub struct Loader {
@@ -255,8 +262,12 @@ impl WalletLoader for Loader {
                 return Err(WalletError::Failed {
                     msg: String::from("wallet metadata is corrupt"),
                 });
-            } else {
+            } else if self.input.interactive() {
                 println!("Sorry, that's incorrect.");
+            } else {
+                return Err(WalletError::Failed {
+                    msg: String::from("incorrect authentication"),
+                });
             }
         };
 

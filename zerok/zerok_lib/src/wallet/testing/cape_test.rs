@@ -378,7 +378,10 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> MockCapeBackend<'a, Meta> {
         ledger: Arc<Mutex<MockCapeLedger<'a>>>,
         loader: &mut impl WalletLoader<Meta = Meta>,
     ) -> Result<Self, WalletError> {
-        let storage = AtomicWalletStorage::new(loader)?;
+        // Workaround for https://github.com/SpectrumXYZ/atomicstore/issues/2, which affects logs
+        // containing more than one entry in a file. We simply set the fill size small enough that
+        // there will only ever be one entry per file.
+        let storage = AtomicWalletStorage::new(loader, 128)?;
         Ok(Self {
             key_stream: storage.key_stream(),
             storage: Arc::new(Mutex::new(storage)),
@@ -717,7 +720,7 @@ impl<'a> SystemUnderTest<'a> for CapeTest {
             path: self.temp_dir(),
             key: KeyTree::random(&mut self.rng).unwrap().0,
         };
-        AtomicWalletStorage::new(&mut loader).unwrap()
+        AtomicWalletStorage::new(&mut loader, 128).unwrap()
     }
 
     async fn create_backend(

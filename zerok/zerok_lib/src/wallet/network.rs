@@ -47,7 +47,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
         validator_url: Url,
         loader: &mut impl WalletLoader<Meta = Meta>,
     ) -> Result<Self, WalletError> {
-        let storage = AtomicWalletStorage::new(loader)?;
+        let storage = AtomicWalletStorage::new(loader, 1024)?;
         Ok(Self {
             query_client: Self::client(query_url)?,
             bulletin_client: Self::client(bulletin_url)?,

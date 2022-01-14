@@ -58,7 +58,12 @@ mod serde_ark_unchecked {
 }
 
 // Serialization intermediate for the dynamic part of a WalletState.
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[ser_test(
+    arbitrary,
+    types(AAPLedger),
+    types(crate::cape_ledger::CapeLedger),
+    ark(false)
+)]
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(bound = "")]
 struct WalletSnapshot<L: Ledger> {
@@ -176,7 +181,10 @@ pub struct AtomicWalletStorage<'a, L: Ledger, Meta: Serialize + DeserializeOwned
 }
 
 impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStorage<'a, L, Meta> {
-    pub fn new(loader: &mut impl WalletLoader<Meta = Meta>) -> Result<Self, WalletError> {
+    pub fn new(
+        loader: &mut impl WalletLoader<Meta = Meta>,
+        file_fill_size: u64,
+    ) -> Result<Self, WalletError> {
         let directory = loader.location();
         let mut atomic_loader =
             AtomicStoreLoader::load(&directory, "wallet").context(PersistenceError)?;
@@ -202,22 +210,48 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
         };
 
         let adaptor = EncryptingResourceAdapter::<()>::new(key.derive_sub_tree("enc".as_bytes()));
-        let static_data =
-            RollingLog::load(&mut atomic_loader, adaptor.cast(), "wallet_static", 1024)
-                .context(PersistenceError)?;
-        let dynamic_state =
-            RollingLog::load(&mut atomic_loader, adaptor.cast(), "wallet_dyn", 1024)
-                .context(PersistenceError)?;
-        let auditable_assets =
-            AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_aud", 1024)
-                .context(PersistenceError)?;
-        let defined_assets =
-            AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_def", 1024)
-                .context(PersistenceError)?;
-        let txn_history = AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_txns", 1024)
-            .context(PersistenceError)?;
-        let keys = AppendLog::load(&mut atomic_loader, adaptor.cast(), "wallet_keys", 1024)
-            .context(PersistenceError)?;
+        let static_data = RollingLog::load(
+            &mut atomic_loader,
+            adaptor.cast(),
+            "wallet_static",
+            file_fill_size,
+        )
+        .context(PersistenceError)?;
+        let dynamic_state = RollingLog::load(
+            &mut atomic_loader,
+            adaptor.cast(),
+            "wallet_dyn",
+            file_fill_size,
+        )
+        .context(PersistenceError)?;
+        let auditable_assets = AppendLog::load(
+            &mut atomic_loader,
+            adaptor.cast(),
+            "wallet_aud",
+            file_fill_size,
+        )
+        .context(PersistenceError)?;
+        let defined_assets = AppendLog::load(
+            &mut atomic_loader,
+            adaptor.cast(),
+            "wallet_def",
+            file_fill_size,
+        )
+        .context(PersistenceError)?;
+        let txn_history = AppendLog::load(
+            &mut atomic_loader,
+            adaptor.cast(),
+            "wallet_txns",
+            file_fill_size,
+        )
+        .context(PersistenceError)?;
+        let keys = AppendLog::load(
+            &mut atomic_loader,
+            adaptor.cast(),
+            "wallet_keys",
+            file_fill_size,
+        )
+        .context(PersistenceError)?;
         let store = AtomicStore::open(atomic_loader).context(PersistenceError)?;
 
         Ok(Self {
@@ -607,7 +641,7 @@ mod tests {
             key: KeyTree::random(&mut rng).unwrap().0,
         };
         {
-            let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::new(&mut loader, 1024).unwrap();
             assert!(!storage.exists());
             storage.create(&state).await.unwrap();
             assert!(storage.exists());
@@ -624,7 +658,7 @@ mod tests {
         // load comes only from persistent storage and not from any in-memory state of the first
         // instance.
         let loaded = {
-            let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::new(&mut loader, 1024).unwrap();
             storage.load().await.unwrap()
         };
         assert_wallet_states_eq(&stored, &loaded);
@@ -687,12 +721,12 @@ mod tests {
 
         // Snapshot the modified dynamic state and then reload.
         {
-            let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::new(&mut loader, 1024).unwrap();
             storage.store_snapshot(&stored).await.unwrap();
             storage.commit().await;
         }
         let loaded = {
-            let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::new(&mut loader, 1024).unwrap();
             storage.load().await.unwrap()
         };
         assert_wallet_states_eq(&stored, &loaded);
@@ -713,7 +747,7 @@ mod tests {
             .user_keys
             .insert(user_key.address(), user_key.clone());
         {
-            let mut storage = AtomicWalletStorage::<AAPLedger, _>::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::<AAPLedger, _>::new(&mut loader, 1024).unwrap();
             storage.store_auditable_asset(&asset).await.unwrap();
             storage
                 .store_key(&RoleKeyPair::Auditor(audit_key))
@@ -730,7 +764,7 @@ mod tests {
             storage.commit().await;
         }
         let loaded = {
-            let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::new(&mut loader, 1024).unwrap();
             storage.load().await.unwrap()
         };
         assert_wallet_states_eq(&stored, &loaded);
@@ -741,7 +775,7 @@ mod tests {
             .defined_assets
             .insert(asset.code, (asset.clone(), seed, vec![]));
         {
-            let mut storage = AtomicWalletStorage::<AAPLedger, _>::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::<AAPLedger, _>::new(&mut loader, 1024).unwrap();
             storage
                 .store_defined_asset(&asset, seed, &[])
                 .await
@@ -749,7 +783,7 @@ mod tests {
             storage.commit().await;
         }
         let loaded = {
-            let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::new(&mut loader, 1024).unwrap();
             storage.load().await.unwrap()
         };
         assert_wallet_states_eq(&stored, &loaded);
@@ -763,7 +797,7 @@ mod tests {
 
         // Make a change to one of the data structures, but revert it.
         let loaded = {
-            let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::new(&mut loader, 1024).unwrap();
             storage
                 .store_auditable_asset(&AssetDefinition::native())
                 .await
@@ -777,7 +811,7 @@ mod tests {
 
         // Change multiple data structures and revert.
         let loaded = {
-            let mut storage = AtomicWalletStorage::new(&mut loader).unwrap();
+            let mut storage = AtomicWalletStorage::new(&mut loader, 1024).unwrap();
 
             let (code, seed) = AssetCode::random(&mut rng);
             let asset = AssetDefinition::new(code, Default::default()).unwrap();
