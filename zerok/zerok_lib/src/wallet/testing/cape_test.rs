@@ -308,6 +308,12 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
                 {
                     return Err(QueryServiceError::InvalidSignature {}.into());
                 }
+                if memos.len() != txn.txn.output_len() {
+                    return Err(QueryServiceError::WrongNumberOfMemos {
+                        expected: txn.txn.output_len(),
+                    }
+                    .into());
+                }
             }
             _ => {
                 println!("Wrap transactions don't get memos");
@@ -572,35 +578,6 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         memos: Vec<ReceiverMemo>,
         sig: Signature,
     ) -> Result<(), WalletError> {
-        let txn = self.get_transaction(block_id, txn_id).await?;
-
-        // Validate memos.
-        match &txn {
-            CapeTransition::Transaction(CapeTransaction::AAP(note)) => {
-                if note.verify_receiver_memos_signature(&memos, &sig).is_err() {
-                    return Err(QueryServiceError::InvalidSignature {}.into());
-                }
-                if memos.len() != txn.output_len() {
-                    return Err(QueryServiceError::WrongNumberOfMemos {
-                        expected: txn.output_len(),
-                    }
-                    .into());
-                }
-            }
-            CapeTransition::Transaction(CapeTransaction::Burn { xfr, .. }) => {
-                if TransactionNote::Transfer(Box::new(*xfr.clone()))
-                    .verify_receiver_memos_signature(&memos, &sig)
-                    .is_err()
-                {
-                    return Err(QueryServiceError::InvalidSignature {}.into());
-                }
-            }
-            _ => {
-                println!("Wrap transactions don't get memos");
-                return Err(QueryServiceError::InvalidTxnId {}.into());
-            }
-        }
-
         self.ledger
             .lock()
             .await
