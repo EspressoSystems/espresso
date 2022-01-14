@@ -1,5 +1,9 @@
 use super::{CryptoError, Wallet, WalletBackend, WalletError};
-use crate::{cape_ledger::*, cape_state::*, txn_builder::TransactionReceipt};
+use crate::{
+    cape_ledger::*,
+    cape_state::*,
+    txn_builder::{TransactionInfo, TransactionReceipt},
+};
 use async_trait::async_trait;
 use jf_aap::{
     keys::UserAddress,
@@ -117,7 +121,7 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
             .chain(dst_addr.as_bytes())
             .cloned()
             .collect::<Vec<_>>();
-        let (xfr, mut info) = self
+        let xfr_info = self
             // The owner public key of the new record opening is ignored when processing a burn. We
             // need to put some address in the receiver field though, so just use the one we have
             // handy.
@@ -130,17 +134,34 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
                 Some((2, 2)),
             )
             .await?;
-        assert_eq!(xfr.inputs_nullifiers.len(), 2);
-        assert_eq!(xfr.output_commitments.len(), 2);
-        if let Some(history) = &mut info.history {
+
+        // Only generate memos for the fee change output.
+        assert!(xfr_info.fee_output.is_some());
+        let (memos, sig) = self
+            .generate_memos(vec![xfr_info.fee_output.unwrap()], &xfr_info.sig_keypair)
+            .await?;
+
+        let mut txn_info = TransactionInfo {
+            account: xfr_info.owner_address,
+            memos,
+            sig,
+            freeze_outputs: vec![],
+            history: Some(xfr_info.history),
+            uid: None,
+            inputs: xfr_info.inputs,
+            outputs: xfr_info.outputs,
+        };
+        assert_eq!(xfr_info.note.inputs_nullifiers.len(), 2);
+        assert_eq!(xfr_info.note.output_commitments.len(), 2);
+        if let Some(history) = &mut txn_info.history {
             history.kind = CapeTransactionKind::Burn;
         }
 
         let txn = CapeTransition::Transaction(CapeTransaction::Burn {
-            xfr: Box::new(xfr),
-            ro: Box::new(info.outputs[0].clone()),
+            xfr: Box::new(xfr_info.note),
+            ro: Box::new(txn_info.outputs[0].clone()),
         });
-        self.submit(txn, info).await
+        self.submit(txn, txn_info).await
     }
 
     pub async fn approved_assets(&self) -> Vec<(AssetDefinition, Erc20Code)> {
