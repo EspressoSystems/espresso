@@ -210,12 +210,14 @@ pub struct CapeContractState {
     pub erc20_deposits: Vec<RecordCommitment>,
 }
 
-pub fn erc20_asset_description(erc20_code: &Erc20Code, sponsor: &EthereumAddr) -> String {
-    format!(
-        "TRICAPE ERC20 {} sponsored by {}",
-        hex::encode(&(erc20_code.0).0),
-        hex::encode(&sponsor.0)
-    )
+pub fn erc20_asset_description(erc20_code: &Erc20Code, sponsor: &EthereumAddr) -> Vec<u8> {
+    [
+        "TRICAPE ERC20".as_bytes(),
+        &(erc20_code.0).0.to_vec(),
+        "sponsored by".as_bytes(),
+        &sponsor.0.to_vec(),
+    ]
+    .concat()
 }
 
 fn is_erc20_asset_def_valid(
@@ -224,7 +226,7 @@ fn is_erc20_asset_def_valid(
     sponsor: &EthereumAddr,
 ) -> bool {
     let description = erc20_asset_description(erc20_code, sponsor);
-    def.code.verify_foreign(description.as_bytes()).is_ok()
+    def.code.verify_foreign(&description).is_ok()
 }
 
 #[allow(unused_variables)]

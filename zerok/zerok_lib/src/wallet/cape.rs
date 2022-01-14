@@ -60,7 +60,7 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
 
         //todo Include CAPE-specific domain separator in AssetCode derivation, once Jellyfish adds
         // support for domain separators.
-        let code = AssetCode::new_foreign(description.as_bytes());
+        let code = AssetCode::new_foreign(&description);
         let asset = AssetDefinition::new(code, aap_asset_policy).context(CryptoError)?;
 
         state
