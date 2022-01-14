@@ -287,6 +287,7 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
         if txn.memos.is_some() {
             return Err(QueryServiceError::MemosAlreadyPosted {}.into());
         }
+
         // Validate the new memos.
         match &txn.txn {
             CapeTransition::Transaction(CapeTransaction::AAP(note)) => {
@@ -307,6 +308,12 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
                 {
                     return Err(QueryServiceError::InvalidSignature {}.into());
                 }
+                if memos.len() != txn.txn.output_len() {
+                    return Err(QueryServiceError::WrongNumberOfMemos {
+                        expected: txn.txn.output_len(),
+                    }
+                    .into());
+                }
             }
             _ => {
                 println!("Wrap transactions don't get memos");
@@ -323,25 +330,13 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
             .collect::<Vec<_>>();
 
         // Store and broadcast the new memos.
-        let memos = match &txn.txn {
-            // In the case of a burn transaction, only post memos for fee change output.
-            // TODO !keyao Skip the memos of burned record when calling MockCapeNetwork::post_memos.
-            // (https://github.com/SpectrumXYZ/cape/issues/278.)
-            CapeTransition::Transaction(CapeTransaction::Burn { .. }) => izip!(
-                vec![memos[0].clone()],
-                txn.txn.output_commitments(),
-                txn.uids.iter().cloned(),
-                merkle_paths
-            )
-            .collect::<Vec<_>>(),
-            _ => izip!(
-                memos,
-                txn.txn.output_commitments(),
-                txn.uids.iter().cloned(),
-                merkle_paths
-            )
-            .collect::<Vec<_>>(),
-        };
+        let memos = izip!(
+            memos,
+            txn.txn.output_commitments(),
+            txn.uids.iter().cloned(),
+            merkle_paths
+        )
+        .collect::<Vec<_>>();
         txn.memos = Some((memos.clone(), sig));
         let event = LedgerEvent::Memos {
             outputs: memos,

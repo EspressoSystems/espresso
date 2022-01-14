@@ -43,8 +43,7 @@ use jf_aap::{
         AssetCode, AssetCodeSeed, AssetDefinition, AssetPolicy, FreezeFlag, Nullifier,
         ReceiverMemo, RecordCommitment, RecordOpening,
     },
-    transfer::TransferNote,
-    MerkleLeafProof, MerklePath, Signature, TransactionNote,
+    KeyPair as SigKeyPair, MerkleLeafProof, MerklePath, Signature, TransactionNote,
 };
 use ledger::{
     traits::{
@@ -1542,9 +1541,20 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         spec: TransferSpec<'k>,
-    ) -> Result<(TransferNote, TransactionInfo<L>), WalletError> {
+    ) -> Result<TransferInfo<L>, WalletError> {
         self.txn_state
             .transfer(spec, &self.proving_keys.xfr, &mut session.rng)
+            .context(TransactionError)
+    }
+
+    pub fn generate_memos(
+        &mut self,
+        session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
+        records: Vec<RecordOpening>,
+        sig_keypair: &SigKeyPair,
+    ) -> Result<(Vec<ReceiverMemo>, Signature), WalletError> {
+        self.txn_state
+            .generate_memos(records, &mut session.rng, sig_keypair)
             .context(TransactionError)
     }
 
@@ -1972,6 +1982,8 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
 
     /// Basic transfer without customization.
     /// To add transfer size requirement, call `build_transfer` with a specified `xfr_size_requirement`.
+    /// To skip an output when generating memos, call `genearte_memos` after removing the record from
+    /// the list of outputs.
     pub async fn transfer(
         &mut self,
         account: &UserAddress,
@@ -1979,10 +1991,31 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         receivers: &[(UserAddress, u64)],
         fee: u64,
     ) -> Result<TransactionReceipt<L>, WalletError> {
-        let (note, info) = self
+        let xfr_info = self
             .build_transfer(account, asset, receivers, fee, vec![], None)
             .await?;
-        self.submit_aap(TransactionNote::Transfer(Box::new(note)), info)
+        let memos_rec = match xfr_info.fee_output {
+            Some(ro) => {
+                let mut rec = vec![ro];
+                rec.append(&mut xfr_info.outputs.clone());
+                rec
+            }
+            None => xfr_info.outputs.clone(),
+        };
+        let (memos, sig) = self
+            .generate_memos(memos_rec, &xfr_info.sig_keypair)
+            .await?;
+        let txn_info = TransactionInfo {
+            account: xfr_info.owner_address,
+            memos,
+            sig,
+            freeze_outputs: vec![],
+            history: Some(xfr_info.history),
+            uid: None,
+            inputs: xfr_info.inputs,
+            outputs: xfr_info.outputs,
+        };
+        self.submit_aap(TransactionNote::Transfer(Box::new(xfr_info.note)), txn_info)
             .await
     }
 
@@ -1994,7 +2027,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         fee: u64,
         bound_data: Vec<u8>,
         xfr_size_requirement: Option<(usize, usize)>,
-    ) -> Result<(TransferNote, TransactionInfo<L>), WalletError> {
+    ) -> Result<TransferInfo<L>, WalletError> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         let receivers = iter(receivers)
             .then(|(addr, amt)| {
@@ -2017,6 +2050,15 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
             xfr_size_requirement,
         };
         state.build_transfer(session, spec)
+    }
+
+    pub async fn generate_memos(
+        &mut self,
+        records: Vec<RecordOpening>,
+        sig_keypair: &SigKeyPair,
+    ) -> Result<(Vec<ReceiverMemo>, Signature), WalletError> {
+        let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+        state.generate_memos(session, records, sig_keypair)
     }
 
     pub async fn submit(
