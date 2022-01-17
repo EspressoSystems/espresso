@@ -23,7 +23,7 @@ use jf_aap::{
         Nullifier, ReceiverMemo, RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness, MerkleLeafProof, MerkleTree, Signature,
+    AccMemberWitness, KeyPair, MerkleLeafProof, MerkleTree, Signature,
 };
 use jf_utils::tagged_blob;
 use key_set::KeySet;
@@ -837,6 +837,18 @@ where
     }
 }
 
+/// Transfer information that will be used to generate memos and construct additional transaction
+/// information.
+pub struct TransferInfo<L: Ledger> {
+    pub note: TransferNote,
+    pub owner_address: UserAddress,
+    pub sig_keypair: KeyPair,
+    pub history: TransactionHistoryEntry<L>,
+    pub inputs: Vec<RecordOpening>,
+    pub outputs: Vec<RecordOpening>,
+    pub fee_output: Option<RecordOpening>,
+}
+
 pub struct TransferSpec<'a> {
     pub owner_keypair: &'a UserKeyPair,
     pub asset: &'a AssetCode,
@@ -1015,7 +1027,7 @@ impl<L: Ledger> TransactionState<L> {
         spec: TransferSpec<'k>,
         proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
         rng: &mut ChaChaRng,
-    ) -> Result<(TransferNote, TransactionInfo<L>), TransactionError> {
+    ) -> Result<TransferInfo<L>, TransactionError> {
         if *spec.asset == AssetCode::native() {
             self.transfer_native(spec, proving_keys, rng)
         } else {
@@ -1028,7 +1040,7 @@ impl<L: Ledger> TransactionState<L> {
         spec: TransferSpec<'k>,
         proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
         rng: &mut ChaChaRng,
-    ) -> Result<(TransferNote, TransactionInfo<L>), TransactionError> {
+    ) -> Result<TransferInfo<L>, TransactionError> {
         let total_output_amount: u64 = spec
             .receivers
             .iter()
@@ -1109,13 +1121,6 @@ impl<L: Ledger> TransactionState<L> {
             .chain(outputs.into_iter())
             .collect();
 
-        let memos: Vec<_> = outputs
-            .iter()
-            .map(|ro| ReceiverMemo::from_ro(rng, ro, &[]))
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        let sig = sign_receiver_memos(&kp, &memos).context(CryptoError)?;
-
         // Build auxiliary info.
         let history = TransactionHistoryEntry {
             time: Local::now(),
@@ -1129,19 +1134,15 @@ impl<L: Ledger> TransactionState<L> {
                 .collect(),
             receipt: None,
         };
-        Ok((
+        Ok(TransferInfo {
             note,
-            TransactionInfo {
-                account: spec.owner_keypair.address(),
-                memos,
-                sig,
-                freeze_outputs: vec![],
-                history: Some(history),
-                uid: None,
-                inputs: input_records.into_iter().map(|(ro, _)| ro).collect(),
-                outputs,
-            },
-        ))
+            owner_address: spec.owner_keypair.address(),
+            sig_keypair: kp,
+            history,
+            inputs: input_records.into_iter().map(|(ro, _)| ro).collect(),
+            outputs,
+            fee_output: None,
+        })
     }
 
     fn transfer_non_native<'a, 'k>(
@@ -1149,7 +1150,7 @@ impl<L: Ledger> TransactionState<L> {
         spec: TransferSpec<'k>,
         proving_keys: &'k KeySet<TransferProvingKey<'a>, key_set::OrderByOutputs>,
         rng: &mut ChaChaRng,
-    ) -> Result<(TransferNote, TransactionInfo<L>), TransactionError> {
+    ) -> Result<TransferInfo<L>, TransactionError> {
         assert_ne!(
             *spec.asset,
             AssetCode::native(),
@@ -1230,7 +1231,7 @@ impl<L: Ledger> TransactionState<L> {
 
         // generate transfer note and receiver memos
         let (fee_info, fee_out_rec) = TxnFeeInfo::new(rng, fee_input, spec.fee).unwrap();
-        let (note, sig_key) = TransferNote::generate_non_native(
+        let (note, sig_keypair) = TransferNote::generate_non_native(
             rng,
             inputs,
             &outputs,
@@ -1240,13 +1241,6 @@ impl<L: Ledger> TransactionState<L> {
             spec.bound_data,
         )
         .context(CryptoError)?;
-        let memos = vec![&fee_out_rec]
-            .into_iter()
-            .chain(outputs.iter())
-            .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        let sig = sign_receiver_memos(&sig_key, &memos).unwrap();
 
         // Build auxiliary info.
         let history = TransactionHistoryEntry {
@@ -1261,19 +1255,31 @@ impl<L: Ledger> TransactionState<L> {
                 .collect(),
             receipt: None,
         };
-        Ok((
+        Ok(TransferInfo {
             note,
-            TransactionInfo {
-                account: spec.owner_keypair.address(),
-                memos,
-                sig,
-                freeze_outputs: vec![],
-                history: Some(history),
-                uid: None,
-                inputs: input_records.into_iter().map(|(ro, _)| ro).collect(),
-                outputs,
-            },
-        ))
+            owner_address: spec.owner_keypair.address(),
+            sig_keypair,
+            history,
+            inputs: input_records.into_iter().map(|(ro, _)| ro).collect(),
+            outputs,
+            fee_output: Some(fee_out_rec),
+        })
+    }
+
+    pub fn generate_memos(
+        &mut self,
+        records: Vec<RecordOpening>,
+        rng: &mut ChaChaRng,
+        sig_keypair: &KeyPair,
+    ) -> Result<(Vec<ReceiverMemo>, Signature), TransactionError> {
+        let memos: Vec<_> = records
+            .iter()
+            .map(|ro| ReceiverMemo::from_ro(rng, ro, &[]))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let sig = sign_receiver_memos(sig_keypair, &memos).context(CryptoError)?;
+
+        Ok((memos, sig))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1305,7 +1311,7 @@ impl<L: Ledger> TransactionState<L> {
             .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let (note, sig_key) = jf_aap::mint::MintNote::generate(
+        let (note, sig_keypair) = jf_aap::mint::MintNote::generate(
             rng,
             mint_record.clone(),
             *seed,
@@ -1314,7 +1320,7 @@ impl<L: Ledger> TransactionState<L> {
             proving_key,
         )
         .context(CryptoError)?;
-        let sig = sign_receiver_memos(&sig_key, &memos).unwrap();
+        let sig = sign_receiver_memos(&sig_keypair, &memos).unwrap();
 
         // Build auxiliary info.
         let history = TransactionHistoryEntry {
@@ -1379,7 +1385,7 @@ impl<L: Ledger> TransactionState<L> {
 
         // generate transfer note and receiver memos
         let (fee_info, fee_out_rec) = TxnFeeInfo::new(rng, fee_input, fee).unwrap();
-        let (note, sig_key, outputs) =
+        let (note, sig_keypair, outputs) =
             FreezeNote::generate(rng, inputs, fee_info, proving_key).context(CryptoError)?;
         let memos = vec![&fee_out_rec]
             .into_iter()
@@ -1387,7 +1393,7 @@ impl<L: Ledger> TransactionState<L> {
             .map(|r| ReceiverMemo::from_ro(rng, r, &[]))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let sig = sign_receiver_memos(&sig_key, &memos).unwrap();
+        let sig = sign_receiver_memos(&sig_keypair, &memos).unwrap();
 
         // Build auxiliary info.
         let history = TransactionHistoryEntry {
