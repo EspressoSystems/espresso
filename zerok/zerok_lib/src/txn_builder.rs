@@ -709,7 +709,7 @@ where
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MintInfo {
     pub seed: AssetCodeSeed,
     pub desc: Vec<u8>,
@@ -721,7 +721,7 @@ impl MintInfo {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AssetInfo {
     pub asset: AssetDefinition,
     pub mint_info: Option<MintInfo>,

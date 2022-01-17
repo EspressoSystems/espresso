@@ -4,9 +4,14 @@ use crate::{
         open_aap_audit_memo, open_xfr_audit_memo, traits::*, AAPTransactionKind, AuditError,
         AuditMemoOpening,
     },
+    ser_test,
     state::ValidationError,
-    util::commit::{Commitment, Committable, RawCommitmentBuilder},
+    util::{
+        arbitrary_wrappers::*,
+        commit::{Commitment, Committable, RawCommitmentBuilder},
+    },
 };
+use arbitrary::{Arbitrary, Unstructured};
 use jf_aap::{
     keys::{AuditorKeyPair, AuditorPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment, RecordOpening},
@@ -22,6 +27,7 @@ use std::iter::repeat;
 //  * Some(true): definitely in the set
 //  * Some(false): definitely not in the set
 //  * None: outside the sparse domain of this set, query a full node for a definitive answer
+#[ser_test(arbitrary, ark(false))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CapeNullifierSet(HashMap<Nullifier, bool>);
 
@@ -43,6 +49,13 @@ impl NullifierSet for CapeNullifierSet {
             self.0.insert(*n, true);
         }
         Ok(())
+    }
+}
+
+impl<'a> Arbitrary<'a> for CapeNullifierSet {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let m: HashMap<ArbitraryNullifier, bool> = u.arbitrary()?;
+        Ok(Self(m.into_iter().map(|(k, v)| (k.into(), v)).collect()))
     }
 }
 
@@ -202,7 +215,8 @@ impl Block for CapeBlock {
 // results of Ethereum query services, and our local validator stores just enough information to
 // satisfy the Validator interface required by the wallet. Thus, the CAPE integration for the
 // Validator interface is actually more Truster than Validator.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[ser_test(arbitrary, ark(false))]
+#[derive(Arbitrary, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapeTruster {
     // The current timestamp. The only requirement is that this is a monotonically increasing value,
     // but in this implementation it tracks the number of blocks committed.

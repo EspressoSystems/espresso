@@ -44,6 +44,7 @@ pub mod arbitrary_wrappers {
     use jf_aap::{BaseField, KeyPair};
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 
+    #[derive(PartialEq, Eq, Hash)]
     pub struct ArbitraryNullifier(Nullifier);
 
     impl From<ArbitraryNullifier> for Nullifier {
