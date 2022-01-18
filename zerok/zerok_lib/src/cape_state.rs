@@ -48,9 +48,14 @@ impl CapeTransaction {
     pub fn commitments(&self) -> Vec<RecordCommitment> {
         match self {
             CapeTransaction::Burn { xfr, .. } => {
-                // All valid burn transactions have two outputs, but only the first one (the fee
-                // change output) is added to the Merkle tree. The second output is burned.
-                vec![xfr.output_commitments[0]]
+                // All valid burn transactions have at least two outputs.
+                //
+                // The first output is the fee change record, the second
+                // output is burned, and the rest are normal outputs which
+                // get added to the Merkle tree
+                let mut ret = xfr.output_commitments.clone();
+                ret.remove(1); // remove the burnt record
+                ret
             }
             CapeTransaction::AAP(note) => note.output_commitments(),
         }
@@ -58,10 +63,12 @@ impl CapeTransaction {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Erc20Code(pub EthereumAddr);
-
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EthereumAddr(pub [u8; 20]);
+
+// ERC20 assets are identified by the address of the smart contract
+// controlling them.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Erc20Code(pub EthereumAddr);
 
 impl EthereumAddr {
     pub fn as_bytes(&self) -> &[u8; 20] {
@@ -414,8 +421,9 @@ impl CapeContractState {
                                 let num_inputs = xfr.inputs_nullifiers.len();
                                 let num_outputs = xfr.output_commitments.len();
 
-                                // TODO: is this correct?
-                                if (num_inputs, num_outputs) != (2, 2) {
+                                // there must be at least 2 outputs for one
+                                // output to be the burned record.
+                                if num_outputs < 2 {
                                     return Err(CapeValidationError::UnsupportedBurnSize {
                                         num_inputs,
                                         num_outputs,
