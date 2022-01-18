@@ -83,8 +83,20 @@ pub struct TransactionId(pub BlockId, pub usize);
 // UserAddress from jf_aap is just a type alias for VerKey, which serializes with the tag VERKEY,
 // which is confusing. This newtype struct lets us a define a more user-friendly tag.
 #[tagged_blob("ADDR")]
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq, Hash)]
 pub struct UserAddress(pub jf_aap::keys::UserAddress);
+
+impl From<jf_aap::keys::UserAddress> for UserAddress {
+    fn from(addr: jf_aap::keys::UserAddress) -> Self {
+        Self(addr)
+    }
+}
+
+impl From<UserAddress> for jf_aap::keys::UserAddress {
+    fn from(addr: UserAddress) -> Self {
+        addr.0
+    }
+}
 
 pub use jf_aap::keys::UserPubKey;
 
