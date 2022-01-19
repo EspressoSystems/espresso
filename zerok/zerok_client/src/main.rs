@@ -1,5 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////
-// The AAP Wallet Frontend
+// The Spectrum Wallet Frontend
 //
 // For now, this "frontend" is simply a comand-line read-eval-print loop which
 // allows the user to enter commands for a wallet interactively.
@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
 use zerok_lib::{
-    ledger::AAPLedger,
+    ledger::SpectrumLedger,
     wallet::{
         cli::*,
         loader::{LoadMethod, LoaderMetadata, WalletLoader},
@@ -99,10 +99,10 @@ impl CLIArgs for Args {
     }
 }
 
-struct AapCli;
+struct SpectrumCli;
 
-impl<'a> CLI<'a> for AapCli {
-    type Ledger = AAPLedger;
+impl<'a> CLI<'a> for SpectrumCli {
+    type Ledger = SpectrumLedger;
     type Backend = NetworkBackend<'a, LoaderMetadata>;
     type Args = Args;
 
@@ -120,7 +120,7 @@ impl<'a> CLI<'a> for AapCli {
 
 #[async_std::main]
 async fn main() {
-    if let Err(err) = cli_main::<AapCli>(&Args::from_args()).await {
+    if let Err(err) = cli_main::<SpectrumCli>(&Args::from_args()).await {
         println!("{}", err);
         exit(1);
     }

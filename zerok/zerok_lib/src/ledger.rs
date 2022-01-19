@@ -143,6 +143,7 @@ pub mod traits {
 
     pub trait Ledger: Copy + Debug + Send + Sync {
         type Validator: traits::Validator;
+        fn name() -> String;
     }
 }
 
@@ -377,8 +378,12 @@ impl traits::Validator for ValidatorState {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct AAPLedger;
+pub struct SpectrumLedger;
 
-impl Ledger for AAPLedger {
+impl Ledger for SpectrumLedger {
     type Validator = ValidatorState;
+
+    fn name() -> String {
+        String::from("Spectrum")
+    }
 }

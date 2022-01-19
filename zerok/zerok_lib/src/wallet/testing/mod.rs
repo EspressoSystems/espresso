@@ -4,18 +4,18 @@
 ///
 /// This file defines a framework for testing the generic wallet with any mock backend, for any
 /// ledger. Implementations of this test interface for various backends and ledgers are in
-/// sub-modules in different files (e.g. aap_test.rs, cape_test.rs). These files also contain tests
-/// which are specific to wallets with a particular ledger type or backend, which depend on
+/// sub-modules in different files (e.g. spectrum_test.rs, cape_test.rs). These files also contain
+/// tests which are specific to wallets with a particular ledger type or backend, which depend on
 /// properties not exposed or guaranteed by the generic interface. The file tests.rs contains the
 /// test suite for the generic wallet interface, which is instantiated for each ledger/backend.
 ///
 /// Whenever the generic test suite is instantiated with a new ledger/backend, the module name for
 /// the instantiation should match the (nested) module name for ledger-specific tests. For example,
-/// we have wallet::testing::tests::aap_wallet_tests (defined in tests.rs) and we have
-/// wallet::testing::aap_test::aap_wallet_tests (defined in aap_test.rs). This makes it possible to
-/// run all of the tests for the AAP wallet by passing `aap_wallet_tests` to the test runner (and
-/// similary for CAPE, with `cape_wallet_tests`). To run all tests for all wallets, just use
-/// `wallet::testing`.
+/// we have wallet::testing::tests::spectrum_wallet_tests (defined in tests.rs) and we have
+/// wallet::testing::spectrum_test::spectrum_wallet_tests (defined in spectrum_test.rs). This makes
+/// it possible to run all of the tests for the Spectrum wallet by passing `spectrum_wallet_tests`
+/// to the test runner (and similary for CAPE, with `cape_wallet_tests`). To run all tests for all
+/// wallets, just use `wallet::testing`.
 use super::*;
 use crate::{
     state::{
@@ -488,6 +488,6 @@ impl<L: Ledger + 'static> MockEventSource<L> {
     }
 }
 
-mod aap_test;
 mod cape_test;
+mod spectrum_test;
 mod tests;

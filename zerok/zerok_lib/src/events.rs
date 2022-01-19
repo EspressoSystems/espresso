@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 #[derive(Clone, Debug, Serialize, Deserialize, strum_macros::AsStaticStr)]
 #[serde(bound = "")]
-pub enum LedgerEvent<L: Ledger = AAPLedger> {
+pub enum LedgerEvent<L: Ledger = SpectrumLedger> {
     /// A new block was added to the ledger.
     ///
     /// Includes the block contents, the unique identifier for the block, and the new state

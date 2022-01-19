@@ -270,4 +270,8 @@ pub struct CapeLedger;
 
 impl Ledger for CapeLedger {
     type Validator = CapeTruster;
+
+    fn name() -> String {
+        String::from("CAPE")
+    }
 }

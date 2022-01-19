@@ -392,10 +392,10 @@ impl TransactionStatus {
     }
 }
 
-#[ser_test(arbitrary, types(AAPLedger))]
+#[ser_test(arbitrary, types(SpectrumLedger))]
 #[tagged_blob("TXN")]
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct TransactionReceipt<L: Ledger = AAPLedger> {
+pub struct TransactionReceipt<L: Ledger = SpectrumLedger> {
     pub uid: TransactionUID<L>,
     pub fee_nullifier: Nullifier,
     pub submitter: UserAddress,
@@ -422,7 +422,7 @@ where
     }
 }
 
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[ser_test(arbitrary, types(SpectrumLedger), ark(false))]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(bound = "")]
 pub struct PendingTransaction<L: Ledger> {
@@ -462,7 +462,7 @@ impl<L: Ledger> PendingTransaction<L> {
     }
 }
 
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[ser_test(arbitrary, types(SpectrumLedger), ark(false))]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(bound = "")]
 pub struct TransactionAwaitingMemos<L: Ledger> {
@@ -492,7 +492,7 @@ where
 
 // Serialization intermediate for TransactionDatabase, which eliminates the redundancy of the
 // in-memory indices in TransactionDatabase.
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[ser_test(arbitrary, types(SpectrumLedger), ark(false))]
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(bound = "")]
 struct TransactionStorage<L: Ledger> {
@@ -519,7 +519,7 @@ where
     }
 }
 
-#[ser_test(arbitrary, types(AAPLedger))]
+#[ser_test(arbitrary, types(SpectrumLedger))]
 #[tagged_blob("TXUID")]
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct TransactionUID<L: Ledger>(pub TransactionHash<L>);
@@ -547,7 +547,7 @@ where
     }
 }
 
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[ser_test(arbitrary, types(SpectrumLedger), ark(false))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(from = "TransactionStorage<L>", into = "TransactionStorage<L>")]
 #[serde(bound = "")]
@@ -773,7 +773,7 @@ impl<L: Ledger> PartialEq<Self> for TransactionHistoryEntry<L> {
 
 // Additional information about a transaction not included in the note, needed to submit it and
 // track it after submission..
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[ser_test(arbitrary, types(SpectrumLedger), ark(false))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct TransactionInfo<L: Ledger> {
@@ -867,10 +867,10 @@ pub type CommittedTxn<'a> = (u64, u64, &'a mut [(u64, bool)]);
 // a never expired target
 pub const UNEXPIRED_VALID_UNTIL: u64 = 2u64.pow(jf_aap::constants::MAX_TIMESTAMP_LEN as u32) - 1;
 
-#[ser_test(arbitrary, types(AAPLedger), ark(false))]
+#[ser_test(arbitrary, types(SpectrumLedger), ark(false))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct TransactionState<L: Ledger = AAPLedger> {
+pub struct TransactionState<L: Ledger = SpectrumLedger> {
     // sequence number of the last event processed
     pub now: EventIndex,
     // validator

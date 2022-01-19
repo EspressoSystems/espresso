@@ -1,5 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////
-// The AAP Wallet Frontend
+// The generic AAP Wallet Frontend
 //
 // For now, this "frontend" is simply a comand-line read-eval-print loop which
 // allows the user to enter commands for a wallet interactively.
@@ -773,7 +773,8 @@ async fn repl<'a, C: CLI<'a>>(args: &'a C::Args) -> Result<(), WalletError> {
     };
 
     println!(
-        "Welcome to the AAP wallet, version {}",
+        "Welcome to the {} wallet, version {}",
+        C::Ledger::name(),
         env!("CARGO_PKG_VERSION")
     );
     println!("(c) 2021 Translucence Research, Inc.");

@@ -60,7 +60,7 @@ mod serde_ark_unchecked {
 // Serialization intermediate for the dynamic part of a WalletState.
 #[ser_test(
     arbitrary,
-    types(AAPLedger),
+    types(SpectrumLedger),
     types(crate::cape_ledger::CapeLedger),
     ark(false)
 )]
@@ -747,7 +747,8 @@ mod tests {
             .user_keys
             .insert(user_key.address(), user_key.clone());
         {
-            let mut storage = AtomicWalletStorage::<AAPLedger, _>::new(&mut loader, 1024).unwrap();
+            let mut storage =
+                AtomicWalletStorage::<SpectrumLedger, _>::new(&mut loader, 1024).unwrap();
             storage.store_auditable_asset(&asset).await.unwrap();
             storage
                 .store_key(&RoleKeyPair::Auditor(audit_key))
@@ -775,7 +776,8 @@ mod tests {
             .defined_assets
             .insert(asset.code, (asset.clone(), seed, vec![]));
         {
-            let mut storage = AtomicWalletStorage::<AAPLedger, _>::new(&mut loader, 1024).unwrap();
+            let mut storage =
+                AtomicWalletStorage::<SpectrumLedger, _>::new(&mut loader, 1024).unwrap();
             storage
                 .store_defined_asset(&asset, seed, &[])
                 .await
@@ -846,7 +848,7 @@ mod tests {
                 .store_transaction(TransactionHistoryEntry {
                     time: Local::now(),
                     asset: asset.code,
-                    kind: TransactionKind::<AAPLedger>::send(),
+                    kind: TransactionKind::<SpectrumLedger>::send(),
                     sender: Some(user_key.address()),
                     receivers: vec![],
                     receipt: None,
