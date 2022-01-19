@@ -329,6 +329,9 @@ pub trait SystemUnderTest<'a>: Default + Send + Sync {
                 .add_user_key(key_pair.clone(), Default::default())
                 .await
                 .unwrap();
+            // Wait for the wallet to find any records already belonging to this key from the
+            // initial grants.
+            wallet.await_key_scan(&key_pair.address()).await.unwrap();
             wallets.push((wallet, key_pair.address()));
         }
 
@@ -360,11 +363,7 @@ pub trait SystemUnderTest<'a>: Default + Send + Sync {
         // Since we're syncing with the time stamp from the most recent event, the wallets should
         // be in a stable state once they have processed up to that event. Check that each wallet
         // has persisted all of its in-memory state at this point.
-        let ledger = ledger.lock().await;
-        for ((wallet, _), storage) in wallets.iter().zip(&ledger.storage) {
-            let WalletSharedState { state, .. } = &*wallet.mutex.lock().await;
-            assert_wallet_states_eq(state, &storage.lock().await.load().await.unwrap());
-        }
+        self.check_storage(ledger, wallets).await;
     }
 
     async fn sync_with(
@@ -374,6 +373,18 @@ pub trait SystemUnderTest<'a>: Default + Send + Sync {
     ) {
         println!("waiting for sync point {}", t);
         future::join_all(wallets.iter().map(|(wallet, _)| wallet.sync(t))).await;
+    }
+
+    async fn check_storage(
+        &self,
+        ledger: &Arc<Mutex<MockLedger<'a, Self::Ledger, Self::MockNetwork, Self::MockStorage>>>,
+        wallets: &[(Wallet<'a, Self::MockBackend, Self::Ledger>, UserAddress)],
+    ) {
+        let ledger = ledger.lock().await;
+        for ((wallet, _), storage) in wallets.iter().zip(&ledger.storage) {
+            let WalletSharedState { state, .. } = &*wallet.mutex.lock().await;
+            assert_wallet_states_eq(state, &storage.lock().await.load().await.unwrap());
+        }
     }
 }
 

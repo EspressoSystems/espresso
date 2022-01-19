@@ -1410,6 +1410,87 @@ mod generic_wallet_tests {
         .unwrap();
     }
 
+    #[async_std::test]
+    async fn test_generate_user_key<'a, T: SystemUnderTest<'a>>() {
+        let mut t = T::default();
+        let mut now = Instant::now();
+        let (ledger, mut wallets) = t.create_test_network(&[(3, 4)], vec![0, 4], &mut now).await;
+
+        // Figure out the next key in `wallets[0]`s deterministic key stream without adding it to
+        // the wallet. We will use this to create a record owned by this key, _and then_ generate
+        // the key through the wallet's public interface, triggering a background ledger scan which
+        // should identify the existing record belonging to the key.
+        let key = {
+            let WalletSharedState { state, session, .. } = &mut *wallets[0].0.lock().await;
+            let key = session
+                .backend
+                .key_stream()
+                .derive_sub_tree("user".as_bytes())
+                .derive_user_keypair(&state.key_state.user.to_le_bytes());
+            session
+                .backend
+                .register_user_key(&key.pub_key())
+                .await
+                .unwrap();
+            key
+        };
+
+        // Transfer a record to `key` before we tell `wallets[0]` to generate the key, so that we
+        // can check if the background ledger scan initiated when the wallet generates the key
+        // successfully discovers the record.
+        let send_addr = wallets[1].1.clone();
+        wallets[1]
+            .0
+            .transfer(&send_addr, &AssetCode::native(), &[(key.address(), 1)], 1)
+            .await
+            .unwrap();
+        t.sync(&ledger, &wallets).await;
+        // The receiving wallet doesn't initially get the new balance, because it hasn't added the
+        // key yet.
+        assert_eq!(
+            wallets[0]
+                .0
+                .balance(&key.address(), &AssetCode::native())
+                .await,
+            0
+        );
+
+        // Now add the key and check that the scan discovers the existing record.
+        assert_eq!(
+            key.pub_key(),
+            wallets[0]
+                .0
+                .generate_user_key(Some(Default::default()))
+                .await
+                .unwrap()
+        );
+        t.check_storage(&ledger, &wallets).await;
+        wallets[0].0.await_key_scan(&key.address()).await.unwrap();
+        assert_eq!(
+            wallets[0]
+                .0
+                .balance(&key.address(), &AssetCode::native())
+                .await,
+            1
+        );
+
+        // Now check that the regular event handling loop discovers records owned by this key going
+        //forwards.
+        wallets[1]
+            .0
+            .transfer(&send_addr, &AssetCode::native(), &[(key.address(), 1)], 1)
+            .await
+            .unwrap();
+        t.sync(&ledger, &wallets).await;
+        assert_eq!(
+            wallets[0]
+                .0
+                .balance(&key.address(), &AssetCode::native())
+                .await,
+            2
+        );
+    }
+
     #[instantiate_tests(<'static, aap_test::AAPTest>)]
     mod aap_wallet_tests {}
 

@@ -121,6 +121,9 @@ pub enum WalletError {
     TransactionError {
         source: crate::txn_builder::TransactionError,
     },
+    UserKeyExists {
+        pub_key: UserPubKey,
+    },
     #[snafu(display("{}", msg))]
     Failed {
         msg: String,
@@ -463,17 +466,19 @@ pub trait WalletStorage<'a, L: Ledger> {
 /// This struct should not be constructed directly, but instead a transaction should be obtained
 /// through the WalletBackend::store() method, which will automatically commit the transaction after
 /// it succeeds.
-pub struct StorageTransaction<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> {
-    storage: MutexGuard<'l, Storage>,
+pub struct StorageTransaction<'a, 'l, L: Ledger, Backend: WalletBackend<'a, L> + ?Sized> {
+    pub backend: &'l mut Backend,
     cancelled: bool,
     _phantom: std::marker::PhantomData<&'a ()>,
     _phantom2: std::marker::PhantomData<L>,
 }
 
-impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> StorageTransaction<'a, 'l, L, Storage> {
-    fn new(storage: MutexGuard<'l, Storage>) -> Self {
+impl<'a, 'l, L: Ledger, Backend: WalletBackend<'a, L> + ?Sized>
+    StorageTransaction<'a, 'l, L, Backend>
+{
+    fn new(backend: &'l mut Backend) -> Self {
         Self {
-            storage,
+            backend,
             cancelled: false,
             _phantom: Default::default(),
             _phantom2: Default::default(),
@@ -482,7 +487,7 @@ impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> StorageTransaction<'a, 'l
 
     async fn store_snapshot(&mut self, state: &WalletState<'a, L>) -> Result<(), WalletError> {
         if !self.cancelled {
-            let res = self.storage.store_snapshot(state).await;
+            let res = self.storage().await.store_snapshot(state).await;
             if res.is_err() {
                 self.cancel().await;
             }
@@ -494,7 +499,7 @@ impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> StorageTransaction<'a, 'l
 
     async fn store_auditable_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
         if !self.cancelled {
-            let res = self.storage.store_auditable_asset(asset).await;
+            let res = self.storage().await.store_auditable_asset(asset).await;
             if res.is_err() {
                 self.cancel().await;
             }
@@ -506,7 +511,7 @@ impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> StorageTransaction<'a, 'l
 
     async fn store_key<K: KeyPair>(&mut self, key: &K) -> Result<(), WalletError> {
         if !self.cancelled {
-            let res = self.storage.store_key(&key.clone().into()).await;
+            let res = self.storage().await.store_key(&key.clone().into()).await;
             if res.is_err() {
                 self.cancel().await;
             }
@@ -523,7 +528,11 @@ impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> StorageTransaction<'a, 'l
         desc: &[u8],
     ) -> Result<(), WalletError> {
         if !self.cancelled {
-            let res = self.storage.store_defined_asset(asset, seed, desc).await;
+            let res = self
+                .storage()
+                .await
+                .store_defined_asset(asset, seed, desc)
+                .await;
             if res.is_err() {
                 self.cancel().await;
             }
@@ -538,7 +547,7 @@ impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> StorageTransaction<'a, 'l
         transaction: TransactionHistoryEntry<L>,
     ) -> Result<(), WalletError> {
         if !self.cancelled {
-            let res = self.storage.store_transaction(transaction).await;
+            let res = self.storage().await.store_transaction(transaction).await;
             if res.is_err() {
                 self.cancel().await;
             }
@@ -551,13 +560,17 @@ impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> StorageTransaction<'a, 'l
     async fn cancel(&mut self) {
         if !self.cancelled {
             self.cancelled = true;
-            self.storage.revert().await;
+            self.storage().await.revert().await;
         }
+    }
+
+    async fn storage(&mut self) -> MutexGuard<'_, <Backend as WalletBackend<'a, L>>::Storage> {
+        self.backend.storage().await
     }
 }
 
-impl<'a, 'l, L: Ledger, Storage: WalletStorage<'a, L>> Drop
-    for StorageTransaction<'a, 'l, L, Storage>
+impl<'a, 'l, L: Ledger, Backend: WalletBackend<'a, L> + ?Sized> Drop
+    for StorageTransaction<'a, 'l, L, Backend>
 {
     fn drop(&mut self) {
         block_on(self.cancel())
@@ -605,19 +618,19 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
     ///     t.store_snapshot(wallet_state).await?;
     ///     // If this store fails, the effects of the previous store will be reverted.
     ///     t.store_auditable_asset(wallet_state, asset).await?;
+    ///     // Use `t.backend` to access other backend functions during the transaction. Any
+    ///     // failures here will revert all previous stores.
+    ///     t.backend.do_something().await?;
     ///     Ok(t)
     /// }).await?;
     /// ```
     async fn store<'l, F, Fut>(&'l mut self, update: F) -> Result<(), WalletError>
     where
-        F: Send + FnOnce(StorageTransaction<'a, 'l, L, Self::Storage>) -> Fut,
-        Fut: Send
-            + Future<Output = Result<StorageTransaction<'a, 'l, L, Self::Storage>, WalletError>>,
-        Self::Storage: 'l,
+        F: Send + FnOnce(StorageTransaction<'a, 'l, L, Self>) -> Fut,
+        Fut: Send + Future<Output = Result<StorageTransaction<'a, 'l, L, Self>, WalletError>>,
     {
-        let storage = self.storage().await;
-        let fut = update(StorageTransaction::new(storage)).and_then(|mut txn| async move {
-            txn.storage.commit().await;
+        let fut = update(StorageTransaction::new(self)).and_then(|txn| async move {
+            txn.backend.storage().await.commit().await;
             Ok(())
         });
         fut.await
@@ -1467,38 +1480,133 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         Ok(())
     }
 
+    // Add a new user key and set up a scan of the ledger to import records belonging to this key.
+    //
+    // `user_key` can be provided to add an arbitrary key, not necessarily derived from this
+    // wallet's deterministic key stream. Otherwise, the next key in the key stream will be derived
+    // and added.
+    //
+    // If `scan_from` is provided, a new ledger scan will be created and the corresponding event
+    // stream will be returned. Note that the caller is responsible for actually starting the task
+    // which processes this scan, since the Wallet (not the WalletState) has the data structures
+    // needed to manage tasks (the AsyncScope, mutexes, etc.).
     pub async fn add_user_key(
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
-        user_key: UserKeyPair,
+        user_key: Option<UserKeyPair>,
         scan_from: Option<EventIndex>,
-    ) -> Result<(), WalletError> {
-        Self::add_key(session, &mut self.user_keys, user_key.clone()).await?;
+    ) -> Result<
+        (
+            UserKeyPair,
+            Option<impl 'a + Stream<Item = (LedgerEvent<L>, EventSource)> + Send + Unpin>,
+        ),
+        WalletError,
+    > {
+        let generated = user_key.is_none();
+        let (user_key, revert_key_state) = match user_key {
+            Some(user_key) => {
+                if self.user_keys.contains_key(&user_key.address()) {
+                    // For other key types, adding a key that already exists is a no-op. However,
+                    // because of the background ledger scans associated with user keys, we want to
+                    // report an error, since the user may have attempted to add the same key with
+                    // two different `scan_from` parameters, and we have not actually started the
+                    // second scan in this case.
+                    return Err(WalletError::UserKeyExists {
+                        pub_key: user_key.pub_key(),
+                    });
+                }
+                (user_key, None)
+            }
+            None => {
+                let revert_key_state = self.key_state.user;
 
-        // Register the new public key with the public address->key mapping.
-        session
-            .backend
-            .register_user_key(&user_key.pub_key())
-            .await?;
+                // It is possible that we already have some of the keys that will be yielded by the
+                // deterministic key stream. For example, the user could create a second wallet with
+                // the same mnemonic, generate some keys, and then manually add those keys to this
+                // wallet. If `user_key` is not provided, this function is required to generate a
+                // new key, so keep incrementing the key stream state and generating keys until we
+                // find one that is new.
+                let user_key = loop {
+                    let user_key = session
+                        .user_key_stream
+                        .derive_user_keypair(&self.key_state.user.to_le_bytes());
+                    self.key_state.user += 1;
+                    if !self.user_keys.contains_key(&user_key.address()) {
+                        break user_key;
+                    }
+                };
+
+                (user_key, Some(revert_key_state))
+            }
+        };
 
         if let Some(scan_from) = scan_from {
             // Register a background scan of the ledger to import records belonging to this key.
-            // Note that the caller is responsible for actually starting the task which processes
-            // this scan, since the Wallet (not the WalletState) has the data structures needed to
-            // manage tasks (the AsyncScope, mutexes, etc.).
-            self.key_scans.insert(
-                user_key.address(),
-                BackgroundKeyScan {
-                    key: user_key.clone(),
-                    next_event: scan_from,
-                    to_event: self.txn_state.now,
-                    records: Default::default(),
-                    new_nullifiers: Default::default(),
-                },
-            );
+            //
+            // Note that there cannot already be a key scan registered for this key (hence the
+            // assert) since we have already checked that we don't yet have this key. This is
+            // important for the rollback logic below, in the case where we fail to persist the
+            // update.
+            assert!(self
+                .key_scans
+                .insert(
+                    user_key.address(),
+                    BackgroundKeyScan {
+                        key: user_key.clone(),
+                        next_event: scan_from,
+                        to_event: self.txn_state.now,
+                        records: Default::default(),
+                        new_nullifiers: Default::default(),
+                    },
+                )
+                .is_none());
         }
 
-        Ok(())
+        // Add the new key to our set of keys and update our persistent data structures and remote
+        // services.
+        if let Err(err) = session
+            .backend
+            .store(|mut t| async {
+                t.store_key(&user_key).await?;
+
+                // We store a new version of the dynamic state if we have registered a new key scan,
+                // or if the new key is generated from our HD key stream (in which case the
+                // `key_state` has been updated).
+                if scan_from.is_some() || generated {
+                    t.store_snapshot(self).await?;
+                }
+
+                // If we successfully updated our data structures, register the key with the
+                // network. The storage transaction will revert if this fails.
+                t.backend.register_user_key(&user_key.pub_key()).await?;
+                Ok(t)
+            })
+            .await
+        {
+            // If anything went wrong, no storage transaction was committed. Revert our changes to
+            // in-memory data structures before returning the error.
+            self.key_scans.remove(&user_key.address());
+            if let Some(old_key_state) = revert_key_state {
+                self.key_state.user = old_key_state;
+            }
+            return Err(err);
+        }
+
+        // If we succeeded, we can add the key to our local, in-memory state to reflect the changes
+        // to persistent storage.
+        self.user_keys.insert(user_key.address(), user_key.clone());
+
+        // Return the stream of events for the background scan worker task to process, if applicable.
+        let events = match scan_from {
+            Some(scan_from) => Some(
+                session
+                    .backend
+                    .subscribe(scan_from, Some(self.txn_state.now))
+                    .await,
+            ),
+            None => None,
+        };
+        Ok((user_key, events))
     }
 
     pub async fn add_audit_key(
@@ -1754,6 +1862,7 @@ pub struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
     sync_handles: Vec<(EventIndex, oneshot::Sender<()>)>,
     txn_subscribers: HashMap<TransactionUID<L>, Vec<oneshot::Sender<TransactionStatus>>>,
     pending_foreign_txns: HashMap<Nullifier, Vec<oneshot::Sender<TransactionStatus>>>,
+    pending_key_scans: HashMap<UserAddress, Vec<oneshot::Sender<()>>>,
 }
 
 impl<'a, L: Ledger, Backend: WalletBackend<'a, L>> WalletSharedState<'a, L, Backend> {
@@ -1846,6 +1955,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
             sync_handles,
             txn_subscribers,
             pending_foreign_txns,
+            pending_key_scans: Default::default(),
         }));
 
         let mut scope = unsafe {
@@ -1949,7 +2059,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         // Spawn background tasks for any scans which were in progress when the wallet was last shut
         // down.
         for (key, events) in key_scans {
-            wallet.spawn_key_scan(key, events);
+            wallet.spawn_key_scan(key, events).await;
         }
 
         Ok(wallet)
@@ -2168,19 +2278,18 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         user_key: UserKeyPair,
         scan_from: EventIndex,
     ) -> Result<(), WalletError> {
-        let mut guard = self.mutex.lock().await;
-        let WalletSharedState { state, session, .. } = &mut *guard;
-        state
-            .add_user_key(session, user_key.clone(), Some(scan_from))
-            .await?;
+        let (user_key, events) = {
+            let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+            state
+                .add_user_key(session, Some(user_key), Some(scan_from))
+                .await?
+        };
 
-        // Start a background task to scan for records belonging to the new key.
-        let events = session
-            .backend
-            .subscribe(scan_from, Some(state.txn_state.now))
-            .await;
-        drop(guard);
-        self.spawn_key_scan(user_key, events);
+        if let Some(events) = events {
+            // Start a background task to scan for records belonging to the new key.
+            self.spawn_key_scan(user_key.clone(), events).await;
+        }
+
         Ok(())
     }
 
@@ -2197,14 +2306,16 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         'a: 'l,
     {
         Box::pin(async move {
-            let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-            let user_key = session
-                .user_key_stream
-                .derive_user_keypair(&state.key_state.user.to_le_bytes());
-            state.key_state.user += 1;
-            state
-                .add_user_key(session, user_key.clone(), scan_from)
-                .await?;
+            let (user_key, events) = {
+                let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+                state.add_user_key(session, None, scan_from).await?
+            };
+
+            if let Some(events) = events {
+                // Start a background task to scan for records belonging to the new key.
+                self.spawn_key_scan(user_key.clone(), events).await;
+            }
+
             Ok(user_key.pub_key())
         })
     }
@@ -2395,11 +2506,36 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         }
     }
 
-    fn spawn_key_scan(
+    pub async fn await_key_scan(&self, address: &UserAddress) -> Result<(), oneshot::Canceled> {
+        let mut guard = self.mutex.lock().await;
+        let WalletSharedState {
+            pending_key_scans, ..
+        } = &mut *guard;
+        let senders = match pending_key_scans.get_mut(address) {
+            Some(senders) => senders,
+            // If there is not an in-progress scan for this key, return immediately.
+            None => return Ok(()),
+        };
+        let (sender, receiver) = oneshot::channel();
+        senders.push(sender);
+
+        drop(guard);
+        receiver.await
+    }
+
+    async fn spawn_key_scan(
         &mut self,
         key: UserKeyPair,
         mut events: impl 'a + Stream<Item = (LedgerEvent<L>, EventSource)> + Unpin + Send,
     ) {
+        {
+            // Register the key scan in `pending_key_scans` so that `await_key_scan` will work.
+            let WalletSharedState {
+                pending_key_scans, ..
+            } = &mut *self.mutex.lock().await;
+            pending_key_scans.insert(key.address(), vec![]);
+        }
+
         let mutex = self.mutex.clone();
         self.task_scope.spawn_cancellable(
             async move {
@@ -2410,7 +2546,12 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
                         .await;
                 }
 
-                let WalletSharedState { state, session, .. } = &mut *mutex.lock().await;
+                let WalletSharedState {
+                    state,
+                    session,
+                    pending_key_scans,
+                    ..
+                } = &mut *mutex.lock().await;
                 let scan = state.key_scans.remove(&key.address()).unwrap();
                 state.add_records(&key, scan.records.into_values().collect());
                 session
@@ -2421,6 +2562,17 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
                     })
                     .await
                     .ok();
+
+                // Signal anyone waiting for a notification that this scan finished.
+                for sender in pending_key_scans
+                    .remove(&key.address())
+                    .into_iter()
+                    .flatten()
+                {
+                    // Ignore errors, it just means the receiving end of the channel has been
+                    // dropped.
+                    sender.send(()).ok();
+                }
             },
             || (),
         );
