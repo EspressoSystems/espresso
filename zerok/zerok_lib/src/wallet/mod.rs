@@ -1774,6 +1774,21 @@ impl<'a, L: Ledger, Backend: WalletBackend<'a, L>> WalletSharedState<'a, L, Back
 // to panic where this type alias is used in `Wallet::new`. As a result, the type alias `BoxFuture`
 // from `futures::future` does not work, so we define our own.
 type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+// `SendFuture` trait is needed for the cape repo to compile when calling key generation functions,
+// `generate_audit_key`, `generate_freeze_key`, and `generate_user_key`.
+//
+// Workaround:
+// 1. Wrap code of the key generation functions with `async move` to fix the implementation "not
+// general enough" error.
+// 2. Add a function lifetime `'l` and capture the lifetime `'a` of `self` with the `Captures` trait
+// to avoid conflicting lifetime requirements.
+// 3. Wrap the return type with `Box<dyn>` to resolve the failure during "building vtable
+// representation", and add the `SendFuture` trait to combine `Future` and `Captures` since `dyn`
+// can only take one non-auto trait.
+//
+// Related issues:
+// https://github.com/rust-lang/rust/issues/89657, https://github.com/rust-lang/rust/issues/90691.
 pub trait SendFuture<'a, T>: Future<Output = T> + Captures<'a> + Send {}
 impl<'a, T, F: Future<Output = T> + Captures<'a> + Send> SendFuture<'a, T> for F {}
 
