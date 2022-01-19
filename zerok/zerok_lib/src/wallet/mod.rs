@@ -1884,6 +1884,23 @@ impl<'a, L: Ledger, Backend: WalletBackend<'a, L>> WalletSharedState<'a, L, Back
 // from `futures::future` does not work, so we define our own.
 type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+// `SendFuture` trait is needed for the cape repo to compile when calling key generation functions,
+// `generate_audit_key`, `generate_freeze_key`, and `generate_user_key`.
+//
+// Workaround:
+// 1. Wrap code of the key generation functions with `async move` to fix the implementation "not
+// general enough" error.
+// 2. Add a function lifetime `'l` and capture the lifetime `'a` of `self` with the `Captures` trait
+// to avoid conflicting lifetime requirements.
+// 3. Wrap the return type with `Box<dyn>` to resolve the failure during "building vtable
+// representation", and add the `SendFuture` trait to combine `Future` and `Captures` since `dyn`
+// can only take one non-auto trait.
+//
+// Related issues:
+// https://github.com/rust-lang/rust/issues/89657, https://github.com/rust-lang/rust/issues/90691.
+pub trait SendFuture<'a, T>: Future<Output = T> + Captures<'a> + Send {}
+impl<'a, T, F: Future<Output = T> + Captures<'a> + Send> SendFuture<'a, T> for F {}
+
 impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     Wallet<'a, Backend, L>
 {
@@ -2214,14 +2231,21 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     }
 
     /// generate a new auditor key and add it to the wallet's key set
-    pub async fn generate_audit_key(&mut self) -> Result<AuditorPubKey, WalletError> {
-        let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        let audit_key = session
-            .auditor_key_stream
-            .derive_auditor_keypair(&state.key_state.auditor.to_le_bytes());
-        state.key_state.auditor += 1;
-        state.add_audit_key(session, audit_key.clone()).await?;
-        Ok(audit_key.pub_key())
+    pub fn generate_audit_key<'l>(
+        &'l mut self,
+    ) -> std::pin::Pin<Box<dyn SendFuture<'a, Result<AuditorPubKey, WalletError>> + 'l>>
+    where
+        'a: 'l,
+    {
+        Box::pin(async move {
+            let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+            let audit_key = session
+                .auditor_key_stream
+                .derive_auditor_keypair(&state.key_state.auditor.to_le_bytes());
+            state.key_state.auditor += 1;
+            state.add_audit_key(session, audit_key.clone()).await?;
+            Ok(audit_key.pub_key())
+        })
     }
 
     /// add a freezer key to the wallet's key set
@@ -2231,14 +2255,21 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     }
 
     /// generate a new freezer key and add it to the wallet's key set
-    pub async fn generate_freeze_key(&mut self) -> Result<FreezerPubKey, WalletError> {
-        let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-        let freeze_key = session
-            .freezer_key_stream
-            .derive_freezer_keypair(&state.key_state.freezer.to_le_bytes());
-        state.key_state.freezer += 1;
-        state.add_freeze_key(session, freeze_key.clone()).await?;
-        Ok(freeze_key.pub_key())
+    pub fn generate_freeze_key<'l>(
+        &'l mut self,
+    ) -> std::pin::Pin<Box<dyn SendFuture<'a, Result<FreezerPubKey, WalletError>> + 'l>>
+    where
+        'a: 'l,
+    {
+        Box::pin(async move {
+            let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+            let freeze_key = session
+                .freezer_key_stream
+                .derive_freezer_keypair(&state.key_state.freezer.to_le_bytes());
+            state.key_state.freezer += 1;
+            state.add_freeze_key(session, freeze_key.clone()).await?;
+            Ok(freeze_key.pub_key())
+        })
     }
 
     /// add a user/spender key to the wallet's key set
@@ -2267,21 +2298,26 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     /// recovery of an HD wallet from a mnemonic phrase, `scan_from` can be used to initiate a
     /// background scan of the ledger from the given event index to find records already belonging
     /// to the new key.
-    pub async fn generate_user_key(
-        &mut self,
+    pub fn generate_user_key<'l>(
+        &'l mut self,
         scan_from: Option<EventIndex>,
-    ) -> Result<UserPubKey, WalletError> {
-        let (user_key, events) = {
-            let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
-            state.add_user_key(session, None, scan_from).await?
-        };
+    ) -> std::pin::Pin<Box<dyn SendFuture<'a, Result<UserPubKey, WalletError>> + 'l>>
+    where
+        'a: 'l,
+    {
+        Box::pin(async move {
+            let (user_key, events) = {
+                let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+                state.add_user_key(session, None, scan_from).await?
+            };
 
-        if let Some(events) = events {
-            // Start a background task to scan for records belonging to the new key.
-            self.spawn_key_scan(user_key.clone(), events).await;
-        }
+            if let Some(events) = events {
+                // Start a background task to scan for records belonging to the new key.
+                self.spawn_key_scan(user_key.clone(), events).await;
+            }
 
-        Ok(user_key.pub_key())
+            Ok(user_key.pub_key())
+        })
     }
 
     pub async fn import_memo(
