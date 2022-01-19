@@ -1,4 +1,4 @@
-use crate::{ledger::*, ser_test, state::ValidationError};
+use crate::{ledger::*, ser_test, state::ValidationError, wallet::spectrum::SpectrumLedger};
 use arbitrary::Arbitrary;
 use jf_aap::{
     structs::{ReceiverMemo, RecordCommitment},

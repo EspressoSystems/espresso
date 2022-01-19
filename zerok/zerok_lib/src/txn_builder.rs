@@ -6,6 +6,7 @@ use crate::{
     ledger::traits::{Transaction as _, Validator as _},
     ser_test,
     state::{key_set, ValidatorState, MERKLE_HEIGHT},
+    wallet::spectrum::SpectrumLedger,
 };
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;

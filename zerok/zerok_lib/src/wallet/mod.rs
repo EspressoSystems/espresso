@@ -7,6 +7,7 @@ pub mod network;
 pub mod persistence;
 pub mod reader;
 mod secret;
+pub mod spectrum;
 #[cfg(any(test, feature = "mocks"))]
 pub mod testing;
 
@@ -55,6 +56,7 @@ use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
+use spectrum::SpectrumLedger;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::iter::repeat;

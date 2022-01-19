@@ -1,10 +1,10 @@
 use super::hd::KeyTree;
 use super::loader::WalletLoader;
 use super::persistence::AtomicWalletStorage;
+use super::spectrum::SpectrumLedger;
 use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
 use crate::api;
 use crate::events::{EventIndex, EventSource, LedgerEvent};
-use crate::ledger::SpectrumLedger;
 use crate::node;
 use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
 use crate::state::key_set::SizedKey;

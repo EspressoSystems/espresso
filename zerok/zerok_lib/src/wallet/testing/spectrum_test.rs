@@ -1,7 +1,6 @@
 use super::*;
 use crate::{
     api::FromError,
-    ledger::SpectrumLedger,
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{
@@ -10,8 +9,8 @@ use crate::{
     },
     txn_builder::{RecordDatabase, TransactionHistoryEntry, TransactionState},
     wallet::{
-        hd, testing, CryptoError, RoleKeyPair, WalletBackend, WalletError, WalletState,
-        WalletStorage,
+        hd, spectrum::SpectrumLedger, testing, CryptoError, RoleKeyPair, WalletBackend,
+        WalletError, WalletState, WalletStorage,
     },
 };
 use async_std::sync::{Arc, Mutex, MutexGuard};

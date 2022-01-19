@@ -11,14 +11,12 @@ use jf_aap::proof::UniversalParam;
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
-use zerok_lib::{
-    ledger::SpectrumLedger,
-    wallet::{
-        cli::*,
-        loader::{LoadMethod, LoaderMetadata, WalletLoader},
-        network::{NetworkBackend, Url},
-        WalletError,
-    },
+use zerok_lib::wallet::{
+    cli::*,
+    loader::{LoadMethod, LoaderMetadata, WalletLoader},
+    network::{NetworkBackend, Url},
+    spectrum::SpectrumLedger,
+    WalletError,
 };
 
 #[derive(StructOpt)]
