@@ -1464,6 +1464,7 @@ mod generic_wallet_tests {
                 .await
                 .unwrap()
         );
+        t.check_storage(&ledger, &wallets).await;
         wallets[0].0.await_key_scan(&key.address()).await.unwrap();
         assert_eq!(
             wallets[0]
