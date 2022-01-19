@@ -329,6 +329,9 @@ pub trait SystemUnderTest<'a>: Default + Send + Sync {
                 .add_user_key(key_pair.clone(), Default::default())
                 .await
                 .unwrap();
+            // Wait for the wallet to find any records already belonging to this key from the
+            // initial grants.
+            wallet.await_key_scan(&key_pair.address()).await.unwrap();
             wallets.push((wallet, key_pair.address()));
         }
 

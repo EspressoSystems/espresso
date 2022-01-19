@@ -1754,6 +1754,7 @@ pub struct WalletSharedState<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
     sync_handles: Vec<(EventIndex, oneshot::Sender<()>)>,
     txn_subscribers: HashMap<TransactionUID<L>, Vec<oneshot::Sender<TransactionStatus>>>,
     pending_foreign_txns: HashMap<Nullifier, Vec<oneshot::Sender<TransactionStatus>>>,
+    pending_key_scans: HashMap<UserAddress, Vec<oneshot::Sender<()>>>,
 }
 
 impl<'a, L: Ledger, Backend: WalletBackend<'a, L>> WalletSharedState<'a, L, Backend> {
@@ -1829,6 +1830,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
             sync_handles,
             txn_subscribers,
             pending_foreign_txns,
+            pending_key_scans: Default::default(),
         }));
 
         let mut scope = unsafe {
@@ -1932,7 +1934,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         // Spawn background tasks for any scans which were in progress when the wallet was last shut
         // down.
         for (key, events) in key_scans {
-            wallet.spawn_key_scan(key, events);
+            wallet.spawn_key_scan(key, events).await;
         }
 
         Ok(wallet)
@@ -2149,7 +2151,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
             .subscribe(scan_from, Some(state.txn_state.now))
             .await;
         drop(guard);
-        self.spawn_key_scan(user_key, events);
+        self.spawn_key_scan(user_key, events).await;
         Ok(())
     }
 
@@ -2162,7 +2164,8 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         &mut self,
         scan_from: Option<EventIndex>,
     ) -> Result<UserPubKey, WalletError> {
-        let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
+        let mut guard = self.mutex.lock().await;
+        let WalletSharedState { state, session, .. } = &mut *guard;
         let user_key = session
             .user_key_stream
             .derive_user_keypair(&state.key_state.user.to_le_bytes());
@@ -2170,6 +2173,17 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         state
             .add_user_key(session, user_key.clone(), scan_from)
             .await?;
+
+        // Start a background task to scan for records belonging to the new key.
+        if let Some(scan_from) = scan_from {
+            let events = session
+                .backend
+                .subscribe(scan_from, Some(state.txn_state.now))
+                .await;
+            drop(guard);
+            self.spawn_key_scan(user_key.clone(), events).await;
+        }
+
         Ok(user_key.pub_key())
     }
 
@@ -2359,11 +2373,36 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         }
     }
 
-    fn spawn_key_scan(
+    pub async fn await_key_scan(&self, address: &UserAddress) -> Result<(), oneshot::Canceled> {
+        let mut guard = self.mutex.lock().await;
+        let WalletSharedState {
+            pending_key_scans, ..
+        } = &mut *guard;
+        let senders = match pending_key_scans.get_mut(address) {
+            Some(senders) => senders,
+            // If there is not an in-progress scan for this key, return immediately.
+            None => return Ok(()),
+        };
+        let (sender, receiver) = oneshot::channel();
+        senders.push(sender);
+
+        drop(guard);
+        receiver.await
+    }
+
+    async fn spawn_key_scan(
         &mut self,
         key: UserKeyPair,
         mut events: impl 'a + Stream<Item = (LedgerEvent<L>, EventSource)> + Unpin + Send,
     ) {
+        {
+            // Register the key scan in `pending_key_scans` so that `await_key_scan` will work.
+            let WalletSharedState {
+                pending_key_scans, ..
+            } = &mut *self.mutex.lock().await;
+            pending_key_scans.insert(key.address(), vec![]);
+        }
+
         let mutex = self.mutex.clone();
         self.task_scope.spawn_cancellable(
             async move {
@@ -2374,7 +2413,12 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
                         .await;
                 }
 
-                let WalletSharedState { state, session, .. } = &mut *mutex.lock().await;
+                let WalletSharedState {
+                    state,
+                    session,
+                    pending_key_scans,
+                    ..
+                } = &mut *mutex.lock().await;
                 let scan = state.key_scans.remove(&key.address()).unwrap();
                 state.add_records(&key, scan.records.into_values().collect());
                 session
@@ -2385,6 +2429,17 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
                     })
                     .await
                     .ok();
+
+                // Signal anyone waiting for a notification that this scan finished.
+                for sender in pending_key_scans
+                    .remove(&key.address())
+                    .into_iter()
+                    .flatten()
+                {
+                    // Ignore errors, it just means the receiving end of the channel has been
+                    // dropped.
+                    sender.send(()).ok();
+                }
             },
             || (),
         );
