@@ -36,6 +36,7 @@ use tracing::{event, Level};
 use wallet::hd::KeyTree;
 use wallet::loader::WalletLoader;
 use wallet::network::{NetworkBackend, Url};
+use wallet::spectrum::SpectrumLedger;
 use wallet::{KeyError, WalletError};
 use zerok_lib::{
     api::client, events::EventIndex, spectrum_api::SpectrumError,
@@ -67,19 +68,19 @@ struct TrivialWalletLoader {
     dir: PathBuf,
 }
 
-impl WalletLoader for TrivialWalletLoader {
+impl WalletLoader<SpectrumLedger> for TrivialWalletLoader {
     type Meta = ();
 
     fn location(&self) -> PathBuf {
         self.dir.clone()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError> {
+    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<SpectrumLedger>> {
         let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
+    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError<SpectrumLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)
     }
 }

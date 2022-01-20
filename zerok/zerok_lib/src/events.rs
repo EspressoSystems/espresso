@@ -1,4 +1,4 @@
-use crate::{ledger::*, ser_test, state::ValidationError, wallet::spectrum::SpectrumLedger};
+use crate::{ledger::*, ser_test, wallet::spectrum::SpectrumLedger};
 use arbitrary::Arbitrary;
 use jf_aap::{
     structs::{ReceiverMemo, RecordCommitment},
@@ -28,7 +28,7 @@ pub enum LedgerEvent<L: Ledger = SpectrumLedger> {
     /// Includes the block contents and the reason for rejection.
     Reject {
         block: Block<L>,
-        error: ValidationError,
+        error: ValidationError<L>,
     },
 
     /// Receiver memos were posted for one or more previously accepted transactions.

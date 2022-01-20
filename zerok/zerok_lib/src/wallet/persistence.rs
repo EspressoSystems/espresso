@@ -182,9 +182,9 @@ pub struct AtomicWalletStorage<'a, L: Ledger, Meta: Serialize + DeserializeOwned
 
 impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStorage<'a, L, Meta> {
     pub fn new(
-        loader: &mut impl WalletLoader<Meta = Meta>,
+        loader: &mut impl WalletLoader<L, Meta = Meta>,
         file_fill_size: u64,
-    ) -> Result<Self, WalletError> {
+    ) -> Result<Self, WalletError<L>> {
         let directory = loader.location();
         let mut atomic_loader =
             AtomicStoreLoader::load(&directory, "wallet").context(PersistenceError)?;
@@ -275,7 +275,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> AtomicWalletStora
         })
     }
 
-    pub async fn create(mut self: &mut Self, w: &WalletState<'a, L>) -> Result<(), WalletError> {
+    pub async fn create(mut self: &mut Self, w: &WalletState<'a, L>) -> Result<(), WalletError<L>> {
         // Store the initial static and dynamic state, and the metadata. We do this in a closure so
         // that if any operation fails, it will exit the closure but not this function, and we can
         // then commit or revert based on the results of the closure.
@@ -333,7 +333,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         self.persisted_meta.load_latest().is_ok()
     }
 
-    async fn load(&mut self) -> Result<WalletState<'a, L>, WalletError> {
+    async fn load(&mut self) -> Result<WalletState<'a, L>, WalletError<L>> {
         let static_state = self.static_data.load_latest().context(PersistenceError)?;
         let dynamic_state = self.dynamic_state.load_latest().context(PersistenceError)?;
 
@@ -370,7 +370,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         })
     }
 
-    async fn store_snapshot(&mut self, w: &WalletState<'a, L>) -> Result<(), WalletError> {
+    async fn store_snapshot(&mut self, w: &WalletState<'a, L>) -> Result<(), WalletError<L>> {
         self.dynamic_state
             .store_resource(&WalletSnapshot::from(w))
             .context(PersistenceError)?;
@@ -378,7 +378,10 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         Ok(())
     }
 
-    async fn store_auditable_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
+    async fn store_auditable_asset(
+        &mut self,
+        asset: &AssetDefinition,
+    ) -> Result<(), WalletError<L>> {
         self.auditable_assets
             .store_resource(asset)
             .context(PersistenceError)?;
@@ -386,7 +389,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         Ok(())
     }
 
-    async fn store_key(&mut self, key: &RoleKeyPair) -> Result<(), WalletError> {
+    async fn store_key(&mut self, key: &RoleKeyPair) -> Result<(), WalletError<L>> {
         self.keys.store_resource(key).context(PersistenceError)?;
         self.keys_dirty = true;
         Ok(())
@@ -397,7 +400,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
         asset: &AssetDefinition,
         seed: AssetCodeSeed,
         desc: &[u8],
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         self.defined_assets
             .store_resource(&(asset.clone(), seed, desc.to_vec()))
             .context(PersistenceError)?;
@@ -408,7 +411,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
     async fn store_transaction(
         &mut self,
         txn: TransactionHistoryEntry<L>,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         self.txn_history
             .store_resource(&txn)
             .context(PersistenceError)?;
@@ -418,7 +421,7 @@ impl<'a, L: Ledger, Meta: Send + Serialize + DeserializeOwned> WalletStorage<'a,
 
     async fn transaction_history(
         &mut self,
-    ) -> Result<Vec<TransactionHistoryEntry<L>>, WalletError> {
+    ) -> Result<Vec<TransactionHistoryEntry<L>>, WalletError<L>> {
         self.txn_history
             .iter()
             .map(|res| res.context(PersistenceError))
@@ -523,18 +526,18 @@ mod tests {
         key: KeyTree,
     }
 
-    impl WalletLoader for MockWalletLoader {
+    impl<L: Ledger> WalletLoader<L> for MockWalletLoader {
         type Meta = ();
 
         fn location(&self) -> PathBuf {
             self.dir.path().into()
         }
 
-        fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError> {
+        fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<L>> {
             Ok(((), self.key.clone()))
         }
 
-        fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
+        fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError<L>> {
             Ok(self.key.clone())
         }
     }

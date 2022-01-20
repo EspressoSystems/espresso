@@ -11,6 +11,7 @@ use jf_aap::{
     TransactionNote,
 };
 use std::collections::HashMap;
+use std::fmt::Display;
 
 impl traits::NullifierSet for SetMerkleTree {
     type Proof = SetMerkleProof;
@@ -101,8 +102,19 @@ impl traits::Transaction for ElaboratedTransaction {
     }
 }
 
+impl traits::ValidationError for ValidationError {
+    fn new(_msg: impl Display) -> Self {
+        Self::Failed {}
+    }
+
+    fn is_bad_nullifier_proof(&self) -> bool {
+        matches!(self, ValidationError::BadNullifierProof { .. })
+    }
+}
+
 impl traits::Block for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
+    type Error = ValidationError;
 
     fn new(txns: Vec<Self::Transaction>) -> Self {
         let (txns, proofs): (Vec<TransactionNote>, Vec<_>) =

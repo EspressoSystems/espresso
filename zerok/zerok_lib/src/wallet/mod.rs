@@ -17,7 +17,7 @@ use crate::util::arbitrary_wrappers::{ArbitraryNullifier, ArbitraryUserKeyPair};
 use crate::{
     events::{EventIndex, EventSource, LedgerEvent},
     ledger, ser_test,
-    state::{ProverKeySet, ValidationError},
+    state::ProverKeySet,
 };
 use arbitrary::{Arbitrary, Unstructured};
 use async_scoped::AsyncScope;
@@ -47,7 +47,8 @@ use jf_aap::{
 };
 use ledger::{
     traits::{
-        Block as _, NullifierSet as _, Transaction as _, TransactionKind as _, Validator as _,
+        Block as _, NullifierSet as _, Transaction as _, TransactionKind as _,
+        ValidationError as _, Validator as _,
     },
     *,
 };
@@ -63,12 +64,12 @@ use std::sync::Arc;
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility = "pub")]
-pub enum WalletError {
+pub enum WalletError<L: Ledger> {
     UndefinedAsset {
         asset: AssetCode,
     },
     InvalidBlock {
-        source: ValidationError,
+        source: ValidationError<L>,
     },
     NullifierAlreadyPublished {
         nullifier: Nullifier,
@@ -131,13 +132,13 @@ pub enum WalletError {
     },
 }
 
-impl From<crate::txn_builder::TransactionError> for WalletError {
+impl<L: Ledger> From<crate::txn_builder::TransactionError> for WalletError<L> {
     fn from(source: crate::txn_builder::TransactionError) -> Self {
         Self::TransactionError { source }
     }
 }
 
-impl From<crate::node::QueryServiceError> for WalletError {
+impl<L: Ledger> From<crate::node::QueryServiceError> for WalletError<L> {
     fn from(source: crate::node::QueryServiceError) -> Self {
         Self::QueryServiceError { source }
     }
@@ -407,16 +408,19 @@ pub trait WalletStorage<'a, L: Ledger> {
     /// Load the stored wallet identified by the given key.
     ///
     /// This function may assume `self.exists(key_pair)`.
-    async fn load(&mut self) -> Result<WalletState<'a, L>, WalletError>;
+    async fn load(&mut self) -> Result<WalletState<'a, L>, WalletError<L>>;
 
     /// Store a snapshot of the wallet's dynamic state.
-    async fn store_snapshot(&mut self, state: &WalletState<'a, L>) -> Result<(), WalletError>;
+    async fn store_snapshot(&mut self, state: &WalletState<'a, L>) -> Result<(), WalletError<L>>;
 
     /// Append a new auditable asset to the growing set.
-    async fn store_auditable_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError>;
+    async fn store_auditable_asset(
+        &mut self,
+        asset: &AssetDefinition,
+    ) -> Result<(), WalletError<L>>;
 
     /// Add a key to the wallet's key set.
-    async fn store_key(&mut self, key: &RoleKeyPair) -> Result<(), WalletError>;
+    async fn store_key(&mut self, key: &RoleKeyPair) -> Result<(), WalletError<L>>;
 
     /// Append a new defined asset to the growing set.
     async fn store_defined_asset(
@@ -424,14 +428,15 @@ pub trait WalletStorage<'a, L: Ledger> {
         asset: &AssetDefinition,
         seed: AssetCodeSeed,
         desc: &[u8],
-    ) -> Result<(), WalletError>;
+    ) -> Result<(), WalletError<L>>;
 
     async fn store_transaction(
         &mut self,
         txn: TransactionHistoryEntry<L>,
-    ) -> Result<(), WalletError>;
-    async fn transaction_history(&mut self)
-        -> Result<Vec<TransactionHistoryEntry<L>>, WalletError>;
+    ) -> Result<(), WalletError<L>>;
+    async fn transaction_history(
+        &mut self,
+    ) -> Result<Vec<TransactionHistoryEntry<L>>, WalletError<L>>;
 
     /// Commit to outstanding changes.
     async fn commit(&mut self);
@@ -468,7 +473,7 @@ impl<'a, 'l, L: Ledger, Backend: WalletBackend<'a, L> + ?Sized>
         }
     }
 
-    async fn store_snapshot(&mut self, state: &WalletState<'a, L>) -> Result<(), WalletError> {
+    async fn store_snapshot(&mut self, state: &WalletState<'a, L>) -> Result<(), WalletError<L>> {
         if !self.cancelled {
             let res = self.storage().await.store_snapshot(state).await;
             if res.is_err() {
@@ -480,7 +485,10 @@ impl<'a, 'l, L: Ledger, Backend: WalletBackend<'a, L> + ?Sized>
         }
     }
 
-    async fn store_auditable_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
+    async fn store_auditable_asset(
+        &mut self,
+        asset: &AssetDefinition,
+    ) -> Result<(), WalletError<L>> {
         if !self.cancelled {
             let res = self.storage().await.store_auditable_asset(asset).await;
             if res.is_err() {
@@ -492,7 +500,7 @@ impl<'a, 'l, L: Ledger, Backend: WalletBackend<'a, L> + ?Sized>
         }
     }
 
-    async fn store_key<K: KeyPair>(&mut self, key: &K) -> Result<(), WalletError> {
+    async fn store_key<K: KeyPair>(&mut self, key: &K) -> Result<(), WalletError<L>> {
         if !self.cancelled {
             let res = self.storage().await.store_key(&key.clone().into()).await;
             if res.is_err() {
@@ -509,7 +517,7 @@ impl<'a, 'l, L: Ledger, Backend: WalletBackend<'a, L> + ?Sized>
         asset: &AssetDefinition,
         seed: AssetCodeSeed,
         desc: &[u8],
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         if !self.cancelled {
             let res = self
                 .storage()
@@ -528,7 +536,7 @@ impl<'a, 'l, L: Ledger, Backend: WalletBackend<'a, L> + ?Sized>
     async fn store_transaction(
         &mut self,
         transaction: TransactionHistoryEntry<L>,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         if !self.cancelled {
             let res = self.storage().await.store_transaction(transaction).await;
             if res.is_err() {
@@ -580,7 +588,7 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
     /// needs of the implementation. Maybe we can clean this up if and when GATs stabilize.
     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage>;
 
-    async fn load(&mut self) -> Result<WalletState<'a, L>, WalletError> {
+    async fn load(&mut self) -> Result<WalletState<'a, L>, WalletError<L>> {
         let mut storage = self.storage().await;
         if storage.exists() {
             // If there is a stored wallet with this key pair, load it.
@@ -607,10 +615,10 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
     ///     Ok(t)
     /// }).await?;
     /// ```
-    async fn store<'l, F, Fut>(&'l mut self, update: F) -> Result<(), WalletError>
+    async fn store<'l, F, Fut>(&'l mut self, update: F) -> Result<(), WalletError<L>>
     where
         F: Send + FnOnce(StorageTransaction<'a, 'l, L, Self>) -> Fut,
-        Fut: Send + Future<Output = Result<StorageTransaction<'a, 'l, L, Self>, WalletError>>,
+        Fut: Send + Future<Output = Result<StorageTransaction<'a, 'l, L, Self>, WalletError<L>>>,
     {
         let fut = update(StorageTransaction::new(self)).and_then(|txn| async move {
             txn.backend.storage().await.commit().await;
@@ -622,30 +630,30 @@ pub trait WalletBackend<'a, L: Ledger>: Send {
     fn key_stream(&self) -> hd::KeyTree;
 
     // Querying the ledger
-    async fn create(&mut self) -> Result<WalletState<'a, L>, WalletError>;
+    async fn create(&mut self) -> Result<WalletState<'a, L>, WalletError<L>>;
     async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream;
-    async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError>;
+    async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError<L>>;
     async fn get_nullifier_proof(
         &self,
         nullifiers: &mut NullifierSet<L>,
         nullifier: Nullifier,
-    ) -> Result<(bool, NullifierProof<L>), WalletError>;
+    ) -> Result<(bool, NullifierProof<L>), WalletError<L>>;
     async fn get_transaction(
         &self,
         block_id: u64,
         txn_id: u64,
-    ) -> Result<Transaction<L>, WalletError>;
-    async fn register_user_key(&mut self, pub_key: &UserPubKey) -> Result<(), WalletError>;
+    ) -> Result<Transaction<L>, WalletError<L>>;
+    async fn register_user_key(&mut self, pub_key: &UserPubKey) -> Result<(), WalletError<L>>;
 
     // Submit a transaction to a validator.
-    async fn submit(&mut self, txn: Transaction<L>) -> Result<(), WalletError>;
+    async fn submit(&mut self, txn: Transaction<L>) -> Result<(), WalletError<L>>;
     async fn post_memos(
         &mut self,
         block_id: u64,
         txn_id: u64,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
-    ) -> Result<(), WalletError>;
+    ) -> Result<(), WalletError<L>>;
 }
 
 pub struct WalletSession<'a, L: Ledger, Backend: WalletBackend<'a, L>> {
@@ -718,7 +726,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         receipt: &TransactionReceipt<L>,
-    ) -> Result<TransactionStatus, WalletError> {
+    ) -> Result<TransactionStatus, WalletError<L>> {
         match self.txn_state.transactions.status(&receipt.uid) {
             TransactionStatus::Unknown => {
                 // If the transactions database returns Unknown, it means the transaction is not in-
@@ -953,7 +961,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     {
                         // Try to resubmit if the error is recoverable.
                         let uid = pending.uid();
-                        if let ValidationError::BadNullifierProof {} = &error {
+                        if error.is_bad_nullifier_proof() {
                             if self
                                 .update_nullifier_proofs(session, &mut txn)
                                 .await
@@ -1236,7 +1244,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         comm: RecordCommitment,
         uid: u64,
         proof: MerklePath,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         for key in self.user_keys.values().cloned().collect::<Vec<_>>() {
             let records = self
                 .try_open_memos(
@@ -1253,7 +1261,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             }
         }
 
-        Err(WalletError::CannotDecryptMemo {})
+        Err(WalletError::<L>::CannotDecryptMemo {})
     }
 
     async fn clear_pending_transaction<'t>(
@@ -1356,7 +1364,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         txn: &mut Transaction<L>,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         let mut proofs = Vec::new();
         for n in txn.input_nullifiers() {
             let (spent, proof) = session
@@ -1364,7 +1372,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 .get_nullifier_proof(&mut self.txn_state.nullifiers, n)
                 .await?;
             if spent {
-                return Err(WalletError::NullifierAlreadyPublished { nullifier: n });
+                return Err(WalletError::<L>::NullifierAlreadyPublished { nullifier: n });
             }
             proofs.push(proof);
         }
@@ -1381,7 +1389,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         session: &'b mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         description: &'b [u8],
         policy: AssetPolicy,
-    ) -> impl 'b + Captures<'a> + Future<Output = Result<AssetDefinition, WalletError>> + Send
+    ) -> impl 'b + Captures<'a> + Future<Output = Result<AssetDefinition, WalletError<L>>> + Send
     where
         'a: 'b,
     {
@@ -1436,7 +1444,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         asset: &AssetDefinition,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         if self.auditable_assets.contains_key(&asset.code) {
             // Don't add the same asset twice.
             return Ok(());
@@ -1445,7 +1453,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             .audit_keys
             .contains_key(asset.policy_ref().auditor_pub_key())
         {
-            return Err(WalletError::AssetNotAuditable {
+            return Err(WalletError::<L>::AssetNotAuditable {
                 asset: asset.clone(),
             });
         }
@@ -1483,7 +1491,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
             UserKeyPair,
             Option<impl 'a + Stream<Item = (LedgerEvent<L>, EventSource)> + Send + Unpin>,
         ),
-        WalletError,
+        WalletError<L>,
     > {
         let generated = user_key.is_none();
         let (user_key, revert_key_state) = match user_key {
@@ -1494,7 +1502,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                     // report an error, since the user may have attempted to add the same key with
                     // two different `scan_from` parameters, and we have not actually started the
                     // second scan in this case.
-                    return Err(WalletError::UserKeyExists {
+                    return Err(WalletError::<L>::UserKeyExists {
                         pub_key: user_key.pub_key(),
                     });
                 }
@@ -1596,7 +1604,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         audit_key: AuditorKeyPair,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         Self::add_key(session, &mut self.audit_keys, audit_key).await
     }
 
@@ -1604,7 +1612,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         freeze_key: FreezerKeyPair,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         Self::add_key(session, &mut self.freeze_keys, freeze_key).await
     }
 
@@ -1612,7 +1620,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         keys: &mut HashMap<K::PubKey, K>,
         key: K,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         if keys.contains_key(&key.pub_key()) {
             return Ok(());
         }
@@ -1632,7 +1640,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         &mut self,
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         spec: TransferSpec<'k>,
-    ) -> Result<TransferInfo<L>, WalletError> {
+    ) -> Result<TransferInfo<L>, WalletError<L>> {
         self.txn_state
             .transfer(spec, &self.proving_keys.xfr, &mut session.rng)
             .context(TransactionError)
@@ -1643,7 +1651,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         records: Vec<RecordOpening>,
         sig_keypair: &SigKeyPair,
-    ) -> Result<(Vec<ReceiverMemo>, Signature), WalletError> {
+    ) -> Result<(Vec<ReceiverMemo>, Signature), WalletError<L>> {
         self.txn_state
             .generate_memos(records, &mut session.rng, sig_keypair)
             .context(TransactionError)
@@ -1657,11 +1665,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         asset_code: &AssetCode,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<(MintNote, TransactionInfo<L>), WalletError> {
+    ) -> Result<(MintNote, TransactionInfo<L>), WalletError<L>> {
         let asset = self
             .defined_assets
             .get(asset_code)
-            .ok_or(WalletError::UndefinedAsset { asset: *asset_code })?;
+            .ok_or(WalletError::<L>::UndefinedAsset { asset: *asset_code })?;
         self.txn_state
             .mint(
                 &self.account_keypair(account)?.clone(),
@@ -1705,11 +1713,11 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         amount: u64,
         owner: UserAddress,
         outputs_frozen: FreezeFlag,
-    ) -> Result<(FreezeNote, TransactionInfo<L>), WalletError> {
+    ) -> Result<(FreezeNote, TransactionInfo<L>), WalletError<L>> {
         let freeze_key = match self.freeze_keys.get(asset.policy_ref().freezer_pub_key()) {
             Some(key) => key,
             None => {
-                return Err(WalletError::AssetNotFreezable {
+                return Err(WalletError::<L>::AssetNotFreezable {
                     asset: asset.clone(),
                 });
             }
@@ -1735,7 +1743,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         session: &mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         note: TransactionNote,
         info: TransactionInfo<L>,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt<L>, WalletError<L>> {
         let mut nullifier_pfs = Vec::new();
         for n in note.nullifiers() {
             let (spent, proof) = session
@@ -1743,7 +1751,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
                 .get_nullifier_proof(&mut self.txn_state.nullifiers, n)
                 .await?;
             if spent {
-                return Err(WalletError::NullifierAlreadyPublished { nullifier: n });
+                return Err(WalletError::<L>::NullifierAlreadyPublished { nullifier: n });
             }
             nullifier_pfs.push(proof);
         }
@@ -1769,7 +1777,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         session: &'b mut WalletSession<'a, L, impl WalletBackend<'a, L>>,
         txn: Transaction<L>,
         info: TransactionInfo<L>,
-    ) -> impl 'b + Captures<'a> + Future<Output = Result<TransactionReceipt<L>, WalletError>> + Send
+    ) -> impl 'b + Captures<'a> + Future<Output = Result<TransactionReceipt<L>, WalletError<L>>> + Send
     where
         'a: 'b,
     {
@@ -1813,10 +1821,10 @@ impl<'a, L: Ledger> WalletState<'a, L> {
         }
     }
 
-    fn account_keypair(&'_ self, account: &UserAddress) -> Result<&'_ UserKeyPair, WalletError> {
+    fn account_keypair(&'_ self, account: &UserAddress) -> Result<&'_ UserKeyPair, WalletError<L>> {
         match self.user_keys.get(account) {
             Some(key_pair) => Ok(key_pair),
-            None => Err(WalletError::NoSuchAccount {
+            None => Err(WalletError::<L>::NoSuchAccount {
                 address: account.clone(),
             }),
         }
@@ -1898,10 +1906,10 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     // manually write out the opaque return type so that we can explicitly add the `Send` bound. The
     // difference is that we use dynamic type erasure (Pin<Box<dyn Future>>) instead of static type
     // erasure. I don't know why this doesn't crash the compiler, but it doesn't.
-    pub fn new(backend: Backend) -> BoxFuture<'a, Result<Wallet<'a, Backend, L>, WalletError>> {
+    pub fn new(backend: Backend) -> BoxFuture<'a, Result<Wallet<'a, Backend, L>, WalletError<L>>> {
         Box::pin(async move { Self::new_impl(backend).await })
     }
-    async fn new_impl(mut backend: Backend) -> Result<Wallet<'a, Backend, L>, WalletError> {
+    async fn new_impl(mut backend: Backend) -> Result<Wallet<'a, Backend, L>, WalletError<L>> {
         let state = backend.load().await?;
         let mut events = backend.subscribe(state.txn_state.now, None).await;
         let mut key_scans = vec![];
@@ -2084,7 +2092,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
 
     pub async fn transaction_history(
         &self,
-    ) -> Result<Vec<TransactionHistoryEntry<L>>, WalletError> {
+    ) -> Result<Vec<TransactionHistoryEntry<L>>, WalletError<L>> {
         let WalletSharedState { session, .. } = &mut *self.mutex.lock().await;
         let mut storage = session.backend.storage().await;
         storage.transaction_history().await
@@ -2100,7 +2108,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset: &AssetCode,
         receivers: &[(UserAddress, u64)],
         fee: u64,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt<L>, WalletError<L>> {
         let xfr_info = self
             .build_transfer(account, asset, receivers, fee, vec![], None)
             .await?;
@@ -2137,13 +2145,13 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         fee: u64,
         bound_data: Vec<u8>,
         xfr_size_requirement: Option<(usize, usize)>,
-    ) -> Result<TransferInfo<L>, WalletError> {
+    ) -> Result<TransferInfo<L>, WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         let receivers = iter(receivers)
             .then(|(addr, amt)| {
                 let session = &session;
                 async move {
-                    Ok::<(UserPubKey, u64), WalletError>((
+                    Ok::<(UserPubKey, u64), WalletError<L>>((
                         session.backend.get_public_key(addr).await?,
                         *amt,
                     ))
@@ -2166,7 +2174,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         &mut self,
         records: Vec<RecordOpening>,
         sig_keypair: &SigKeyPair,
-    ) -> Result<(Vec<ReceiverMemo>, Signature), WalletError> {
+    ) -> Result<(Vec<ReceiverMemo>, Signature), WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.generate_memos(session, records, sig_keypair)
     }
@@ -2175,7 +2183,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         &mut self,
         txn: Transaction<L>,
         info: TransactionInfo<L>,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt<L>, WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state
             .submit_elaborated_transaction(session, txn, info)
@@ -2186,7 +2194,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         &mut self,
         txn: TransactionNote,
         info: TransactionInfo<L>,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt<L>, WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.submit_transaction(session, txn, info).await
     }
@@ -2196,19 +2204,19 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         &mut self,
         description: &[u8],
         policy: AssetPolicy,
-    ) -> Result<AssetDefinition, WalletError> {
+    ) -> Result<AssetDefinition, WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.define_asset(session, description, policy).await
     }
 
     /// start auditing transactions with a given asset type
-    pub async fn audit_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError> {
+    pub async fn audit_asset(&mut self, asset: &AssetDefinition) -> Result<(), WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.audit_asset(session, asset).await
     }
 
     /// add an auditor key to the wallet's key set
-    pub async fn add_audit_key(&mut self, audit_key: AuditorKeyPair) -> Result<(), WalletError> {
+    pub async fn add_audit_key(&mut self, audit_key: AuditorKeyPair) -> Result<(), WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.add_audit_key(session, audit_key).await
     }
@@ -2216,7 +2224,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     /// generate a new auditor key and add it to the wallet's key set
     pub fn generate_audit_key<'l>(
         &'l mut self,
-    ) -> std::pin::Pin<Box<dyn SendFuture<'a, Result<AuditorPubKey, WalletError>> + 'l>>
+    ) -> std::pin::Pin<Box<dyn SendFuture<'a, Result<AuditorPubKey, WalletError<L>>> + 'l>>
     where
         'a: 'l,
     {
@@ -2232,7 +2240,10 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     }
 
     /// add a freezer key to the wallet's key set
-    pub async fn add_freeze_key(&mut self, freeze_key: FreezerKeyPair) -> Result<(), WalletError> {
+    pub async fn add_freeze_key(
+        &mut self,
+        freeze_key: FreezerKeyPair,
+    ) -> Result<(), WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.add_freeze_key(session, freeze_key).await
     }
@@ -2240,7 +2251,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     /// generate a new freezer key and add it to the wallet's key set
     pub fn generate_freeze_key<'l>(
         &'l mut self,
-    ) -> std::pin::Pin<Box<dyn SendFuture<'a, Result<FreezerPubKey, WalletError>> + 'l>>
+    ) -> std::pin::Pin<Box<dyn SendFuture<'a, Result<FreezerPubKey, WalletError<L>>> + 'l>>
     where
         'a: 'l,
     {
@@ -2260,7 +2271,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         &mut self,
         user_key: UserKeyPair,
         scan_from: EventIndex,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         let (user_key, events) = {
             let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
             state
@@ -2284,7 +2295,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     pub fn generate_user_key<'l>(
         &'l mut self,
         scan_from: Option<EventIndex>,
-    ) -> std::pin::Pin<Box<dyn SendFuture<'a, Result<UserPubKey, WalletError>> + 'l>>
+    ) -> std::pin::Pin<Box<dyn SendFuture<'a, Result<UserPubKey, WalletError<L>>> + 'l>>
     where
         'a: 'l,
     {
@@ -2309,7 +2320,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         comm: RecordCommitment,
         uid: u64,
         proof: MerklePath,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.import_memo(session, memo, comm, uid, proof).await
     }
@@ -2322,7 +2333,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset_code: &AssetCode,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<(MintNote, TransactionInfo<L>), WalletError> {
+    ) -> Result<(MintNote, TransactionInfo<L>), WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state
             .build_mint(session, account, fee, asset_code, amount, owner)
@@ -2336,7 +2347,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset_code: &AssetCode,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt<L>, WalletError<L>> {
         let (note, info) = self
             .build_mint(account, fee, asset_code, amount, owner)
             .await?;
@@ -2351,7 +2362,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<(FreezeNote, TransactionInfo<L>), WalletError> {
+    ) -> Result<(FreezeNote, TransactionInfo<L>), WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state
             .build_freeze(
@@ -2373,7 +2384,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt<L>, WalletError<L>> {
         let (note, info) = self
             .build_freeze(account, fee, asset, amount, owner)
             .await?;
@@ -2388,7 +2399,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<(FreezeNote, TransactionInfo<L>), WalletError> {
+    ) -> Result<(FreezeNote, TransactionInfo<L>), WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state
             .build_freeze(
@@ -2410,7 +2421,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
         asset: &AssetDefinition,
         amount: u64,
         owner: UserAddress,
-    ) -> Result<TransactionReceipt<L>, WalletError> {
+    ) -> Result<TransactionReceipt<L>, WalletError<L>> {
         let (note, info) = self
             .build_unfreeze(account, fee, asset, amount, owner)
             .await?;
@@ -2421,7 +2432,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     pub async fn transaction_status(
         &self,
         receipt: &TransactionReceipt<L>,
-    ) -> Result<TransactionStatus, WalletError> {
+    ) -> Result<TransactionStatus, WalletError<L>> {
         let WalletSharedState { state, session, .. } = &mut *self.mutex.lock().await;
         state.transaction_status(session, receipt).await
     }
@@ -2429,7 +2440,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
     pub async fn await_transaction(
         &self,
         receipt: &TransactionReceipt<L>,
-    ) -> Result<TransactionStatus, WalletError> {
+    ) -> Result<TransactionStatus, WalletError<L>> {
         let mut guard = self.mutex.lock().await;
         let WalletSharedState {
             state,
@@ -2462,7 +2473,7 @@ impl<'a, L: 'static + Ledger, Backend: 'a + WalletBackend<'a, L> + Send + Sync>
                     .push(sender);
             }
             drop(guard);
-            receiver.await.map_err(|_| WalletError::Cancelled {})
+            receiver.await.map_err(|_| WalletError::<L>::Cancelled {})
         }
     }
 

@@ -1,4 +1,3 @@
-use crate::state::ValidationError;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use jf_aap::{
     keys::{AuditorKeyPair, AuditorPubKey},
@@ -114,10 +113,26 @@ pub mod traits {
         }
     }
 
+    pub trait ValidationError:
+        'static
+        + Clone
+        + Debug
+        + Display
+        + snafu::Error
+        + Serialize
+        + DeserializeOwned
+        + Send
+        + Sync
+    {
+        fn new(msg: impl Display) -> Self;
+        fn is_bad_nullifier_proof(&self) -> bool;
+    }
+
     pub trait Block: Clone + Debug + Serialize + DeserializeOwned + Send + Sync {
         type Transaction: Transaction;
+        type Error: ValidationError;
         fn new(txns: Vec<Self::Transaction>) -> Self;
-        fn add_transaction(&mut self, txn: Self::Transaction) -> Result<(), ValidationError>;
+        fn add_transaction(&mut self, txn: Self::Transaction) -> Result<(), Self::Error>;
         fn txns(&self) -> Vec<Self::Transaction>;
         fn len(&self) -> usize {
             self.txns().len()
@@ -135,7 +150,10 @@ pub mod traits {
 
         fn now(&self) -> u64;
         fn commit(&self) -> Self::StateCommitment;
-        fn validate_and_apply(&mut self, block: Self::Block) -> Result<Vec<u64>, ValidationError>;
+        fn validate_and_apply(
+            &mut self,
+            block: Self::Block,
+        ) -> Result<Vec<u64>, <Self::Block as Block>::Error>;
     }
 
     pub trait Ledger: Copy + Debug + Send + Sync {
@@ -149,6 +167,7 @@ pub use traits::Ledger;
 pub type Validator<L> = <L as Ledger>::Validator;
 pub type StateCommitment<L> = <Validator<L> as traits::Validator>::StateCommitment;
 pub type Block<L> = <Validator<L> as traits::Validator>::Block;
+pub type ValidationError<L> = <Block<L> as traits::Block>::Error;
 pub type Transaction<L> = <Block<L> as traits::Block>::Transaction;
 pub type TransactionHash<L> = <Transaction<L> as traits::Transaction>::Hash;
 pub type TransactionKind<L> = <Transaction<L> as traits::Transaction>::Kind;

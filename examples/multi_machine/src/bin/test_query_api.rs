@@ -35,6 +35,7 @@ use wallet::{
     hd::KeyTree,
     loader::WalletLoader,
     network::{NetworkBackend, Url},
+    spectrum::SpectrumLedger,
     KeyError, Wallet, WalletError,
 };
 use zerok_lib::api::{client::*, Hash, UnspentRecord};
@@ -173,19 +174,19 @@ struct UnencryptedWalletLoader {
     dir: TempDir,
 }
 
-impl WalletLoader for UnencryptedWalletLoader {
+impl WalletLoader<SpectrumLedger> for UnencryptedWalletLoader {
     type Meta = ();
 
     fn location(&self) -> PathBuf {
         self.dir.path().into()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError> {
+    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<SpectrumLedger>> {
         let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
+    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError<SpectrumLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)
     }
 }

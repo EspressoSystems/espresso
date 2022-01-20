@@ -43,8 +43,8 @@ pub trait CLI<'a> {
     fn init_backend(
         universal_param: &'a UniversalParam,
         args: &'a Self::Args,
-        loader: &mut impl WalletLoader<Meta = LoaderMetadata>,
-    ) -> Result<Self::Backend, WalletError>;
+        loader: &mut impl WalletLoader<Self::Ledger, Meta = LoaderMetadata>,
+    ) -> Result<Self::Backend, WalletError<Self::Ledger>>;
 }
 
 pub trait CLIArgs {
@@ -618,7 +618,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
             "load a key from a file",
             C,
             |wallet, key_type: KeyType, path: PathBuf; scan_from: Option<EventIndex>| {
-                let mut file = match File::open(path.clone()).context(IoError) {
+                let mut file = match File::open(path.clone()) {
                     Ok(file) => file,
                     Err(err) => {
                         println!("Error opening file {:?}: {}", path, err);
@@ -626,7 +626,7 @@ fn init_commands<'a, C: CLI<'a>>() -> Vec<Command<'a, C>> {
                     }
                 };
                 let mut bytes = Vec::new();
-                if let Err(err) = file.read_to_end(&mut bytes).context(IoError) {
+                if let Err(err) = file.read_to_end(&mut bytes) {
                     println!("Error reading file: {}", err);
                     return;
                 }
@@ -729,15 +729,17 @@ impl<'a, C: CLI<'a>> CLIInput<'a, C> for KeyType {
     }
 }
 
-pub async fn cli_main<'a, C: CLI<'a>>(args: &'a C::Args) -> Result<(), WalletError> {
+pub async fn cli_main<'a, L: 'static + Ledger, C: CLI<'a, Ledger = L>>(
+    args: &'a C::Args,
+) -> Result<(), WalletError<L>> {
     if let Some(path) = args.key_gen_path() {
-        key_gen(path)
+        key_gen::<C>(path)
     } else {
-        repl::<C>(args).await
+        repl::<L, C>(args).await
     }
 }
 
-fn key_gen(mut path: PathBuf) -> Result<(), WalletError> {
+fn key_gen<'a, C: CLI<'a>>(mut path: PathBuf) -> Result<(), WalletError<C::Ledger>> {
     let key_pair = wallet::new_key_pair();
 
     let mut file = File::create(path.clone()).context(IoError)?;
@@ -752,7 +754,9 @@ fn key_gen(mut path: PathBuf) -> Result<(), WalletError> {
     Ok(())
 }
 
-async fn repl<'a, C: CLI<'a>>(args: &'a C::Args) -> Result<(), WalletError> {
+async fn repl<'a, L: 'static + Ledger, C: CLI<'a, Ledger = L>>(
+    args: &'a C::Args,
+) -> Result<(), WalletError<L>> {
     let (storage, _tmp_dir) = match args.storage_path() {
         Some(storage) => (storage, None),
         None if !args.use_tmp_storage() => {

@@ -11,6 +11,8 @@ use jf_aap::{
 };
 use snafu::ResultExt;
 
+pub type CapeWalletError = WalletError<CapeLedger>;
+
 #[async_trait]
 pub trait CapeWalletBackend<'a>: WalletBackend<'a, CapeLedger> {
     /// Update the global ERC20 asset registry with a new (ERC20, CAPE asset) pair.
@@ -22,13 +24,13 @@ pub trait CapeWalletBackend<'a>: WalletBackend<'a, CapeLedger> {
         asset: &AssetDefinition,
         erc20_code: Erc20Code,
         sponsor: EthereumAddr,
-    ) -> Result<(), WalletError>;
+    ) -> Result<(), CapeWalletError>;
 
     /// Get the ERC20 code which is associated with a CAPE asset.
     async fn get_wrapped_erc20_code(
         &self,
         asset: &AssetDefinition,
-    ) -> Result<Erc20Code, WalletError>;
+    ) -> Result<Erc20Code, CapeWalletError>;
 
     /// Wrap some amount of an ERC20 token in a CAPE asset.
     ///
@@ -46,7 +48,7 @@ pub trait CapeWalletBackend<'a>: WalletBackend<'a, CapeLedger> {
         erc20_code: Erc20Code,
         src_addr: EthereumAddr,
         ro: RecordOpening,
-    ) -> Result<(), WalletError>;
+    ) -> Result<(), CapeWalletError>;
 }
 
 pub type CapeWallet<'a, Backend> = Wallet<'a, Backend, CapeLedger>;
@@ -57,7 +59,7 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
         erc20_code: Erc20Code,
         sponsor_addr: EthereumAddr,
         aap_asset_policy: AssetPolicy,
-    ) -> Result<AssetDefinition, WalletError> {
+    ) -> Result<AssetDefinition, CapeWalletError> {
         let mut state = self.lock().await;
 
         let description = erc20_asset_description(&erc20_code, &sponsor_addr);
@@ -84,7 +86,7 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
         aap_asset: AssetDefinition,
         owner: UserAddress,
         amount: u64,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), CapeWalletError> {
         let mut state = self.lock().await;
 
         let erc20_code = state.backend().get_wrapped_erc20_code(&aap_asset).await?;
@@ -112,7 +114,7 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
         aap_asset: &AssetCode,
         amount: u64,
         fee: u64,
-    ) -> Result<TransactionReceipt<CapeLedger>, WalletError> {
+    ) -> Result<TransactionReceipt<CapeLedger>, CapeWalletError> {
         // A burn note is just a transfer note with a special `proof_bound_data` field consisting of
         // the magic burn bytes followed by the destination address.
         let bound_data = CAPE_BURN_MAGIC_BYTES

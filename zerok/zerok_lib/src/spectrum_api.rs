@@ -3,6 +3,7 @@ use crate::{
     set_merkle_tree::SetMerkleProof,
     state::{state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction},
     util::commit,
+    wallet::spectrum::SpectrumLedger,
 };
 use api::Error;
 use fmt::{Display, Formatter};
@@ -168,7 +169,7 @@ impl FromError for SpectrumError {
     }
 }
 
-impl FromError for crate::wallet::WalletError {
+impl FromError for crate::wallet::WalletError<SpectrumLedger> {
     fn catch_all(msg: String) -> Self {
         Self::Failed { msg }
     }

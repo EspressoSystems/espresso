@@ -37,14 +37,14 @@ pub mod mocks;
 #[async_trait]
 pub trait MockNetwork<'a, L: Ledger> {
     fn now(&self) -> EventIndex;
-    fn submit(&mut self, block: Block<L>) -> Result<(), WalletError>;
+    fn submit(&mut self, block: Block<L>) -> Result<(), WalletError<L>>;
     fn post_memos(
         &mut self,
         block_id: u64,
         txn_id: u64,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
-    ) -> Result<(), WalletError>;
+    ) -> Result<(), WalletError<L>>;
     fn memos_source(&self) -> EventSource;
     fn generate_event(&mut self, event: LedgerEvent<L>);
 }
@@ -84,7 +84,7 @@ impl<'a, L: Ledger, N: MockNetwork<'a, L>, S: WalletStorage<'a, L>> MockLedger<'
         self.network.now()
     }
 
-    pub fn flush(&mut self) -> Result<(), WalletError> {
+    pub fn flush(&mut self) -> Result<(), WalletError<L>> {
         if self.current_block.is_empty() {
             return Ok(());
         }
@@ -117,7 +117,7 @@ impl<'a, L: Ledger, N: MockNetwork<'a, L>, S: WalletStorage<'a, L>> MockLedger<'
         self.mangled = false;
     }
 
-    pub fn submit(&mut self, txn: Transaction<L>) -> Result<(), WalletError> {
+    pub fn submit(&mut self, txn: Transaction<L>) -> Result<(), WalletError<L>> {
         if self.hold_next_transaction {
             self.held_transaction = Some(txn);
             self.hold_next_transaction = false;
@@ -125,7 +125,7 @@ impl<'a, L: Ledger, N: MockNetwork<'a, L>, S: WalletStorage<'a, L>> MockLedger<'
             let rejected = Block::<L>::new(vec![txn]);
             self.network.generate_event(LedgerEvent::<L>::Reject {
                 block: rejected,
-                error: ValidationError::Failed {},
+                error: ValidationError::<L>::new("block rejected because mock ledger is mangled"),
             });
         } else {
             match self.current_block.add_transaction(txn.clone()) {
@@ -153,14 +153,14 @@ impl<'a, L: Ledger, N: MockNetwork<'a, L>, S: WalletStorage<'a, L>> MockLedger<'
         txn_id: u64,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<L>> {
         self.network.post_memos(block_id, txn_id, memos, sig)?;
         assert!(self.missing_memos >= 1);
         self.missing_memos -= 1;
         Ok(())
     }
 
-    pub fn set_block_size(&mut self, size: usize) -> Result<(), WalletError> {
+    pub fn set_block_size(&mut self, size: usize) -> Result<(), WalletError<L>> {
         self.block_size = size;
         if self.current_block.len() >= self.block_size {
             self.flush()?;

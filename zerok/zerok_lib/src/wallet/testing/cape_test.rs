@@ -250,7 +250,7 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
         self.query_service_events.now() + self.memo_events.now()
     }
 
-    fn submit(&mut self, block: Block<CapeLedger>) -> Result<(), WalletError> {
+    fn submit(&mut self, block: Block<CapeLedger>) -> Result<(), WalletError<CapeLedger>> {
         // Convert the submitted transactions to CapeOperations.
         let ops = block
             .txns()
@@ -278,7 +278,7 @@ impl<'a> MockNetwork<'a, CapeLedger> for MockCapeNetwork {
         txn_id: u64,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<CapeLedger>> {
         let txn = match self.txns.get_mut(&(block_id, txn_id)) {
             Some(txn) => txn,
             None => return Err(QueryServiceError::InvalidTxnId {}.into()),
@@ -370,8 +370,8 @@ pub struct MockCapeBackend<'a, Meta: Serialize + DeserializeOwned> {
 impl<'a, Meta: Serialize + DeserializeOwned + Send> MockCapeBackend<'a, Meta> {
     pub fn new(
         ledger: Arc<Mutex<MockCapeLedger<'a>>>,
-        loader: &mut impl WalletLoader<Meta = Meta>,
-    ) -> Result<Self, WalletError> {
+        loader: &mut impl WalletLoader<CapeLedger, Meta = Meta>,
+    ) -> Result<Self, WalletError<CapeLedger>> {
         // Workaround for https://github.com/SpectrumXYZ/atomicstore/issues/2, which affects logs
         // containing more than one entry in a file. We simply set the fill size small enough that
         // there will only ever be one entry per file.
@@ -390,7 +390,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> MockCapeBackend<'a, Meta> {
     pub async fn new_for_test(
         ledger: Arc<Mutex<MockCapeLedger<'a>>>,
         storage: Arc<Mutex<AtomicWalletStorage<'a, CapeLedger, Meta>>>,
-    ) -> Result<MockCapeBackend<'a, Meta>, WalletError> {
+    ) -> Result<MockCapeBackend<'a, Meta>, WalletError<CapeLedger>> {
         let key_stream = storage.lock().await.key_stream();
         Ok(Self {
             key_stream,
@@ -411,7 +411,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         self.storage.lock().await
     }
 
-    async fn create(&mut self) -> Result<WalletState<'a, CapeLedger>, WalletError> {
+    async fn create(&mut self) -> Result<WalletState<'a, CapeLedger>, WalletError<CapeLedger>> {
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = &*UNIVERSAL_PARAM;
         let mut ledger = self.ledger.lock().await;
@@ -426,7 +426,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                 .freeze
                 .iter()
                 .map(|k| {
-                    Ok::<FreezeProvingKey, WalletError>(
+                    Ok::<FreezeProvingKey, WalletError<CapeLedger>>(
                         jf_aap::proof::freeze::preprocess(
                             univ_param,
                             k.num_inputs(),
@@ -443,7 +443,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                 .xfr
                 .iter()
                 .map(|k| {
-                    Ok::<TransferProvingKey, WalletError>(
+                    Ok::<TransferProvingKey, WalletError<CapeLedger>>(
                         jf_aap::proof::transfer::preprocess(
                             univ_param,
                             k.num_inputs(),
@@ -508,7 +508,10 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         ))
     }
 
-    async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
+    async fn get_public_key(
+        &self,
+        address: &UserAddress,
+    ) -> Result<UserPubKey, WalletError<CapeLedger>> {
         Ok(self
             .ledger
             .lock()
@@ -520,7 +523,10 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
             .clone())
     }
 
-    async fn register_user_key(&mut self, pub_key: &UserPubKey) -> Result<(), WalletError> {
+    async fn register_user_key(
+        &mut self,
+        pub_key: &UserPubKey,
+    ) -> Result<(), WalletError<CapeLedger>> {
         self.ledger
             .lock()
             .await
@@ -534,7 +540,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         &self,
         nullifiers: &mut CapeNullifierSet,
         nullifier: Nullifier,
-    ) -> Result<(bool, ()), WalletError> {
+    ) -> Result<(bool, ()), WalletError<CapeLedger>> {
         // Try to look up the nullifier in our "local" cache. If it is not there, query the contract
         // and cache it.
         match nullifiers.get(nullifier) {
@@ -558,7 +564,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         &self,
         block_id: u64,
         txn_id: u64,
-    ) -> Result<CapeTransition, WalletError> {
+    ) -> Result<CapeTransition, WalletError<CapeLedger>> {
         let ledger = self.ledger.lock().await;
         Ok(ledger
             .network
@@ -573,7 +579,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         self.key_stream.clone()
     }
 
-    async fn submit(&mut self, txn: CapeTransition) -> Result<(), WalletError> {
+    async fn submit(&mut self, txn: CapeTransition) -> Result<(), WalletError<CapeLedger>> {
         self.ledger.lock().await.submit(txn)
     }
 
@@ -583,7 +589,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         txn_id: u64,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<CapeLedger>> {
         self.ledger
             .lock()
             .await
@@ -600,7 +606,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> CapeWalletBackend<'a>
         asset: &AssetDefinition,
         erc20_code: Erc20Code,
         sponsor: EthereumAddr,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<CapeLedger>> {
         self.ledger
             .lock()
             .await
@@ -612,7 +618,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> CapeWalletBackend<'a>
     async fn get_wrapped_erc20_code(
         &self,
         asset: &AssetDefinition,
-    ) -> Result<Erc20Code, WalletError> {
+    ) -> Result<Erc20Code, WalletError<CapeLedger>> {
         match self
             .ledger
             .lock()
@@ -623,7 +629,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> CapeWalletBackend<'a>
             .get(asset)
         {
             Some((erc20_code, _)) => Ok(erc20_code.clone()),
-            None => Err(WalletError::UndefinedAsset { asset: asset.code }),
+            None => Err(WalletError::<CapeLedger>::UndefinedAsset { asset: asset.code }),
         }
     }
 
@@ -632,7 +638,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> CapeWalletBackend<'a>
         erc20_code: Erc20Code,
         src_addr: EthereumAddr,
         ro: RecordOpening,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<CapeLedger>> {
         self.ledger
             .lock()
             .await
@@ -642,7 +648,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> CapeWalletBackend<'a>
     }
 }
 
-fn cape_to_wallet_err(err: CapeValidationError) -> WalletError {
+fn cape_to_wallet_err(err: CapeValidationError) -> WalletError<CapeLedger> {
     //todo Convert CapeValidationError to WalletError in a better way. Maybe WalletError should be
     // parameterized on the ledger type and there should be a ledger trait ValidationError.
     WalletError::Failed {
@@ -655,18 +661,18 @@ struct MockCapeWalletLoader {
     key: KeyTree,
 }
 
-impl WalletLoader for MockCapeWalletLoader {
+impl WalletLoader<CapeLedger> for MockCapeWalletLoader {
     type Meta = ();
 
     fn location(&self) -> PathBuf {
         self.path.clone()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError> {
+    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<CapeLedger>> {
         Ok(((), self.key.clone()))
     }
 
-    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
+    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError<CapeLedger>> {
         Ok(self.key.clone())
     }
 }
