@@ -16,7 +16,7 @@ use crate::txn_builder::*;
 use crate::util::arbitrary_wrappers::{ArbitraryNullifier, ArbitraryUserKeyPair};
 use crate::{
     events::{EventIndex, EventSource, LedgerEvent},
-    ledger, ser_test,
+    ser_test,
     state::ProverKeySet,
 };
 use arbitrary::{Arbitrary, Unstructured};
@@ -45,15 +45,15 @@ use jf_aap::{
     },
     KeyPair as SigKeyPair, MerkleLeafProof, MerklePath, Signature, TransactionNote,
 };
-use ledger::{
+use rand_chacha::rand_core::SeedableRng;
+use rand_chacha::ChaChaRng;
+use reef::{
     traits::{
         Block as _, NullifierSet as _, Transaction as _, TransactionKind as _,
         ValidationError as _, Validator as _,
     },
     *,
 };
-use rand_chacha::rand_core::SeedableRng;
-use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use spectrum::SpectrumLedger;

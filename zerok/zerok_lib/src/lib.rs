@@ -10,7 +10,6 @@ pub mod cape_state;
 pub mod committee;
 pub mod events;
 pub mod full_persistence;
-pub mod ledger;
 pub mod lw_persistence;
 pub mod node;
 mod set_merkle_tree;

@@ -1,5 +1,4 @@
 use super::{encryption, hd, reader, EncryptionError, KeyError, WalletError};
-use crate::ledger::Ledger;
 use encryption::{Cipher, CipherText, Salt};
 use hd::KeyTree;
 use rand_chacha::{
@@ -7,6 +6,7 @@ use rand_chacha::{
     ChaChaRng,
 };
 use reader::Reader;
+use reef::Ledger;
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::path::PathBuf;

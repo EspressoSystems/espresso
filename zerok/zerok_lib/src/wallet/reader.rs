@@ -1,5 +1,5 @@
 use super::WalletError;
-use crate::ledger::Ledger;
+use reef::Ledger;
 use rpassword::prompt_password_stdout;
 
 pub enum Reader {

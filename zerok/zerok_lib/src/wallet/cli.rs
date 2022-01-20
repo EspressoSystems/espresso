@@ -16,6 +16,7 @@ use jf_aap::{
     proof::UniversalParam,
     structs::{AssetCode, AssetDefinition, AssetPolicy, ReceiverMemo, RecordCommitment},
 };
+use reef::Ledger;
 use snafu::ResultExt;
 use std::any::type_name;
 use std::collections::HashMap;
@@ -28,7 +29,6 @@ use std::str::FromStr;
 use tagged_base64::TaggedBase64;
 use tempdir::TempDir;
 use wallet::{
-    ledger::Ledger,
     loader::{LoadMethod, Loader, LoaderMetadata, WalletLoader},
     reader::Reader,
     AssetInfo, BincodeError, IoError, MintInfo, TransactionReceipt, TransactionStatus,

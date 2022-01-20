@@ -1,9 +1,5 @@
 use crate::{
     cape_state::*,
-    ledger::{
-        open_aap_audit_memo, open_xfr_audit_memo, traits::*, AAPTransactionKind, AuditError,
-        AuditMemoOpening,
-    },
     ser_test,
     util::{
         arbitrary_wrappers::*,
@@ -16,6 +12,7 @@ use jf_aap::{
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment, RecordOpening},
     TransactionNote,
 };
+use reef::{aap, traits::*, AuditError, AuditMemoOpening};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -61,34 +58,34 @@ impl<'a> Arbitrary<'a> for CapeNullifierSet {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum_macros::Display)]
 pub enum CapeTransactionKind {
-    AAP(AAPTransactionKind),
+    AAP(aap::TransactionKind),
     Burn,
     Wrap,
 }
 
 impl TransactionKind for CapeTransactionKind {
     fn send() -> Self {
-        Self::AAP(AAPTransactionKind::send())
+        Self::AAP(aap::TransactionKind::send())
     }
 
     fn receive() -> Self {
-        Self::AAP(AAPTransactionKind::receive())
+        Self::AAP(aap::TransactionKind::receive())
     }
 
     fn mint() -> Self {
-        Self::AAP(AAPTransactionKind::mint())
+        Self::AAP(aap::TransactionKind::mint())
     }
 
     fn freeze() -> Self {
-        Self::AAP(AAPTransactionKind::freeze())
+        Self::AAP(aap::TransactionKind::freeze())
     }
 
     fn unfreeze() -> Self {
-        Self::AAP(AAPTransactionKind::unfreeze())
+        Self::AAP(aap::TransactionKind::unfreeze())
     }
 
     fn unknown() -> Self {
-        Self::AAP(AAPTransactionKind::unknown())
+        Self::AAP(aap::TransactionKind::unknown())
     }
 }
 
@@ -130,10 +127,10 @@ impl Transaction for CapeTransition {
     ) -> Result<AuditMemoOpening, AuditError> {
         match self {
             Self::Transaction(CapeTransaction::AAP(note)) => {
-                open_aap_audit_memo(assets, keys, note)
+                aap::open_audit_memo(assets, keys, note)
             }
             Self::Transaction(CapeTransaction::Burn { xfr, .. }) => {
-                open_xfr_audit_memo(assets, keys, xfr)
+                aap::open_xfr_audit_memo(assets, keys, xfr)
             }
             _ => Err(AuditError::NoAuditMemos),
         }

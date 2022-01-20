@@ -2,10 +2,6 @@ use crate::{
     cape_ledger::*,
     cape_state::*,
     events::{EventIndex, EventSource, LedgerEvent},
-    ledger::{
-        traits::{Block as _, Transaction as _},
-        Block,
-    },
     node::QueryServiceError,
     state::{
         key_set::{OrderByOutputs, SizedKey},
@@ -30,6 +26,10 @@ use jf_aap::{
     MerklePath, MerkleTree, Signature, TransactionNote,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+use reef::{
+    traits::{Block as _, Transaction as _},
+    Block,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use snafu::ResultExt;
 use std::collections::HashMap;

@@ -1,9 +1,10 @@
-use crate::{ledger::*, ser_test, wallet::spectrum::SpectrumLedger};
+use crate::{ser_test, wallet::spectrum::SpectrumLedger};
 use arbitrary::Arbitrary;
 use jf_aap::{
     structs::{ReceiverMemo, RecordCommitment},
     MerklePath,
 };
+use reef::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
