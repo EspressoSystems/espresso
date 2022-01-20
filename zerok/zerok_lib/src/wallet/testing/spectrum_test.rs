@@ -1,7 +1,6 @@
 use super::*;
 use crate::{
     api::FromError,
-    ledger::AAPLedger,
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{
@@ -10,8 +9,8 @@ use crate::{
     },
     txn_builder::{RecordDatabase, TransactionHistoryEntry, TransactionState},
     wallet::{
-        hd, testing, CryptoError, RoleKeyPair, WalletBackend, WalletError, WalletState,
-        WalletStorage,
+        hd, spectrum::SpectrumLedger, testing, CryptoError, RoleKeyPair, WalletBackend,
+        WalletError, WalletState, WalletStorage,
     },
 };
 use async_std::sync::{Arc, Mutex, MutexGuard};
@@ -33,11 +32,11 @@ use testing::{MockLedger, MockNetwork};
 pub struct MockStorage<'a> {
     committed: Option<WalletState<'a>>,
     working: Option<WalletState<'a>>,
-    txn_history: Vec<TransactionHistoryEntry<AAPLedger>>,
+    txn_history: Vec<TransactionHistoryEntry<SpectrumLedger>>,
 }
 
 #[async_trait]
-impl<'a> WalletStorage<'a, AAPLedger> for MockStorage<'a> {
+impl<'a> WalletStorage<'a, SpectrumLedger> for MockStorage<'a> {
     fn exists(&self) -> bool {
         self.committed.is_some()
     }
@@ -95,7 +94,7 @@ impl<'a> WalletStorage<'a, AAPLedger> for MockStorage<'a> {
 
     async fn store_transaction(
         &mut self,
-        txn: TransactionHistoryEntry<AAPLedger>,
+        txn: TransactionHistoryEntry<SpectrumLedger>,
     ) -> Result<(), WalletError> {
         self.txn_history.push(txn);
         Ok(())
@@ -103,7 +102,7 @@ impl<'a> WalletStorage<'a, AAPLedger> for MockStorage<'a> {
 
     async fn transaction_history(
         &mut self,
-    ) -> Result<Vec<TransactionHistoryEntry<AAPLedger>>, WalletError> {
+    ) -> Result<Vec<TransactionHistoryEntry<SpectrumLedger>>, WalletError> {
         Ok(self.txn_history.clone())
     }
 
@@ -116,17 +115,17 @@ impl<'a> WalletStorage<'a, AAPLedger> for MockStorage<'a> {
     }
 }
 
-pub struct MockAAPNetwork<'a> {
+pub struct MockSpectrumNetwork<'a> {
     validator: ValidatorState,
     nullifiers: SetMerkleTree,
     records: MerkleTree,
     committed_blocks: Vec<(ElaboratedBlock, Vec<Vec<u64>>)>,
     proving_keys: Arc<ProverKeySet<'a, key_set::OrderByOutputs>>,
     address_map: HashMap<UserAddress, UserPubKey>,
-    events: MockEventSource<AAPLedger>,
+    events: MockEventSource<SpectrumLedger>,
 }
 
-impl<'a> MockNetwork<'a, AAPLedger> for MockAAPNetwork<'a> {
+impl<'a> MockNetwork<'a, SpectrumLedger> for MockSpectrumNetwork<'a> {
     fn now(&self) -> EventIndex {
         self.events.now()
     }
@@ -197,7 +196,7 @@ impl<'a> MockNetwork<'a, AAPLedger> for MockAAPNetwork<'a> {
                     .1
             })
             .collect::<Vec<_>>();
-        self.generate_event(LedgerEvent::<AAPLedger>::Memos {
+        self.generate_event(LedgerEvent::<SpectrumLedger>::Memos {
             outputs: izip!(memos, comms, uids, merkle_paths).collect(),
             transaction: Some((block_id, txn_id)),
         });
@@ -224,16 +223,16 @@ impl<'a> MockNetwork<'a, AAPLedger> for MockAAPNetwork<'a> {
 }
 
 #[derive(Clone)]
-pub struct MockAAPBackend<'a> {
+pub struct MockSpectrumBackend<'a> {
     key_pair: UserKeyPair,
-    ledger: Arc<Mutex<MockLedger<'a, AAPLedger, MockAAPNetwork<'a>, MockStorage<'a>>>>,
+    ledger: Arc<Mutex<MockLedger<'a, SpectrumLedger, MockSpectrumNetwork<'a>, MockStorage<'a>>>>,
     initial_grants: Vec<(RecordOpening, u64)>,
     seed: [u8; 32],
     storage: Arc<Mutex<MockStorage<'a>>>,
 }
 
 #[async_trait]
-impl<'a> WalletBackend<'a, AAPLedger> for MockAAPBackend<'a> {
+impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
     type EventStream = Pin<Box<dyn Stream<Item = (LedgerEvent, EventSource)> + Send>>;
     type Storage = MockStorage<'a>;
 
@@ -373,13 +372,13 @@ impl<'a> WalletBackend<'a, AAPLedger> for MockAAPBackend<'a> {
 }
 
 #[derive(Default)]
-pub struct AAPTest;
+pub struct SpectrumTest;
 
 #[async_trait]
-impl<'a> testing::SystemUnderTest<'a> for AAPTest {
-    type Ledger = AAPLedger;
-    type MockBackend = MockAAPBackend<'a>;
-    type MockNetwork = MockAAPNetwork<'a>;
+impl<'a> testing::SystemUnderTest<'a> for SpectrumTest {
+    type Ledger = SpectrumLedger;
+    type MockBackend = MockSpectrumBackend<'a>;
+    type MockNetwork = MockSpectrumNetwork<'a>;
     type MockStorage = MockStorage<'a>;
 
     async fn create_network(
@@ -389,7 +388,7 @@ impl<'a> testing::SystemUnderTest<'a> for AAPTest {
         records: MerkleTree,
         _initial_grants: Vec<(RecordOpening, u64)>,
     ) -> Self::MockNetwork {
-        MockAAPNetwork {
+        MockSpectrumNetwork {
             validator: ValidatorState::new(verif_crs, records.clone()),
             records,
             nullifiers: SetMerkleTree::default(),
@@ -412,7 +411,7 @@ impl<'a> testing::SystemUnderTest<'a> for AAPTest {
         storage: Arc<Mutex<Self::MockStorage>>,
         key_pair: UserKeyPair,
     ) -> Self::MockBackend {
-        MockAAPBackend {
+        MockSpectrumBackend {
             ledger,
             initial_grants,
             seed,
@@ -422,9 +421,9 @@ impl<'a> testing::SystemUnderTest<'a> for AAPTest {
     }
 }
 
-// AAP-specific tests
+// Spectrum-specific tests
 #[cfg(test)]
-mod aap_wallet_tests {
+mod spectrum_wallet_tests {
     use super::*;
     use jf_aap::structs::AssetCode;
     use std::time::Instant;
@@ -432,7 +431,7 @@ mod aap_wallet_tests {
 
     #[async_std::test]
     async fn test_resubmit() -> std::io::Result<()> {
-        let mut t = AAPTest::default();
+        let mut t = SpectrumTest::default();
         let mut now = Instant::now();
 
         // The sender wallet (wallets[0]) gets an initial grant of 2 for a transaction fee and a

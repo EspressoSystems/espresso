@@ -1,10 +1,10 @@
 use super::hd::KeyTree;
 use super::loader::WalletLoader;
 use super::persistence::AtomicWalletStorage;
+use super::spectrum::SpectrumLedger;
 use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
 use crate::api;
 use crate::events::{EventIndex, EventSource, LedgerEvent};
-use crate::ledger::AAPLedger;
 use crate::node;
 use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
 use crate::state::key_set::SizedKey;
@@ -35,7 +35,7 @@ pub struct NetworkBackend<'a, Meta: Serialize + DeserializeOwned> {
     query_client: surf::Client,
     bulletin_client: surf::Client,
     validator_client: surf::Client,
-    storage: Arc<Mutex<AtomicWalletStorage<'a, AAPLedger, Meta>>>,
+    storage: Arc<Mutex<AtomicWalletStorage<'a, SpectrumLedger, Meta>>>,
     key_stream: KeyTree,
 }
 
@@ -109,11 +109,11 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
 }
 
 #[async_trait]
-impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
+impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLedger>
     for NetworkBackend<'a, Meta>
 {
     type EventStream = node::EventStream<(LedgerEvent, EventSource)>;
-    type Storage = AtomicWalletStorage<'a, AAPLedger, Meta>;
+    type Storage = AtomicWalletStorage<'a, SpectrumLedger, Meta>;
 
     async fn create(&mut self) -> Result<WalletState<'a>, WalletError> {
         let LedgerSnapshot {

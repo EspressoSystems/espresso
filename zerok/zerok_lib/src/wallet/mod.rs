@@ -7,6 +7,7 @@ pub mod network;
 pub mod persistence;
 pub mod reader;
 mod secret;
+pub mod spectrum;
 #[cfg(any(test, feature = "mocks"))]
 pub mod testing;
 
@@ -55,6 +56,7 @@ use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
+use spectrum::SpectrumLedger;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::iter::repeat;
@@ -253,7 +255,7 @@ pub struct KeyStreamState {
 }
 
 #[derive(Debug, Clone)]
-pub struct WalletState<'a, L: Ledger = AAPLedger> {
+pub struct WalletState<'a, L: Ledger = SpectrumLedger> {
     // TODO: Move the mutable keys to the txn state.
     // https://github.com/spectrum-eco/spectrum/issues/6.
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1843,7 +1845,7 @@ impl<'a, L: Ledger> WalletState<'a, L> {
 /// Note: it is a soundness requirement that the destructor of a `Wallet` run when the `Wallet` is
 /// dropped. Therefore, `std::mem::forget` must not be used to forget a `Wallet` without running its
 /// destructor.
-pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = AAPLedger> {
+pub struct Wallet<'a, Backend: WalletBackend<'a, L>, L: Ledger = SpectrumLedger> {
     // Data shared between the main thread and the event handling thread:
     //  * the trusted, persistent wallet state
     //  * the trusted, ephemeral wallet session

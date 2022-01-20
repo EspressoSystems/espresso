@@ -1,7 +1,4 @@
-use crate::state::{
-    state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction,
-    ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
-};
+use crate::state::ValidationError;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use jf_aap::{
     keys::{AuditorKeyPair, AuditorPubKey},
@@ -143,6 +140,7 @@ pub mod traits {
 
     pub trait Ledger: Copy + Debug + Send + Sync {
         type Validator: traits::Validator;
+        fn name() -> String;
     }
 }
 
@@ -157,40 +155,10 @@ pub type TransactionKind<L> = <Transaction<L> as traits::Transaction>::Kind;
 pub type NullifierSet<L> = <Transaction<L> as traits::Transaction>::NullifierSet;
 pub type NullifierProof<L> = <NullifierSet<L> as traits::NullifierSet>::Proof;
 
-impl traits::NullifierSet for SetMerkleTree {
-    type Proof = SetMerkleProof;
-
-    fn multi_insert(&mut self, nullifiers: &[(Nullifier, Self::Proof)]) -> Result<(), Self::Proof> {
-        // Bring nullifier tree branches containing spent nullifiers into memory, using the proofs
-        // contained in the block. All the proofs are relative to the original nullifiers set, so we
-        // need to bring all the relevant branches into memory before adding any of the new
-        // nullifiers to the set, as this will change the tree and invalidate the remaining proofs.
-        for (nullifier, proof) in nullifiers {
-            if self.remember(*nullifier, proof.clone()).is_err() {
-                return Err(proof.clone());
-            }
-        }
-        // Now we can add the new nullifiers to the tree.
-        for (nullifier, _) in nullifiers {
-            // This should not fail, since we remembered all the relevant nullifiers in the previous
-            // loop, so we can unwrap().
-            self.insert(*nullifier).unwrap();
-        }
-        // Now that the new nullifiers have all been inserted, we can prune our nullifiers set back
-        // down to restore sparseness.
-        for (nullifier, _) in nullifiers {
-            //todo !jeb.bearer for now we unconditionally forget the new nullifier, knowing we can
-            // get it back from the backend if necessary. However, this nullifier may be helping us
-            // by representing a branch of the tree that we care about, that would allow us to
-            // generate a proof that the nullifier for one of our owned records is _not_ in the
-            // tree. We should be more careful about pruning to cut down on the amount we have to
-            // ask the network.
-            self.forget(*nullifier);
-        }
-
-        Ok(())
-    }
-}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Below are some implementations for generic AAP-style ledgers. These are meant to aid in the
+// implementation of the ledger traits above for a particular AAP-like ledger type.
+//
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum_macros::Display)]
 pub enum AAPTransactionKind {
@@ -272,113 +240,4 @@ pub fn open_mint_audit_memo(
                 outputs: vec![output],
             }
         })
-}
-
-impl traits::Transaction for ElaboratedTransaction {
-    type NullifierSet = SetMerkleTree;
-    type Hash = ElaboratedTransactionHash;
-    type Kind = AAPTransactionKind;
-
-    fn aap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
-        Self { txn: note, proofs }
-    }
-
-    fn open_audit_memo(
-        &self,
-        assets: &HashMap<AssetCode, AssetDefinition>,
-        keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
-    ) -> Result<AuditMemoOpening, AuditError> {
-        open_aap_audit_memo(assets, keys, &self.txn)
-    }
-
-    fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {
-        self.txn
-            .nullifiers()
-            .into_iter()
-            .zip(self.proofs.clone())
-            .collect()
-    }
-
-    fn input_nullifiers(&self) -> Vec<Nullifier> {
-        self.txn.nullifiers()
-    }
-
-    fn output_commitments(&self) -> Vec<RecordCommitment> {
-        self.txn.output_commitments()
-    }
-
-    fn output_len(&self) -> usize {
-        self.txn.output_len()
-    }
-
-    fn hash(&self) -> Self::Hash {
-        self.etxn_hash()
-    }
-
-    fn kind(&self) -> Self::Kind {
-        match &self.txn {
-            TransactionNote::Mint(_) => AAPTransactionKind::Mint,
-            TransactionNote::Transfer(_) => AAPTransactionKind::Send,
-            TransactionNote::Freeze(_) => AAPTransactionKind::Freeze,
-        }
-    }
-
-    fn set_proofs(&mut self, proofs: Vec<SetMerkleProof>) {
-        self.proofs = proofs;
-    }
-}
-
-impl traits::Block for ElaboratedBlock {
-    type Transaction = ElaboratedTransaction;
-
-    fn new(txns: Vec<Self::Transaction>) -> Self {
-        let (txns, proofs): (Vec<TransactionNote>, Vec<_>) =
-            txns.into_iter().map(|txn| (txn.txn, txn.proofs)).unzip();
-        Self {
-            block: crate::state::Block(txns),
-            proofs,
-        }
-    }
-
-    fn txns(&self) -> Vec<Self::Transaction> {
-        self.block
-            .0
-            .iter()
-            .zip(&self.proofs)
-            .map(|(txn, proofs)| ElaboratedTransaction {
-                txn: txn.clone(),
-                proofs: proofs.clone(),
-            })
-            .collect()
-    }
-
-    fn add_transaction(&mut self, txn: Self::Transaction) -> Result<(), ValidationError> {
-        use phaselock::BlockContents;
-        *self = self.add_transaction_raw(&txn)?;
-        Ok(())
-    }
-}
-
-impl traits::Validator for ValidatorState {
-    type StateCommitment = LedgerStateCommitment;
-    type Block = ElaboratedBlock;
-
-    fn now(&self) -> u64 {
-        self.prev_commit_time
-    }
-
-    fn commit(&self) -> Self::StateCommitment {
-        self.commit()
-    }
-
-    fn validate_and_apply(&mut self, block: Self::Block) -> Result<Vec<u64>, ValidationError> {
-        self.validate_and_apply(self.now() + 1, block.block, block.proofs)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct AAPLedger;
-
-impl Ledger for AAPLedger {
-    type Validator = ValidatorState;
 }

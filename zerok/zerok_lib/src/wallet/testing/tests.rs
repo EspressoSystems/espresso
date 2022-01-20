@@ -1491,8 +1491,8 @@ mod generic_wallet_tests {
         );
     }
 
-    #[instantiate_tests(<'static, aap_test::AAPTest>)]
-    mod aap_wallet_tests {}
+    #[instantiate_tests(<'static, spectrum_test::SpectrumTest>)]
+    mod spectrum_wallet_tests {}
 
     #[instantiate_tests(<'static, cape_test::CapeTest>)]
     mod cape_wallet_tests {}
