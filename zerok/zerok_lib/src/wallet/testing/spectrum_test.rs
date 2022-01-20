@@ -1,6 +1,5 @@
 use super::*;
 use crate::{
-    api::FromError,
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{
@@ -326,18 +325,18 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
         let block = &network
             .committed_blocks
             .get(block_id as usize)
-            .ok_or_else(|| {
-                WalletError::from_query_service_error(node::QueryServiceError::InvalidBlockId {
+            .ok_or_else(|| WalletError::QueryServiceError {
+                source: node::QueryServiceError::InvalidBlockId {
                     index: block_id as usize,
                     num_blocks: network.committed_blocks.len(),
-                })
+                },
             })?
             .0;
 
         if txn_id as usize >= block.block.0.len() {
-            return Err(WalletError::from_query_service_error(
-                node::QueryServiceError::InvalidTxnId {},
-            ));
+            return Err(WalletError::QueryServiceError {
+                source: node::QueryServiceError::InvalidTxnId {},
+            });
         }
         let txn = block.block.0[txn_id as usize].clone();
         let proofs = block.proofs[txn_id as usize].clone();

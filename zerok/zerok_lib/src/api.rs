@@ -17,23 +17,19 @@
 // object with the appropriate Serialize implementation.
 //
 
-use crate::state::{
-    state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction,
-    SetMerkleProof,
-};
 use crate::util::commit;
 use ark_serialize::*;
-use fmt::{Display, Formatter};
+use fmt::{Debug, Display, Formatter};
 use futures::future::BoxFuture;
 use futures::prelude::*;
 use generic_array::{ArrayLength, GenericArray};
 use jf_aap::{
     structs::{ReceiverMemo, RecordCommitment},
-    Signature, TransactionNote,
+    Signature,
 };
 use jf_utils::{tagged_blob, Tagged};
 use phaselock::BlockHash;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, ResultExt, Snafu};
 use std::fmt;
 use tagged_base64::TaggedBase64;
@@ -63,12 +59,6 @@ impl<U: ArrayLength<u8>> From<GenericArray<u8, U>> for Hash {
 impl<T: commit::Committable> From<commit::Commitment<T>> for Hash {
     fn from(c: commit::Commitment<T>) -> Self {
         Self::from(<[u8; 32]>::from(c))
-    }
-}
-
-impl From<LedgerStateCommitment> for Hash {
-    fn from(c: LedgerStateCommitment) -> Self {
-        Self::from(commit::Commitment::<_>::from(c))
     }
 }
 
@@ -105,83 +95,6 @@ pub use jf_aap::keys::UserPubKey;
 pub struct MerklePath(pub jf_aap::MerklePath);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CommittedBlock {
-    pub id: BlockId,
-    pub index: usize,
-    pub hash: Hash,
-    pub state_commitment: LedgerStateCommitment,
-    pub transactions: Vec<CommittedTransaction>,
-}
-
-impl Display for CommittedBlock {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_as_json(self, f)
-    }
-}
-
-impl From<CommittedBlock> for ElaboratedBlock {
-    fn from(b: CommittedBlock) -> Self {
-        let (txs, proofs) = b
-            .transactions
-            .into_iter()
-            .map(|tx| (tx.data, tx.proofs))
-            .unzip();
-        Self {
-            block: Block(txs),
-            proofs,
-        }
-    }
-}
-
-impl From<&CommittedBlock> for ElaboratedBlock {
-    fn from(b: &CommittedBlock) -> Self {
-        let (txs, proofs) = b
-            .transactions
-            .iter()
-            .map(|tx| (tx.data.clone(), tx.proofs.clone()))
-            .unzip();
-        Self {
-            block: Block(txs),
-            proofs,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CommittedTransaction {
-    pub id: TransactionId,
-    pub data: TransactionNote,
-    pub proofs: Vec<SetMerkleProof>,
-    pub output_uids: Vec<u64>,
-    pub output_memos: Option<Vec<ReceiverMemo>>,
-    pub memos_signature: Option<Signature>,
-}
-
-impl From<CommittedTransaction> for ElaboratedTransaction {
-    fn from(tx: CommittedTransaction) -> Self {
-        Self {
-            txn: tx.data,
-            proofs: tx.proofs,
-        }
-    }
-}
-
-impl From<&CommittedTransaction> for ElaboratedTransaction {
-    fn from(tx: &CommittedTransaction) -> Self {
-        Self {
-            txn: tx.data.clone(),
-            proofs: tx.proofs.clone(),
-        }
-    }
-}
-
-impl Display for CommittedTransaction {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_as_json(self, f)
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UnspentRecord {
     pub commitment: RecordCommitment,
     pub uid: u64,
@@ -207,215 +120,64 @@ impl Display for PostMemos {
     }
 }
 
-/// Response body for the query service endpoint GET /getnullifier.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct NullifierProof {
-    pub spent: bool,
-    pub proof: SetMerkleProof,
-}
-
-impl Display for NullifierProof {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_as_json(self, f)
-    }
-}
-
 /// Errors which can be serialized in a response body.
 ///
-/// When a request fails for any reason, the body of the response will contain a serialization of
-/// the error that caused the failure. The serialization will represent this data structure.
-/// Variants can be added to handle any specific error type that the API wants to expose. Other
-/// errors (such as errors generated from the [tide] framework) will be serialized as strings using
-/// their [Display] instance and encoded in the [Error::InternalError] variant.
-#[derive(Debug, Serialize, Deserialize, Snafu)]
-#[allow(clippy::large_enum_variant)]
-#[non_exhaustive]
-pub enum Error {
-    QueryServiceError {
-        source: crate::node::QueryServiceError,
-    },
-    ValidationError {
-        source: crate::state::ValidationError,
-    },
-    #[snafu(display("{:?}", source))]
-    ConsensusError {
-        // PhaseLockError cannot be serialized. Instead, if we have to serialize this variant, we
-        // will serialize Ok(err) to Err(format(err)), and when we deserialize we will at least
-        // preserve the variant ConsensusError and a String representation of the underlying error.
-        // Unfortunately, this means we cannot use this variant as a SNAFU error source.
-        #[serde(with = "crate::state::ser_debug")]
-        #[snafu(source(false))]
-        source: Result<phaselock::error::PhaseLockError, String>,
-    },
-    #[snafu(display("error in parameter {}: {}", param, msg))]
-    ParamError {
-        param: String,
-        msg: String,
-    },
-    #[snafu(display("unsupported content type {}", content_type))]
-    UnsupportedContentType {
-        content_type: String,
-    },
-    UnspecifiedContentType {},
-    #[snafu(display("{}", msg))]
-    InternalError {
-        msg: String,
-    },
-}
+/// This trait can be used to define a standard error type returned by all API endpoints. When a
+/// request fails for any reason, the body of the response will contain a serialization of
+/// the error that caused the failure, upcasted into an anyhow::Error. If the error is an instance
+/// of the standard error type for that particular API, it can be deserialized and downcasted to
+/// this type on the client. The `client` module provides a middleware handler that does this
+/// automatically.
+///
+/// Other errors (those which don't downcast to the API's errortype, such as errors
+/// generated from the [tide] framework) will be serialized as strings using their [Display]
+/// instance and encoded as an API error using the `catch_all` function.
+pub trait Error: std::error::Error + Serialize + DeserializeOwned + Send + Sync + 'static {
+    fn catch_all(msg: String) -> Self;
+    fn status(&self) -> tide::StatusCode;
 
-impl Error {
-    fn status(&self) -> tide::StatusCode {
-        match self {
-            Self::ParamError { .. } => tide::StatusCode::BadRequest,
-            Self::UnsupportedContentType { .. } => tide::StatusCode::BadRequest,
-            _ => tide::StatusCode::InternalServerError,
-        }
-    }
-}
-
-impl From<crate::node::QueryServiceError> for Error {
-    fn from(source: crate::node::QueryServiceError) -> Self {
-        Self::QueryServiceError { source }
-    }
-}
-
-impl From<crate::state::ValidationError> for Error {
-    fn from(source: crate::state::ValidationError) -> Self {
-        Self::ValidationError { source }
-    }
-}
-
-impl From<phaselock::error::PhaseLockError> for Error {
-    fn from(source: phaselock::error::PhaseLockError) -> Self {
-        Self::ConsensusError { source: Ok(source) }
-    }
-}
-
-impl From<serde_json::Error> for Error {
-    fn from(source: serde_json::Error) -> Self {
-        Self::InternalError {
-            msg: source.to_string(),
-        }
-    }
-}
-
-impl From<Box<bincode::ErrorKind>> for Error {
-    fn from(source: Box<bincode::ErrorKind>) -> Self {
-        Self::InternalError {
-            msg: source.to_string(),
+    /// Convert from a generic client-side error to a specific error type.
+    ///
+    /// If `source` can be downcast to `Self`, it is simply downcasted. Otherwise, it is converted
+    /// to a [String] using [Display] and then converted to `Self` using [catch_all].
+    fn from_client_error(source: surf::Error) -> Self {
+        match source.downcast::<Self>() {
+            Ok(err) => err,
+            Err(err) => Self::catch_all(err.to_string()),
         }
     }
 }
 
 /// Convert a concrete error type into a server error.
 ///
-/// The error is first converted into an [Error] using the [From] instance. That error is then
-/// upcasted into an anyhow error to be embedded in the [tide::Error].
-pub fn server_error(error: impl Into<Error>) -> tide::Error {
+/// The error is first converted into an `E` using the [From] instance. That error is then
+/// upcasted into an anyhow error to be embedded in the [tide::Error], using the status code
+/// indicated by [Error::status_code].
+///
+/// TODO the best way I can think of using this is something like
+/// ```ignore
+/// enum MyError { ... }
+///
+/// impl Error for MyError { ... }
+///
+/// fn my_error(error: impl Into<MyError>) -> tide::Error {
+///     server_error(error)
+/// }
+///
+/// fn some_endpoint(...) {
+///     ...
+///     some_result.map_err(my_error)?;
+///     ...
+/// }
+/// ```
+/// to ensure that the correct type parameter `MyError` is always used with `server_error`. A better
+/// way would be to define a `Server` type which wraps a `tide` server, and takes endpoints of the
+/// form `(...) -> Result<impl Serialize, impl Error>` and then calls `server_error` internal. This
+/// would also be a good place to put other common server-related code, such as parsing api.toml and
+/// route dispatching.
+pub fn server_error<E: Error>(error: impl Into<E>) -> tide::Error {
     let error = error.into();
     tide::Error::new(error.status(), error)
-}
-
-/// Conversion from [api::Error] to module-specific error types.
-///
-/// Any error type which has a catch-all variant can implement this trait and get conversions from
-/// other [Error] variants for free. By default, the conversion function for each variant simply
-/// converts the variant to a String using the Display instance and calls the [catch_all] method. If
-/// the implementing type has a variant for a specific type of error encapsulated in [Error], it can
-/// override the conversion function for that variant.
-///
-/// Having default conversion functions for each variant ensures that new error types can be added
-/// to [Error] without breaking existing conversions, as long as a corresponding new default method
-/// is added to this trait.
-pub trait FromError: Sized {
-    fn catch_all(msg: String) -> Self;
-
-    fn from_query_service_error(source: crate::node::QueryServiceError) -> Self {
-        Self::catch_all(source.to_string())
-    }
-
-    fn from_validation_error(source: crate::state::ValidationError) -> Self {
-        Self::catch_all(source.to_string())
-    }
-
-    fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
-        match source {
-            Ok(err) => Self::catch_all(format!("{:?}", err)),
-            Err(msg) => Self::catch_all(msg),
-        }
-    }
-
-    fn from_param_error(param: String, msg: String) -> Self {
-        Self::catch_all(format!("invalid request parameter {}: {}", param, msg))
-    }
-
-    fn from_unsupported_content_type(content_type: String) -> Self {
-        Self::catch_all(format!("unsupported content type {}", content_type))
-    }
-
-    fn from_unspecified_content_type() -> Self {
-        Self::catch_all(String::from("missing Content-Type header"))
-    }
-
-    fn from_api_error<E: Into<Error>>(source: E) -> Self {
-        match source.into() {
-            Error::QueryServiceError { source } => Self::from_query_service_error(source),
-            Error::ValidationError { source } => Self::from_validation_error(source),
-            Error::ConsensusError { source } => Self::from_consensus_error(source),
-            Error::ParamError { param, msg } => Self::from_param_error(param, msg),
-            Error::UnsupportedContentType { content_type } => {
-                Self::from_unsupported_content_type(content_type)
-            }
-            Error::UnspecifiedContentType {} => Self::from_unspecified_content_type(),
-            Error::InternalError { msg } => Self::catch_all(msg),
-        }
-    }
-
-    /// Convert from a generic client-side error to a specific error type.
-    ///
-    /// If `source` can be downcast to an [Error], it is converted to the specific type using
-    /// [from_api_error]. Otherwise, it is converted to a [String] using [Display] and then
-    /// converted to the specific type using [catch_all].
-    fn from_client_error(source: surf::Error) -> Self {
-        match source.downcast::<Error>() {
-            Ok(err) => Self::from_api_error(err),
-            Err(err) => Self::catch_all(err.to_string()),
-        }
-    }
-}
-
-impl FromError for Error {
-    fn catch_all(msg: String) -> Self {
-        Self::InternalError { msg }
-    }
-
-    fn from_query_service_error(source: crate::node::QueryServiceError) -> Self {
-        Self::QueryServiceError { source }
-    }
-
-    fn from_validation_error(source: crate::state::ValidationError) -> Self {
-        Self::ValidationError { source }
-    }
-
-    fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
-        Self::ConsensusError { source }
-    }
-
-    fn from_param_error(param: String, msg: String) -> Self {
-        Self::ParamError { param, msg }
-    }
-
-    fn from_unsupported_content_type(content_type: String) -> Self {
-        Self::UnsupportedContentType { content_type }
-    }
-
-    fn from_unspecified_content_type() -> Self {
-        Self::UnspecifiedContentType {}
-    }
-
-    fn from_api_error<E: Into<Error>>(source: E) -> Self {
-        source.into()
-    }
 }
 
 /// Context for embedding network client errors into specific error types.
@@ -425,13 +187,13 @@ impl FromError for Error {
 ///
 /// Calling `some_result.context(ClientError)` will convert a potential error from a [surf::Error]
 /// to a specific error type `E` using the method `E::from_client_error`, provided by the
-/// [FromError] trait.
+/// [Error] trait.
 ///
 /// This is the inverse of [server_error], and can be used on the client side to recover errors
 /// which were generated on the server using [server_error].
 pub struct ClientError;
 
-impl<E: FromError + ErrorCompat + std::error::Error> IntoError<E> for ClientError {
+impl<E: Error + ErrorCompat + std::error::Error> IntoError<E> for ClientError {
     type Source = surf::Error;
 
     fn into_error(self, source: Self::Source) -> E {
@@ -441,12 +203,12 @@ impl<E: FromError + ErrorCompat + std::error::Error> IntoError<E> for ClientErro
 
 /// Convert a concrete error type into a client error.
 ///
-/// The error is first converted into an [Error] using the [From] instance. That error is then
+/// The error is first converted into an [Error] using the [Into] instance. That error is then
 /// upcasted into an anyhow error to be embedded in the [surf::Error].
 ///
 /// This is the equivalent for [server_error] for errors generated on the client side; for instance,
 /// in middleware.
-pub fn client_error(error: impl Into<Error>) -> surf::Error {
+pub fn client_error<E: Error>(error: impl Into<E>) -> surf::Error {
     let error = error.into();
     surf::Error::new(error.status(), error)
 }
@@ -469,14 +231,23 @@ pub mod server {
                 "application/json" => req.body_json().await,
                 "application/octet-stream" => {
                     let bytes = req.body_bytes().await?;
-                    bincode::deserialize(&bytes).map_err(server_error)
+                    bincode::deserialize(&bytes).map_err(|err| {
+                        tide::Error::from_str(
+                            StatusCode::BadRequest,
+                            format!("unable to deserialie request body: {}", err),
+                        )
+                    })
                 }
-                content_type => Err(server_error(Error::UnsupportedContentType {
-                    content_type: String::from(content_type),
-                })),
+                content_type => Err(tide::Error::from_str(
+                    StatusCode::BadRequest,
+                    format!("unsupported content type {}", content_type),
+                )),
             }
         } else {
-            Err(server_error(Error::UnspecifiedContentType {}))
+            Err(tide::Error::from_str(
+                StatusCode::BadRequest,
+                "unspecified content type",
+            ))
         }
     }
 
@@ -575,7 +346,7 @@ pub mod server {
     /// This middleware is the inverse of the client-side middleware `parse_error_body`, which
     /// automatically converts error responses into [Err] variants, assuming the responses follow
     /// the convention implemented by this middleware.
-    pub fn add_error_body<'a, T: Clone + Send + Sync + 'static>(
+    pub fn add_error_body<'a, T: Clone + Send + Sync + 'static, E: Error>(
         req: Request<T>,
         next: Next<'a, T>,
     ) -> BoxFuture<'a, tide::Result> {
@@ -583,7 +354,7 @@ pub mod server {
             let mut accept = Accept::from_headers(&req)?;
             let mut res = next.run(req).await;
             if let Some(error) = res.take_error() {
-                let error = Error::from_client_error(error);
+                let error = E::from_client_error(error);
                 event!(Level::WARN, "responding with error: {}", error);
                 let mut res = respond_with(&mut accept, &error)?;
                 res.set_status(error.status());
@@ -635,23 +406,31 @@ pub mod client {
         if let Some(content_type) = res.header("Content-Type") {
             match content_type.as_str() {
                 "application/json" => res.body_json().await,
-                "application/octet-stream" => {
-                    bincode::deserialize(&res.body_bytes().await?).map_err(client_error)
-                }
-                content_type => Err(client_error(Error::UnsupportedContentType {
-                    content_type: String::from(content_type),
-                })),
+                "application/octet-stream" => bincode::deserialize(&res.body_bytes().await?)
+                    .map_err(|err| {
+                        surf::Error::from_str(
+                            StatusCode::InternalServerError,
+                            format!("response body fails to deserialize: {}", err),
+                        )
+                    }),
+                content_type => Err(surf::Error::from_str(
+                    StatusCode::UnsupportedMediaType,
+                    format!("unsupported content type {}", content_type),
+                )),
             }
         } else {
-            Err(client_error(Error::UnspecifiedContentType {}))
+            Err(surf::Error::from_str(
+                StatusCode::UnsupportedMediaType,
+                "unspecified content type in response",
+            ))
         }
     }
 
-    pub async fn response_to_result(mut res: Response) -> surf::Result<Response> {
+    pub async fn response_to_result<E: Error>(mut res: Response) -> surf::Result<Response> {
         if res.status() == StatusCode::Ok {
             Ok(res)
         } else {
-            let err: Error = response_body(&mut res).await?;
+            let err: E = response_body(&mut res).await?;
             Err(surf::Error::new(err.status(), err))
         }
     }
@@ -669,14 +448,14 @@ pub mod client {
     /// This middleware is the inverse of the server-side middleware `add_error_body`, which
     /// automatically prepares the body of error responses for interpretation by this client side
     /// middleware.
-    pub fn parse_error_body(
+    pub fn parse_error_body<E: Error>(
         req: Request,
         client: Client,
         next: Next<'_>,
     ) -> BoxFuture<surf::Result<Response>> {
         Box::pin(
             next.run(req, client)
-                .and_then(|res| async { response_to_result(res).await }),
+                .and_then(|res| async { response_to_result::<E>(res).await }),
         )
     }
 }
@@ -707,7 +486,7 @@ impl<T: Tagged + CanonicalDeserialize> TaggedBlob for T {
 }
 
 // Display implementation for types which serialize to JSON. Displays as a valid JSON object.
-fn fmt_as_json<T: Serialize>(v: &T, f: &mut Formatter<'_>) -> fmt::Result {
+pub fn fmt_as_json<T: Serialize>(v: &T, f: &mut Formatter<'_>) -> fmt::Result {
     let string = serde_json::to_string(v).map_err(|_| fmt::Error)?;
     write!(f, "{}", string)
 }

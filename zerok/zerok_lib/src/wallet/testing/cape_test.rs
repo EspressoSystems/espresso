@@ -1,5 +1,4 @@
 use crate::{
-    api::FromError,
     cape_ledger::*,
     cape_state::*,
     events::{EventIndex, EventSource, LedgerEvent},
@@ -646,7 +645,9 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> CapeWalletBackend<'a>
 fn cape_to_wallet_err(err: CapeValidationError) -> WalletError {
     //todo Convert CapeValidationError to WalletError in a better way. Maybe WalletError should be
     // parameterized on the ledger type and there should be a ledger trait ValidationError.
-    WalletError::catch_all(err.to_string())
+    WalletError::Failed {
+        msg: err.to_string(),
+    }
 }
 
 struct MockCapeWalletLoader {

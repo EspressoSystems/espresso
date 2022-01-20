@@ -37,7 +37,10 @@ use wallet::hd::KeyTree;
 use wallet::loader::WalletLoader;
 use wallet::network::{NetworkBackend, Url};
 use wallet::{KeyError, WalletError};
-use zerok_lib::{api::client, events::EventIndex, universal_params::UNIVERSAL_PARAM, wallet};
+use zerok_lib::{
+    api::client, events::EventIndex, spectrum_api::SpectrumError,
+    universal_params::UNIVERSAL_PARAM, wallet,
+};
 
 type Wallet = wallet::Wallet<'static, NetworkBackend<'static, ()>>;
 
@@ -195,7 +198,7 @@ async fn main() {
         .set_base_url(args.server)
         .try_into()
         .expect("failed to start HTTP client");
-    let client = client.with(client::parse_error_body);
+    let client = client.with(client::parse_error_body::<SpectrumError>);
     loop {
         // Get a list of all users in our group (this will include our own public key).
         let peers: Vec<UserPubKey> = match client.get("getusers").recv_json().await {

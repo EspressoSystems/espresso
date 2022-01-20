@@ -1,16 +1,19 @@
-use super::hd::KeyTree;
-use super::loader::WalletLoader;
-use super::persistence::AtomicWalletStorage;
-use super::spectrum::SpectrumLedger;
-use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
-use crate::api;
-use crate::events::{EventIndex, EventSource, LedgerEvent};
-use crate::node;
-use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
-use crate::state::key_set::SizedKey;
-use crate::state::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
-use crate::txn_builder::TransactionState;
-use api::{client::*, BlockId, ClientError, CommittedTransaction, FromError, TransactionId};
+use super::{
+    hd::KeyTree, loader::WalletLoader, persistence::AtomicWalletStorage, spectrum::SpectrumLedger,
+    BincodeError, ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState,
+};
+use crate::{
+    api,
+    events::{EventIndex, EventSource, LedgerEvent},
+    node,
+    set_merkle_tree::{SetMerkleProof, SetMerkleTree},
+    spectrum_api,
+    spectrum_api::{ClientError, CommittedTransaction, SpectrumError},
+    state::key_set::SizedKey,
+    state::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT},
+    txn_builder::TransactionState,
+};
+use api::{client::*, BlockId, TransactionId};
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
@@ -63,7 +66,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
             .set_base_url(base_url)
             .try_into()
             .context(ClientConfigError)?;
-        Ok(client.with(parse_error_body))
+        Ok(client.with(parse_error_body::<SpectrumError>))
     }
 
     async fn get<T: for<'de> Deserialize<'de>>(
@@ -87,7 +90,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
     ) -> Result<(), WalletError> {
         client
             .post(uri)
-            .body_bytes(bincode::serialize(body).map_err(WalletError::from_api_error)?)
+            .body_bytes(bincode::serialize(body).context(BincodeError)?)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
@@ -268,7 +271,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
         if let Some(ret) = set.contains(nullifier) {
             Ok(ret)
         } else {
-            let api::NullifierProof { proof, spent, .. } = self
+            let spectrum_api::NullifierProof { proof, spent, .. } = self
                 .get(format!("/getnullifier/{}/{}", set.hash(), nullifier))
                 .await?;
             set.remember(nullifier, proof.clone()).unwrap();

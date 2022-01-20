@@ -11,7 +11,6 @@ pub mod spectrum;
 #[cfg(any(test, feature = "mocks"))]
 pub mod testing;
 
-use crate::api;
 use crate::state::key_set;
 use crate::txn_builder::*;
 use crate::util::arbitrary_wrappers::{ArbitraryNullifier, ArbitraryUserKeyPair};
@@ -130,24 +129,6 @@ pub enum WalletError {
     Failed {
         msg: String,
     },
-}
-
-impl api::FromError for WalletError {
-    fn catch_all(msg: String) -> Self {
-        Self::Failed { msg }
-    }
-
-    fn from_query_service_error(source: crate::node::QueryServiceError) -> Self {
-        Self::QueryServiceError { source }
-    }
-
-    fn from_validation_error(source: ValidationError) -> Self {
-        Self::InvalidBlock { source }
-    }
-
-    fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
-        Self::ConsensusError { source }
-    }
 }
 
 impl From<crate::txn_builder::TransactionError> for WalletError {
