@@ -1,4 +1,5 @@
 use super::WalletError;
+use reef::Ledger;
 use rpassword::prompt_password_stdout;
 
 pub enum Reader {
@@ -15,7 +16,7 @@ impl Reader {
         }
     }
 
-    pub fn read_password(&self, prompt: &str) -> Result<String, WalletError> {
+    pub fn read_password<L: Ledger>(&self, prompt: &str) -> Result<String, WalletError<L>> {
         match self {
             Self::Interactive(_) => {
                 prompt_password_stdout(prompt).map_err(|err| WalletError::Failed {

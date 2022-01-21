@@ -20,7 +20,6 @@
 
 use async_std::future::timeout;
 use async_tungstenite::async_std::connect_async;
-use client::*;
 use futures::prelude::*;
 use itertools::izip;
 use phaselock::BlockContents;
@@ -36,11 +35,13 @@ use wallet::{
     hd::KeyTree,
     loader::WalletLoader,
     network::{NetworkBackend, Url},
+    spectrum::SpectrumLedger,
     KeyError, Wallet, WalletError,
 };
-use zerok_lib::api::*;
+use zerok_lib::api::{client::*, Hash, UnspentRecord};
 use zerok_lib::events::LedgerEvent;
 use zerok_lib::node::{LedgerSummary, QueryServiceError};
+use zerok_lib::spectrum_api::*;
 use zerok_lib::wallet;
 use zerok_lib::{state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM};
 
@@ -69,7 +70,7 @@ async fn get<T: for<'de> Deserialize<'de>, S: Display>(route: S) -> T {
     event!(Level::INFO, "GET {}", url);
     response_body(
         &mut surf::get(url)
-            .middleware(parse_error_body)
+            .middleware(parse_error_body::<SpectrumError>)
             .send()
             .await
             .unwrap(),
@@ -78,11 +79,11 @@ async fn get<T: for<'de> Deserialize<'de>, S: Display>(route: S) -> T {
     .unwrap()
 }
 
-async fn get_error(route: impl Display) -> Error {
+async fn get_error(route: impl Display) -> SpectrumError {
     let url = url(route);
     event!(Level::INFO, "GET {}", url);
     match surf::get(url)
-        .middleware(parse_error_body)
+        .middleware(parse_error_body::<SpectrumError>)
         .send()
         .await
         .context(ClientError)
@@ -173,19 +174,19 @@ struct UnencryptedWalletLoader {
     dir: TempDir,
 }
 
-impl WalletLoader for UnencryptedWalletLoader {
+impl WalletLoader<SpectrumLedger> for UnencryptedWalletLoader {
     type Meta = ();
 
     fn location(&self) -> PathBuf {
         self.dir.path().into()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError> {
+    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<SpectrumLedger>> {
         let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
+    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError<SpectrumLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)
     }
 }
@@ -244,7 +245,7 @@ async fn main() {
 
     // Test some invalid endpoints; check that error response bodies contain error descriptions.
     match get_error(format!("/getblock/index/{}", num_blocks)).await {
-        Error::QueryServiceError {
+        SpectrumError::QueryService {
             source: QueryServiceError::InvalidBlockId { .. },
         } => {}
         err => panic!("expected InvalidBlockId, got {}", err),

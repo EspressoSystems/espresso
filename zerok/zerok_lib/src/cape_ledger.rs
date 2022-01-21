@@ -1,11 +1,6 @@
 use crate::{
     cape_state::*,
-    ledger::{
-        open_aap_audit_memo, open_xfr_audit_memo, traits::*, AAPTransactionKind, AuditError,
-        AuditMemoOpening,
-    },
     ser_test,
-    state::ValidationError,
     util::{
         arbitrary_wrappers::*,
         commit::{Commitment, Committable, RawCommitmentBuilder},
@@ -17,8 +12,10 @@ use jf_aap::{
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment, RecordOpening},
     TransactionNote,
 };
+use reef::{aap, traits::*, AuditError, AuditMemoOpening};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::iter::repeat;
 
 // A representation of an unauthenticated sparse set of nullifiers (it is "authenticated" by
@@ -61,34 +58,34 @@ impl<'a> Arbitrary<'a> for CapeNullifierSet {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum_macros::Display)]
 pub enum CapeTransactionKind {
-    AAP(AAPTransactionKind),
+    AAP(aap::TransactionKind),
     Burn,
     Wrap,
 }
 
 impl TransactionKind for CapeTransactionKind {
     fn send() -> Self {
-        Self::AAP(AAPTransactionKind::send())
+        Self::AAP(aap::TransactionKind::send())
     }
 
     fn receive() -> Self {
-        Self::AAP(AAPTransactionKind::receive())
+        Self::AAP(aap::TransactionKind::receive())
     }
 
     fn mint() -> Self {
-        Self::AAP(AAPTransactionKind::mint())
+        Self::AAP(aap::TransactionKind::mint())
     }
 
     fn freeze() -> Self {
-        Self::AAP(AAPTransactionKind::freeze())
+        Self::AAP(aap::TransactionKind::freeze())
     }
 
     fn unfreeze() -> Self {
-        Self::AAP(AAPTransactionKind::unfreeze())
+        Self::AAP(aap::TransactionKind::unfreeze())
     }
 
     fn unknown() -> Self {
-        Self::AAP(AAPTransactionKind::unknown())
+        Self::AAP(aap::TransactionKind::unknown())
     }
 }
 
@@ -130,10 +127,10 @@ impl Transaction for CapeTransition {
     ) -> Result<AuditMemoOpening, AuditError> {
         match self {
             Self::Transaction(CapeTransaction::AAP(note)) => {
-                open_aap_audit_memo(assets, keys, note)
+                aap::open_audit_memo(assets, keys, note)
             }
             Self::Transaction(CapeTransaction::Burn { xfr, .. }) => {
-                open_xfr_audit_memo(assets, keys, xfr)
+                aap::open_xfr_audit_memo(assets, keys, xfr)
             }
             _ => Err(AuditError::NoAuditMemos),
         }
@@ -180,6 +177,19 @@ impl Transaction for CapeTransition {
     fn set_proofs(&mut self, _proofs: Vec<()>) {}
 }
 
+impl ValidationError for CapeValidationError {
+    fn new(msg: impl Display) -> Self {
+        Self::Failed {
+            msg: msg.to_string(),
+        }
+    }
+
+    fn is_bad_nullifier_proof(&self) -> bool {
+        // CAPE doesn't have nullifier proofs, so validation never fails due to a bad one.
+        false
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CapeBlock(Vec<CapeTransition>);
 
@@ -196,6 +206,7 @@ impl Committable for CapeBlock {
 
 impl Block for CapeBlock {
     type Transaction = CapeTransition;
+    type Error = CapeValidationError;
 
     fn new(txns: Vec<CapeTransition>) -> Self {
         Self(txns)
@@ -205,7 +216,7 @@ impl Block for CapeBlock {
         self.0.clone()
     }
 
-    fn add_transaction(&mut self, txn: CapeTransition) -> Result<(), ValidationError> {
+    fn add_transaction(&mut self, txn: CapeTransition) -> Result<(), CapeValidationError> {
         self.0.push(txn);
         Ok(())
     }
@@ -246,7 +257,7 @@ impl Validator for CapeTruster {
         self.now
     }
 
-    fn validate_and_apply(&mut self, block: Self::Block) -> Result<Vec<u64>, ValidationError> {
+    fn validate_and_apply(&mut self, block: Self::Block) -> Result<Vec<u64>, CapeValidationError> {
         // We don't actually do validation here, since in this implementation we trust the query
         // service to provide only valid blocks. Instead, just compute the UIDs of the new records
         // assuming the block successfully validates.

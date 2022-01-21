@@ -59,6 +59,7 @@ zerok-macros = { path = "../zerok_macros" }
 hex = "0.4.3"
 chrono = "0.4.19"
 mnemonic = "1.0.1"
+reef = { git = "ssh://git@github.com/SpectrumXYZ/reef.git", rev = "6ea5ccf96e456ce25cbd05eabb2be4df35c7fcb9" }
 
 [dev-dependencies]
 generic-tests = "0.1.2"

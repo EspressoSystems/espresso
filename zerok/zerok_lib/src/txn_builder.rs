@@ -2,8 +2,6 @@ use crate::node::MerkleTreeWithArbitrary;
 use crate::util::arbitrary_wrappers::*;
 use crate::{
     events::EventIndex,
-    ledger,
-    ledger::traits::{Transaction as _, Validator as _},
     ser_test,
     state::{key_set, ValidatorState, MERKLE_HEIGHT},
     wallet::spectrum::SpectrumLedger,
@@ -28,9 +26,11 @@ use jf_aap::{
 };
 use jf_utils::tagged_blob;
 use key_set::KeySet;
-use ledger::traits::TransactionKind as _;
-use ledger::*;
 use rand_chacha::ChaChaRng;
+use reef::{
+    traits::{Ledger, Transaction as _, TransactionKind as _, Validator as _},
+    types::*,
+};
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};

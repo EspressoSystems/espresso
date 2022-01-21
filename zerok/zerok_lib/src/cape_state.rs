@@ -182,6 +182,10 @@ pub enum CapeValidationError {
         #[serde(with = "crate::state::ser_display")]
         err: Result<Arc<TxnApiError>, String>,
     },
+
+    Failed {
+        msg: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

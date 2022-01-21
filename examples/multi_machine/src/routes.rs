@@ -1,6 +1,9 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
 use crate::WebState;
+use api::{
+    server, BlockId, Hash, TaggedBlob, TransactionId, UnspentRecord, UserAddress, UserPubKey,
+};
 use futures::prelude::*;
 use itertools::izip;
 use phaselock::BlockContents;
@@ -15,9 +18,10 @@ use tide::http::{content::Accept, mime};
 use tide::StatusCode;
 use tide_websockets::WebSocketConnection;
 use tracing::{event, Level};
-use zerok_lib::api::*;
+use zerok_lib::api;
 use zerok_lib::events::LedgerEvent;
 use zerok_lib::node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
+use zerok_lib::spectrum_api::*;
 use zerok_lib::state::state_comm::LedgerStateCommitment;
 
 #[derive(Debug, EnumString)]
@@ -142,6 +146,11 @@ pub fn check_api(api: toml::Value) -> bool {
         panic!("api.toml is inconsistent with enum ApiRoutKey");
     }
     !missing_definition
+}
+
+// Wrapper around `api::server_error` forcing `SpectrumError` as the error type.
+pub fn server_error<E: Into<SpectrumError>>(err: E) -> tide::Error {
+    api::server_error(err)
 }
 
 // Get a block index from whatever form of block identifier was used in the URL.

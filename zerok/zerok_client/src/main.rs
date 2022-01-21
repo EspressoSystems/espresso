@@ -107,8 +107,8 @@ impl<'a> CLI<'a> for SpectrumCli {
     fn init_backend(
         univ_param: &'a UniversalParam,
         args: &'a Self::Args,
-        loader: &mut impl WalletLoader<Meta = LoaderMetadata>,
-    ) -> Result<Self::Backend, WalletError> {
+        loader: &mut impl WalletLoader<SpectrumLedger, Meta = LoaderMetadata>,
+    ) -> Result<Self::Backend, WalletError<SpectrumLedger>> {
         let server = args.server.clone().ok_or(WalletError::Failed {
             msg: String::from("server is required"),
         })?;
@@ -118,7 +118,7 @@ impl<'a> CLI<'a> for SpectrumCli {
 
 #[async_std::main]
 async fn main() {
-    if let Err(err) = cli_main::<SpectrumCli>(&Args::from_args()).await {
+    if let Err(err) = cli_main::<SpectrumLedger, SpectrumCli>(&Args::from_args()).await {
         println!("{}", err);
         exit(1);
     }

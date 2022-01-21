@@ -1,16 +1,15 @@
-use crate::{
-    ledger::*,
-    state::{
-        state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction,
-        ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
-    },
+use crate::state::{
+    state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction,
+    ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
 use jf_aap::{
     keys::{AuditorKeyPair, AuditorPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
     TransactionNote,
 };
+use reef::*;
 use std::collections::HashMap;
+use std::fmt::Display;
 
 impl traits::NullifierSet for SetMerkleTree {
     type Proof = SetMerkleProof;
@@ -50,7 +49,7 @@ impl traits::NullifierSet for SetMerkleTree {
 impl traits::Transaction for ElaboratedTransaction {
     type NullifierSet = SetMerkleTree;
     type Hash = ElaboratedTransactionHash;
-    type Kind = AAPTransactionKind;
+    type Kind = aap::TransactionKind;
 
     fn aap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
         Self { txn: note, proofs }
@@ -61,7 +60,7 @@ impl traits::Transaction for ElaboratedTransaction {
         assets: &HashMap<AssetCode, AssetDefinition>,
         keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
     ) -> Result<AuditMemoOpening, AuditError> {
-        open_aap_audit_memo(assets, keys, &self.txn)
+        aap::open_audit_memo(assets, keys, &self.txn)
     }
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {
@@ -90,9 +89,9 @@ impl traits::Transaction for ElaboratedTransaction {
 
     fn kind(&self) -> Self::Kind {
         match &self.txn {
-            TransactionNote::Mint(_) => AAPTransactionKind::Mint,
-            TransactionNote::Transfer(_) => AAPTransactionKind::Send,
-            TransactionNote::Freeze(_) => AAPTransactionKind::Freeze,
+            TransactionNote::Mint(_) => aap::TransactionKind::Mint,
+            TransactionNote::Transfer(_) => aap::TransactionKind::Send,
+            TransactionNote::Freeze(_) => aap::TransactionKind::Freeze,
         }
     }
 
@@ -101,8 +100,19 @@ impl traits::Transaction for ElaboratedTransaction {
     }
 }
 
+impl traits::ValidationError for ValidationError {
+    fn new(_msg: impl Display) -> Self {
+        Self::Failed {}
+    }
+
+    fn is_bad_nullifier_proof(&self) -> bool {
+        matches!(self, ValidationError::BadNullifierProof { .. })
+    }
+}
+
 impl traits::Block for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
+    type Error = ValidationError;
 
     fn new(txns: Vec<Self::Transaction>) -> Self {
         let (txns, proofs): (Vec<TransactionNote>, Vec<_>) =

@@ -1,16 +1,19 @@
-use super::hd::KeyTree;
-use super::loader::WalletLoader;
-use super::persistence::AtomicWalletStorage;
-use super::spectrum::SpectrumLedger;
-use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
-use crate::api;
-use crate::events::{EventIndex, EventSource, LedgerEvent};
-use crate::node;
-use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
-use crate::state::key_set::SizedKey;
-use crate::state::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
-use crate::txn_builder::TransactionState;
-use api::{client::*, BlockId, ClientError, CommittedTransaction, FromError, TransactionId};
+use super::{
+    hd::KeyTree, loader::WalletLoader, persistence::AtomicWalletStorage, spectrum::SpectrumLedger,
+    BincodeError, ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState,
+};
+use crate::{
+    api,
+    events::{EventIndex, EventSource, LedgerEvent},
+    node,
+    set_merkle_tree::{SetMerkleProof, SetMerkleTree},
+    spectrum_api,
+    spectrum_api::{ClientError, CommittedTransaction, SpectrumError},
+    state::key_set::SizedKey,
+    state::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT},
+    txn_builder::TransactionState,
+};
+use api::{client::*, BlockId, TransactionId};
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
@@ -45,8 +48,8 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
         query_url: Url,
         bulletin_url: Url,
         validator_url: Url,
-        loader: &mut impl WalletLoader<Meta = Meta>,
-    ) -> Result<Self, WalletError> {
+        loader: &mut impl WalletLoader<SpectrumLedger, Meta = Meta>,
+    ) -> Result<Self, WalletError<SpectrumLedger>> {
         let storage = AtomicWalletStorage::new(loader, 1024)?;
         Ok(Self {
             query_client: Self::client(query_url)?,
@@ -58,25 +61,25 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
         })
     }
 
-    fn client(base_url: Url) -> Result<surf::Client, WalletError> {
+    fn client(base_url: Url) -> Result<surf::Client, WalletError<SpectrumLedger>> {
         let client: surf::Client = surf::Config::new()
             .set_base_url(base_url)
             .try_into()
             .context(ClientConfigError)?;
-        Ok(client.with(parse_error_body))
+        Ok(client.with(parse_error_body::<SpectrumError>))
     }
 
     async fn get<T: for<'de> Deserialize<'de>>(
         &self,
         uri: impl AsRef<str>,
-    ) -> Result<T, WalletError> {
+    ) -> Result<T, WalletError<SpectrumLedger>> {
         let mut res = self
             .query_client
             .get(uri)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, WalletError>(ClientError)?;
+            .context::<_, WalletError<SpectrumLedger>>(ClientError)?;
         response_body(&mut res).await.context(ClientError)
     }
 
@@ -84,14 +87,14 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
         client: &surf::Client,
         uri: impl AsRef<str>,
         body: &T,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<SpectrumLedger>> {
         client
             .post(uri)
-            .body_bytes(bincode::serialize(body).map_err(WalletError::from_api_error)?)
+            .body_bytes(bincode::serialize(body).context(BincodeError)?)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, WalletError>(ClientError)?;
+            .context::<_, WalletError<SpectrumLedger>>(ClientError)?;
         Ok(())
     }
 
@@ -115,7 +118,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
     type EventStream = node::EventStream<(LedgerEvent, EventSource)>;
     type Storage = AtomicWalletStorage<'a, SpectrumLedger, Meta>;
 
-    async fn create(&mut self) -> Result<WalletState<'a>, WalletError> {
+    async fn create(&mut self) -> Result<WalletState<'a>, WalletError<SpectrumLedger>> {
         let LedgerSnapshot {
             state: validator,
             nullifiers,
@@ -134,7 +137,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
                 .freeze
                 .iter()
                 .map(|k| {
-                    Ok::<FreezeProvingKey, WalletError>(
+                    Ok::<FreezeProvingKey, WalletError<SpectrumLedger>>(
                         jf_aap::proof::freeze::preprocess(
                             univ_param,
                             k.num_inputs(),
@@ -150,7 +153,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
                 .xfr
                 .iter()
                 .map(|k| {
-                    Ok::<TransferProvingKey, WalletError>(
+                    Ok::<TransferProvingKey, WalletError<SpectrumLedger>>(
                         jf_aap::proof::transfer::preprocess(
                             univ_param,
                             k.num_inputs(),
@@ -255,7 +258,10 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
         )
     }
 
-    async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
+    async fn get_public_key(
+        &self,
+        address: &UserAddress,
+    ) -> Result<UserPubKey, WalletError<SpectrumLedger>> {
         self.get(format!("getuser/{}", api::UserAddress(address.clone())))
             .await
     }
@@ -264,11 +270,11 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
         &self,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
-    ) -> Result<(bool, SetMerkleProof), WalletError> {
+    ) -> Result<(bool, SetMerkleProof), WalletError<SpectrumLedger>> {
         if let Some(ret) = set.contains(nullifier) {
             Ok(ret)
         } else {
-            let api::NullifierProof { proof, spent, .. } = self
+            let spectrum_api::NullifierProof { proof, spent, .. } = self
                 .get(format!("/getnullifier/{}/{}", set.hash(), nullifier))
                 .await?;
             set.remember(nullifier, proof.clone()).unwrap();
@@ -280,18 +286,24 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
         &self,
         txn_id: u64,
         block_id: u64,
-    ) -> Result<ElaboratedTransaction, WalletError> {
+    ) -> Result<ElaboratedTransaction, WalletError<SpectrumLedger>> {
         let txn_id = TransactionId(BlockId(block_id as usize), txn_id as usize);
         let CommittedTransaction { data, proofs, .. } =
             self.get(format!("/gettransaction/{}", txn_id)).await?;
         Ok(ElaboratedTransaction { txn: data, proofs })
     }
 
-    async fn register_user_key(&mut self, pub_key: &UserPubKey) -> Result<(), WalletError> {
+    async fn register_user_key(
+        &mut self,
+        pub_key: &UserPubKey,
+    ) -> Result<(), WalletError<SpectrumLedger>> {
         Self::post(&self.bulletin_client, "/users", pub_key).await
     }
 
-    async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {
+    async fn submit(
+        &mut self,
+        txn: ElaboratedTransaction,
+    ) -> Result<(), WalletError<SpectrumLedger>> {
         Self::post(&self.validator_client, "/submit", &txn).await
     }
 
@@ -301,7 +313,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
         txn_id: u64,
         memos: Vec<ReceiverMemo>,
         signature: Signature,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<SpectrumLedger>> {
         let txid = TransactionId(BlockId(block_id as usize), txn_id as usize);
         let body = api::PostMemos { memos, signature };
         Self::post(&self.bulletin_client, format!("/memos/{}", txid), &body).await

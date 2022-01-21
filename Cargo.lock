@@ -3134,6 +3134,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reef"
+version = "0.1.0"
+source = "git+ssh://git@github.com/SpectrumXYZ/reef.git?rev=6ea5ccf96e456ce25cbd05eabb2be4df35c7fcb9#6ea5ccf96e456ce25cbd05eabb2be4df35c7fcb9"
+dependencies = [
+ "ark-serialize",
+ "itertools 0.10.3",
+ "jf-aap",
+ "serde",
+ "snafu",
+ "strum_macros",
+]
+
+[[package]]
 name = "regex"
 version = "1.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4716,6 +4729,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rand_xoshiro",
  "rayon",
+ "reef",
  "rpassword",
  "rust-argon2",
  "rustyline",
