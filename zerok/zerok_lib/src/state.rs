@@ -2,7 +2,6 @@
 
 use zerok_macros::*;
 
-use crate::commit;
 pub use crate::full_persistence::FullPersistence;
 pub use crate::lw_persistence::LWPersistence;
 pub use crate::set_merkle_tree::*;
@@ -470,14 +469,6 @@ impl Clone for ValidationError {
 impl Committable for VerifierKeySet {
     fn commit(&self) -> Commitment<Self> {
         commit::RawCommitmentBuilder::new("VerifCRS Comm")
-            .var_size_bytes(&canonical::serialize(self).unwrap())
-            .finalize()
-    }
-}
-
-impl Committable for TransactionNote {
-    fn commit(&self) -> Commitment<Self> {
-        commit::RawCommitmentBuilder::new("Txn Comm")
             .var_size_bytes(&canonical::serialize(self).unwrap())
             .finalize()
     }

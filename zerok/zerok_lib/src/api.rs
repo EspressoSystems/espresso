@@ -17,7 +17,6 @@
 // object with the appropriate Serialize implementation.
 //
 
-use crate::util::commit;
 use ark_serialize::*;
 use fmt::{Debug, Display, Formatter};
 use futures::future::BoxFuture;

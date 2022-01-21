@@ -1,9 +1,5 @@
 #![deny(warnings)]
 
-#[cfg(test)]
-#[macro_use]
-extern crate quickcheck_macros;
-
 pub mod api;
 pub mod cape_ledger;
 pub mod cape_state;
@@ -21,7 +17,6 @@ pub mod universal_params;
 mod util;
 pub mod validator_node;
 pub mod wallet;
-pub use util::commit;
 
 #[cfg(test)]
 mod macro_tests;

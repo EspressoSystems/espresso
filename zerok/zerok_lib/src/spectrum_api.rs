@@ -2,7 +2,6 @@ use crate::{
     api,
     set_merkle_tree::SetMerkleProof,
     state::{state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction},
-    util::commit,
     wallet::spectrum::SpectrumLedger,
 };
 use api::Error;

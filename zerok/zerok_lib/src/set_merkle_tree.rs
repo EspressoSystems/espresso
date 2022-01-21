@@ -1,7 +1,7 @@
 #![deny(warnings)]
 #![allow(dead_code)]
 
-use crate::util::{arbitrary_wrappers::*, canonical, commit};
+use crate::util::{arbitrary_wrappers::*, canonical};
 use ark_serialize::*;
 use bitvec::vec::BitVec;
 use core::mem;
