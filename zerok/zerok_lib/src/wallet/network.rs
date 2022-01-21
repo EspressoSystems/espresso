@@ -4,11 +4,10 @@ use super::{
 };
 use crate::{
     api,
+    api::{ClientError, CommittedTransaction, SpectrumError},
     events::{EventIndex, EventSource, LedgerEvent},
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
-    spectrum_api,
-    spectrum_api::{ClientError, CommittedTransaction, SpectrumError},
     state::key_set::SizedKey,
     state::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT},
     txn_builder::TransactionState,
@@ -274,7 +273,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
         if let Some(ret) = set.contains(nullifier) {
             Ok(ret)
         } else {
-            let spectrum_api::NullifierProof { proof, spent, .. } = self
+            let api::NullifierProof { proof, spent, .. } = self
                 .get(format!("/getnullifier/{}/{}", set.hash(), nullifier))
                 .await?;
             set.remember(nullifier, proof.clone()).unwrap();

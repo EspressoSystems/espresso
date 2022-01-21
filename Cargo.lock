@@ -2477,6 +2477,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "net"
+version = "0.1.0"
+source = "git+ssh://git@github.com/SpectrumXYZ/net.git?rev=28c70c35f46744096d1e835e38844f0e2b98ec3f#28c70c35f46744096d1e835e38844f0e2b98ec3f"
+dependencies = [
+ "ark-serialize",
+ "ark-std",
+ "bincode",
+ "commit",
+ "futures",
+ "generic-array",
+ "itertools 0.10.3",
+ "jf-aap",
+ "jf-utils",
+ "serde",
+ "serde_json",
+ "snafu",
+ "surf",
+ "tagged-base64",
+ "tide",
+ "tracing",
+]
+
+[[package]]
 name = "nibble_vec"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4733,6 +4756,7 @@ dependencies = [
  "jf-utils",
  "lazy_static",
  "mnemonic",
+ "net",
  "phaselock",
  "procfs",
  "proptest",

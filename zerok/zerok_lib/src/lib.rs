@@ -9,7 +9,6 @@ pub mod full_persistence;
 pub mod lw_persistence;
 pub mod node;
 mod set_merkle_tree;
-pub mod spectrum_api;
 pub mod state;
 pub mod testing;
 pub mod txn_builder;

@@ -31,10 +31,10 @@ use tide_websockets::{WebSocket, WebSocketConnection};
 use toml::Value;
 use tracing::{debug, event, Level};
 use zerok_lib::{
+    api::SpectrumError,
     api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
-    spectrum_api::SpectrumError,
     state::key_set::KeySet,
     state::{
         ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, ValidatorState,

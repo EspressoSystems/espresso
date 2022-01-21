@@ -19,10 +19,10 @@ use tide::StatusCode;
 use tide_websockets::WebSocketConnection;
 use tracing::{event, Level};
 use zerok_lib::api;
+use zerok_lib::api::*;
 use zerok_lib::events::LedgerEvent;
 use zerok_lib::node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
-use zerok_lib::spectrum_api::*;
-use zerok_lib::state::state_comm::LedgerStateCommitment;
+use zerok_lib::state::{state_comm::LedgerStateCommitment, ElaboratedBlock};
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -173,6 +173,10 @@ async fn block_index(
     }
 }
 
+fn block_hash(block: &ElaboratedBlock) -> Hash {
+    Hash(block.hash().as_ref().to_vec())
+}
+
 pub fn dummy_url_eval(
     route_pattern: &str,
     bindings: &HashMap<String, RouteBinding>,
@@ -239,7 +243,7 @@ async fn get_block(
     Ok(CommittedBlock {
         id: BlockId(index),
         index,
-        hash: Hash::from(transition.block.hash()),
+        hash: block_hash(&transition.block),
         state_commitment: state.commit(),
         transactions: izip!(
             transition.block.block.0,
@@ -284,7 +288,7 @@ async fn get_block_hash(
         .await
         .map_err(server_error)?
         .block;
-    Ok(Hash::from(block.hash()))
+    Ok(block_hash(&block))
 }
 
 async fn get_transaction(
