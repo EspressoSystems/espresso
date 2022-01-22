@@ -1,6 +1,7 @@
 #![deny(warnings)]
 
 use crate::state::VerifierKeySet;
+use ark_serialize::*;
 use core::convert::TryFrom;
 use core::fmt::Debug;
 use jf_aap::{
@@ -10,6 +11,7 @@ use jf_aap::{
     txn_batch_verify, MerkleCommitment, MerkleFrontier, MerkleTree, NodeValue, TransactionNote,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
+use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -62,19 +64,41 @@ impl CapeTransaction {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[tagged_blob("EADDR")]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct EthereumAddr(pub [u8; 20]);
 
-// ERC20 assets are identified by the address of the smart contract
-// controlling them.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Erc20Code(pub EthereumAddr);
+impl CanonicalSerialize for EthereumAddr {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer.write_all(&self.0).map_err(SerializationError::from)
+    }
+
+    fn serialized_size(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl CanonicalDeserialize for EthereumAddr {
+    fn deserialize<R: Read>(mut reader: R) -> std::result::Result<Self, SerializationError> {
+        let mut addr = <[u8; 20]>::default();
+        reader
+            .read_exact(&mut addr)
+            .map_err(SerializationError::from)?;
+        Ok(EthereumAddr(addr))
+    }
+}
 
 impl EthereumAddr {
     pub fn as_bytes(&self) -> &[u8; 20] {
         &self.0
     }
 }
+
+// ERC20 assets are identified by the address of the smart contract
+// controlling them.
+#[tagged_blob("ERC20")]
+#[derive(CanonicalSerialize, CanonicalDeserialize, Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct Erc20Code(pub EthereumAddr);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CapeOperation {
