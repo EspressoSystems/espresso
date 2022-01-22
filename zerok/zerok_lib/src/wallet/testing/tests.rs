@@ -1,5 +1,6 @@
 use super::*;
 use chrono::Duration;
+use zerok_macros::generic_tests;
 
 #[derive(Clone, Debug)]
 pub struct TxnHistoryWithTimeTolerantEq<L: Ledger>(pub TransactionHistoryEntry<L>);
@@ -20,9 +21,8 @@ impl<L: Ledger> PartialEq<Self> for TxnHistoryWithTimeTolerantEq<L> {
     }
 }
 
-#[cfg(test)]
-#[generic_tests::define(attrs(test, ignore, async_std::test))]
-mod generic_wallet_tests {
+#[generic_tests]
+pub mod generic_wallet_tests {
     use super::*;
     use async_std::task::block_on;
     use proptest::{collection::vec, strategy::Strategy, test_runner, test_runner::TestRunner};
@@ -197,13 +197,13 @@ mod generic_wallet_tests {
     }
 
     #[async_std::test]
-    async fn test_two_wallets_native<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()> {
+    pub async fn test_two_wallets_native<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()> {
         test_two_wallets::<T>(true).await;
         Ok(())
     }
 
     #[async_std::test]
-    async fn test_two_wallets_non_native<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()> {
+    pub async fn test_two_wallets_non_native<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()> {
         test_two_wallets::<T>(false).await;
         Ok(())
     }
@@ -484,63 +484,63 @@ mod generic_wallet_tests {
     }
 
     #[async_std::test]
-    async fn test_wallet_rejected_native_xfr_invalid<'a, T: SystemUnderTest<'a>>(
+    pub async fn test_wallet_rejected_native_xfr_invalid<'a, T: SystemUnderTest<'a>>(
     ) -> std::io::Result<()> {
         test_wallet_rejected::<T>(true, false, false, false).await;
         Ok(())
     }
 
     #[async_std::test]
-    async fn test_wallet_rejected_native_xfr_timeout<'a, T: SystemUnderTest<'a>>(
+    pub async fn test_wallet_rejected_native_xfr_timeout<'a, T: SystemUnderTest<'a>>(
     ) -> std::io::Result<()> {
         test_wallet_rejected::<T>(true, false, false, true).await;
         Ok(())
     }
 
     #[async_std::test]
-    async fn test_wallet_rejected_non_native_xfr_invalid<'a, T: SystemUnderTest<'a>>(
+    pub async fn test_wallet_rejected_non_native_xfr_invalid<'a, T: SystemUnderTest<'a>>(
     ) -> std::io::Result<()> {
         test_wallet_rejected::<T>(false, false, false, false).await;
         Ok(())
     }
 
     #[async_std::test]
-    async fn test_wallet_rejected_non_native_xfr_timeout<'a, T: SystemUnderTest<'a>>(
+    pub async fn test_wallet_rejected_non_native_xfr_timeout<'a, T: SystemUnderTest<'a>>(
     ) -> std::io::Result<()> {
         test_wallet_rejected::<T>(false, false, false, true).await;
         Ok(())
     }
 
     #[async_std::test]
-    async fn test_wallet_rejected_non_native_mint_invalid<'a, T: SystemUnderTest<'a>>(
+    pub async fn test_wallet_rejected_non_native_mint_invalid<'a, T: SystemUnderTest<'a>>(
     ) -> std::io::Result<()> {
         test_wallet_rejected::<T>(false, true, false, false).await;
         Ok(())
     }
 
     #[async_std::test]
-    async fn test_wallet_rejected_non_native_mint_timeout<'a, T: SystemUnderTest<'a>>(
+    pub async fn test_wallet_rejected_non_native_mint_timeout<'a, T: SystemUnderTest<'a>>(
     ) -> std::io::Result<()> {
         test_wallet_rejected::<T>(false, true, false, true).await;
         Ok(())
     }
 
     #[async_std::test]
-    async fn test_wallet_rejected_non_native_freeze_invalid<'a, T: SystemUnderTest<'a>>(
+    pub async fn test_wallet_rejected_non_native_freeze_invalid<'a, T: SystemUnderTest<'a>>(
     ) -> std::io::Result<()> {
         test_wallet_rejected::<T>(false, false, true, false).await;
         Ok(())
     }
 
     #[async_std::test]
-    async fn test_wallet_rejected_non_native_freeze_timeout<'a, T: SystemUnderTest<'a>>(
+    pub async fn test_wallet_rejected_non_native_freeze_timeout<'a, T: SystemUnderTest<'a>>(
     ) -> std::io::Result<()> {
         test_wallet_rejected::<T>(false, false, true, true).await;
         Ok(())
     }
 
     #[async_std::test]
-    async fn test_wallet_freeze<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()> {
+    pub async fn test_wallet_freeze<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()> {
         let mut t = T::default();
         let mut now = Instant::now();
 
@@ -1207,7 +1207,7 @@ mod generic_wallet_tests {
     }
 
     #[async_std::test]
-    async fn test_multixfr_wallet_simple<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()> {
+    pub async fn test_multixfr_wallet_simple<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()> {
         let alice_grant = (0, 0, 3); // Alice gets 3 of coin 0 to start
         let bob_grant = (1, 1, 3); // Bob gets 3 of coin 1 to start
         let txns = vec![vec![
@@ -1220,7 +1220,7 @@ mod generic_wallet_tests {
     }
 
     #[async_std::test]
-    async fn test_multixfr_wallet_multi_xfr_block<'a, T: SystemUnderTest<'a>>(
+    pub async fn test_multixfr_wallet_multi_xfr_block<'a, T: SystemUnderTest<'a>>(
     ) -> std::io::Result<()> {
         // Alice and Bob each get 1 native token to start.
         let alice_grant = (0, 0, 1);
@@ -1236,8 +1236,8 @@ mod generic_wallet_tests {
     }
 
     #[async_std::test]
-    async fn test_multixfr_wallet_various_kinds<'a, T: SystemUnderTest<'a>>() -> std::io::Result<()>
-    {
+    pub async fn test_multixfr_wallet_various_kinds<'a, T: SystemUnderTest<'a>>(
+    ) -> std::io::Result<()> {
         let txns = vec![vec![
             (0, 0, 1, 1), // native asset transfer
             (1, 0, 1, 1), // non-native asset transfer with change output
@@ -1352,7 +1352,7 @@ mod generic_wallet_tests {
     }
 
     #[test]
-    fn proptest_multixfr_wallet_small<'a, T: SystemUnderTest<'a>>() {
+    pub fn proptest_multixfr_wallet_small<'a, T: SystemUnderTest<'a>>() {
         TestRunner::new(test_runner::Config {
             cases: 1,
             ..test_runner::Config::default()
@@ -1372,7 +1372,7 @@ mod generic_wallet_tests {
 
     #[test]
     #[ignore]
-    fn proptest_multixfr_wallet_many_small_tests<'a, T: SystemUnderTest<'a>>() {
+    pub fn proptest_multixfr_wallet_many_small_tests<'a, T: SystemUnderTest<'a>>() {
         TestRunner::new(test_runner::Config {
             cases: 10,
             ..test_runner::Config::default()
@@ -1392,7 +1392,7 @@ mod generic_wallet_tests {
 
     #[test]
     #[ignore]
-    fn proptest_multixfr_wallet_one_big_test<'a, T: SystemUnderTest<'a>>() {
+    pub fn proptest_multixfr_wallet_one_big_test<'a, T: SystemUnderTest<'a>>() {
         TestRunner::new(test_runner::Config {
             cases: 1,
             ..test_runner::Config::default()
@@ -1411,7 +1411,7 @@ mod generic_wallet_tests {
     }
 
     #[async_std::test]
-    async fn test_generate_user_key<'a, T: SystemUnderTest<'a>>() {
+    pub async fn test_generate_user_key<'a, T: SystemUnderTest<'a>>() {
         let mut t = T::default();
         let mut now = Instant::now();
         let (ledger, mut wallets) = t.create_test_network(&[(3, 4)], vec![0, 4], &mut now).await;
@@ -1490,10 +1490,4 @@ mod generic_wallet_tests {
             2
         );
     }
-
-    #[instantiate_tests(<'static, spectrum_test::SpectrumTest>)]
-    mod spectrum_wallet_tests {}
-
-    #[instantiate_tests(<'static, cape_test::CapeTest>)]
-    mod cape_wallet_tests {}
 }

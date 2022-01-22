@@ -64,7 +64,6 @@ reef = { git = "ssh://git@github.com/SpectrumXYZ/reef.git", rev = "34725636bbde0
 net = { git = "ssh://git@github.com/SpectrumXYZ/net.git", rev = "28c70c35f46744096d1e835e38844f0e2b98ec3f" }
 
 [dev-dependencies]
-generic-tests = "0.1.2"
 quickcheck = "1.0"
 quickcheck_macros = "1.0"
 proptest = "0.8.7"
