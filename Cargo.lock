@@ -777,9 +777,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitvec"
-version = "0.22.3"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5237f00a8c86130a0cc317830e558b966dd7850d48a953d998c813f01a41b527"
+checksum = "f5011ffc90248764d7005b0e10c7294f5aa1bd87d9dd7248f4ad475b347c294d"
 dependencies = [
  "funty",
  "radium",
@@ -1043,11 +1043,12 @@ dependencies = [
 [[package]]
 name = "commit"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/commit.git?rev=ce0249eb2e7cd9eb1a1df04dbe7a6f88adfc8e80#ce0249eb2e7cd9eb1a1df04dbe7a6f88adfc8e80"
+source = "git+ssh://git@github.com/SpectrumXYZ/commit.git?rev=f48cd52c59755eade0605111826eef3df6abdcf8#f48cd52c59755eade0605111826eef3df6abdcf8"
 dependencies = [
  "arbitrary",
  "ark-serialize",
  "bitvec",
+ "funty",
  "generic-array",
  "hex",
  "serde",
@@ -1670,9 +1671,9 @@ checksum = "a06f77d526c1a601b7c4cdd98f54b5eaabffc14d5f2f0296febdc7f357c6d3ba"
 
 [[package]]
 name = "funty"
-version = "1.2.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1847abb9cb65d566acd5942e94aea9c8f547ad02c98e1649326fc0e8910b8b1e"
+checksum = "fed34cd105917e91daa4da6b3728c47b068749d6a62c59811f06ed2ac71d9da7"
 
 [[package]]
 name = "futures"
@@ -2101,7 +2102,7 @@ checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 [[package]]
 name = "jf-aap"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=eb8d3d3b03fec0d88327f4686e8a2787c85274d9#eb8d3d3b03fec0d88327f4686e8a2787c85274d9"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=eca7b7e85718c7770c24ad90dd34b8a07209a01b#eca7b7e85718c7770c24ad90dd34b8a07209a01b"
 dependencies = [
  "anyhow",
  "ark-bls12-377",
@@ -2142,7 +2143,7 @@ dependencies = [
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=eb8d3d3b03fec0d88327f4686e8a2787c85274d9#eb8d3d3b03fec0d88327f4686e8a2787c85274d9"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#9b678f5156ad48e0cad318056b3fd73a5188e02d"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2173,7 +2174,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=eb8d3d3b03fec0d88327f4686e8a2787c85274d9#eb8d3d3b03fec0d88327f4686e8a2787c85274d9"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#9b678f5156ad48e0cad318056b3fd73a5188e02d"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -2196,7 +2197,7 @@ dependencies = [
 [[package]]
 name = "jf-rescue"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=eb8d3d3b03fec0d88327f4686e8a2787c85274d9#eb8d3d3b03fec0d88327f4686e8a2787c85274d9"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#9b678f5156ad48e0cad318056b3fd73a5188e02d"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2224,7 +2225,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=eb8d3d3b03fec0d88327f4686e8a2787c85274d9#eb8d3d3b03fec0d88327f4686e8a2787c85274d9"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#9b678f5156ad48e0cad318056b3fd73a5188e02d"
 dependencies = [
  "anyhow",
  "ark-ec",
@@ -2241,7 +2242,7 @@ dependencies = [
 [[package]]
 name = "jf-utils-derive"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=eb8d3d3b03fec0d88327f4686e8a2787c85274d9#eb8d3d3b03fec0d88327f4686e8a2787c85274d9"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#9b678f5156ad48e0cad318056b3fd73a5188e02d"
 dependencies = [
  "ark-serialize",
  "ark-std",
@@ -2468,7 +2469,7 @@ dependencies = [
 [[package]]
 name = "net"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/net.git?rev=28c70c35f46744096d1e835e38844f0e2b98ec3f#28c70c35f46744096d1e835e38844f0e2b98ec3f"
+source = "git+ssh://git@github.com/SpectrumXYZ/net.git?rev=8d04d5578de00539bbaa218eaa1c12d02adef3ba#8d04d5578de00539bbaa218eaa1c12d02adef3ba"
 dependencies = [
  "ark-serialize",
  "ark-std",
@@ -3163,7 +3164,7 @@ dependencies = [
 [[package]]
 name = "reef"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/reef.git?rev=34725636bbde038176d39dbf6b948ab0a0a0793c#34725636bbde038176d39dbf6b948ab0a0a0793c"
+source = "git+ssh://git@github.com/SpectrumXYZ/reef.git?rev=28c52c6d14f39294bd099288d29d4f1052b7c144#28c52c6d14f39294bd099288d29d4f1052b7c144"
 dependencies = [
  "ark-serialize",
  "itertools 0.10.3",
@@ -4158,7 +4159,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d686ec1c0f384b1277f097b2f279a2ecc11afe8c133c1aabf036a27cb4cd206e"
 dependencies = [
  "tracing",
- "tracing-subscriber 0.3.5",
+ "tracing-subscriber 0.3.6",
 ]
 
 [[package]]
@@ -4216,9 +4217,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.5"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d81bfa81424cc98cb034b837c985b7a290f592e5b4322f353f94a0ab0f9f594"
+checksum = "77be66445c4eeebb934a7340f227bfe7b338173d3f8c00a60a5a58005c9faecf"
 dependencies = [
  "sharded-slab",
  "thread_local",
@@ -4616,12 +4617,9 @@ checksum = "3f2b8c7cbd3bfdddd9ab98769f9746a7fad1bca236554cd032b78d768bc0e89f"
 
 [[package]]
 name = "wyz"
-version = "0.4.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "129e027ad65ce1453680623c3fb5163cbf7107bfe1aa32257e7d0e63f9ced188"
-dependencies = [
- "tap",
-]
+checksum = "85e60b0d1b5f99db2556934e21937020776a5d31520bf169e851ac44e6420214"
 
 [[package]]
 name = "x25519-dalek"
