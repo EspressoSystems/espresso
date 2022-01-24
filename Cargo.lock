@@ -777,9 +777,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitvec"
-version = "0.20.4"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7774144344a4faa177370406a7ff5f1da24303817368584c6206c8303eb07848"
+checksum = "f5011ffc90248764d7005b0e10c7294f5aa1bd87d9dd7248f4ad475b347c294d"
 dependencies = [
  "funty",
  "radium",
@@ -1043,11 +1043,12 @@ dependencies = [
 [[package]]
 name = "commit"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/commit.git?rev=da073ee16e65913b7dc9b6407d7cc93f4f277c8d#da073ee16e65913b7dc9b6407d7cc93f4f277c8d"
+source = "git+ssh://git@github.com/SpectrumXYZ/commit.git?rev=f48cd52c59755eade0605111826eef3df6abdcf8#f48cd52c59755eade0605111826eef3df6abdcf8"
 dependencies = [
  "arbitrary",
  "ark-serialize",
  "bitvec",
+ "funty",
  "generic-array",
  "hex",
  "serde",
@@ -2112,7 +2113,7 @@ checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 [[package]]
 name = "jf-aap"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=1f1f11e7ed8a6e3b012de58e94ca9b905d468d9b#1f1f11e7ed8a6e3b012de58e94ca9b905d468d9b"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=eca7b7e85718c7770c24ad90dd34b8a07209a01b#eca7b7e85718c7770c24ad90dd34b8a07209a01b"
 dependencies = [
  "anyhow",
  "ark-bls12-377",
@@ -3151,7 +3152,7 @@ dependencies = [
 [[package]]
 name = "reef"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/reef.git?rev=a565a27286daf48a0eb7a32965af6b90ec0e9045#a565a27286daf48a0eb7a32965af6b90ec0e9045"
+source = "git+ssh://git@github.com/SpectrumXYZ/reef.git?rev=28c52c6d14f39294bd099288d29d4f1052b7c144#28c52c6d14f39294bd099288d29d4f1052b7c144"
 dependencies = [
  "ark-serialize",
  "itertools 0.10.3",
