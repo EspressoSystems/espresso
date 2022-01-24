@@ -38,10 +38,10 @@ use wallet::{
     spectrum::SpectrumLedger,
     KeyError, Wallet, WalletError,
 };
+use zerok_lib::api::*;
 use zerok_lib::api::{client::*, Hash, UnspentRecord};
 use zerok_lib::events::LedgerEvent;
 use zerok_lib::node::{LedgerSummary, QueryServiceError};
-use zerok_lib::spectrum_api::*;
 use zerok_lib::wallet;
 use zerok_lib::{state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM};
 
@@ -108,7 +108,10 @@ async fn validate_committed_block(
     assert_eq!(ix, block.index);
     assert!(block.index < num_blocks);
     assert_eq!(block.index, block.id.0);
-    assert_eq!(block.hash, Hash::from(ElaboratedBlock::from(block).hash()));
+    assert_eq!(
+        block.hash,
+        Hash(ElaboratedBlock::from(block).hash().as_ref().to_vec())
+    );
 
     // Check that we get the same block if we query by other methods.
     assert_eq!(*block, get(format!("/getblock/{}", block.id)).await);

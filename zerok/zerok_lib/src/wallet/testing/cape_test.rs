@@ -751,6 +751,9 @@ mod cape_wallet_tests {
     use jf_aap::structs::{AssetCode, AssetPolicy};
     use std::time::Instant;
 
+    use super::super::generic_wallet_tests;
+    instantiate_generic_wallet_tests!(CapeTest);
+
     #[async_std::test]
     async fn test_cape_wallet() -> std::io::Result<()> {
         let mut t = CapeTest::default();

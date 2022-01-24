@@ -571,10 +571,9 @@ mod tests {
     fn random_txn_hash(rng: &mut ChaChaRng) -> ElaboratedTransactionHash {
         let mut hash = [0; H_256];
         rng.fill_bytes(&mut hash);
-        let ret =
-            crate::commit::RawCommitmentBuilder::<ElaboratedTransaction>::new("random_txn_hash")
-                .fixed_size_bytes(&hash)
-                .finalize();
+        let ret = commit::RawCommitmentBuilder::<ElaboratedTransaction>::new("random_txn_hash")
+            .fixed_size_bytes(&hash)
+            .finalize();
         ElaboratedTransactionHash(ret)
     }
 

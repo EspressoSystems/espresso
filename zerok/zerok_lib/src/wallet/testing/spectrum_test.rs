@@ -443,6 +443,9 @@ mod spectrum_wallet_tests {
     use std::time::Instant;
     use testing::SystemUnderTest;
 
+    use super::super::generic_wallet_tests;
+    instantiate_generic_wallet_tests!(SpectrumTest);
+
     #[async_std::test]
     async fn test_resubmit() -> std::io::Result<()> {
         let mut t = SpectrumTest::default();

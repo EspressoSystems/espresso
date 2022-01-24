@@ -10,6 +10,7 @@ edition = "2018"
 arbitrary = { version="1.0", features=["derive"] }
 atomic_store = { version="0.0.2", registry="translucence" }
 chacha20 = "0.8.1"
+commit = { git = "ssh://git@github.com/SpectrumXYZ/commit.git", rev = "f48cd52c59755eade0605111826eef3df6abdcf8" }
 itertools = "0.10.1"
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
@@ -60,9 +61,9 @@ hex = "0.4.3"
 chrono = "0.4.19"
 mnemonic = "1.0.1"
 reef = { git = "ssh://git@github.com/SpectrumXYZ/reef.git", rev = "28c52c6d14f39294bd099288d29d4f1052b7c144" }
+net = { git = "ssh://git@github.com/SpectrumXYZ/net.git", rev = "8d04d5578de00539bbaa218eaa1c12d02adef3ba" }
 
 [dev-dependencies]
-generic-tests = "0.1.2"
 quickcheck = "1.0"
 quickcheck_macros = "1.0"
 proptest = "0.8.7"

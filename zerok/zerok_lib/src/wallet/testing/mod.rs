@@ -8,14 +8,6 @@
 /// tests which are specific to wallets with a particular ledger type or backend, which depend on
 /// properties not exposed or guaranteed by the generic interface. The file tests.rs contains the
 /// test suite for the generic wallet interface, which is instantiated for each ledger/backend.
-///
-/// Whenever the generic test suite is instantiated with a new ledger/backend, the module name for
-/// the instantiation should match the (nested) module name for ledger-specific tests. For example,
-/// we have wallet::testing::tests::spectrum_wallet_tests (defined in tests.rs) and we have
-/// wallet::testing::spectrum_test::spectrum_wallet_tests (defined in spectrum_test.rs). This makes
-/// it possible to run all of the tests for the Spectrum wallet by passing `spectrum_wallet_tests`
-/// to the test runner (and similary for CAPE, with `cape_wallet_tests`). To run all tests for all
-/// wallets, just use `wallet::testing`.
 use super::*;
 use crate::{
     state::{
@@ -488,6 +480,9 @@ impl<L: Ledger + 'static> MockEventSource<L> {
     }
 }
 
+#[macro_use]
+mod tests;
 mod cape_test;
 mod spectrum_test;
-mod tests;
+
+pub use tests::generic_wallet_tests;

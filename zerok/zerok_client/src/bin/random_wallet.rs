@@ -39,8 +39,7 @@ use wallet::network::{NetworkBackend, Url};
 use wallet::spectrum::SpectrumLedger;
 use wallet::{KeyError, WalletError};
 use zerok_lib::{
-    api::client, events::EventIndex, spectrum_api::SpectrumError,
-    universal_params::UNIVERSAL_PARAM, wallet,
+    api::client, api::SpectrumError, events::EventIndex, universal_params::UNIVERSAL_PARAM, wallet,
 };
 
 type Wallet = wallet::Wallet<'static, NetworkBackend<'static, ()>>;

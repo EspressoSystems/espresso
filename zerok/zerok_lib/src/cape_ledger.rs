@@ -1,12 +1,6 @@
-use crate::{
-    cape_state::*,
-    ser_test,
-    util::{
-        arbitrary_wrappers::*,
-        commit::{Commitment, Committable, RawCommitmentBuilder},
-    },
-};
+use crate::{cape_state::*, ser_test, util::arbitrary_wrappers::*};
 use arbitrary::{Arbitrary, Unstructured};
+use commit::{Commitment, Committable, RawCommitmentBuilder};
 use jf_aap::{
     keys::{AuditorKeyPair, AuditorPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment, RecordOpening},

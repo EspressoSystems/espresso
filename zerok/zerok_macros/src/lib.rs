@@ -302,3 +302,10 @@ fn parse_type(m: &NestedMeta) -> Type {
         }
     }
 }
+
+mod generic_tests;
+
+#[proc_macro_attribute]
+pub fn generic_tests(args: TokenStream, input: TokenStream) -> TokenStream {
+    generic_tests::generic_tests(args, input)
+}
