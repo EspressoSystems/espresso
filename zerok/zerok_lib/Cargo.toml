@@ -13,10 +13,10 @@ chacha20 = "0.8.1"
 itertools = "0.10.1"
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
-jf-plonk = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git", rev = "54f112e41f2264abdfb92c433564fea5cc7cdc97"}
-jf-primitives = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git", rev = "54f112e41f2264abdfb92c433564fea5cc7cdc97"}
-jf-aap = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git", rev = "54f112e41f2264abdfb92c433564fea5cc7cdc97"}
-jf-utils = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git", rev = "54f112e41f2264abdfb92c433564fea5cc7cdc97"}
+jf-plonk = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git" }
+jf-primitives = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git" }
+jf-aap = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git", rev = "1f1f11e7ed8a6e3b012de58e94ca9b905d468d9b"}
+jf-utils = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git" }
 # phaselock = { version = "0.0.2", registry = "translucence"}
 phaselock = { git = "ssh://git@github.com/SpectrumXYZ/phaselock.git", rev = "14586ed218a35cb48675b73d4a34ae7ae55c67e6" }
 ark-std = { version = "0.3.0", default-features = false }
@@ -59,7 +59,7 @@ zerok-macros = { path = "../zerok_macros" }
 hex = "0.4.3"
 chrono = "0.4.19"
 mnemonic = "1.0.1"
-reef = { git = "ssh://git@github.com/SpectrumXYZ/reef.git", rev = "a1af004a5722efba2a2ca9ad589a5a0ea46cc320" }
+reef = { git = "ssh://git@github.com/SpectrumXYZ/reef.git", rev = "a565a27286daf48a0eb7a32965af6b90ec0e9045" }
 
 [dev-dependencies]
 generic-tests = "0.1.2"

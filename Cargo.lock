@@ -1041,6 +1041,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "commit"
+version = "0.1.0"
+source = "git+ssh://git@github.com/SpectrumXYZ/commit.git?rev=da073ee16e65913b7dc9b6407d7cc93f4f277c8d#da073ee16e65913b7dc9b6407d7cc93f4f277c8d"
+dependencies = [
+ "arbitrary",
+ "ark-serialize",
+ "bitvec",
+ "generic-array",
+ "hex",
+ "serde",
+ "sha3",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2098,7 +2112,7 @@ checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 [[package]]
 name = "jf-aap"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=54f112e41f2264abdfb92c433564fea5cc7cdc97#54f112e41f2264abdfb92c433564fea5cc7cdc97"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=1f1f11e7ed8a6e3b012de58e94ca9b905d468d9b#1f1f11e7ed8a6e3b012de58e94ca9b905d468d9b"
 dependencies = [
  "anyhow",
  "ark-bls12-377",
@@ -2112,6 +2126,7 @@ dependencies = [
  "ark-serialize",
  "ark-std",
  "bincode",
+ "commit",
  "csv",
  "derivative",
  "displaydoc",
@@ -2126,9 +2141,9 @@ dependencies = [
  "rand 0.8.4",
  "rand_chacha 0.3.1",
  "rayon",
- "rustc-serialize",
  "serde",
  "serde_derive",
+ "serde_json",
  "sha2",
  "sha3",
  "structopt",
@@ -2138,7 +2153,7 @@ dependencies = [
 [[package]]
 name = "jf-plonk"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=54f112e41f2264abdfb92c433564fea5cc7cdc97#54f112e41f2264abdfb92c433564fea5cc7cdc97"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#9b678f5156ad48e0cad318056b3fd73a5188e02d"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2169,7 +2184,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=54f112e41f2264abdfb92c433564fea5cc7cdc97#54f112e41f2264abdfb92c433564fea5cc7cdc97"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#9b678f5156ad48e0cad318056b3fd73a5188e02d"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -2192,7 +2207,7 @@ dependencies = [
 [[package]]
 name = "jf-rescue"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=54f112e41f2264abdfb92c433564fea5cc7cdc97#54f112e41f2264abdfb92c433564fea5cc7cdc97"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#9b678f5156ad48e0cad318056b3fd73a5188e02d"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2220,7 +2235,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=54f112e41f2264abdfb92c433564fea5cc7cdc97#54f112e41f2264abdfb92c433564fea5cc7cdc97"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#9b678f5156ad48e0cad318056b3fd73a5188e02d"
 dependencies = [
  "anyhow",
  "ark-ec",
@@ -2237,7 +2252,7 @@ dependencies = [
 [[package]]
 name = "jf-utils-derive"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=54f112e41f2264abdfb92c433564fea5cc7cdc97#54f112e41f2264abdfb92c433564fea5cc7cdc97"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#9b678f5156ad48e0cad318056b3fd73a5188e02d"
 dependencies = [
  "ark-serialize",
  "ark-std",
@@ -3136,7 +3151,7 @@ dependencies = [
 [[package]]
 name = "reef"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/reef.git?rev=a1af004a5722efba2a2ca9ad589a5a0ea46cc320#a1af004a5722efba2a2ca9ad589a5a0ea46cc320"
+source = "git+ssh://git@github.com/SpectrumXYZ/reef.git?rev=a565a27286daf48a0eb7a32965af6b90ec0e9045#a565a27286daf48a0eb7a32965af6b90ec0e9045"
 dependencies = [
  "ark-serialize",
  "itertools 0.10.3",
@@ -3229,12 +3244,6 @@ name = "rustc-demangle"
 version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ef03e0a2b150c7a90d01faf6254c9c48a41e95fb2a8c2ac1c6f0d2b9aefc342"
-
-[[package]]
-name = "rustc-serialize"
-version = "0.3.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcf128d1287d2ea9d80910b5f1120d0b8eede3fbf1abe91c40d39ea7d51e6fda"
 
 [[package]]
 name = "rustc_version"
