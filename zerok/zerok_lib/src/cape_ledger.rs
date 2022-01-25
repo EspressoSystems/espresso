@@ -280,7 +280,7 @@ impl Ledger for CapeLedger {
     }
 
     fn record_root_history() -> usize {
-        10
+        CapeContractState::RECORD_ROOT_HISTORY_SIZE
     }
 
     fn merkle_height() -> u8 {
