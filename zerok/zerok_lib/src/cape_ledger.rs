@@ -121,9 +121,7 @@ impl Transaction for CapeTransition {
         keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
     ) -> Result<AuditMemoOpening, AuditError> {
         match self {
-            Self::Transaction(CapeTransaction::AAP(note)) => {
-                aap::open_audit_memo(assets, keys, note)
-            }
+            Self::Transaction(CapeTransaction::AAP(note)) => note.open_audit_memo(assets, keys),
             Self::Transaction(CapeTransaction::Burn { xfr, .. }) => {
                 aap::open_xfr_audit_memo(assets, keys, xfr)
             }
@@ -279,5 +277,13 @@ impl Ledger for CapeLedger {
 
     fn name() -> String {
         String::from("CAPE")
+    }
+
+    fn record_root_history() -> usize {
+        CapeContractState::RECORD_ROOT_HISTORY_SIZE
+    }
+
+    fn merkle_height() -> u8 {
+        CAPE_MERKLE_HEIGHT
     }
 }

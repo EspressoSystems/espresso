@@ -1,13 +1,12 @@
-use super::{CryptoError, Wallet, WalletBackend, WalletError};
-use crate::{
-    cape_ledger::*,
-    cape_state::*,
-    txn_builder::{TransactionInfo, TransactionReceipt},
-};
+use crate::{cape_ledger::*, cape_state::*};
 use async_trait::async_trait;
 use jf_aap::{
     keys::UserAddress,
     structs::{AssetCode, AssetDefinition, AssetPolicy, FreezeFlag, RecordOpening},
+};
+use seahorse::{
+    txn_builder::{TransactionInfo, TransactionReceipt},
+    CryptoError, Wallet, WalletBackend, WalletError,
 };
 use snafu::ResultExt;
 
@@ -53,8 +52,44 @@ pub trait CapeWalletBackend<'a>: WalletBackend<'a, CapeLedger> {
 
 pub type CapeWallet<'a, Backend> = Wallet<'a, Backend, CapeLedger>;
 
-impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
-    pub async fn sponsor(
+#[async_trait]
+pub trait CapeWalletExt<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> {
+    async fn sponsor(
+        &mut self,
+        erc20_code: Erc20Code,
+        sponsor_addr: EthereumAddr,
+        aap_asset_policy: AssetPolicy,
+    ) -> Result<AssetDefinition, CapeWalletError>;
+
+    async fn wrap(
+        &mut self,
+        src_addr: EthereumAddr,
+        // We take as input the target asset, not the source ERC20 code, because there may be more
+        // than one AAP asset for a given ERC20 token. We need the user to disambiguate (probably
+        // using a list of approved (AAP, ERC20) pairs provided by the query service).
+        aap_asset: AssetDefinition,
+        owner: UserAddress,
+        amount: u64,
+    ) -> Result<(), CapeWalletError>;
+
+    /// For now, the amount to burn should be the same as a wrapped record.
+    async fn burn(
+        &mut self,
+        account: &UserAddress,
+        dst_addr: EthereumAddr,
+        aap_asset: &AssetCode,
+        amount: u64,
+        fee: u64,
+    ) -> Result<TransactionReceipt<CapeLedger>, CapeWalletError>;
+
+    async fn approved_assets(&self) -> Vec<(AssetDefinition, Erc20Code)>;
+}
+
+#[async_trait]
+impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWalletExt<'a, Backend>
+    for CapeWallet<'a, Backend>
+{
+    async fn sponsor(
         &mut self,
         erc20_code: Erc20Code,
         sponsor_addr: EthereumAddr,
@@ -77,12 +112,9 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
         Ok(asset)
     }
 
-    pub async fn wrap(
+    async fn wrap(
         &mut self,
         src_addr: EthereumAddr,
-        // We take as input the target asset, not the source ERC20 code, because there may be more
-        // than one AAP asset for a given ERC20 token. We need the user to disambiguate (probably
-        // using a list of approved (AAP, ERC20) pairs provided by the query service).
         aap_asset: AssetDefinition,
         owner: UserAddress,
         amount: u64,
@@ -106,8 +138,7 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
             .await
     }
 
-    /// For now, the amount to burn should be the same as a wrapped record.
-    pub async fn burn(
+    async fn burn(
         &mut self,
         account: &UserAddress,
         dst_addr: EthereumAddr,
@@ -166,7 +197,7 @@ impl<'a, Backend: CapeWalletBackend<'a> + Sync + 'a> CapeWallet<'a, Backend> {
         self.submit(txn, txn_info).await
     }
 
-    pub async fn approved_assets(&self) -> Vec<(AssetDefinition, Erc20Code)> {
+    async fn approved_assets(&self) -> Vec<(AssetDefinition, Erc20Code)> {
         unimplemented!()
     }
 }

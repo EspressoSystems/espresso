@@ -23,6 +23,9 @@ use async_tungstenite::async_std::connect_async;
 use futures::prelude::*;
 use itertools::izip;
 use phaselock::BlockContents;
+use seahorse::{
+    events::LedgerEvent, hd::KeyTree, loader::WalletLoader, KeyError, Wallet, WalletError,
+};
 use serde::Deserialize;
 use snafu::ResultExt;
 use std::fmt::Display;
@@ -31,19 +34,17 @@ use std::time::Duration;
 use structopt::StructOpt;
 use tempdir::TempDir;
 use tracing::{event, Level};
-use wallet::{
-    hd::KeyTree,
-    loader::WalletLoader,
-    network::{NetworkBackend, Url},
-    spectrum::SpectrumLedger,
-    KeyError, Wallet, WalletError,
+use zerok_lib::{
+    api::client::*,
+    api::*,
+    node::{LedgerSummary, QueryServiceError},
+    state::ElaboratedBlock,
+    universal_params::UNIVERSAL_PARAM,
+    wallet::{
+        network::{NetworkBackend, Url},
+        spectrum::SpectrumLedger,
+    },
 };
-use zerok_lib::api::*;
-use zerok_lib::api::{client::*, Hash, UnspentRecord};
-use zerok_lib::events::LedgerEvent;
-use zerok_lib::node::{LedgerSummary, QueryServiceError};
-use zerok_lib::wallet;
-use zerok_lib::{state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM};
 
 #[derive(StructOpt)]
 struct Args {
@@ -243,7 +244,7 @@ async fn main() {
     // Check validity of the individual events. The events are just serialized LedgerEvents, not an
     // API-specific type, so as long as they deserialize properly they should be fine.
     for event in events1.into_iter() {
-        serde_json::from_str::<LedgerEvent>(event.to_text().unwrap()).unwrap();
+        serde_json::from_str::<LedgerEvent<SpectrumLedger>>(event.to_text().unwrap()).unwrap();
     }
 
     // Test some invalid endpoints; check that error response bodies contain error descriptions.

@@ -62,8 +62,10 @@ zerok-macros = { git = "ssh://git@github.com/SpectrumXYZ/zerok-macros.git" }
 hex = "0.4.3"
 chrono = "0.4.19"
 mnemonic = "1.0.1"
-reef = { git = "ssh://git@github.com/SpectrumXYZ/reef.git", rev = "28c52c6d14f39294bd099288d29d4f1052b7c144" }
+reef = { git = "ssh://git@github.com/SpectrumXYZ/reef.git", rev = "6e3e7f683d2f8c1c1da662301f8ca8c2863018cc" }
 net = { git = "ssh://git@github.com/SpectrumXYZ/net.git", rev = "8d04d5578de00539bbaa218eaa1c12d02adef3ba" }
+universal-param = { git = "ssh://git@github.com/SpectrumXYZ/universal-param.git" }
+seahorse = { git = "ssh://git@github.com/SpectrumXYZ/seahorse.git", features = ["testing"] }
 
 [dev-dependencies]
 quickcheck = "1.0"

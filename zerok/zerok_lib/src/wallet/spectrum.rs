@@ -60,7 +60,7 @@ impl traits::Transaction for ElaboratedTransaction {
         assets: &HashMap<AssetCode, AssetDefinition>,
         keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
     ) -> Result<AuditMemoOpening, AuditError> {
-        aap::open_audit_memo(assets, keys, &self.txn)
+        self.txn.open_audit_memo(assets, keys)
     }
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {
@@ -167,5 +167,13 @@ impl Ledger for SpectrumLedger {
 
     fn name() -> String {
         String::from("Spectrum")
+    }
+
+    fn record_root_history() -> usize {
+        ValidatorState::RECORD_ROOT_HISTORY_SIZE
+    }
+
+    fn merkle_height() -> u8 {
+        crate::state::MERKLE_HEIGHT
     }
 }

@@ -25,6 +25,7 @@ use jf_aap::structs::{AssetCode, AssetPolicy};
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+use seahorse::{events::EventIndex, hd::KeyTree, loader::WalletLoader, KeyError, WalletError};
 use snafu::ResultExt;
 use std::convert::TryInto;
 use std::fs::File;
@@ -33,16 +34,17 @@ use std::path::PathBuf;
 use std::time::Duration;
 use structopt::StructOpt;
 use tracing::{event, Level};
-use wallet::hd::KeyTree;
-use wallet::loader::WalletLoader;
-use wallet::network::{NetworkBackend, Url};
-use wallet::spectrum::SpectrumLedger;
-use wallet::{KeyError, WalletError};
 use zerok_lib::{
-    api::client, api::SpectrumError, events::EventIndex, universal_params::UNIVERSAL_PARAM, wallet,
+    api::client,
+    api::SpectrumError,
+    universal_params::UNIVERSAL_PARAM,
+    wallet::{
+        network::{NetworkBackend, Url},
+        spectrum::SpectrumLedger,
+    },
 };
 
-type Wallet = wallet::Wallet<'static, NetworkBackend<'static, ()>>;
+type Wallet = seahorse::Wallet<'static, NetworkBackend<'static, ()>, SpectrumLedger>;
 
 #[derive(StructOpt)]
 struct Args {

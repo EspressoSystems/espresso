@@ -168,13 +168,13 @@ impl FromError for SpectrumError {
     }
 }
 
-impl FromError for crate::wallet::WalletError<SpectrumLedger> {
+impl FromError for seahorse::WalletError<SpectrumLedger> {
     fn catch_all(msg: String) -> Self {
         Self::Failed { msg }
     }
 
     fn from_query_service_error(source: crate::node::QueryServiceError) -> Self {
-        Self::QueryServiceError { source }
+        source.into()
     }
 
     fn from_validation_error(source: crate::state::ValidationError) -> Self {
@@ -182,7 +182,10 @@ impl FromError for crate::wallet::WalletError<SpectrumLedger> {
     }
 
     fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
-        Self::ConsensusError { source }
+        match source {
+            Ok(err) => Self::catch_all(err.to_string()),
+            Err(msg) => Self::catch_all(msg),
+        }
     }
 }
 

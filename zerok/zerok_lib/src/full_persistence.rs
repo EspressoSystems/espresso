@@ -1,6 +1,6 @@
 use crate::{
-    events::LedgerEvent,
     state::{ElaboratedBlock, SetMerkleTree, ValidatorState},
+    wallet::spectrum::SpectrumLedger,
 };
 use atomic_store::{
     append_log::Iter, load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader,
@@ -12,6 +12,7 @@ use jf_aap::{
     structs::ReceiverMemo,
     MerkleLeaf, MerkleTree, Signature,
 };
+use seahorse::events::LedgerEvent;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -43,7 +44,7 @@ pub struct FullPersistence {
     // TODO: !jeb.bearer,nathan.yospe - turn this back into a RollingLog once we fix whatever is
     // wrong with RollingLog; we don't need to store old versions of the known_nodes map
     known_nodes: AppendLog<BincodeLoadStore<HashMap<UserAddress, UserPubKey>>>,
-    events: AppendLog<BincodeLoadStore<LedgerEvent>>,
+    events: AppendLog<BincodeLoadStore<LedgerEvent<SpectrumLedger>>>,
 }
 
 impl FullPersistence {
@@ -155,7 +156,7 @@ impl FullPersistence {
         ]);
     }
 
-    pub fn store_event(&mut self, event: &LedgerEvent) {
+    pub fn store_event(&mut self, event: &LedgerEvent<SpectrumLedger>) {
         self.events.store_resource(event).unwrap();
     }
 
@@ -236,7 +237,7 @@ impl FullPersistence {
         self.memos.iter()
     }
 
-    pub fn events_iter(&self) -> Iter<BincodeLoadStore<LedgerEvent>> {
+    pub fn events_iter(&self) -> Iter<BincodeLoadStore<LedgerEvent<SpectrumLedger>>> {
         self.events.iter()
     }
 

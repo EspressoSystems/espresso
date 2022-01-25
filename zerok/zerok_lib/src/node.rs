@@ -1,11 +1,11 @@
 use crate::full_persistence::FullPersistence;
 pub use crate::state::state_comm::LedgerStateCommitment;
 use crate::{
-    events::LedgerEvent,
     ser_test,
     set_merkle_tree::*,
     state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
     validator_node::*,
+    wallet::spectrum::SpectrumLedger,
 };
 use arbitrary::Arbitrary;
 use arbitrary_wrappers::*;
@@ -30,6 +30,7 @@ use phaselock::{
     handle::{HandleError, PhaseLockHandle},
     BlockContents, H_256,
 };
+use seahorse::events::LedgerEvent;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashMap};
@@ -112,27 +113,12 @@ pub struct LedgerSummary {
 }
 
 #[ser_test(arbitrary, ark(false))]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct MerkleTreeWithArbitrary(pub MerkleTree);
-
-impl<'a> Arbitrary<'a> for MerkleTreeWithArbitrary {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut mt = MerkleTree::new(3).unwrap();
-        for _ in 0..15 {
-            // todo: range restricted random depth and count
-            mt.push(u.arbitrary::<ArbitraryBaseField>()?.into());
-        }
-        Ok(MerkleTreeWithArbitrary(mt))
-    }
-}
-
-#[ser_test(arbitrary, ark(false))]
 #[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LedgerSnapshot {
     pub state: ValidatorState,
     pub state_comm: LedgerStateCommitment,
     pub nullifiers: SetMerkleTree,
-    pub records: MerkleTreeWithArbitrary,
+    pub records: ArbitraryMerkleTree,
 }
 
 #[derive(Clone, Debug)]
@@ -194,7 +180,7 @@ pub trait QueryService {
 
     /// Get an asynchronous stream which yields LedgerEvents when things happen on the ledger or
     /// the associated bulletin board.
-    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent>;
+    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<SpectrumLedger>>;
 
     /// Broadcast that a set of receiver memos corresponds to a particular transaction. The memos
     /// must be signed using the signing key for the specified transaction. The sender of a message
@@ -264,6 +250,14 @@ pub enum QueryServiceError {
     },
 }
 
+impl<L: reef::Ledger> From<QueryServiceError> for seahorse::WalletError<L> {
+    fn from(source: QueryServiceError) -> Self {
+        Self::Failed {
+            msg: source.to_string(),
+        }
+    }
+}
+
 struct FullState {
     validator: ValidatorState,
     full_persisted: FullPersistence,
@@ -288,10 +282,10 @@ struct FullState {
     // persistent storage) and this will not be necessary.
     proposed: ElaboratedBlock,
     // The send ends of all channels which are subscribed to events.
-    subscribers: Vec<mpsc::UnboundedSender<LedgerEvent>>,
+    subscribers: Vec<mpsc::UnboundedSender<LedgerEvent<SpectrumLedger>>>,
     // Clients which have subscribed to events starting at some time in the future, to be added to
     // `subscribers` when the time comes.
-    pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<LedgerEvent>>>,
+    pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<LedgerEvent<SpectrumLedger>>>>,
 }
 
 impl FullState {
@@ -320,7 +314,7 @@ impl FullState {
                             ValidationError::Failed {}
                         }
                     };
-                    self.send_event(LedgerEvent::Reject {
+                    self.send_event(LedgerEvent::<SpectrumLedger>::Reject {
                         block: self.proposed.clone(),
                         error: err,
                     });
@@ -413,7 +407,7 @@ impl FullState {
         }
     }
 
-    fn send_event(&mut self, event: LedgerEvent) {
+    fn send_event(&mut self, event: LedgerEvent<SpectrumLedger>) {
         // Subscribers who asked for a subscription starting from the current time can now be added
         // to the list of active subscribers.
         let now = self.full_persisted.events_iter().len() as u64;
@@ -434,7 +428,7 @@ impl FullState {
         self.full_persisted.commit_events();
     }
 
-    fn subscribe(&mut self, t: u64) -> EventStream<LedgerEvent> {
+    fn subscribe(&mut self, t: u64) -> EventStream<LedgerEvent<SpectrumLedger>> {
         let (sender, receiver) = mpsc::unbounded();
         if (t as usize) < self.full_persisted.events_iter().len() {
             // If the start time is in the past, send the subscriber all saved events since the
@@ -518,7 +512,7 @@ impl FullState {
         Ok(LedgerSnapshot {
             state_comm: state.commit(),
             state,
-            records: MerkleTreeWithArbitrary(records),
+            records: ArbitraryMerkleTree(records),
             nullifiers,
         })
     }
@@ -830,7 +824,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
         Ok(nullifiers.contains(n).unwrap())
     }
 
-    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent> {
+    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<SpectrumLedger>> {
         let mut state = self.state.write().await;
         state.subscribe(i)
     }
@@ -970,7 +964,7 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
         self.as_query_service().nullifier_proof(root, n).await
     }
 
-    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent> {
+    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<SpectrumLedger>> {
         self.as_query_service().subscribe(i).await
     }
 
