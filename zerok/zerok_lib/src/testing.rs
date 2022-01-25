@@ -1,5 +1,4 @@
 #![deny(warnings)]
-use crate::state::key_set::KeySet;
 use crate::state::*;
 use crate::universal_params::UNIVERSAL_PARAM;
 use arbitrary::Arbitrary;
@@ -15,6 +14,7 @@ use jf_aap::{
     transfer::{TransferNote, TransferNoteInput},
     AccMemberWitness, MerkleTree, Signature, TransactionNote, TransactionVerifyingKey,
 };
+use key_set::{KeySet, ProverKeySet, VerifierKeySet};
 use phaselock::traits::{BlockContents, State};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;

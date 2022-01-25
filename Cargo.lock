@@ -125,6 +125,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbitrary-wrappers"
+version = "0.1.0"
+source = "git+ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git#5a0d0616b464d3bc3f0211b2fcd059fd1279d8ff"
+dependencies = [
+ "arbitrary",
+ "ark-std",
+ "itertools 0.10.3",
+ "jf-aap",
+ "rand_chacha 0.3.1",
+]
+
+[[package]]
 name = "ark-bls12-377"
 version = "0.3.0"
 source = "git+https://github.com/arkworks-rs/curves?rev=677b4ae751a274037880ede86e9b6f30f62635af#677b4ae751a274037880ede86e9b6f30f62635af"
@@ -2266,6 +2278,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
 
 [[package]]
+name = "key-set"
+version = "0.1.0"
+source = "git+ssh://git@github.com/SpectrumXYZ/key-set.git#31d3f6f1433e2542af286cf31590a68a402fb5c5"
+dependencies = [
+ "ark-serialize",
+ "bincode",
+ "commit",
+ "itertools 0.10.3",
+ "jf-aap",
+ "serde",
+ "serde_with",
+ "snafu",
+]
+
+[[package]]
 name = "kv-log-macro"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2431,6 +2458,7 @@ dependencies = [
  "jf-plonk",
  "jf-primitives",
  "jf-utils",
+ "key-set",
  "markdown",
  "phaselock",
  "procfs",
@@ -4670,13 +4698,10 @@ dependencies = [
 [[package]]
 name = "zerok-macros"
 version = "0.1.0"
+source = "git+ssh://git@github.com/SpectrumXYZ/zerok-macros.git#0a9e9ca4ef8870bcd9a2373c00c4a697f704453a"
 dependencies = [
- "arbitrary",
- "ark-serialize",
  "proc-macro2",
  "quote",
- "rand_chacha 0.3.1",
- "serde",
  "syn",
 ]
 
@@ -4717,6 +4742,7 @@ name = "zerok_lib"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "arbitrary-wrappers",
  "ark-ff",
  "ark-serialize",
  "ark-std",
@@ -4740,6 +4766,7 @@ dependencies = [
  "jf-plonk",
  "jf-primitives",
  "jf-utils",
+ "key-set",
  "lazy_static",
  "mnemonic",
  "net",

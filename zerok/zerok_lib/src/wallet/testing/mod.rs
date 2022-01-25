@@ -9,16 +9,11 @@
 /// properties not exposed or guaranteed by the generic interface. The file tests.rs contains the
 /// test suite for the generic wallet interface, which is instantiated for each ledger/backend.
 use super::*;
-use crate::{
-    state::{
-        key_set::{KeySet, OrderByOutputs},
-        ProverKeySet, VerifierKeySet, MERKLE_HEIGHT,
-    },
-    universal_params::UNIVERSAL_PARAM,
-};
+use crate::{state::MERKLE_HEIGHT, universal_params::UNIVERSAL_PARAM};
 use async_std::sync::{Arc, Mutex};
 use futures::channel::mpsc;
 use jf_aap::{MerkleTree, TransactionVerifyingKey};
+use key_set::{KeySet, OrderByOutputs, ProverKeySet, VerifierKeySet};
 use rand_chacha::rand_core::RngCore;
 use std::collections::BTreeMap;
 use std::pin::Pin;

@@ -2,7 +2,6 @@
 members = [
     "examples/asynctide",
     "zerok/zerok_lib",
-    "zerok/zerok_macros",
     "zerok/zerok_client",
     "zerok/zerok_validator",
     "examples/multi_machine",

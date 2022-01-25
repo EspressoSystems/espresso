@@ -11,15 +11,13 @@ pub mod spectrum;
 #[cfg(any(test, feature = "mocks"))]
 pub mod testing;
 
-use crate::state::key_set;
 use crate::txn_builder::*;
-use crate::util::arbitrary_wrappers::{ArbitraryNullifier, ArbitraryUserKeyPair};
 use crate::{
     events::{EventIndex, EventSource, LedgerEvent},
     ser_test,
-    state::ProverKeySet,
 };
 use arbitrary::{Arbitrary, Unstructured};
+use arbitrary_wrappers::{ArbitraryNullifier, ArbitraryUserKeyPair};
 use async_scoped::AsyncScope;
 use async_std::sync::{Mutex, MutexGuard};
 use async_std::task::block_on;
@@ -45,6 +43,7 @@ use jf_aap::{
     },
     KeyPair as SigKeyPair, MerkleLeafProof, MerklePath, Signature, TransactionNote,
 };
+use key_set::ProverKeySet;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use reef::{

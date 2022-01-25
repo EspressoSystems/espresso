@@ -1,6 +1,5 @@
 use crate::full_persistence::FullPersistence;
 pub use crate::state::state_comm::LedgerStateCommitment;
-use crate::util::arbitrary_wrappers::*;
 use crate::{
     events::LedgerEvent,
     ser_test,
@@ -9,6 +8,7 @@ use crate::{
     validator_node::*,
 };
 use arbitrary::Arbitrary;
+use arbitrary_wrappers::*;
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
 use async_trait::async_trait;
