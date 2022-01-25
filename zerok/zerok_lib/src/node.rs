@@ -112,27 +112,12 @@ pub struct LedgerSummary {
 }
 
 #[ser_test(arbitrary, ark(false))]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct MerkleTreeWithArbitrary(pub MerkleTree);
-
-impl<'a> Arbitrary<'a> for MerkleTreeWithArbitrary {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut mt = MerkleTree::new(3).unwrap();
-        for _ in 0..15 {
-            // todo: range restricted random depth and count
-            mt.push(u.arbitrary::<ArbitraryBaseField>()?.into());
-        }
-        Ok(MerkleTreeWithArbitrary(mt))
-    }
-}
-
-#[ser_test(arbitrary, ark(false))]
 #[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LedgerSnapshot {
     pub state: ValidatorState,
     pub state_comm: LedgerStateCommitment,
     pub nullifiers: SetMerkleTree,
-    pub records: MerkleTreeWithArbitrary,
+    pub records: ArbitraryMerkleTree,
 }
 
 #[derive(Clone, Debug)]
@@ -518,7 +503,7 @@ impl FullState {
         Ok(LedgerSnapshot {
             state_comm: state.commit(),
             state,
-            records: MerkleTreeWithArbitrary(records),
+            records: ArbitraryMerkleTree(records),
             nullifiers,
         })
     }

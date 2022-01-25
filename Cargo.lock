@@ -127,13 +127,15 @@ dependencies = [
 [[package]]
 name = "arbitrary-wrappers"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git#5a0d0616b464d3bc3f0211b2fcd059fd1279d8ff"
+source = "git+ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git#54ccf73cfe3bc4d3d1497a70682100201852a807"
 dependencies = [
  "arbitrary",
  "ark-std",
  "itertools 0.10.3",
  "jf-aap",
  "rand_chacha 0.3.1",
+ "serde",
+ "zerok-macros",
 ]
 
 [[package]]
@@ -4386,6 +4388,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "universal-param"
+version = "0.1.0"
+source = "git+ssh://git@github.com/SpectrumXYZ/universal-param.git#e6193294f6bc804aaa34132de31dca070bbe8d86"
+dependencies = [
+ "ark-serialize",
+ "ark-std",
+ "itertools 0.10.3",
+ "jf-aap",
+ "rand_chacha 0.3.1",
+]
+
+[[package]]
 name = "untrusted"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4798,6 +4812,7 @@ dependencies = [
  "threshold_crypto",
  "tide",
  "tracing",
+ "universal-param",
  "zeroize",
  "zerok-macros",
 ]

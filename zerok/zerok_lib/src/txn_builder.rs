@@ -1,4 +1,3 @@
-use crate::node::MerkleTreeWithArbitrary;
 use crate::{
     events::EventIndex,
     ser_test,
@@ -914,7 +913,7 @@ where
             validator: u.arbitrary()?,
             records: u.arbitrary()?,
             nullifiers: u.arbitrary()?,
-            record_mt: u.arbitrary::<MerkleTreeWithArbitrary>()?.0,
+            record_mt: u.arbitrary::<ArbitraryMerkleTree>()?.0,
             merkle_leaf_to_forget: None,
             transactions: u.arbitrary()?,
         })
