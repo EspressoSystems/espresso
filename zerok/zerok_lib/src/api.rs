@@ -32,7 +32,7 @@ use jf_aap::{
     Signature, TransactionNote,
 };
 use jf_utils::{tagged_blob, Tagged};
-use phaselock::BlockHash;
+use phaselock::data::BlockHash;
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, ResultExt, Snafu};
 use std::fmt;
@@ -115,7 +115,7 @@ impl From<CommittedBlock> for ElaboratedBlock {
             .map(|tx| (tx.data, tx.proofs))
             .unzip();
         Self {
-            block: Block(txs),
+            block: Block{txns: txs, fee_blind: &Self.block.fee_blind, proposer_pub_key: &Self.block.proposer_pub_key},
             proofs,
         }
     }
@@ -129,7 +129,7 @@ impl From<&CommittedBlock> for ElaboratedBlock {
             .map(|tx| (tx.data.clone(), tx.proofs.clone()))
             .unzip();
         Self {
-            block: Block{txs: txns, },
+            block: Block{txns: txs, fee_blind: Self.block.fee_blind, proposer_pub_key: Self.block.proposer_pub_key},
             proofs,
         }
     }
@@ -233,7 +233,7 @@ pub enum Error {
         // Unfortunately, this means we cannot use this variant as a SNAFU error source.
         #[serde(with = "crate::state::ser_debug")]
         #[snafu(source(false))]
-        source: Result<phaselock::error::PhaseLockError, String>,
+        source: Result<phaselock::types::PhaseLockError, String>,
     },
     #[snafu(display("error in parameter {}: {}", param, msg))]
     ParamError {
@@ -273,8 +273,8 @@ impl From<crate::state::ValidationError> for Error {
     }
 }
 
-impl From<phaselock::error::PhaseLockError> for Error {
-    fn from(source: phaselock::error::PhaseLockError) -> Self {
+impl From<phaselock::types::PhaseLockError> for Error {
+    fn from(source: phaselock::types::PhaseLockError) -> Self {
         Self::ConsensusError { source: Ok(source) }
     }
 }
@@ -326,7 +326,7 @@ pub trait FromError: Sized {
         Self::catch_all(source.to_string())
     }
 
-    fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
+    fn from_consensus_error(source: Result<phaselock::types::PhaseLockError, String>) -> Self {
         match source {
             Ok(err) => Self::catch_all(format!("{:?}", err)),
             Err(msg) => Self::catch_all(msg),
@@ -385,7 +385,7 @@ impl FromError for Error {
         Self::ValidationError { source }
     }
 
-    fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
+    fn from_consensus_error(source: Result<phaselock::types::PhaseLockError, String>) -> Self {
         Self::ConsensusError { source }
     }
 

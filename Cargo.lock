@@ -2659,6 +2659,7 @@ dependencies = [
 [[package]]
 name = "phaselock"
 version = "0.0.5-dev"
+source = "git+ssh://git@github.com/SpectrumXYZ/phaselock.git?rev=8db746abd64c91ca351643edc6f4c82d86aea573#8db746abd64c91ca351643edc6f4c82d86aea573"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",

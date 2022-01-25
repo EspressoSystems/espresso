@@ -25,10 +25,8 @@ use jf_aap::{
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use ledger::{AAPLedger, Block, Ledger, StateCommitment};
 use phaselock::{
-    types::error::PhaseLockError,
-    types::event::EventType,
-    types::handle::{HandleError, PhaseLockHandle},
-    BlockContents, H_256,
+    types::{PhaseLockError, EventType, HandleError, PhaseLockHandle},
+    traits::BlockContents, H_256,
 };
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -39,7 +37,7 @@ pub trait ConsensusEvent {
     fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState>;
 }
 
-pub type PhaseLockEvent = phaselock::event::Event<ElaboratedBlock, ValidatorState>;
+pub type PhaseLockEvent = phaselock::types::Event<ElaboratedBlock, ValidatorState>;
 
 impl ConsensusEvent for PhaseLockEvent {
     fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState> {

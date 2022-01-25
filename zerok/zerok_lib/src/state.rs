@@ -22,7 +22,7 @@ use jf_aap::{
     keys::UserPubKey,
 };
 use jf_utils::tagged_blob;
-use phaselock::{traits::state::State, BlockContents, H_256};
+use phaselock::{traits::State, traits::BlockContents, H_256};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use snafu::Snafu;
@@ -129,6 +129,9 @@ impl Committable for ElaboratedTransaction {
 impl BlockContents<H_256> for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
+    //set userkey of whoever is proposing the block 
+    type LedgerUserKey = UserPubKey;
+    type LedgerBlindFactor = BlindFactor;
 
     fn add_transaction_raw(&self, txn: &ElaboratedTransaction) -> Result<Self, ValidationError> {
         let mut ret = self.clone();
@@ -152,26 +155,31 @@ impl BlockContents<H_256> for ElaboratedBlock {
         Ok(ret)
     }
 
-    fn hash(&self) -> phaselock::BlockHash<H_256> {
+    fn hash(&self) -> phaselock::data::BlockHash<H_256> {
         use std::convert::TryInto;
 
-        phaselock::BlockHash::<H_256>::from_array(self.commit().try_into().unwrap())
+        phaselock::data::BlockHash::<H_256>::from_array(self.commit().try_into().unwrap())
     }
 
-    fn hash_bytes(bytes: &[u8]) -> phaselock::BlockHash<H_256> {
+    fn hash_bytes(bytes: &[u8]) -> phaselock::data::BlockHash<H_256> {
         use std::convert::TryInto;
         // TODO: fix this hack, it is specifically working around the
         // misuse-preventing `T: Committable` on `RawCommitmentBuilder`
         let ret = commit::RawCommitmentBuilder::<Block>::new("PhaseLock bytes")
             .var_size_bytes(bytes)
             .finalize();
-        phaselock::BlockHash::<H_256>::from_array(ret.try_into().unwrap())
+        phaselock::data::BlockHash::<H_256>::from_array(ret.try_into().unwrap())
     }
 
-    fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<H_256> {
+    fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::data::BlockHash<H_256> {
         use std::convert::TryInto;
 
-        phaselock::BlockHash::<H_256>::from_array(txn.commit().try_into().unwrap())
+        phaselock::data::BlockHash::<H_256>::from_array(txn.commit().try_into().unwrap())
+    }
+
+    fn derive_fee_record_commitment(&self) -> std::result::Result<Self, ValidationError> {
+        let rc = derive_txns_fee_record(&self.txns, self.proposer_pub_key.clone(), self.fee_blind)?;
+        Ok(rc)
     }
 }
 

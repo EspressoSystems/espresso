@@ -328,7 +328,7 @@ impl traits::Block for ElaboratedBlock {
         let (txns, proofs): (Vec<TransactionNote>, Vec<_>) =
             txns.into_iter().map(|txn| (txn.txn, txn.proofs)).unzip();
         Self {
-            block: crate::state::Block{txns: txns, },
+            block: crate::state::Block{txns: txns, proposer_pub_key: Self.block.proposer_pub_key, fee_blind: Self.block.fee_blind},
             proofs,
         }
     }

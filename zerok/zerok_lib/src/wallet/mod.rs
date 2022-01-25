@@ -85,7 +85,7 @@ pub enum WalletError {
         asset: AssetDefinition,
     },
     NetworkError {
-        source: phaselock::networking::NetworkError,
+        source: phaselock::traits::NetworkError,
     },
     QueryServiceError {
         source: crate::node::QueryServiceError,
@@ -95,7 +95,7 @@ pub enum WalletError {
     },
     ConsensusError {
         #[snafu(source(false))]
-        source: Result<phaselock::error::PhaseLockError, String>,
+        source: Result<phaselock::types::PhaseLockError, String>,
     },
     PersistenceError {
         source: atomic_store::error::PersistenceError,
@@ -138,7 +138,7 @@ impl api::FromError for WalletError {
         Self::InvalidBlock { source }
     }
 
-    fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
+    fn from_consensus_error(source: Result<phaselock::types::PhaseLockError, String>) -> Self {
         Self::ConsensusError { source }
     }
 }

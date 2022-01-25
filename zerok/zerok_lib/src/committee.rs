@@ -1,4 +1,4 @@
-use phaselock::{committee::DynamicCommittee, traits::Election, BlockHash, PrivKey, PubKey, H_256};
+use phaselock::{committee::DynamicCommittee, traits::Election, data::BlockHash, PrivKey, PubKey, H_256};
 use std::collections::{hash_map::HashMap, HashSet};
 use std::marker::PhantomData;
 
