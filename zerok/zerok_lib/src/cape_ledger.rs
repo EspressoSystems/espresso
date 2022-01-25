@@ -284,6 +284,6 @@ impl Ledger for CapeLedger {
     }
 
     fn merkle_height() -> u8 {
-        crate::state::MERKLE_HEIGHT
+        CAPE_MERKLE_HEIGHT
     }
 }
