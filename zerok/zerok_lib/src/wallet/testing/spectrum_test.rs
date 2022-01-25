@@ -1,13 +1,8 @@
-use super::*;
 use crate::{
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
-    txn_builder::{RecordDatabase, TransactionHistoryEntry, TransactionState},
-    wallet::{
-        hd, spectrum::SpectrumLedger, testing, CryptoError, RoleKeyPair, WalletBackend,
-        WalletError, WalletState, WalletStorage,
-    },
+    wallet::spectrum::SpectrumLedger,
 };
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
@@ -20,6 +15,13 @@ use jf_aap::{
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+use seahorse::{
+    events::{EventIndex, EventSource, LedgerEvent},
+    hd, testing,
+    testing::MockEventSource,
+    txn_builder::{RecordDatabase, TransactionHistoryEntry, TransactionState},
+    CryptoError, RoleKeyPair, WalletBackend, WalletError, WalletState, WalletStorage,
+};
 use snafu::ResultExt;
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -27,8 +29,8 @@ use testing::{MockLedger, MockNetwork};
 
 #[derive(Clone, Debug, Default)]
 pub struct MockStorage<'a> {
-    committed: Option<WalletState<'a>>,
-    working: Option<WalletState<'a>>,
+    committed: Option<WalletState<'a, SpectrumLedger>>,
+    working: Option<WalletState<'a, SpectrumLedger>>,
     txn_history: Vec<TransactionHistoryEntry<SpectrumLedger>>,
 }
 
@@ -38,13 +40,15 @@ impl<'a> WalletStorage<'a, SpectrumLedger> for MockStorage<'a> {
         self.committed.is_some()
     }
 
-    async fn load(&mut self) -> Result<WalletState<'a>, WalletError<SpectrumLedger>> {
+    async fn load(
+        &mut self,
+    ) -> Result<WalletState<'a, SpectrumLedger>, WalletError<SpectrumLedger>> {
         Ok(self.committed.as_ref().unwrap().clone())
     }
 
     async fn store_snapshot(
         &mut self,
-        state: &WalletState<'a>,
+        state: &WalletState<'a, SpectrumLedger>,
     ) -> Result<(), WalletError<SpectrumLedger>> {
         if let Some(working) = &mut self.working {
             working.txn_state = state.txn_state.clone();
@@ -211,7 +215,7 @@ impl<'a> MockNetwork<'a, SpectrumLedger> for MockSpectrumNetwork<'a> {
         EventSource::QueryService
     }
 
-    fn generate_event(&mut self, e: LedgerEvent) {
+    fn generate_event(&mut self, e: LedgerEvent<SpectrumLedger>) {
         println!(
             "generating event {}: {}",
             self.now(),
@@ -236,14 +240,17 @@ pub struct MockSpectrumBackend<'a> {
 
 #[async_trait]
 impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
-    type EventStream = Pin<Box<dyn Stream<Item = (LedgerEvent, EventSource)> + Send>>;
+    type EventStream =
+        Pin<Box<dyn Stream<Item = (LedgerEvent<SpectrumLedger>, EventSource)> + Send>>;
     type Storage = MockStorage<'a>;
 
     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
         self.storage.lock().await
     }
 
-    async fn create(&mut self) -> Result<WalletState<'a>, WalletError<SpectrumLedger>> {
+    async fn create(
+        &mut self,
+    ) -> Result<WalletState<'a, SpectrumLedger>, WalletError<SpectrumLedger>> {
         let state = {
             let mut ledger = self.ledger.lock().await;
 
@@ -291,7 +298,7 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
 
     async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream {
         let mut ledger = self.ledger.lock().await;
-        ledger.network.events.subscribe(from, to)
+        ledger.network().events.subscribe(from, to)
     }
 
     async fn get_public_key(
@@ -316,9 +323,7 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
         if set.hash() == ledger.network().nullifiers.hash() {
             Ok(ledger.network().nullifiers.contains(nullifier).unwrap())
         } else {
-            Err(WalletError::<SpectrumLedger>::QueryServiceError {
-                source: node::QueryServiceError::InvalidNullifierRoot {},
-            })
+            Err(node::QueryServiceError::InvalidNullifierRoot {}.into())
         }
     }
 
@@ -332,18 +337,16 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
         let block = &network
             .committed_blocks
             .get(block_id as usize)
-            .ok_or_else(|| WalletError::<SpectrumLedger>::QueryServiceError {
-                source: node::QueryServiceError::InvalidBlockId {
+            .ok_or_else(|| {
+                WalletError::<SpectrumLedger>::from(node::QueryServiceError::InvalidBlockId {
                     index: block_id as usize,
                     num_blocks: network.committed_blocks.len(),
-                },
+                })
             })?
             .0;
 
         if txn_id as usize >= block.block.0.len() {
-            return Err(WalletError::<SpectrumLedger>::QueryServiceError {
-                source: node::QueryServiceError::InvalidTxnId {},
-            });
+            return Err(node::QueryServiceError::InvalidTxnId {}.into());
         }
         let txn = block.block.0[txn_id as usize].clone();
         let proofs = block.proofs[txn_id as usize].clone();
@@ -431,6 +434,10 @@ impl<'a> testing::SystemUnderTest<'a> for SpectrumTest {
             key_pair,
         }
     }
+
+    fn universal_param(&self) -> &'a jf_aap::proof::UniversalParam {
+        &*crate::universal_params::UNIVERSAL_PARAM
+    }
 }
 
 // Spectrum-specific tests
@@ -441,8 +448,8 @@ mod spectrum_wallet_tests {
     use std::time::Instant;
     use testing::SystemUnderTest;
 
-    use super::super::generic_wallet_tests;
-    instantiate_generic_wallet_tests!(SpectrumTest);
+    use testing::generic_wallet_tests;
+    seahorse::instantiate_generic_wallet_tests!(SpectrumTest);
 
     #[async_std::test]
     async fn test_resubmit() -> std::io::Result<()> {

@@ -1,16 +1,6 @@
 use crate::{
-    cape_ledger::*,
-    cape_state::*,
-    events::{EventIndex, EventSource, LedgerEvent},
-    node::QueryServiceError,
-    state::MERKLE_HEIGHT,
-    txn_builder::{RecordDatabase, TransactionState},
-    universal_params::UNIVERSAL_PARAM,
-    wallet::{
-        cape::CapeWalletBackend, hd::KeyTree, loader::WalletLoader,
-        persistence::AtomicWalletStorage, testing, CryptoError, KeyStreamState, WalletBackend,
-        WalletError, WalletState,
-    },
+    cape_ledger::*, cape_state::*, node::QueryServiceError, state::MERKLE_HEIGHT,
+    universal_params::UNIVERSAL_PARAM, wallet::cape::CapeWalletBackend,
 };
 use async_std::sync::{Mutex, MutexGuard};
 use async_trait::async_trait;
@@ -18,15 +8,25 @@ use futures::stream::Stream;
 use itertools::izip;
 use jf_aap::{
     keys::{UserAddress, UserKeyPair, UserPubKey},
-    proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey},
+    proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam},
     structs::{AssetDefinition, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
     MerklePath, MerkleTree, Signature, TransactionNote,
 };
 use key_set::{OrderByOutputs, ProverKeySet, SizedKey, VerifierKeySet};
+use lazy_static::lazy_static;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use reef::{
-    traits::{Block as _, Transaction as _},
+    traits::{Block as _, Ledger as _, Transaction as _},
     Block,
+};
+use seahorse::{
+    events::{EventIndex, EventSource, LedgerEvent},
+    hd::KeyTree,
+    loader::WalletLoader,
+    persistence::AtomicWalletStorage,
+    testing,
+    txn_builder::{RecordDatabase, TransactionState},
+    CryptoError, KeyStreamState, WalletBackend, WalletError, WalletState,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use snafu::ResultExt;
@@ -548,7 +548,7 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
                     .ledger
                     .lock()
                     .await
-                    .network
+                    .network()
                     .contract
                     .nullifiers
                     .contains(&nullifier);
@@ -563,9 +563,9 @@ impl<'a, Meta: Serialize + DeserializeOwned + Send> WalletBackend<'a, CapeLedger
         block_id: u64,
         txn_id: u64,
     ) -> Result<CapeTransition, WalletError<CapeLedger>> {
-        let ledger = self.ledger.lock().await;
+        let mut ledger = self.ledger.lock().await;
         Ok(ledger
-            .network
+            .network()
             .txns
             .get(&(block_id, txn_id))
             .ok_or(QueryServiceError::InvalidTxnId {})?
@@ -698,6 +698,13 @@ impl Default for CapeTest {
     }
 }
 
+lazy_static! {
+    static ref CAPE_UNIVERSAL_PARAM: UniversalParam = universal_param::get(
+        &mut ChaChaRng::from_seed([1u8; 32]),
+        CapeLedger::merkle_height()
+    );
+}
+
 #[async_trait]
 impl<'a> SystemUnderTest<'a> for CapeTest {
     type Ledger = CapeLedger;
@@ -739,18 +746,23 @@ impl<'a> SystemUnderTest<'a> for CapeTest {
             .await
             .unwrap()
     }
+
+    fn universal_param(&self) -> &'a UniversalParam {
+        &*CAPE_UNIVERSAL_PARAM
+    }
 }
 
 // CAPE-specific tests
 #[cfg(test)]
 mod cape_wallet_tests {
     use super::*;
-    use crate::txn_builder::TransactionError;
+    use crate::wallet::cape::CapeWalletExt;
     use jf_aap::structs::{AssetCode, AssetPolicy};
+    use seahorse::txn_builder::TransactionError;
     use std::time::Instant;
 
-    use super::super::generic_wallet_tests;
-    instantiate_generic_wallet_tests!(CapeTest);
+    use testing::generic_wallet_tests;
+    seahorse::instantiate_generic_wallet_tests!(CapeTest);
 
     #[async_std::test]
     async fn test_cape_wallet() -> std::io::Result<()> {

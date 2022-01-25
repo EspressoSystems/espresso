@@ -1,15 +1,10 @@
-use super::{
-    hd::KeyTree, loader::WalletLoader, persistence::AtomicWalletStorage, spectrum::SpectrumLedger,
-    BincodeError, ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState,
-};
+use super::spectrum::SpectrumLedger;
 use crate::{
     api,
     api::{ClientError, CommittedTransaction, SpectrumError},
-    events::{EventIndex, EventSource, LedgerEvent},
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{ElaboratedTransaction, MERKLE_HEIGHT},
-    txn_builder::TransactionState,
 };
 use api::{client::*, BlockId, TransactionId};
 use async_std::sync::{Arc, Mutex, MutexGuard};
@@ -24,6 +19,14 @@ use jf_aap::structs::{Nullifier, ReceiverMemo};
 use jf_aap::Signature;
 use key_set::{ProverKeySet, SizedKey};
 use node::LedgerSnapshot;
+use seahorse::{
+    events::{EventIndex, EventSource, LedgerEvent},
+    hd::KeyTree,
+    loader::WalletLoader,
+    persistence::AtomicWalletStorage,
+    txn_builder::TransactionState,
+    BincodeError, ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;
 use std::convert::TryInto;
@@ -114,10 +117,12 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
 impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLedger>
     for NetworkBackend<'a, Meta>
 {
-    type EventStream = node::EventStream<(LedgerEvent, EventSource)>;
+    type EventStream = node::EventStream<(LedgerEvent<SpectrumLedger>, EventSource)>;
     type Storage = AtomicWalletStorage<'a, SpectrumLedger, Meta>;
 
-    async fn create(&mut self) -> Result<WalletState<'a>, WalletError<SpectrumLedger>> {
+    async fn create(
+        &mut self,
+    ) -> Result<WalletState<'a, SpectrumLedger>, WalletError<SpectrumLedger>> {
         let LedgerSnapshot {
             state: validator,
             nullifiers,

@@ -7,6 +7,7 @@ use api::{
 use futures::prelude::*;
 use itertools::izip;
 use phaselock::BlockContents;
+use seahorse::events::LedgerEvent;
 use server::{best_response_type, response};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -18,11 +19,13 @@ use tide::http::{content::Accept, mime};
 use tide::StatusCode;
 use tide_websockets::WebSocketConnection;
 use tracing::{event, Level};
-use zerok_lib::api;
-use zerok_lib::api::*;
-use zerok_lib::events::LedgerEvent;
-use zerok_lib::node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
-use zerok_lib::state::{state_comm::LedgerStateCommitment, ElaboratedBlock};
+use zerok_lib::{
+    api,
+    api::*,
+    node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService},
+    state::{state_comm::LedgerStateCommitment, ElaboratedBlock},
+    wallet::spectrum::SpectrumLedger,
+};
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -466,7 +469,7 @@ async fn get_nullifier(
 async fn get_event(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &impl QueryService,
-) -> Result<LedgerEvent, tide::Error> {
+) -> Result<LedgerEvent<SpectrumLedger>, tide::Error> {
     let index = bindings[":index"].value.as_index()? as u64;
     let mut events = query_service.subscribe(index).await;
     events.next().await.ok_or_else(|| {
