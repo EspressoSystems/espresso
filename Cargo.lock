@@ -4698,13 +4698,10 @@ dependencies = [
 [[package]]
 name = "zerok-macros"
 version = "0.1.0"
+source = "git+ssh://git@github.com/SpectrumXYZ/zerok-macros.git#0a9e9ca4ef8870bcd9a2373c00c4a697f704453a"
 dependencies = [
- "arbitrary",
- "ark-serialize",
  "proc-macro2",
  "quote",
- "rand_chacha 0.3.1",
- "serde",
  "syn",
 ]
 

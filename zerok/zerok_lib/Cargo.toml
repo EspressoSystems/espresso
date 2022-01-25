@@ -58,7 +58,7 @@ tempdir = "0.3.7"
 tide = "0.16.0"
 tracing = "0.1.26"
 zeroize = "1.3"
-zerok-macros = { path = "../zerok_macros" }
+zerok-macros = { git = "ssh://git@github.com/SpectrumXYZ/zerok-macros.git" }
 hex = "0.4.3"
 chrono = "0.4.19"
 mnemonic = "1.0.1"
