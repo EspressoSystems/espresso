@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 arbitrary = { version="1.0", features=["derive"] }
+arbitrary-wrappers = { git = "ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git" }
 atomic_store = { version="0.0.2", registry="translucence" }
 chacha20 = "0.8.1"
 commit = { git = "ssh://git@github.com/SpectrumXYZ/commit.git", rev = "f48cd52c59755eade0605111826eef3df6abdcf8" }

@@ -125,6 +125,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbitrary-wrappers"
+version = "0.1.0"
+source = "git+ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git#5a0d0616b464d3bc3f0211b2fcd059fd1279d8ff"
+dependencies = [
+ "arbitrary",
+ "ark-std",
+ "itertools 0.10.3",
+ "jf-aap",
+ "rand_chacha 0.3.1",
+]
+
+[[package]]
 name = "ark-bls12-377"
 version = "0.3.0"
 source = "git+https://github.com/arkworks-rs/curves?rev=677b4ae751a274037880ede86e9b6f30f62635af#677b4ae751a274037880ede86e9b6f30f62635af"
@@ -4733,6 +4745,7 @@ name = "zerok_lib"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "arbitrary-wrappers",
  "ark-ff",
  "ark-serialize",
  "ark-std",

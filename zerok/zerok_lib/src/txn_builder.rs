@@ -1,5 +1,4 @@
 use crate::node::MerkleTreeWithArbitrary;
-use crate::util::arbitrary_wrappers::*;
 use crate::{
     events::EventIndex,
     ser_test,
@@ -7,6 +6,7 @@ use crate::{
     wallet::spectrum::SpectrumLedger,
 };
 use arbitrary::{Arbitrary, Unstructured};
+use arbitrary_wrappers::*;
 use ark_serialize::*;
 use chrono::{DateTime, Local};
 use jf_aap::{
