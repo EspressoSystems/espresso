@@ -8,8 +8,7 @@ use crate::{
     events::{EventIndex, EventSource, LedgerEvent},
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
-    state::key_set::SizedKey,
-    state::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT},
+    state::{ElaboratedTransaction, MERKLE_HEIGHT},
     txn_builder::TransactionState,
 };
 use api::{client::*, BlockId, TransactionId};
@@ -23,6 +22,7 @@ use jf_aap::keys::{UserAddress, UserPubKey};
 use jf_aap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
 use jf_aap::structs::{Nullifier, ReceiverMemo};
 use jf_aap::Signature;
+use key_set::{ProverKeySet, SizedKey};
 use node::LedgerSnapshot;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;

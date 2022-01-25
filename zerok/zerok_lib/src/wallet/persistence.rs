@@ -1,5 +1,3 @@
-use crate::state::key_set::OrderByOutputs;
-use crate::state::ProverKeySet;
 use crate::txn_builder::TransactionState;
 use crate::wallet::*;
 use async_std::sync::Arc;
@@ -11,6 +9,7 @@ use atomic_store::{
 use encryption::Cipher;
 use hd::KeyTree;
 use jf_aap::structs::AssetDefinition;
+use key_set::{OrderByOutputs, ProverKeySet};
 use loader::WalletLoader;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use reef::*;
@@ -501,7 +500,7 @@ mod tests {
     use crate::{
         state::{
             ElaboratedTransaction, ElaboratedTransactionHash, SetMerkleTree, ValidatorState,
-            VerifierKeySet, MERKLE_HEIGHT,
+            MERKLE_HEIGHT,
         },
         txn_builder::{PendingTransaction, TransactionInfo, TransactionUID},
         universal_params::UNIVERSAL_PARAM,
@@ -510,7 +509,7 @@ mod tests {
         sign_receiver_memos, structs::RecordCommitment, KeyPair, MerkleTree,
         TransactionVerifyingKey,
     };
-    use key_set::KeySet;
+    use key_set::{KeySet, VerifierKeySet};
     use phaselock::H_256;
     use rand_chacha::{
         rand_core::{RngCore, SeedableRng},

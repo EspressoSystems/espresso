@@ -2266,6 +2266,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
 
 [[package]]
+name = "key-set"
+version = "0.1.0"
+source = "git+ssh://git@github.com/SpectrumXYZ/key-set.git#31d3f6f1433e2542af286cf31590a68a402fb5c5"
+dependencies = [
+ "ark-serialize",
+ "bincode",
+ "commit",
+ "itertools 0.10.3",
+ "jf-aap",
+ "serde",
+ "serde_with",
+ "snafu",
+]
+
+[[package]]
 name = "kv-log-macro"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2431,6 +2446,7 @@ dependencies = [
  "jf-plonk",
  "jf-primitives",
  "jf-utils",
+ "key-set",
  "markdown",
  "phaselock",
  "procfs",
@@ -4740,6 +4756,7 @@ dependencies = [
  "jf-plonk",
  "jf-primitives",
  "jf-utils",
+ "key-set",
  "lazy_static",
  "mnemonic",
  "net",

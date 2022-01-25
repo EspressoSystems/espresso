@@ -3,10 +3,7 @@ use crate::{
     cape_state::*,
     events::{EventIndex, EventSource, LedgerEvent},
     node::QueryServiceError,
-    state::{
-        key_set::{OrderByOutputs, SizedKey},
-        ProverKeySet, VerifierKeySet, MERKLE_HEIGHT,
-    },
+    state::MERKLE_HEIGHT,
     txn_builder::{RecordDatabase, TransactionState},
     universal_params::UNIVERSAL_PARAM,
     wallet::{
@@ -25,6 +22,7 @@ use jf_aap::{
     structs::{AssetDefinition, Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
     MerklePath, MerkleTree, Signature, TransactionNote,
 };
+use key_set::{OrderByOutputs, ProverKeySet, SizedKey, VerifierKeySet};
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use reef::{
     traits::{Block as _, Transaction as _},

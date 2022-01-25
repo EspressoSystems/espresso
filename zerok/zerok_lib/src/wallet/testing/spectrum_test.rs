@@ -2,10 +2,7 @@ use super::*;
 use crate::{
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
-    state::{
-        key_set, key_set::OrderByOutputs, ElaboratedBlock, ElaboratedTransaction, ProverKeySet,
-        ValidatorState, VerifierKeySet,
-    },
+    state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
     txn_builder::{RecordDatabase, TransactionHistoryEntry, TransactionState},
     wallet::{
         hd, spectrum::SpectrumLedger, testing, CryptoError, RoleKeyPair, WalletBackend,
@@ -21,6 +18,7 @@ use jf_aap::{
     structs::{AssetCodeSeed, AssetDefinition, Nullifier, ReceiverMemo, RecordOpening},
     MerkleTree, Signature,
 };
+use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use snafu::ResultExt;
 use std::collections::HashMap;

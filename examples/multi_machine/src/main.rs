@@ -10,6 +10,7 @@ use futures_util::StreamExt;
 use jf_aap::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
 use jf_aap::TransactionVerifyingKey;
 use jf_primitives::merkle_tree::FilledMTBuilder;
+use key_set::{KeySet, VerifierKeySet};
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
@@ -35,10 +36,9 @@ use zerok_lib::{
     api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
-    state::key_set::KeySet,
     state::{
         ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, ValidatorState,
-        VerifierKeySet, MERKLE_HEIGHT,
+        MERKLE_HEIGHT,
     },
     testing::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo},
     universal_params::UNIVERSAL_PARAM,

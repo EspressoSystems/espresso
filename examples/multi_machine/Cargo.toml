@@ -18,6 +18,7 @@ jf-plonk = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish
 jf-primitives = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git" }
 jf-aap = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git", rev = "eca7b7e85718c7770c24ad90dd34b8a07209a01b"}
 jf-utils = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git" }
+key-set = { git = "ssh://git@github.com/SpectrumXYZ/key-set.git" }
 markdown = "0.3"
 # phaselock = { version = "0.0.2", registry = "translucence"}
 phaselock = { git = "ssh://git@github.com/SpectrumXYZ/phaselock.git", rev = "14586ed218a35cb48675b73d4a34ae7ae55c67e6" }

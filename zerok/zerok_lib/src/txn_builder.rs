@@ -3,7 +3,7 @@ use crate::util::arbitrary_wrappers::*;
 use crate::{
     events::EventIndex,
     ser_test,
-    state::{key_set, ValidatorState, MERKLE_HEIGHT},
+    state::{ValidatorState, MERKLE_HEIGHT},
     wallet::spectrum::SpectrumLedger,
 };
 use arbitrary::{Arbitrary, Unstructured};

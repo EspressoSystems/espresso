@@ -1,6 +1,5 @@
 #![deny(warnings)]
 
-use crate::state::VerifierKeySet;
 use ark_serialize::*;
 use core::convert::TryFrom;
 use core::fmt::Debug;
@@ -12,6 +11,7 @@ use jf_aap::{
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
+use key_set::VerifierKeySet;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashMap, HashSet, VecDeque};
