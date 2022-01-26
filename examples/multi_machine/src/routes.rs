@@ -22,9 +22,9 @@ use tracing::{event, Level};
 use zerok_lib::{
     api,
     api::*,
+    ledger::SpectrumLedger,
     node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService},
     state::{state_comm::LedgerStateCommitment, ElaboratedBlock},
-    wallet::spectrum::SpectrumLedger,
 };
 
 #[derive(Debug, EnumString)]

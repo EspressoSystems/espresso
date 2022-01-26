@@ -1,10 +1,9 @@
 #![deny(warnings)]
 
 pub mod api;
-pub mod cape_ledger;
-pub mod cape_state;
 pub mod committee;
 pub mod full_persistence;
+pub mod ledger;
 pub mod lw_persistence;
 pub mod node;
 mod set_merkle_tree;

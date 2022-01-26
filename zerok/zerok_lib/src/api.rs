@@ -1,7 +1,7 @@
 use crate::{
+    ledger::SpectrumLedger,
     set_merkle_tree::SetMerkleProof,
     state::{state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction},
-    wallet::spectrum::SpectrumLedger,
 };
 use fmt::{Display, Formatter};
 use jf_aap::{structs::ReceiverMemo, Signature, TransactionNote};

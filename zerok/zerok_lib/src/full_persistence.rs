@@ -1,6 +1,6 @@
 use crate::{
+    ledger::SpectrumLedger,
     state::{ElaboratedBlock, SetMerkleTree, ValidatorState},
-    wallet::spectrum::SpectrumLedger,
 };
 use atomic_store::{
     append_log::Iter, load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader,
