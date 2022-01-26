@@ -1,11 +1,11 @@
 use crate::full_persistence::FullPersistence;
 pub use crate::state::state_comm::LedgerStateCommitment;
 use crate::{
+    ledger::SpectrumLedger,
     ser_test,
     set_merkle_tree::*,
     state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
     validator_node::*,
-    wallet::spectrum::SpectrumLedger,
 };
 use arbitrary::Arbitrary;
 use arbitrary_wrappers::*;

@@ -37,11 +37,9 @@ use tracing::{event, Level};
 use zerok_lib::{
     api::client,
     api::SpectrumError,
+    ledger::SpectrumLedger,
     universal_params::UNIVERSAL_PARAM,
-    wallet::{
-        network::{NetworkBackend, Url},
-        spectrum::SpectrumLedger,
-    },
+    wallet::network::{NetworkBackend, Url},
 };
 
 type Wallet = seahorse::Wallet<'static, NetworkBackend<'static, ()>, SpectrumLedger>;

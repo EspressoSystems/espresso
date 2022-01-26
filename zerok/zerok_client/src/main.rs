@@ -16,9 +16,9 @@ use seahorse::{
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
-use zerok_lib::wallet::{
-    network::{NetworkBackend, Url},
-    spectrum::SpectrumLedger,
+use zerok_lib::{
+    ledger::SpectrumLedger,
+    wallet::network::{NetworkBackend, Url},
 };
 
 #[derive(StructOpt)]

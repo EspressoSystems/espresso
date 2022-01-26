@@ -37,13 +37,11 @@ use tracing::{event, Level};
 use zerok_lib::{
     api::client::*,
     api::*,
+    ledger::SpectrumLedger,
     node::{LedgerSummary, QueryServiceError},
     state::ElaboratedBlock,
     universal_params::UNIVERSAL_PARAM,
-    wallet::{
-        network::{NetworkBackend, Url},
-        spectrum::SpectrumLedger,
-    },
+    wallet::network::{NetworkBackend, Url},
 };
 
 #[derive(StructOpt)]

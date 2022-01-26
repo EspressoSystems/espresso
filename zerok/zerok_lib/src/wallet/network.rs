@@ -1,7 +1,7 @@
-use super::spectrum::SpectrumLedger;
 use crate::{
     api,
     api::{ClientError, CommittedTransaction, SpectrumError},
+    ledger::SpectrumLedger,
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{ElaboratedTransaction, MERKLE_HEIGHT},
