@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 arbitrary = { version="1.0", features=["derive"] }
-arbitrary-wrappers = { git = "ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git", branch = "plonk-verifier"}
+arbitrary-wrappers = { git = "ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git" }
 atomic_store = { version="0.0.2", registry="translucence" }
 chacha20 = "0.8.1"
 commit = { git = "ssh://git@github.com/SpectrumXYZ/commit.git", rev = "f48cd52c59755eade0605111826eef3df6abdcf8" }
@@ -18,8 +18,8 @@ itertools = "0.10.1"
 jf-plonk = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git" }
 jf-primitives = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git" }
 jf-utils = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git" }
-jf-aap = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git" }
-key-set = { git = "ssh://git@github.com/SpectrumXYZ/key-set.git", branch = "plonk-verifier" }
+jf-aap = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git", rev = "fd1de050c214584a296a11f366846a53a316c4d4" }
+key-set = { git = "ssh://git@github.com/SpectrumXYZ/key-set.git" }
 # phaselock = { version = "0.0.2", registry = "translucence"}
 phaselock = { git = "ssh://git@github.com/SpectrumXYZ/phaselock.git", rev = "14586ed218a35cb48675b73d4a34ae7ae55c67e6" }
 ark-std = { version = "0.3.0", default-features = false }
@@ -62,8 +62,8 @@ zerok-macros = { git = "ssh://git@github.com/SpectrumXYZ/zerok-macros.git" }
 hex = "0.4.3"
 chrono = "0.4.19"
 mnemonic = "1.0.1"
-reef = { git = "ssh://git@github.com/SpectrumXYZ/reef.git", branch = "plonk-verifier" }
-net = { git = "ssh://git@github.com/SpectrumXYZ/net.git", branch = "plonk-verifier" }
+reef = { git = "ssh://git@github.com/SpectrumXYZ/reef.git" }
+net = { git = "ssh://git@github.com/SpectrumXYZ/net.git" }
 
 [dev-dependencies]
 quickcheck = "1.0"
