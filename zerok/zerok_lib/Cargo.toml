@@ -64,6 +64,8 @@ chrono = "0.4.19"
 mnemonic = "1.0.1"
 reef = { git = "ssh://git@github.com/SpectrumXYZ/reef.git" }
 net = { git = "ssh://git@github.com/SpectrumXYZ/net.git" }
+universal-param = { git = "ssh://git@github.com/SpectrumXYZ/universal-param.git" }
+seahorse = { git = "ssh://git@github.com/SpectrumXYZ/seahorse.git", features = ["testing"] }
 
 [dev-dependencies]
 quickcheck = "1.0"

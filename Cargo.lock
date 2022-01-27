@@ -127,19 +127,7 @@ dependencies = [
 [[package]]
 name = "arbitrary-wrappers"
 version = "0.1.0"
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-source = "git+ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git#eff347321c035a7286c5e158ca586e86313aec32"
-=======
-source = "git+ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git?branch=plonk-verifier#17c7ccf3052a77f91a6c74437c5e155a27b4aec2"
->>>>>>> 3ec158b... pin jf-aaps to plonk-verifier
-=======
-source = "git+ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git?branch=plonk-verifier#afb63c50676703cc659e737a1d26e7c3a37c1b39"
->>>>>>> 18fd2b9... point jf-aap to main
-=======
 source = "git+ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git#165c544d82310ca8001590ca67e76aa959394711"
->>>>>>> 68f8868... update dependencies
 dependencies = [
  "arbitrary",
  "ark-std",
@@ -3245,19 +3233,7 @@ dependencies = [
 [[package]]
 name = "reef"
 version = "0.1.0"
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-source = "git+ssh://git@github.com/SpectrumXYZ/reef.git?rev=6e3e7f683d2f8c1c1da662301f8ca8c2863018cc#6e3e7f683d2f8c1c1da662301f8ca8c2863018cc"
-=======
-source = "git+ssh://git@github.com/SpectrumXYZ/reef.git?branch=plonk-verifier#be9312a5f3b6a3c093476edccf0c1a03cdc2dae8"
->>>>>>> 3ec158b... pin jf-aaps to plonk-verifier
-=======
-source = "git+ssh://git@github.com/SpectrumXYZ/reef.git?branch=plonk-verifier#737575fcc584b411f0291d7f274ba5a885631bb6"
->>>>>>> 18fd2b9... point jf-aap to main
-=======
 source = "git+ssh://git@github.com/SpectrumXYZ/reef.git#ba644231992f52f7fd8498ce029a85bd82c204a6"
->>>>>>> 68f8868... update dependencies
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -3495,7 +3471,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/seahorse.git#73a10140007c4065707d4d164c2067183c9ba024"
+source = "git+ssh://git@github.com/SpectrumXYZ/seahorse.git#0e09d318e96fd8cc6dbeac1e9f15e4a1997be2f3"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -3506,7 +3482,7 @@ dependencies = [
  "async-trait",
  "atomic_store 0.0.2 (git+ssh://git@github.com/SpectrumXYZ/atomicstore.git)",
  "bincode",
- "chacha20 0.8.1",
+ "chacha20",
  "chrono",
  "commit",
  "futures",
@@ -3526,7 +3502,7 @@ dependencies = [
  "rust-argon2",
  "rustyline",
  "serde",
- "sha3",
+ "sha3 0.9.1",
  "snafu",
  "strum",
  "strum_macros",
@@ -4546,7 +4522,7 @@ dependencies = [
 [[package]]
 name = "universal-param"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/universal-param.git#e6193294f6bc804aaa34132de31dca070bbe8d86"
+source = "git+ssh://git@github.com/SpectrumXYZ/universal-param.git#988da65b09eca7547ecdb878409455c4f95d4687"
 dependencies = [
  "ark-serialize",
  "ark-std",
