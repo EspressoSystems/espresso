@@ -17,7 +17,7 @@ itertools = "0.10.1"
 jf-plonk = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git" }
 jf-primitives = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git" }
 jf-utils = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish.git" }
-jf-aap = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git", branch = "plonk-verifier" }
+jf-aap = { features=["std"], git = "ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git" }
 key-set = { git = "ssh://git@github.com/SpectrumXYZ/key-set.git", branch = "plonk-verifier" }
 markdown = "0.3"
 # phaselock = { version = "0.0.2", registry = "translucence"}
