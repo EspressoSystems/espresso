@@ -127,7 +127,7 @@ dependencies = [
 [[package]]
 name = "arbitrary-wrappers"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git#165c544d82310ca8001590ca67e76aa959394711"
+source = "git+ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git#e0bf09f31c057b2788eee30dcb6f7f698095e8ed"
 dependencies = [
  "arbitrary",
  "ark-std",
@@ -2148,15 +2148,11 @@ checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 [[package]]
 name = "jf-aap"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=fd1de050c214584a296a11f366846a53a316c4d4#fd1de050c214584a296a11f366846a53a316c4d4"
+source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=c789791d61b46e69367f07bb375c1ae2cf66e0d9#c789791d61b46e69367f07bb375c1ae2cf66e0d9"
 dependencies = [
  "anyhow",
- "ark-bls12-377",
- "ark-bls12-381",
  "ark-bn254",
  "ark-ec",
- "ark-ed-on-bls12-377",
- "ark-ed-on-bls12-381",
  "ark-ed-on-bn254",
  "ark-ff",
  "ark-serialize",
@@ -2183,7 +2179,6 @@ dependencies = [
  "sha2 0.9.9",
  "sha3 0.10.0",
  "structopt",
- "thiserror",
 ]
 
 [[package]]
@@ -2314,7 +2309,7 @@ checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
 [[package]]
 name = "key-set"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/key-set.git#f8eefd5a26219aeb68a8c6a54c6f9f6c866a1314"
+source = "git+ssh://git@github.com/SpectrumXYZ/key-set.git#ce16c51eb10ebfd8a19b5200720c81c9dd086904"
 dependencies = [
  "ark-serialize",
  "bincode",
@@ -2538,7 +2533,7 @@ dependencies = [
 [[package]]
 name = "net"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/net.git#7f46bc8df52f99e61a723122107e6f45f082928a"
+source = "git+ssh://git@github.com/SpectrumXYZ/net.git#bdf20c7e87dec3fbcf0ba12ca4f235e2099d0a9e"
 dependencies = [
  "ark-serialize",
  "ark-std",
@@ -2857,6 +2852,15 @@ name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
+name = "pipe"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c7b8f27da217eb966df4c58d4159ea939431950ca03cf782c22bd7c5c1d8d75"
+dependencies = [
+ "crossbeam-channel",
+]
 
 [[package]]
 name = "pipeline"
@@ -3233,12 +3237,13 @@ dependencies = [
 [[package]]
 name = "reef"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/reef.git#ba644231992f52f7fd8498ce029a85bd82c204a6"
+source = "git+ssh://git@github.com/SpectrumXYZ/reef.git#bd921b17c422e14fdaa12cae2e2a034eebf2a500"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
  "ark-serialize",
  "commit",
+ "funty",
  "itertools 0.10.3",
  "jf-aap",
  "serde",
@@ -3471,7 +3476,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/seahorse.git#0e09d318e96fd8cc6dbeac1e9f15e4a1997be2f3"
+source = "git+ssh://git@github.com/SpectrumXYZ/seahorse.git#0420e2047cb498df029de253e5eb541ed1cbdeb5"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -3495,6 +3500,7 @@ dependencies = [
  "lazy_static",
  "mnemonic",
  "net",
+ "pipe",
  "proptest",
  "rand_chacha 0.3.1",
  "reef",
@@ -4522,7 +4528,7 @@ dependencies = [
 [[package]]
 name = "universal-param"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/universal-param.git#988da65b09eca7547ecdb878409455c4f95d4687"
+source = "git+ssh://git@github.com/SpectrumXYZ/universal-param.git#81e4eab45efdf761a44cf6d64d488b8135bbfbce"
 dependencies = [
  "ark-serialize",
  "ark-std",
