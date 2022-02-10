@@ -11,12 +11,11 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use itertools::izip;
 use jf_aap::{
-    keys::{UserAddress, UserKeyPair, UserPubKey},
+    keys::{UserAddress, UserPubKey},
     structs::{AssetCodeSeed, AssetDefinition, Nullifier, ReceiverMemo, RecordOpening},
     MerkleTree, Signature,
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
-use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     hd, testing,
@@ -233,10 +232,9 @@ impl<'a> MockNetwork<'a, SpectrumLedger> for MockSpectrumNetwork<'a> {
 
 #[derive(Clone)]
 pub struct MockSpectrumBackend<'a> {
-    key_pair: UserKeyPair,
+    key_stream: hd::KeyTree,
     ledger: Arc<Mutex<MockLedger<'a, SpectrumLedger, MockSpectrumNetwork<'a>, MockStorage<'a>>>>,
     initial_grants: Vec<(RecordOpening, u64)>,
-    seed: [u8; 32],
     storage: Arc<Mutex<MockStorage<'a>>>,
 }
 
@@ -263,8 +261,12 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
 
                     records: {
                         let mut db: RecordDatabase = Default::default();
+                        let key_pair = self
+                            .key_stream
+                            .derive_sub_tree("user".as_bytes())
+                            .derive_user_keypair(&0u64.to_le_bytes());
                         for (ro, uid) in self.initial_grants.iter() {
-                            db.insert(ro.clone(), *uid, &self.key_pair);
+                            db.insert(ro.clone(), *uid, &key_pair);
                         }
                         db
                     },
@@ -272,7 +274,7 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
                     record_mt: ledger.network().records.clone(),
                     merkle_leaf_to_forget: None,
 
-                    now: Default::default(),
+                    now: ledger.now(),
                     transactions: Default::default(),
                 },
                 key_state: Default::default(),
@@ -294,8 +296,7 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
     }
 
     fn key_stream(&self) -> hd::KeyTree {
-        let mut rng = ChaChaRng::from_seed(self.seed);
-        hd::KeyTree::random(&mut rng).unwrap().0
+        self.key_stream.clone()
     }
 
     async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream {
@@ -424,16 +425,14 @@ impl<'a> testing::SystemUnderTest<'a> for SpectrumTest {
         &mut self,
         ledger: Arc<Mutex<MockLedger<'a, Self::Ledger, Self::MockNetwork, Self::MockStorage>>>,
         initial_grants: Vec<(RecordOpening, u64)>,
-        seed: [u8; 32],
+        key_stream: hd::KeyTree,
         storage: Arc<Mutex<Self::MockStorage>>,
-        key_pair: UserKeyPair,
     ) -> Self::MockBackend {
         MockSpectrumBackend {
             ledger,
             initial_grants,
-            seed,
             storage,
-            key_pair,
+            key_stream,
         }
     }
 
