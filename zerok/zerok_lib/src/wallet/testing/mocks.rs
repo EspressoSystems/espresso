@@ -274,7 +274,7 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
                     record_mt: ledger.network().records.clone(),
                     merkle_leaf_to_forget: None,
 
-                    now: Default::default(),
+                    now: ledger.now(),
                     transactions: Default::default(),
                 },
                 key_state: Default::default(),

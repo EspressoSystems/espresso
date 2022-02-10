@@ -18,7 +18,7 @@ use jf_aap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, Univ
 use jf_aap::structs::{Nullifier, ReceiverMemo};
 use jf_aap::Signature;
 use key_set::{ProverKeySet, SizedKey};
-use node::LedgerSnapshot;
+use node::{LedgerSnapshot, LedgerSummary};
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     hd::KeyTree,
@@ -123,12 +123,19 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
     async fn create(
         &mut self,
     ) -> Result<WalletState<'a, SpectrumLedger>, WalletError<SpectrumLedger>> {
+        let LedgerSummary {
+            num_blocks,
+            num_events,
+            ..
+        } = self.get("getinfo").await?;
         let LedgerSnapshot {
             state: validator,
             nullifiers,
             records,
             ..
-        } = self.get("getsnapshot/0/true").await?;
+        } = self
+            .get(&format!("getsnapshot/{}/true", num_blocks))
+            .await?;
 
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = self.univ_param;
@@ -188,7 +195,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
                 nullifiers,
                 record_mt: records.0,
                 merkle_leaf_to_forget,
-                now: Default::default(),
+                now: EventIndex::from_source(EventSource::QueryService, num_events),
                 records: Default::default(),
 
                 transactions: Default::default(),
