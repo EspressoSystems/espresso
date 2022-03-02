@@ -18,7 +18,7 @@ pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::task::SpawnExt;
 use itertools::izip;
-use jf_aap::{
+use jf_cap::{
     keys::{UserAddress, UserPubKey},
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
     MerkleTree, Signature,
@@ -653,7 +653,7 @@ impl FullState {
 
 /// A QueryService that aggregates the full ledger state by observing consensus.
 pub struct PhaseLockQueryService<'a> {
-    _univ_param: &'a jf_aap::proof::UniversalParam,
+    _univ_param: &'a jf_cap::proof::UniversalParam,
     state: Arc<RwLock<FullState>>,
     // When dropped, this handle will cancel and join the event handling task. It is not used
     // explicitly; it is merely stored with the rest of the struct for the auto-generated drop glue.
@@ -667,7 +667,7 @@ impl<'a> PhaseLockQueryService<'a> {
         // The current state of the network.
         //todo !jeb.bearer Query these parameters from another full node if we are not starting off
         // a fresh network.
-        univ_param: &'a jf_aap::proof::UniversalParam,
+        univ_param: &'a jf_cap::proof::UniversalParam,
         mut validator: ValidatorState,
         record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
@@ -759,7 +759,7 @@ impl<'a> PhaseLockQueryService<'a> {
 
     // pub fn load(
     //     event_source: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
-    //     univ_param: &'a jf_aap::proof::UniversalParam,
+    //     univ_param: &'a jf_cap::proof::UniversalParam,
     //     full_persisted: FullPersistence,
     // ) -> Self {
     //     unimplemented!("loading QueryService")
@@ -873,7 +873,7 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
         // The current state of the network.
         //todo !jeb.bearer Query these parameters from another full node if we are not starting off
         // a fresh network.
-        univ_param: &'a jf_aap::proof::UniversalParam,
+        univ_param: &'a jf_cap::proof::UniversalParam,
         state: ValidatorState,
         record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
@@ -1001,7 +1001,7 @@ mod tests {
         universal_params::UNIVERSAL_PARAM,
     };
     use async_std::task::block_on;
-    use jf_aap::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
+    use jf_cap::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
     use jf_primitives::schnorr_dsa::KeyPair;
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};

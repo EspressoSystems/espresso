@@ -127,12 +127,26 @@ dependencies = [
 [[package]]
 name = "arbitrary-wrappers"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/arbitrary-wrappers.git#e0bf09f31c057b2788eee30dcb6f7f698095e8ed"
+source = "git+ssh://git@github.com/EspressoSystems/arbitrary-wrappers.git?rev=91a396e46283d6cae2c3d390d5d116087bdcc9eb#91a396e46283d6cae2c3d390d5d116087bdcc9eb"
 dependencies = [
  "arbitrary",
  "ark-std",
  "itertools 0.10.3",
- "jf-aap",
+ "jf-cap",
+ "rand_chacha 0.3.1",
+ "serde",
+ "zerok-macros",
+]
+
+[[package]]
+name = "arbitrary-wrappers"
+version = "0.1.0"
+source = "git+ssh://git@github.com/EspressoSystems/arbitrary-wrappers.git#91a396e46283d6cae2c3d390d5d116087bdcc9eb"
+dependencies = [
+ "arbitrary",
+ "ark-std",
+ "itertools 0.10.3",
+ "jf-cap",
  "rand_chacha 0.3.1",
  "serde",
  "zerok-macros",
@@ -695,20 +709,20 @@ dependencies = [
  "chrono",
  "glob",
  "serde",
- "snafu",
+ "snafu 0.6.10",
 ]
 
 [[package]]
 name = "atomic_store"
 version = "0.0.2"
-source = "git+ssh://git@github.com/SpectrumXYZ/atomicstore.git#9d832334d3839e16550c0bd1c59ca9535306fced"
+source = "git+ssh://git@github.com/EspressoSystems/atomicstore.git#65ac519ece495a2ce9a32f929e9858a566034be2"
 dependencies = [
  "ark-serialize",
  "bincode",
  "chrono",
  "glob",
  "serde",
- "snafu",
+ "snafu 0.6.10",
 ]
 
 [[package]]
@@ -1048,7 +1062,7 @@ dependencies = [
 [[package]]
 name = "commit"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/commit.git?rev=f48cd52c59755eade0605111826eef3df6abdcf8#f48cd52c59755eade0605111826eef3df6abdcf8"
+source = "git+ssh://git@github.com/EspressoSystems/commit.git?rev=f48cd52c59755eade0605111826eef3df6abdcf8#f48cd52c59755eade0605111826eef3df6abdcf8"
 dependencies = [
  "arbitrary",
  "ark-serialize",
@@ -2135,9 +2149,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 
 [[package]]
-name = "jf-aap"
+name = "jf-cap"
 version = "0.0.1"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish-apps.git?rev=c789791d61b46e69367f07bb375c1ae2cf66e0d9#c789791d61b46e69367f07bb375c1ae2cf66e0d9"
+source = "git+ssh://git@github.com/EspressoSystems/cap.git?rev=16ad157f96d2102d59206df0106fb341302180d3#16ad157f96d2102d59206df0106fb341302180d3"
 dependencies = [
  "anyhow",
  "ark-bn254",
@@ -2173,7 +2187,7 @@ dependencies = [
 [[package]]
 name = "jf-plonk"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#567e166786d05038e8731eb3ceabbc5a3fd8c932"
+source = "git+ssh://git@github.com/EspressoSystems/jellyfish.git#ae2d5edc514496443914cae1942ab53e87b356ac"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2202,7 +2216,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#567e166786d05038e8731eb3ceabbc5a3fd8c932"
+source = "git+ssh://git@github.com/EspressoSystems/jellyfish.git#ae2d5edc514496443914cae1942ab53e87b356ac"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -2224,7 +2238,7 @@ dependencies = [
 [[package]]
 name = "jf-rescue"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#567e166786d05038e8731eb3ceabbc5a3fd8c932"
+source = "git+ssh://git@github.com/EspressoSystems/jellyfish.git#ae2d5edc514496443914cae1942ab53e87b356ac"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2249,7 +2263,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#567e166786d05038e8731eb3ceabbc5a3fd8c932"
+source = "git+ssh://git@github.com/EspressoSystems/jellyfish.git#ae2d5edc514496443914cae1942ab53e87b356ac"
 dependencies = [
  "anyhow",
  "ark-ec",
@@ -2260,13 +2274,14 @@ dependencies = [
  "jf-utils-derive",
  "serde",
  "sha2 0.10.1",
- "tagged-base64 0.1.0 (git+https://github.com/SpectrumXYZ/tagged-base64?branch=main)",
+ "snafu 0.7.0",
+ "tagged-base64 0.1.0 (git+https://github.com/EspressoSystems/tagged-base64?branch=main)",
 ]
 
 [[package]]
 name = "jf-utils-derive"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/jellyfish.git#567e166786d05038e8731eb3ceabbc5a3fd8c932"
+source = "git+ssh://git@github.com/EspressoSystems/jellyfish.git#ae2d5edc514496443914cae1942ab53e87b356ac"
 dependencies = [
  "ark-std",
  "quote",
@@ -2291,16 +2306,16 @@ checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
 [[package]]
 name = "key-set"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/key-set.git#ce16c51eb10ebfd8a19b5200720c81c9dd086904"
+source = "git+ssh://git@github.com/EspressoSystems/key-set.git#45f278f0c094bd452a4c26525e21bbf1539ec55d"
 dependencies = [
  "ark-serialize",
  "bincode",
  "commit",
  "itertools 0.10.3",
- "jf-aap",
+ "jf-cap",
  "serde",
  "serde_with",
- "snafu",
+ "snafu 0.6.10",
 ]
 
 [[package]]
@@ -2471,7 +2486,7 @@ dependencies = [
  "futures",
  "futures-util",
  "itertools 0.10.3",
- "jf-aap",
+ "jf-cap",
  "jf-plonk",
  "jf-primitives",
  "jf-utils",
@@ -2485,12 +2500,12 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "shellexpand",
- "snafu",
+ "snafu 0.6.10",
  "structopt",
  "strum",
  "strum_macros",
  "surf",
- "tagged-base64 0.1.0 (git+ssh://git@github.com/SpectrumXYZ/tagged-base64.git?branch=main)",
+ "tagged-base64 0.1.0 (git+ssh://git@github.com/EspressoSystems/tagged-base64.git?branch=main)",
  "tempdir",
  "threshold_crypto",
  "tide",
@@ -2515,7 +2530,7 @@ dependencies = [
 [[package]]
 name = "net"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/net.git#bdf20c7e87dec3fbcf0ba12ca4f235e2099d0a9e"
+source = "git+ssh://git@github.com/EspressoSystems/net.git#a0d226cae70f4068343b2b8ab049bbb8f23b75ec"
 dependencies = [
  "ark-serialize",
  "ark-std",
@@ -2524,13 +2539,13 @@ dependencies = [
  "futures",
  "generic-array",
  "itertools 0.10.3",
- "jf-aap",
+ "jf-cap",
  "jf-utils",
  "serde",
  "serde_json",
- "snafu",
+ "snafu 0.6.10",
  "surf",
- "tagged-base64 0.1.0 (git+ssh://git@github.com/SpectrumXYZ/tagged-base64.git?branch=main)",
+ "tagged-base64 0.1.0 (git+ssh://git@github.com/EspressoSystems/tagged-base64.git?branch=main)",
  "tide",
  "tracing",
 ]
@@ -2773,7 +2788,7 @@ dependencies = [
 [[package]]
 name = "phaselock"
 version = "0.0.5"
-source = "git+ssh://git@github.com/SpectrumXYZ/phaselock.git?rev=14586ed218a35cb48675b73d4a34ae7ae55c67e6#14586ed218a35cb48675b73d4a34ae7ae55c67e6"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=14586ed218a35cb48675b73d4a34ae7ae55c67e6#14586ed218a35cb48675b73d4a34ae7ae55c67e6"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",
@@ -2789,7 +2804,7 @@ dependencies = [
  "rand 0.7.3",
  "rand_chacha 0.2.2",
  "serde",
- "snafu",
+ "snafu 0.6.10",
  "threshold_crypto",
  "tracing",
  "tracing-error",
@@ -3219,17 +3234,17 @@ dependencies = [
 [[package]]
 name = "reef"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/reef.git#bd921b17c422e14fdaa12cae2e2a034eebf2a500"
+source = "git+ssh://git@github.com/EspressoSystems/reef.git#5f90af86b6f5bc0961c1b1421ef9db1dbfd458a6"
 dependencies = [
  "arbitrary",
- "arbitrary-wrappers",
+ "arbitrary-wrappers 0.1.0 (git+ssh://git@github.com/EspressoSystems/arbitrary-wrappers.git?rev=91a396e46283d6cae2c3d390d5d116087bdcc9eb)",
  "ark-serialize",
  "commit",
  "funty",
  "itertools 0.10.3",
- "jf-aap",
+ "jf-cap",
  "serde",
- "snafu",
+ "snafu 0.6.10",
  "strum_macros",
 ]
 
@@ -3458,16 +3473,16 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/seahorse.git#4a7e31a9bacbcd47fc75c5734ddf22efba998269"
+source = "git+ssh://git@github.com/EspressoSystems/seahorse.git#2ed316e66ff1fe03723697504cb98fea4b3a3ae2"
 dependencies = [
  "arbitrary",
- "arbitrary-wrappers",
+ "arbitrary-wrappers 0.1.0 (git+ssh://git@github.com/EspressoSystems/arbitrary-wrappers.git)",
  "ark-serialize",
  "ark-std",
  "async-scoped",
  "async-std",
  "async-trait",
- "atomic_store 0.0.2 (git+ssh://git@github.com/SpectrumXYZ/atomicstore.git)",
+ "atomic_store 0.0.2 (git+ssh://git@github.com/EspressoSystems/atomicstore.git)",
  "bincode",
  "chacha20",
  "chrono",
@@ -3476,7 +3491,7 @@ dependencies = [
  "generic-array",
  "hmac 0.11.0",
  "itertools 0.10.3",
- "jf-aap",
+ "jf-cap",
  "jf-utils",
  "key-set",
  "lazy_static",
@@ -3486,16 +3501,17 @@ dependencies = [
  "proptest",
  "rand_chacha 0.3.1",
  "reef",
+ "regex",
  "rpassword",
  "rust-argon2",
  "rustyline",
  "serde",
  "sha3 0.9.1",
- "snafu",
+ "snafu 0.6.10",
  "strum",
  "strum_macros",
  "surf",
- "tagged-base64 0.1.0 (git+ssh://git@github.com/SpectrumXYZ/tagged-base64.git?branch=main)",
+ "tagged-base64 0.1.0 (git+ssh://git@github.com/EspressoSystems/tagged-base64.git?branch=main)",
  "tempdir",
  "universal-param",
  "zeroize",
@@ -3779,7 +3795,18 @@ checksum = "eab12d3c261b2308b0d80c26fffb58d17eba81a4be97890101f416b478c79ca7"
 dependencies = [
  "backtrace",
  "doc-comment",
- "snafu-derive",
+ "snafu-derive 0.6.10",
+]
+
+[[package]]
+name = "snafu"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eba135d2c579aa65364522eb78590cdf703176ef71ad4c32b00f58f7afb2df5"
+dependencies = [
+ "backtrace",
+ "doc-comment",
+ "snafu-derive 0.7.0",
 ]
 
 [[package]]
@@ -3788,6 +3815,18 @@ version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1508efa03c362e23817f96cde18abed596a25219a8b2c66e8db33c03543d315b"
 dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "snafu-derive"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a7fe9b0669ef117c5cabc5549638528f36771f058ff977d7689deb517833a75"
+dependencies = [
+ "heck",
  "proc-macro2",
  "quote",
  "syn",
@@ -4007,13 +4046,14 @@ dependencies = [
 [[package]]
 name = "tagged-base64"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/tagged-base64.git?branch=main#0159640927e5e1bfeac431f121362c70f0ca7e94"
+source = "git+ssh://git@github.com/EspressoSystems/tagged-base64.git?branch=main#5295fafb4068c67e271b831a00cd80846a2fd512"
 dependencies = [
  "base64 0.13.0",
  "console_error_panic_hook",
  "crc-any",
  "futures-channel",
  "js-sys",
+ "structopt",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -4022,13 +4062,14 @@ dependencies = [
 [[package]]
 name = "tagged-base64"
 version = "0.1.0"
-source = "git+https://github.com/SpectrumXYZ/tagged-base64?branch=main#0159640927e5e1bfeac431f121362c70f0ca7e94"
+source = "git+https://github.com/EspressoSystems/tagged-base64?branch=main#5295fafb4068c67e271b831a00cd80846a2fd512"
 dependencies = [
  "base64 0.13.0",
  "console_error_panic_hook",
  "crc-any",
  "futures-channel",
  "js-sys",
+ "structopt",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -4525,12 +4566,12 @@ dependencies = [
 [[package]]
 name = "universal-param"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/universal-param.git#81e4eab45efdf761a44cf6d64d488b8135bbfbce"
+source = "git+ssh://git@github.com/EspressoSystems/universal-param.git#bdf5ccfea1d5f143546576599a5b9820a979a91a"
 dependencies = [
  "ark-serialize",
  "ark-std",
  "itertools 0.10.3",
- "jf-aap",
+ "jf-cap",
  "rand_chacha 0.3.1",
 ]
 
@@ -4847,7 +4888,7 @@ dependencies = [
 [[package]]
 name = "zerok-macros"
 version = "0.1.0"
-source = "git+ssh://git@github.com/SpectrumXYZ/zerok-macros.git#0a9e9ca4ef8870bcd9a2373c00c4a697f704453a"
+source = "git+ssh://git@github.com/EspressoSystems/zerok-macros.git#0a9e9ca4ef8870bcd9a2373c00c4a697f704453a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4863,7 +4904,7 @@ dependencies = [
  "bincode",
  "escargot",
  "futures",
- "jf-aap",
+ "jf-cap",
  "jf-plonk",
  "jf-primitives",
  "jf-utils",
@@ -4876,10 +4917,10 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "snafu",
+ "snafu 0.6.10",
  "structopt",
  "surf",
- "tagged-base64 0.1.0 (git+ssh://git@github.com/SpectrumXYZ/tagged-base64.git?branch=main)",
+ "tagged-base64 0.1.0 (git+ssh://git@github.com/EspressoSystems/tagged-base64.git?branch=main)",
  "tempdir",
  "toml",
  "tracing",
@@ -4892,7 +4933,7 @@ name = "zerok_lib"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
- "arbitrary-wrappers",
+ "arbitrary-wrappers 0.1.0 (git+ssh://git@github.com/EspressoSystems/arbitrary-wrappers.git)",
  "ark-ff",
  "ark-serialize",
  "ark-std",
@@ -4912,7 +4953,7 @@ dependencies = [
  "hex",
  "hmac 0.11.0",
  "itertools 0.10.3",
- "jf-aap",
+ "jf-cap",
  "jf-plonk",
  "jf-primitives",
  "jf-utils",
@@ -4940,11 +4981,11 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha3 0.9.1",
- "snafu",
+ "snafu 0.6.10",
  "strum",
  "strum_macros",
  "surf",
- "tagged-base64 0.1.0 (git+ssh://git@github.com/SpectrumXYZ/tagged-base64.git?branch=main)",
+ "tagged-base64 0.1.0 (git+ssh://git@github.com/EspressoSystems/tagged-base64.git?branch=main)",
  "tempdir",
  "threshold_crypto",
  "tide",

@@ -12,7 +12,7 @@ use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
-use jf_aap::{
+use jf_cap::{
     errors::TxnApiError,
     structs::{Nullifier, RecordCommitment},
     txn_batch_verify, MerkleCommitment, MerkleFrontier, MerkleLeafProof, MerkleTree, NodeValue,

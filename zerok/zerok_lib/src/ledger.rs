@@ -2,7 +2,7 @@ use crate::state::{
     state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction,
     ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
-use jf_aap::{
+use jf_cap::{
     keys::{AuditorKeyPair, AuditorPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
     TransactionNote,

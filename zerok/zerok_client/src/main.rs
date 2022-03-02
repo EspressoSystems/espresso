@@ -7,7 +7,7 @@
 
 mod cli_client;
 
-use jf_aap::proof::UniversalParam;
+use jf_cap::proof::UniversalParam;
 use seahorse::{
     cli::*,
     io::SharedIO,

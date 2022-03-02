@@ -10,7 +10,7 @@ use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use futures::stream::Stream;
 use itertools::izip;
-use jf_aap::{
+use jf_cap::{
     keys::{UserAddress, UserPubKey},
     structs::{AssetCodeSeed, AssetDefinition, Nullifier, ReceiverMemo, RecordOpening},
     MerkleTree, Signature,
@@ -436,7 +436,7 @@ impl<'a> testing::SystemUnderTest<'a> for SpectrumTest {
         }
     }
 
-    fn universal_param(&self) -> &'a jf_aap::proof::UniversalParam {
+    fn universal_param(&self) -> &'a jf_cap::proof::UniversalParam {
         &*crate::universal_params::UNIVERSAL_PARAM
     }
 }
@@ -445,7 +445,7 @@ impl<'a> testing::SystemUnderTest<'a> for SpectrumTest {
 #[cfg(test)]
 mod spectrum_wallet_tests {
     use super::*;
-    use jf_aap::structs::AssetCode;
+    use jf_cap::structs::AssetCode;
     use std::time::Instant;
     use testing::SystemUnderTest;
 

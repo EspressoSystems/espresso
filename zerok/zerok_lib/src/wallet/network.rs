@@ -13,10 +13,10 @@ use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
 use futures::future::ready;
 use futures::prelude::*;
-use jf_aap::keys::{UserAddress, UserPubKey};
-use jf_aap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
-use jf_aap::structs::{Nullifier, ReceiverMemo};
-use jf_aap::Signature;
+use jf_cap::keys::{UserAddress, UserPubKey};
+use jf_cap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
+use jf_cap::structs::{Nullifier, ReceiverMemo};
+use jf_cap::Signature;
 use key_set::{ProverKeySet, SizedKey};
 use node::{LedgerSnapshot, LedgerSummary};
 use seahorse::{
@@ -140,7 +140,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = self.univ_param;
         let proving_keys = Arc::new(ProverKeySet {
-            mint: jf_aap::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
+            mint: jf_cap::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
                 .context(CryptoError)?
                 .0,
             freeze: validator
@@ -149,7 +149,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
                 .iter()
                 .map(|k| {
                     Ok::<FreezeProvingKey, WalletError<SpectrumLedger>>(
-                        jf_aap::proof::freeze::preprocess(
+                        jf_cap::proof::freeze::preprocess(
                             univ_param,
                             k.num_inputs(),
                             MERKLE_HEIGHT,
@@ -165,7 +165,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
                 .iter()
                 .map(|k| {
                     Ok::<TransferProvingKey, WalletError<SpectrumLedger>>(
-                        jf_aap::proof::transfer::preprocess(
+                        jf_cap::proof::transfer::preprocess(
                             univ_param,
                             k.num_inputs(),
                             k.num_outputs(),

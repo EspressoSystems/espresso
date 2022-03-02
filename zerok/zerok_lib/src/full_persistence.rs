@@ -7,7 +7,7 @@ use atomic_store::{
     PersistenceError,
 };
 use core::fmt::Debug;
-use jf_aap::{
+use jf_cap::{
     keys::{UserAddress, UserPubKey},
     structs::ReceiverMemo,
     MerkleLeaf, MerkleTree, Signature,

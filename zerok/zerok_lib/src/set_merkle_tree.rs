@@ -6,7 +6,7 @@ use arbitrary_wrappers::*;
 use ark_serialize::*;
 use bitvec::vec::BitVec;
 use core::mem;
-use jf_aap::structs::Nullifier;
+use jf_cap::structs::Nullifier;
 use serde::{Deserialize, Serialize};
 
 pub mod set_hash {

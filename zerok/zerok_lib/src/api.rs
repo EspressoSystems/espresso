@@ -4,7 +4,7 @@ use crate::{
     state::{state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction},
 };
 use fmt::{Display, Formatter};
-use jf_aap::{structs::ReceiverMemo, Signature, TransactionNote};
+use jf_cap::{structs::ReceiverMemo, Signature, TransactionNote};
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, Snafu};
 use std::fmt;
