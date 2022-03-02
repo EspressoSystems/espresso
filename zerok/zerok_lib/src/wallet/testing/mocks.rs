@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use itertools::izip;
 use jf_cap::{
-    keys::{UserAddress, UserPubKey},
-    structs::{AssetCodeSeed, AssetDefinition, Nullifier, ReceiverMemo, RecordOpening},
+    keys::{UserAddress, UserKeyPair, UserPubKey},
+    structs::{Nullifier, ReceiverMemo, RecordOpening},
     MerkleTree, Signature,
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
@@ -20,8 +20,11 @@ use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     hd, testing,
     testing::MockEventSource,
-    txn_builder::{RecordDatabase, TransactionHistoryEntry, TransactionState},
-    CryptoError, RoleKeyPair, WalletBackend, WalletError, WalletState, WalletStorage,
+    txn_builder::{
+        PendingTransaction, RecordDatabase, TransactionHistoryEntry, TransactionInfo,
+        TransactionState,
+    },
+    AssetInfo, CryptoError, RoleKeyPair, WalletBackend, WalletError, WalletState, WalletStorage,
 };
 use snafu::ResultExt;
 use std::collections::HashMap;
@@ -59,12 +62,9 @@ impl<'a> WalletStorage<'a, SpectrumLedger> for MockStorage<'a> {
         Ok(())
     }
 
-    async fn store_auditable_asset(
-        &mut self,
-        asset: &AssetDefinition,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
+    async fn store_asset(&mut self, asset: &AssetInfo) -> Result<(), WalletError<SpectrumLedger>> {
         if let Some(working) = &mut self.working {
-            working.auditable_assets.insert(asset.code, asset.clone());
+            working.assets.insert(asset.clone());
         }
         Ok(())
     }
@@ -74,6 +74,7 @@ impl<'a> WalletStorage<'a, SpectrumLedger> for MockStorage<'a> {
             match key {
                 RoleKeyPair::Auditor(key) => {
                     working.audit_keys.insert(key.pub_key(), key.clone());
+                    working.assets.add_audit_key(key.pub_key());
                 }
                 RoleKeyPair::Freezer(key) => {
                     working.freeze_keys.insert(key.pub_key(), key.clone());
@@ -82,20 +83,6 @@ impl<'a> WalletStorage<'a, SpectrumLedger> for MockStorage<'a> {
                     working.user_keys.insert(key.address(), key.clone());
                 }
             }
-        }
-        Ok(())
-    }
-
-    async fn store_defined_asset(
-        &mut self,
-        asset: &AssetDefinition,
-        seed: AssetCodeSeed,
-        desc: &[u8],
-    ) -> Result<(), WalletError<SpectrumLedger>> {
-        if let Some(working) = &mut self.working {
-            working
-                .defined_assets
-                .insert(asset.code, (asset.clone(), seed, desc.to_vec()));
         }
         Ok(())
     }
@@ -228,6 +215,20 @@ impl<'a> MockNetwork<'a, SpectrumLedger> for MockSpectrumNetwork<'a> {
         );
         self.events.publish(e);
     }
+
+    fn event(
+        &self,
+        index: EventIndex,
+        source: EventSource,
+    ) -> Result<LedgerEvent<SpectrumLedger>, WalletError<SpectrumLedger>> {
+        if source == EventSource::QueryService {
+            self.events.get(index)
+        } else {
+            Err(WalletError::Failed {
+                msg: String::from("invalid event source"),
+            })
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -279,11 +280,10 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
                 },
                 key_state: Default::default(),
                 key_scans: Default::default(),
-                auditable_assets: Default::default(),
+                assets: Default::default(),
                 audit_keys: Default::default(),
                 freeze_keys: Default::default(),
                 user_keys: Default::default(),
-                defined_assets: HashMap::new(),
             }
         };
 
@@ -358,34 +358,37 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
 
     async fn register_user_key(
         &mut self,
-        pub_key: &UserPubKey,
+        key: &UserKeyPair,
     ) -> Result<(), WalletError<SpectrumLedger>> {
         let mut ledger = self.ledger.lock().await;
         ledger
             .network()
             .address_map
-            .insert(pub_key.address(), pub_key.clone());
+            .insert(key.address(), key.pub_key());
         Ok(())
     }
 
     async fn submit(
         &mut self,
         txn: ElaboratedTransaction,
+        _info: TransactionInfo<SpectrumLedger>,
     ) -> Result<(), WalletError<SpectrumLedger>> {
         self.ledger.lock().await.submit(txn)
     }
 
-    async fn post_memos(
+    async fn finalize(
         &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
-        self.ledger
-            .lock()
-            .await
-            .post_memos(block_id, txn_id, memos, sig)
+        txn: PendingTransaction<SpectrumLedger>,
+        txn_id: Option<(u64, u64)>,
+    ) {
+        if let Some((block_id, txn_id)) = txn_id {
+            // Post memos if successful.
+            self.ledger
+                .lock()
+                .await
+                .post_memos(block_id, txn_id, txn.info.memos, txn.info.sig)
+                .unwrap();
+        }
     }
 }
 

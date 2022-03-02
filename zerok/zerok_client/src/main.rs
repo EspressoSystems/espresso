@@ -11,7 +11,7 @@ use jf_cap::proof::UniversalParam;
 use seahorse::{
     cli::*,
     io::SharedIO,
-    loader::{LoadMethod, LoaderMetadata, WalletLoader},
+    loader::{LoaderMetadata, WalletLoader},
     WalletError,
 };
 use std::path::PathBuf;
@@ -84,18 +84,6 @@ impl CLIArgs for Args {
             Some(SharedIO::std())
         } else {
             None
-        }
-    }
-
-    fn encrypted(&self) -> bool {
-        !self.unencrypted
-    }
-
-    fn load_method(&self) -> LoadMethod {
-        if self.password {
-            LoadMethod::Password
-        } else {
-            LoadMethod::Mnemonic
         }
     }
 

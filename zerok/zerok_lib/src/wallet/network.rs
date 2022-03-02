@@ -13,10 +13,9 @@ use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
 use futures::future::ready;
 use futures::prelude::*;
-use jf_cap::keys::{UserAddress, UserPubKey};
+use jf_cap::keys::{UserAddress, UserKeyPair, UserPubKey};
 use jf_cap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
-use jf_cap::structs::{Nullifier, ReceiverMemo};
-use jf_cap::Signature;
+use jf_cap::structs::Nullifier;
 use key_set::{ProverKeySet, SizedKey};
 use node::{LedgerSnapshot, LedgerSummary};
 use seahorse::{
@@ -24,7 +23,7 @@ use seahorse::{
     hd::KeyTree,
     loader::WalletLoader,
     persistence::AtomicWalletStorage,
-    txn_builder::TransactionState,
+    txn_builder::{PendingTransaction, TransactionInfo, TransactionState},
     BincodeError, ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -202,11 +201,10 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
             },
             key_scans: Default::default(),
             key_state: Default::default(),
-            auditable_assets: Default::default(),
+            assets: Default::default(),
             audit_keys: Default::default(),
             freeze_keys: Default::default(),
             user_keys: Default::default(),
-            defined_assets: Default::default(),
         };
         self.storage().await.create(&state).await?;
 
@@ -306,27 +304,40 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
 
     async fn register_user_key(
         &mut self,
-        pub_key: &UserPubKey,
+        key: &UserKeyPair,
     ) -> Result<(), WalletError<SpectrumLedger>> {
-        Self::post(&self.bulletin_client, "/users", pub_key).await
+        Self::post(&self.bulletin_client, "/users", &key.pub_key()).await
     }
 
     async fn submit(
         &mut self,
         txn: ElaboratedTransaction,
+        _info: TransactionInfo<SpectrumLedger>,
     ) -> Result<(), WalletError<SpectrumLedger>> {
         Self::post(&self.validator_client, "/submit", &txn).await
     }
 
-    async fn post_memos(
+    async fn finalize(
         &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        signature: Signature,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
-        let txid = TransactionId(BlockId(block_id as usize), txn_id as usize);
-        let body = api::PostMemos { memos, signature };
-        Self::post(&self.bulletin_client, format!("/memos/{}", txid), &body).await
+        txn: PendingTransaction<SpectrumLedger>,
+        txn_id: Option<(u64, u64)>,
+    ) {
+        if let Some((block_id, txn_id)) = txn_id {
+            // Post memos if successful.
+            let txn_id = TransactionId(BlockId(block_id as usize), txn_id as usize);
+            let body = api::PostMemos {
+                memos: txn.info.memos,
+                signature: txn.info.sig,
+            };
+            if let Err(err) =
+                Self::post(&self.bulletin_client, format!("/memos/{}", txn_id), &body).await
+            {
+                // TODO if we couldn't reach the bulletin board, we have to retry until we do. It is
+                // unacceptable to fail to post memos after a transaction has completed, because the
+                // assets would then be burned. If we successfully reach the bulletin board, this
+                // should always succeed, since we (presumably) always compute the memos correctly.
+                println!("Error posting memos: {}", err);
+            }
+        }
     }
 }
