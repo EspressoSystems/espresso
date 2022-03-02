@@ -1,7 +1,6 @@
 #![deny(warnings)]
 use crate::state::MERKLE_HEIGHT;
-use jf_cap::structs::NoteType;
-use jf_cap::utils::compute_universal_param_size;
+use jf_cap::{proof::UniversalParam, structs::NoteType, utils::compute_universal_param_size};
 use lazy_static::lazy_static;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;

@@ -49,9 +49,9 @@ impl traits::NullifierSet for SetMerkleTree {
 impl traits::Transaction for ElaboratedTransaction {
     type NullifierSet = SetMerkleTree;
     type Hash = ElaboratedTransactionHash;
-    type Kind = aap::TransactionKind;
+    type Kind = cap::TransactionKind;
 
-    fn aap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
+    fn cap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
         Self { txn: note, proofs }
     }
 
@@ -89,9 +89,9 @@ impl traits::Transaction for ElaboratedTransaction {
 
     fn kind(&self) -> Self::Kind {
         match &self.txn {
-            TransactionNote::Mint(_) => aap::TransactionKind::Mint,
-            TransactionNote::Transfer(_) => aap::TransactionKind::Send,
-            TransactionNote::Freeze(_) => aap::TransactionKind::Freeze,
+            TransactionNote::Mint(_) => cap::TransactionKind::Mint,
+            TransactionNote::Transfer(_) => cap::TransactionKind::Send,
+            TransactionNote::Freeze(_) => cap::TransactionKind::Freeze,
         }
     }
 
