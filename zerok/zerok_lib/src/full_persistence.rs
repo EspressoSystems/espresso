@@ -1,5 +1,5 @@
 use crate::{
-    ledger::SpectrumLedger,
+    ledger::EspressoLedger,
     state::{ElaboratedBlock, SetMerkleTree, ValidatorState},
 };
 use atomic_store::{
@@ -7,7 +7,7 @@ use atomic_store::{
     PersistenceError,
 };
 use core::fmt::Debug;
-use jf_aap::{
+use jf_cap::{
     keys::{UserAddress, UserPubKey},
     structs::ReceiverMemo,
     MerkleLeaf, MerkleTree, Signature,
@@ -44,7 +44,7 @@ pub struct FullPersistence {
     // TODO: !jeb.bearer,nathan.yospe - turn this back into a RollingLog once we fix whatever is
     // wrong with RollingLog; we don't need to store old versions of the known_nodes map
     known_nodes: AppendLog<BincodeLoadStore<HashMap<UserAddress, UserPubKey>>>,
-    events: AppendLog<BincodeLoadStore<LedgerEvent<SpectrumLedger>>>,
+    events: AppendLog<BincodeLoadStore<LedgerEvent<EspressoLedger>>>,
 }
 
 impl FullPersistence {
@@ -156,7 +156,7 @@ impl FullPersistence {
         ]);
     }
 
-    pub fn store_event(&mut self, event: &LedgerEvent<SpectrumLedger>) {
+    pub fn store_event(&mut self, event: &LedgerEvent<EspressoLedger>) {
         self.events.store_resource(event).unwrap();
     }
 
@@ -237,7 +237,7 @@ impl FullPersistence {
         self.memos.iter()
     }
 
-    pub fn events_iter(&self) -> Iter<BincodeLoadStore<LedgerEvent<SpectrumLedger>>> {
+    pub fn events_iter(&self) -> Iter<BincodeLoadStore<LedgerEvent<EspressoLedger>>> {
         self.events.iter()
     }
 

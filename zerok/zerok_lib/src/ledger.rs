@@ -2,7 +2,7 @@ use crate::state::{
     state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction,
     ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
-use jf_aap::{
+use jf_cap::{
     keys::{AuditorKeyPair, AuditorPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
     TransactionNote,
@@ -49,9 +49,9 @@ impl traits::NullifierSet for SetMerkleTree {
 impl traits::Transaction for ElaboratedTransaction {
     type NullifierSet = SetMerkleTree;
     type Hash = ElaboratedTransactionHash;
-    type Kind = aap::TransactionKind;
+    type Kind = cap::TransactionKind;
 
-    fn aap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
+    fn cap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
         Self { txn: note, proofs }
     }
 
@@ -89,9 +89,9 @@ impl traits::Transaction for ElaboratedTransaction {
 
     fn kind(&self) -> Self::Kind {
         match &self.txn {
-            TransactionNote::Mint(_) => aap::TransactionKind::Mint,
-            TransactionNote::Transfer(_) => aap::TransactionKind::Send,
-            TransactionNote::Freeze(_) => aap::TransactionKind::Freeze,
+            TransactionNote::Mint(_) => cap::TransactionKind::Mint,
+            TransactionNote::Transfer(_) => cap::TransactionKind::Send,
+            TransactionNote::Freeze(_) => cap::TransactionKind::Freeze,
         }
     }
 
@@ -160,13 +160,13 @@ impl traits::Validator for ValidatorState {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct SpectrumLedger;
+pub struct EspressoLedger;
 
-impl Ledger for SpectrumLedger {
+impl Ledger for EspressoLedger {
     type Validator = ValidatorState;
 
     fn name() -> String {
-        String::from("Spectrum")
+        String::from("Espresso")
     }
 
     fn record_root_history() -> usize {

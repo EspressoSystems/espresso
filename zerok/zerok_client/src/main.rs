@@ -1,5 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////
-// The Spectrum Wallet Frontend
+// The Espresso Wallet Frontend
 //
 // For now, this "frontend" is simply a comand-line read-eval-print loop which
 // allows the user to enter commands for a wallet interactively.
@@ -7,7 +7,7 @@
 
 mod cli_client;
 
-use jf_aap::proof::UniversalParam;
+use jf_cap::proof::UniversalParam;
 use seahorse::{
     cli::*,
     io::SharedIO,
@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
 use zerok_lib::{
-    ledger::SpectrumLedger,
+    ledger::EspressoLedger,
     wallet::network::{NetworkBackend, Url},
 };
 
@@ -104,18 +104,18 @@ impl CLIArgs for Args {
     }
 }
 
-struct SpectrumCli;
+struct EspressoCli;
 
-impl<'a> CLI<'a> for SpectrumCli {
-    type Ledger = SpectrumLedger;
+impl<'a> CLI<'a> for EspressoCli {
+    type Ledger = EspressoLedger;
     type Backend = NetworkBackend<'a, LoaderMetadata>;
     type Args = Args;
 
     fn init_backend(
         univ_param: &'a UniversalParam,
         args: Self::Args,
-        loader: &mut impl WalletLoader<SpectrumLedger, Meta = LoaderMetadata>,
-    ) -> Result<Self::Backend, WalletError<SpectrumLedger>> {
+        loader: &mut impl WalletLoader<EspressoLedger, Meta = LoaderMetadata>,
+    ) -> Result<Self::Backend, WalletError<EspressoLedger>> {
         let server = args.server.ok_or(WalletError::Failed {
             msg: String::from("server is required"),
         })?;
@@ -125,7 +125,7 @@ impl<'a> CLI<'a> for SpectrumCli {
 
 #[async_std::main]
 async fn main() {
-    if let Err(err) = cli_main::<SpectrumLedger, SpectrumCli>(Args::from_args()).await {
+    if let Err(err) = cli_main::<EspressoLedger, EspressoCli>(Args::from_args()).await {
         println!("{}", err);
         exit(1);
     }

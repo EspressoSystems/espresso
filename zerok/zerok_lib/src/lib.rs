@@ -17,5 +17,5 @@ pub mod wallet;
 #[cfg(test)]
 mod macro_tests;
 
-extern crate zerok_macros;
-use zerok_macros::*;
+extern crate espresso_macros;
+use espresso_macros::*;

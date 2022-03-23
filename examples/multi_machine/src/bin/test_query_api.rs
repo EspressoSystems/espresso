@@ -37,7 +37,7 @@ use tracing::{event, Level};
 use zerok_lib::{
     api::client::*,
     api::*,
-    ledger::SpectrumLedger,
+    ledger::EspressoLedger,
     node::{LedgerSummary, QueryServiceError},
     state::ElaboratedBlock,
     universal_params::UNIVERSAL_PARAM,
@@ -69,7 +69,7 @@ async fn get<T: for<'de> Deserialize<'de>, S: Display>(route: S) -> T {
     event!(Level::INFO, "GET {}", url);
     response_body(
         &mut surf::get(url)
-            .middleware(parse_error_body::<SpectrumError>)
+            .middleware(parse_error_body::<EspressoError>)
             .send()
             .await
             .unwrap(),
@@ -78,11 +78,11 @@ async fn get<T: for<'de> Deserialize<'de>, S: Display>(route: S) -> T {
     .unwrap()
 }
 
-async fn get_error(route: impl Display) -> SpectrumError {
+async fn get_error(route: impl Display) -> EspressoError {
     let url = url(route);
     event!(Level::INFO, "GET {}", url);
     match surf::get(url)
-        .middleware(parse_error_body::<SpectrumError>)
+        .middleware(parse_error_body::<EspressoError>)
         .send()
         .await
         .context(ClientError)
@@ -176,19 +176,19 @@ struct UnencryptedWalletLoader {
     dir: TempDir,
 }
 
-impl WalletLoader<SpectrumLedger> for UnencryptedWalletLoader {
+impl WalletLoader<EspressoLedger> for UnencryptedWalletLoader {
     type Meta = ();
 
     fn location(&self) -> PathBuf {
         self.dir.path().into()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<SpectrumLedger>> {
+    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<EspressoLedger>> {
         let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError<SpectrumLedger>> {
+    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError<EspressoLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)
     }
 }
@@ -242,12 +242,12 @@ async fn main() {
     // Check validity of the individual events. The events are just serialized LedgerEvents, not an
     // API-specific type, so as long as they deserialize properly they should be fine.
     for event in events1.into_iter() {
-        serde_json::from_str::<LedgerEvent<SpectrumLedger>>(event.to_text().unwrap()).unwrap();
+        serde_json::from_str::<LedgerEvent<EspressoLedger>>(event.to_text().unwrap()).unwrap();
     }
 
     // Test some invalid endpoints; check that error response bodies contain error descriptions.
     match get_error(format!("/getblock/index/{}", num_blocks)).await {
-        SpectrumError::QueryService {
+        EspressoError::QueryService {
             source: QueryServiceError::InvalidBlockId { .. },
         } => {}
         err => panic!("expected InvalidBlockId, got {}", err),

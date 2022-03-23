@@ -7,8 +7,8 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use jf_aap::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
-use jf_aap::TransactionVerifyingKey;
+use jf_cap::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
+use jf_cap::TransactionVerifyingKey;
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use key_set::{KeySet, VerifierKeySet};
 use phaselock::{
@@ -32,7 +32,7 @@ use tide_websockets::{WebSocket, WebSocketConnection};
 use toml::Value;
 use tracing::{debug, event, Level};
 use zerok_lib::{
-    api::SpectrumError,
+    api::EspressoError,
     api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
@@ -406,13 +406,13 @@ async fn init_state_and_phaselock(
             // Set up the validator.
             let univ_setup = &*UNIVERSAL_PARAM;
             let (_, xfr_verif_key_12, _) =
-                jf_aap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
+                jf_cap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
             let (_, xfr_verif_key_23, _) =
-                jf_aap::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
+                jf_cap::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
             let (_, mint_verif_key, _) =
-                jf_aap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
+                jf_cap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
             let (_, freeze_verif_key, _) =
-                jf_aap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
+                jf_cap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
             let verif_keys = VerifierKeySet {
                 mint: TransactionVerifyingKey::Mint(mint_verif_key),
                 xfr: KeySet::new(
@@ -581,7 +581,7 @@ async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respon
     let TransactionId(BlockId(block), tx) =
         UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
             .ok_or_else(|| {
-                server_error(SpectrumError::Param {
+                server_error(EspressoError::Param {
                     param: String::from("txid"),
                     msg: String::from(
                         "Valid transaction ID required. Transaction IDs start with TX~.",
@@ -799,7 +799,7 @@ fn init_web_server(
     });
     web_server
         .with(server::trace)
-        .with(server::add_error_body::<_, SpectrumError>);
+        .with(server::add_error_body::<_, EspressoError>);
 
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;
