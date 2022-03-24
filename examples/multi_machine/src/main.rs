@@ -1,4 +1,5 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
+#![deny(warnings)]
 
 use crate::routes::{
     dispatch_url, dispatch_web_socket, server_error, RouteBinding, UrlSegmentType, UrlSegmentValue,
@@ -507,7 +508,7 @@ async fn init_state_and_phaselock(
         None
     };
 
-    task::sleep(core::time::Duration::from_secs(5));
+    task::sleep(core::time::Duration::from_secs(5)).await;
 
     let (_, phaselock) = PhaseLock::init(
         genesis,
@@ -561,6 +562,7 @@ async fn init_state_and_phaselock(
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct Connection {
     id: String,
     wsc: WebSocketConnection,
@@ -568,6 +570,7 @@ struct Connection {
 
 #[derive(Clone)]
 pub struct WebState {
+    #[allow(dead_code)]
     connections: Arc<RwLock<HashMap<String, Connection>>>,
     web_path: PathBuf,
     api: toml::Value,
@@ -773,7 +776,7 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
 
 async fn handle_web_socket(
     req: tide::Request<WebState>,
-    wsc: WebSocketConnection,
+    #[allow(dead_code)] wsc: WebSocketConnection,
 ) -> tide::Result<()> {
     match parse_route(&req) {
         Ok((pattern, bindings)) => dispatch_web_socket(req, wsc, pattern.as_str(), &bindings).await,

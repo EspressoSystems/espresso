@@ -3,7 +3,7 @@ name = "multi_machine"
 version = "0.1.0"
 authors = ["Keyao Shen <keyao@translucence.net>", "corbett@pictographer.com"]
 edition = "2018"
-license = "Copyright © 2021 Translucence Research, Inc. All rights reserved."
+license = "Copyright (c) 2022 Espresso Systems (espressosys.com)"
 default-run = "multi_machine"
 
 [dependencies]

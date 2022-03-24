@@ -1,4 +1,4 @@
-// Copyright © 2021 Translucence Research, Inc. All rights reserved.
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use futures_util::StreamExt;
