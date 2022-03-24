@@ -2,7 +2,6 @@ extern crate zerok_client;
 use zerok_client::cli_client::cli_test;
 
 #[test]
-#[ignore]
 fn demo2() {
     cli_test(|t| {
         let key_path0 = t.wallet_key_path(0)?;
@@ -16,42 +15,48 @@ fn demo2() {
         let key_path1 = key_path1.as_os_str().to_str().ok_or_else(|| {
             format!(
                 "failed to convert key path {:?} for wallet {} to string",
-                key_path1, 0
+                key_path1, 1
             )
         })?;
         //Get the wallet addresses and check balances of the native assets
         let balance = 1u64 << 32;
         t.open(0)?
+            .output("Welcome to the Espresso wallet, version 0.2.0")?
+            .output("\\(c\\) 2021 Espresso Systems, Inc.")?
+            .output("Your wallet will be identified by a secret mnemonic phrase. This phrase will allow you to recover your wallet if you lose access to it. Anyone who has access to this phrase will be able to view and spend your assets. Store this phrase in a safe, private place.")?
             .output("Your mnemonic phrase will be:")?
-            .output("^(?P<mnemonic0>[a-zA-Z ]+)$")?
+            .output("^(?P<mnemonic>[a-zA-Z ]+)")?
             .output("1\\) Accept phrase and create wallet")?
             .output("2\\) Generate a new phrase")?
             .output("3\\) Manually enter a mnemonic")?
             .command(0, "1")?
             .output("Create password:")?
-            .command(1, "test_password1")?
+            .command(0, "test_password0")?
             .output("Retype password:")?
-            .command(1, "test_password1")?
+            .command(0, "test_password0")?
             .output("connecting...")?
-            .command(0, format!("load_key spend {}", key_path0))?
+            .command(0, format!("load_key send {}", key_path0))?
             .output("Note: assets belonging to this key will become available")?
             .output("after a scan of the ledger. This may take a long time. If")?
             .output("you have the owner memo for a record you want to use")?
             .output("immediately, use import_memo.")?
             .output("(?P<addr0>ADDR~.*)")?
             .open(1)?
+            .output("Welcome to the Espresso wallet, version 0.2.0")?
+            .output("\\(c\\) 2021 Espresso Systems, Inc.")?
+            .output("Your wallet will be identified by a secret mnemonic phrase. This phrase will allow you to recover your wallet if you lose access to it. Anyone who has access to this phrase will be able to view and spend your assets. Store this phrase in a safe, private place.")?
             .output("Your mnemonic phrase will be:")?
-            .output("^(?P<mnemonic1>[a-zA-Z\\-]+)$")?
+            .output("^(?P<mnemonic>[a-zA-Z ]+)$")?
             .output("1\\) Accept phrase and create wallet")?
             .output("2\\) Generate a new phrase")?
             .output("3\\) Manually enter a mnemonic")?
             .command(1, "1")?
             .output("Create password:")?
-            .command(1, "test_password2")?
+            .command(1, "test_password1")?
             .output("Retype password:")?
-            .command(1, "test_password2")?
+            .command(1, "test_password1")?
             .output("connecting...")?
-            .command(1, format!("load_key spend {}", key_path1))?
+            .command(1, format!("load_key send {}", key_path1))?
             .output("Note: assets belonging to this key will become available")?
             .output("after a scan of the ledger. This may take a long time. If")?
             .output("you have the owner memo for a record you want to use")?
@@ -63,7 +68,7 @@ fn demo2() {
             .command(1, "balance 0")?
             .output(format!("${} (?P<balance>\\d+)", "addr1"))?
             // Transfer some of the primary wallet's native tokens to the secondary
-            .command(0, "transfer 0 $addr0 $addr1 500 1")?
+            .command(0, "transfer 0 $addr1 500 1")?
             .output("(?P<txn>TXN~.*)")?
             .command(0, "wait $txn")?
             .output("accepted")?
@@ -96,10 +101,10 @@ fn demo2() {
             // Close a validator (not 0, that's the server for the wallets) and show that we can
             // still complete transactions.
             .close_validator(1)?
-            .command(0, "transfer 0 $addr0 $addr1 200 2")?
+            .command(0, "transfer 0 $addr1 200 2 wait=true")?
             .output("(?P<txn>TXN~.*)")?
-            .command(0, "wait $txn")?
-            .output("accepted")?
+            /*.command(0, "wait $txn")?
+            .output("accepted")?*/
             .command(1, "wait $txn")?
             .output("accepted")?
             .command(0, "balance 0")?
@@ -108,7 +113,7 @@ fn demo2() {
             .output("$addr1 700")?
             // Restart the validator and continue making transactions.
             .open_validator(1)?
-            .command(0, "transfer 0 $addr0 $addr1 200 2")?
+            .command(0, "transfer 0 $addr1 200 2")?
             .output("(?P<txn>TXN~.*)")?
             .command(0, "wait $txn")?
             .output("accepted")?
