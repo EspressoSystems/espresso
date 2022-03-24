@@ -164,7 +164,7 @@ PATH = ["getsnapshot/:index/:sparse", "getsnapshot/latest/:sparse"]
 ":index" = "Integer"
 ":sparse" = "Boolean"
 DOC = """
-Get a snapshot of the edger at the specified time. If :index is given, it is the 0-based index of
+Get a snapshot of the ledger at the specified time. If :index is given, it is the 0-based index of
 the desired snapshot, starting from the genesis of the ledger. If using `getsnapshot/latest`, the
 most recent snapshot is returned. If `:sparse`, the resulting snapshot is sparse, containing only
 root hashes for the UTXO and nullifiers sets. Otherwise, the snapshot contains the full sets.

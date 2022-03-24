@@ -2272,7 +2272,7 @@ checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 [[package]]
 name = "jf-cap"
 version = "0.0.1"
-source = "git+ssh://git@github.com/EspressoSystems/cap.git?rev=16ad157f96d2102d59206df0106fb341302180d3#16ad157f96d2102d59206df0106fb341302180d3"
+source = "git+https://github.com/EspressoSystems/cap.git?rev=16ad157f96d2102d59206df0106fb341302180d3#16ad157f96d2102d59206df0106fb341302180d3"
 dependencies = [
  "anyhow",
  "ark-bn254",
@@ -2783,6 +2783,7 @@ dependencies = [
  "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
  "key-set",
  "markdown",
+ "net",
  "phaselock",
  "procfs",
  "rand_chacha 0.2.2",
@@ -4905,12 +4906,12 @@ dependencies = [
 [[package]]
 name = "universal-param"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/universal-param.git#bdf5ccfea1d5f143546576599a5b9820a979a91a"
+source = "git+https://github.com/EspressoSystems/universal-param.git?branch=no-ssh#3e60794451eafcb2c290e31c454caf8fb0401a19"
 dependencies = [
  "ark-serialize",
  "ark-std",
  "itertools 0.10.3",
- "jf-cap 0.0.1 (git+ssh://git@github.com/EspressoSystems/cap.git?rev=16ad157f96d2102d59206df0106fb341302180d3)",
+ "jf-cap 0.0.1 (git+https://github.com/EspressoSystems/cap.git?rev=16ad157f96d2102d59206df0106fb341302180d3)",
  "rand_chacha 0.3.1",
 ]
 

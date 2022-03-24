@@ -188,7 +188,7 @@ impl WalletLoader<EspressoLedger> for UnencryptedWalletLoader {
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError<EspressoLedger>> {
+    fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, WalletError<EspressoLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)
     }
 }

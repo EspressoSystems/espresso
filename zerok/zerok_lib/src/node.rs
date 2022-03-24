@@ -617,7 +617,11 @@ impl FullState {
                 merkle_paths
             )
             .collect(),
-            transaction: Some((block_id as u64, txn_id as u64)),
+            transaction: Some((
+                block_id as u64,
+                txn_id as u64,
+                reef::cap::TransactionKind::Unknown,
+            )),
         };
         self.send_event(event);
 

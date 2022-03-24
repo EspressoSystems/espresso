@@ -1,24 +1,28 @@
 use crate::{
     api,
-    api::{ClientError, CommittedTransaction, EspressoError},
+    api::{ClientError, EspressoError},
     ledger::EspressoLedger,
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{ElaboratedTransaction, MERKLE_HEIGHT},
 };
-use api::{client::*, BlockId, TransactionId};
+use api::client::*;
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
 use futures::future::ready;
 use futures::prelude::*;
-use jf_cap::keys::{UserAddress, UserPubKey};
+use jf_cap::keys::{UserAddress, UserKeyPair, UserPubKey};
 use jf_cap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
-use jf_cap::structs::{Nullifier, ReceiverMemo};
+use jf_cap::structs::Nullifier;
+use jf_cap::MerkleTree;
 use jf_cap::Signature;
 use key_set::{ProverKeySet, SizedKey};
+use net::{BlockId, TransactionId};
 use node::{LedgerSnapshot, LedgerSummary};
+use seahorse::txn_builder::PendingTransaction;
+use seahorse::txn_builder::TransactionInfo;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     hd::KeyTree,
@@ -35,7 +39,7 @@ use surf::http::content::{Accept, MediaTypeProposal};
 use surf::http::{headers, mime};
 pub use surf::Url;
 
-pub struct NetworkBackend<'a, Meta: Serialize + DeserializeOwned> {
+pub struct NetworkBackend<'a, Meta: PartialEq + Serialize + DeserializeOwned + Clone> {
     univ_param: &'a UniversalParam,
     query_client: surf::Client,
     bulletin_client: surf::Client,
@@ -44,7 +48,13 @@ pub struct NetworkBackend<'a, Meta: Serialize + DeserializeOwned> {
     key_stream: KeyTree,
 }
 
-impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InsertPubKey {
+    pub pub_key_bytes: Vec<u8>,
+    pub sig: Signature,
+}
+
+impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
     pub fn new(
         univ_param: &'a UniversalParam,
         query_url: Url,
@@ -114,8 +124,8 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
 }
 
 #[async_trait]
-impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, EspressoLedger>
-    for NetworkBackend<'a, Meta>
+impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
+    WalletBackend<'a, EspressoLedger> for NetworkBackend<'a, Meta>
 {
     type EventStream = node::EventStream<(LedgerEvent<EspressoLedger>, EventSource)>;
     type Storage = AtomicWalletStorage<'a, EspressoLedger, Meta>;
@@ -202,11 +212,10 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, EspressoLe
             },
             key_scans: Default::default(),
             key_state: Default::default(),
-            auditable_assets: Default::default(),
-            audit_keys: Default::default(),
-            freeze_keys: Default::default(),
-            user_keys: Default::default(),
-            defined_assets: Default::default(),
+            assets: Default::default(),
+            viewing_accounts: Default::default(),
+            freezing_accounts: Default::default(),
+            sending_accounts: Default::default(),
         };
         self.storage().await.create(&state).await?;
 
@@ -293,40 +302,68 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, EspressoLe
         }
     }
 
-    async fn get_transaction(
-        &self,
-        txn_id: u64,
-        block_id: u64,
-    ) -> Result<ElaboratedTransaction, WalletError<EspressoLedger>> {
-        let txn_id = TransactionId(BlockId(block_id as usize), txn_id as usize);
-        let CommittedTransaction { data, proofs, .. } =
-            self.get(format!("/gettransaction/{}", txn_id)).await?;
-        Ok(ElaboratedTransaction { txn: data, proofs })
-    }
-
     async fn register_user_key(
         &mut self,
-        pub_key: &UserPubKey,
+        key_pair: &UserKeyPair,
     ) -> Result<(), WalletError<EspressoLedger>> {
-        Self::post(&self.bulletin_client, "/users", pub_key).await
+        let pub_key_bytes = bincode::serialize(&key_pair.pub_key()).unwrap();
+        let sig = key_pair.sign(&pub_key_bytes);
+        let json_request = InsertPubKey { pub_key_bytes, sig };
+        match self
+            .bulletin_client
+            .post("users")
+            .content_type(surf::http::mime::JSON)
+            .body_json(&json_request)
+            .unwrap()
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(err) => Err(WalletError::Failed {
+                msg: format!("error inserting public key: {}", err),
+            }),
+        }
     }
 
     async fn submit(
         &mut self,
         txn: ElaboratedTransaction,
+        // TODO: do something with this?
+        _txn_info: TransactionInfo<EspressoLedger>,
     ) -> Result<(), WalletError<EspressoLedger>> {
         Self::post(&self.validator_client, "/submit", &txn).await
     }
 
-    async fn post_memos(
+    async fn finalize(
         &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        signature: Signature,
-    ) -> Result<(), WalletError<EspressoLedger>> {
-        let txid = TransactionId(BlockId(block_id as usize), txn_id as usize);
-        let body = api::PostMemos { memos, signature };
-        Self::post(&self.bulletin_client, format!("/memos/{}", txid), &body).await
+        txn: PendingTransaction<EspressoLedger>,
+        txid: Option<(u64, u64)>,
+    ) {
+        // -> Result<(), WalletError<EspressoLedger>> {
+
+        if let Some(txid) = txid {
+            let body = api::PostMemos {
+                memos: txn
+                    .info
+                    .memos
+                    .into_iter()
+                    .collect::<Option<Vec<_>>>()
+                    .unwrap(),
+                signature: txn.info.sig,
+            };
+            let txid = TransactionId(BlockId(txid.0 as usize), txid.1 as usize);
+            // TODO: fix the trait so we don't need this unwrap
+            Self::post(&self.bulletin_client, format!("/memos/{}", txid), &body)
+                .await
+                .unwrap()
+        }
+    }
+
+    async fn get_initial_scan_state(
+        &self,
+        _from: EventIndex,
+    ) -> Result<(MerkleTree, EventIndex), WalletError<EspressoLedger>> {
+        // TODO: how should this initialize?
+        let LedgerSnapshot { records, .. } = self.get("getsnapshot/0/true").await?;
+        Ok((records.0, Default::default()))
     }
 }

@@ -16,7 +16,7 @@ use phaselock::{
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
 use std::convert::TryInto;
@@ -596,8 +596,28 @@ async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respon
     Ok(tide::Response::new(StatusCode::Ok))
 }
 
+// TODO: factor this out
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InsertPubKey {
+    pub pub_key_bytes: Vec<u8>,
+    pub sig: jf_cap::Signature,
+}
+
+/// Lookup a user public key from a signed public key address. Fail with
+/// tide::StatusCode::BadRequest if key deserialization or the signature check
+/// fail.
+fn verify_sig_and_get_pub_key(insert_request: InsertPubKey) -> Result<UserPubKey, tide::Error> {
+    let pub_key: UserPubKey = bincode::deserialize(&insert_request.pub_key_bytes)
+        .map_err(|e| tide::Error::new(tide::StatusCode::BadRequest, e))?;
+    pub_key
+        .verify_sig(&insert_request.pub_key_bytes, &insert_request.sig)
+        .map_err(|e| tide::Error::new(tide::StatusCode::BadRequest, e))?;
+    Ok(pub_key)
+}
+
 async fn users_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let pub_key: UserPubKey = request_body(&mut req).await?;
+    let insert_request: InsertPubKey = net::server::request_body(&mut req).await?;
+    let pub_key = verify_sig_and_get_pub_key(insert_request)?;
     let mut bulletin = req.state().node.write().await;
     bulletin.introduce(&pub_key).await.map_err(server_error)?;
     Ok(tide::Response::new(StatusCode::Ok))

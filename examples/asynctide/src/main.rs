@@ -12,6 +12,7 @@ use tracing::{event, Level};
 
 #[derive(Clone)]
 struct Connection {
+    #[allow(dead_code)]
     id: String,
     wsc: WebSocketConnection,
 }

@@ -17,7 +17,7 @@ itertools = "0.10.1"
 jf-plonk = { features=["std"], git = "https://github.com/EspressoSystems/jellyfish.git" }
 jf-primitives = { features=["std"], git = "https://github.com/EspressoSystems/jellyfish.git" }
 jf-utils = { features=["std"], git = "https://github.com/EspressoSystems/jellyfish.git" }
-jf-cap = { features=["std"], git = "https://github.com/EspressoSystems/cap.git" }
+jf-cap = { features=["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git" }
 key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 markdown = "0.3"
 # phaselock = { version = "0.0.2", registry = "translucence"}
@@ -44,6 +44,7 @@ tracing-distributed = "0.3.1"
 tracing-futures = "0.2"
 tracing-subscriber = "0.2.19"
 zerok_lib = { path = "../../zerok/zerok_lib/" }
+net = { git = "https://github.com/EspressoSystems/net.git" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.11.0"
