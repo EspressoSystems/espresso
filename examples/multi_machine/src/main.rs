@@ -1080,8 +1080,10 @@ async fn main() -> Result<(), std::io::Error> {
                 }
             }
 
+            // !!!!!!     WARNING !!!!!!!
             // If the output below is changed, update the message for line.trim() in Validator::new as well
-            info!("  - Starting consensus");
+            println!(/* THINK TWICE BEFORE CHANGING THIS */ "  - Starting consensus");
+            // !!!!!! END WARNING !!!!!!!
             phaselock.start_consensus().await;
             let success = loop {
                 info!("Waiting for PhaseLock event");
