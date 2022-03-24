@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use itertools::izip;
 use jf_cap::{
-    keys::{UserAddress, UserPubKey},
-    structs::{AssetCodeSeed, AssetDefinition, Nullifier, ReceiverMemo, RecordOpening},
+    keys::{UserAddress, UserKeyPair, UserPubKey},
+    structs::{Nullifier, ReceiverMemo, RecordOpening},
     MerkleTree, Signature,
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
@@ -20,8 +20,11 @@ use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     hd, testing,
     testing::MockEventSource,
-    txn_builder::{RecordDatabase, TransactionHistoryEntry, TransactionState},
-    CryptoError, RoleKeyPair, WalletBackend, WalletError, WalletState, WalletStorage,
+    txn_builder::{
+        PendingTransaction, RecordDatabase, TransactionHistoryEntry, TransactionInfo,
+        TransactionState,
+    },
+    AssetInfo, CryptoError, WalletBackend, WalletError, WalletState, WalletStorage,
 };
 use snafu::ResultExt;
 use std::collections::HashMap;
@@ -59,43 +62,9 @@ impl<'a> WalletStorage<'a, EspressoLedger> for MockStorage<'a> {
         Ok(())
     }
 
-    async fn store_auditable_asset(
-        &mut self,
-        asset: &AssetDefinition,
-    ) -> Result<(), WalletError<EspressoLedger>> {
+    async fn store_asset(&mut self, asset: &AssetInfo) -> Result<(), WalletError<EspressoLedger>> {
         if let Some(working) = &mut self.working {
-            working.auditable_assets.insert(asset.code, asset.clone());
-        }
-        Ok(())
-    }
-
-    async fn store_key(&mut self, key: &RoleKeyPair) -> Result<(), WalletError<EspressoLedger>> {
-        if let Some(working) = &mut self.working {
-            match key {
-                RoleKeyPair::Auditor(key) => {
-                    working.audit_keys.insert(key.pub_key(), key.clone());
-                }
-                RoleKeyPair::Freezer(key) => {
-                    working.freeze_keys.insert(key.pub_key(), key.clone());
-                }
-                RoleKeyPair::User(key) => {
-                    working.user_keys.insert(key.address(), key.clone());
-                }
-            }
-        }
-        Ok(())
-    }
-
-    async fn store_defined_asset(
-        &mut self,
-        asset: &AssetDefinition,
-        seed: AssetCodeSeed,
-        desc: &[u8],
-    ) -> Result<(), WalletError<EspressoLedger>> {
-        if let Some(working) = &mut self.working {
-            working
-                .defined_assets
-                .insert(asset.code, (asset.clone(), seed, desc.to_vec()));
+            working.assets.insert(asset.clone());
         }
         Ok(())
     }
@@ -136,6 +105,19 @@ pub struct MockEspressoNetwork<'a> {
 impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
     fn now(&self) -> EventIndex {
         self.events.now()
+    }
+
+    fn event(
+        &self,
+        index: EventIndex,
+        source: EventSource,
+    ) -> Result<LedgerEvent<EspressoLedger>, WalletError<EspressoLedger>> {
+        match source {
+            EventSource::QueryService => self.events.get(index),
+            _ => Err(WalletError::Failed {
+                msg: String::from("invalid event source"),
+            }),
+        }
     }
 
     fn submit(&mut self, block: ElaboratedBlock) -> Result<(), WalletError<EspressoLedger>> {
@@ -206,7 +188,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
             .collect::<Vec<_>>();
         self.generate_event(LedgerEvent::<EspressoLedger>::Memos {
             outputs: izip!(memos, comms, uids, merkle_paths).collect(),
-            transaction: Some((block_id, txn_id)),
+            transaction: Some((block_id, txn_id, reef::cap::TransactionKind::Unknown)),
         });
 
         Ok(())
@@ -264,7 +246,7 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                         let key_pair = self
                             .key_stream
                             .derive_sub_tree("user".as_bytes())
-                            .derive_user_keypair(&0u64.to_le_bytes());
+                            .derive_user_key_pair(&0u64.to_le_bytes());
                         for (ro, uid) in self.initial_grants.iter() {
                             db.insert(ro.clone(), *uid, &key_pair);
                         }
@@ -279,11 +261,10 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                 },
                 key_state: Default::default(),
                 key_scans: Default::default(),
-                auditable_assets: Default::default(),
-                audit_keys: Default::default(),
-                freeze_keys: Default::default(),
-                user_keys: Default::default(),
-                defined_assets: HashMap::new(),
+                assets: Default::default(),
+                freezing_accounts: Default::default(),
+                sending_accounts: Default::default(),
+                viewing_accounts: Default::default(),
             }
         };
 
@@ -330,37 +311,12 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         }
     }
 
-    async fn get_transaction(
-        &self,
-        block_id: u64,
-        txn_id: u64,
-    ) -> Result<ElaboratedTransaction, WalletError<EspressoLedger>> {
-        let mut ledger = self.ledger.lock().await;
-        let network = ledger.network();
-        let block = &network
-            .committed_blocks
-            .get(block_id as usize)
-            .ok_or_else(|| {
-                WalletError::<EspressoLedger>::from(node::QueryServiceError::InvalidBlockId {
-                    index: block_id as usize,
-                    num_blocks: network.committed_blocks.len(),
-                })
-            })?
-            .0;
-
-        if txn_id as usize >= block.block.0.len() {
-            return Err(node::QueryServiceError::InvalidTxnId {}.into());
-        }
-        let txn = block.block.0[txn_id as usize].clone();
-        let proofs = block.proofs[txn_id as usize].clone();
-        Ok(ElaboratedTransaction { txn, proofs })
-    }
-
     async fn register_user_key(
         &mut self,
-        pub_key: &UserPubKey,
+        key_pair: &UserKeyPair,
     ) -> Result<(), WalletError<EspressoLedger>> {
         let mut ledger = self.ledger.lock().await;
+        let pub_key = key_pair.pub_key();
         ledger
             .network()
             .address_map
@@ -371,21 +327,39 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
     async fn submit(
         &mut self,
         txn: ElaboratedTransaction,
+        _info: TransactionInfo<EspressoLedger>,
     ) -> Result<(), WalletError<EspressoLedger>> {
         self.ledger.lock().await.submit(txn)
     }
 
-    async fn post_memos(
+    async fn finalize(
         &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), WalletError<EspressoLedger>> {
-        self.ledger
-            .lock()
-            .await
-            .post_memos(block_id, txn_id, memos, sig)
+        txn: PendingTransaction<EspressoLedger>,
+        txid: Option<(u64, u64)>,
+    ) {
+        // -> Result<(), WalletError<EspressoLedger>>
+
+        if let Some((block_id, txn_id)) = txid {
+            let memos = txn
+                .info
+                .memos
+                .into_iter()
+                .collect::<Option<Vec<_>>>()
+                .unwrap();
+            let sig = txn.info.sig;
+            self.ledger
+                .lock()
+                .await
+                .post_memos(block_id, txn_id, memos, sig)
+                .unwrap()
+        }
+    }
+
+    async fn get_initial_scan_state(
+        &self,
+        _from: EventIndex,
+    ) -> Result<(MerkleTree, EventIndex), WalletError<EspressoLedger>> {
+        self.ledger.lock().await.get_initial_scan_state()
     }
 }
 
@@ -481,7 +455,12 @@ mod spectrum_wallet_tests {
         let receiver = wallets[1].1.clone();
         wallets[0]
             .0
-            .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
+            .transfer(
+                Some(&sender.first().unwrap()),
+                &AssetCode::native(),
+                &[(receiver.first().unwrap().clone(), 1)],
+                1,
+            )
             .await
             .unwrap();
         println!("transfer generated: {}s", now.elapsed().as_secs_f32());
@@ -498,7 +477,12 @@ mod spectrum_wallet_tests {
             let sender = wallets[2].1.clone();
             wallets[2]
                 .0
-                .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
+                .transfer(
+                    Some(sender.first().unwrap()),
+                    &AssetCode::native(),
+                    &[(receiver.first().unwrap().clone(), 1)],
+                    1,
+                )
                 .await
                 .unwrap();
             t.sync(&ledger, &wallets).await;
@@ -526,18 +510,9 @@ mod spectrum_wallet_tests {
             ledger_time.add_from_source(EventSource::QueryService, 3),
         )
         .await;
+        assert_eq!(wallets[0].0.balance(&AssetCode::native()).await, 0);
         assert_eq!(
-            wallets[0]
-                .0
-                .balance(&wallets[0].1, &AssetCode::native())
-                .await,
-            0
-        );
-        assert_eq!(
-            wallets[1]
-                .0
-                .balance(&wallets[1].1, &AssetCode::native())
-                .await,
+            wallets[1].0.balance(&AssetCode::native()).await,
             1 + (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64
         );
 
