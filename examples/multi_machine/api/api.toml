@@ -15,15 +15,15 @@ HTML_TOP = """
 <html lang='en'>
   <head>
     <meta charset='utf-8'>
-    <title>Spectrum Web Help</title>
+    <title>Espresso Web Help</title>
     <link rel='stylesheet' href='public/css/style.css'>
     <script src='public/js/script.js'></script>
   </head>
   <body>
     <div><img src='public/media/Horizontal02.png'
-              alt='Spectrum Logo'
+              alt='Espresso Logo'
               height='115'/></div>
-    <h1>Spectrum Web Interface</h1>
+    <h1>Espresso Web Interface</h1>
 """
 
 HTML_BOTTOM = """
