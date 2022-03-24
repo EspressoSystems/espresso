@@ -417,7 +417,7 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
 
 // Espresso-specific tests
 #[cfg(test)]
-mod spectrum_wallet_tests {
+mod espresso_wallet_tests {
     use super::*;
     use jf_cap::structs::AssetCode;
     use std::time::Instant;

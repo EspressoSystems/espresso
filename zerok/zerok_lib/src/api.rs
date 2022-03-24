@@ -118,7 +118,7 @@ pub trait FromError: Sized {
         Self::catch_all(format!("invalid request parameter {}: {}", param, msg))
     }
 
-    fn from_spectrum_error<E: Into<EspressoError>>(source: E) -> Self {
+    fn from_espresso_error<E: Into<EspressoError>>(source: E) -> Self {
         match source.into() {
             EspressoError::QueryService { source } => Self::from_query_service_error(source),
             EspressoError::Validation { source } => Self::from_validation_error(source),
@@ -133,10 +133,10 @@ pub trait FromError: Sized {
     /// Convert from a generic client-side error to a specific error type.
     ///
     /// If `source` can be downcast to an [Error], it is converted to the specific type using
-    /// [from_spectrum_error]. Otherwise, it is converted to a [String] using [Display] and then
+    /// [from_espresso_error]. Otherwise, it is converted to a [String] using [Display] and then
     /// converted to the specific type using [catch_all].
     fn from_client_error(source: surf::Error) -> Self {
-        Self::from_spectrum_error(<EspressoError as Error>::from_client_error(source))
+        Self::from_espresso_error(<EspressoError as Error>::from_client_error(source))
     }
 }
 
@@ -163,7 +163,7 @@ impl FromError for EspressoError {
         Self::Param { param, msg }
     }
 
-    fn from_spectrum_error<E: Into<EspressoError>>(source: E) -> Self {
+    fn from_espresso_error<E: Into<EspressoError>>(source: E) -> Self {
         source.into()
     }
 }
