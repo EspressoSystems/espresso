@@ -23,11 +23,15 @@ fn demo2() {
         let balance = 1u64 << 32;
         t.open(0)?
             .output("Your mnemonic phrase will be:")?
-            .output("^(?P<mnemonic0>[a-zA-Z\\-]+)$")?
+            .output("^(?P<mnemonic0>[a-zA-Z ]+)$")?
             .output("1\\) Accept phrase and create wallet")?
             .output("2\\) Generate a new phrase")?
             .output("3\\) Manually enter a mnemonic")?
             .command(0, "1")?
+            .output("Create password:")?
+            .command(1, "test_password1")?
+            .output("Retype password:")?
+            .command(1, "test_password1")?
             .output("connecting...")?
             .command(0, format!("load_key spend {}", key_path0))?
             .output("Note: assets belonging to this key will become available")?
@@ -42,6 +46,10 @@ fn demo2() {
             .output("2\\) Generate a new phrase")?
             .output("3\\) Manually enter a mnemonic")?
             .command(1, "1")?
+            .output("Create password:")?
+            .command(1, "test_password2")?
+            .output("Retype password:")?
+            .command(1, "test_password2")?
             .output("connecting...")?
             .command(1, format!("load_key spend {}", key_path1))?
             .output("Note: assets belonging to this key will become available")?

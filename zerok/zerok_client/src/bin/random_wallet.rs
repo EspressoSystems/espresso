@@ -90,7 +90,10 @@ async fn retry_delay() {
 
 #[async_std::main]
 async fn main() {
-    tracing_subscriber::fmt().pretty().init();
+    tracing_subscriber::fmt()
+        .compact()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
     let args = Args::from_args();
 

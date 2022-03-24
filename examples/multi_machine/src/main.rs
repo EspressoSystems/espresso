@@ -30,7 +30,7 @@ use threshold_crypto as tc;
 use tide::StatusCode;
 use tide_websockets::{WebSocket, WebSocketConnection};
 use toml::Value;
-use tracing::{debug, event, Level};
+use tracing::{debug, event, info, Level};
 use zerok_lib::{
     api::EspressoError,
     api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
@@ -483,7 +483,7 @@ async fn init_state_and_phaselock(
         threshold: threshold as u32,
         max_transactions: 100,
         known_nodes,
-        next_view_timeout: 10000,
+        next_view_timeout: 10_000,
         timeout_ratio: (11, 10),
         round_start_delay: 1,
         start_delay: 1,
@@ -500,6 +500,15 @@ async fn init_state_and_phaselock(
     } else {
         validator.clone()
     };
+
+    let univ_param = if full_node {
+        Some(&*UNIVERSAL_PARAM)
+    } else {
+        None
+    };
+
+    task::sleep(core::time::Duration::from_secs(5));
+
     let (_, phaselock) = PhaseLock::init(
         genesis,
         public_keys,
@@ -536,7 +545,7 @@ async fn init_state_and_phaselock(
         };
         let node = FullNode::new(
             phaselock,
-            &*UNIVERSAL_PARAM,
+            univ_param.unwrap(),
             stored_state,
             records,
             nullifiers,
@@ -877,7 +886,10 @@ fn init_web_server(
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
-    tracing_subscriber::fmt().pretty().init();
+    tracing_subscriber::fmt()
+        .compact()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
     // Get configuration
     let node_config = get_node_config();
@@ -922,19 +934,19 @@ async fn main() -> Result<(), std::io::Error> {
                     panic!("Error while writing to the public key file: {}", err)
                 });
         }
-        println!("Public key files created");
+        info!("Public key files created");
     }
 
     // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
     let load_from_store = NodeOpt::from_args().load_from_store;
     if load_from_store {
-        println!("restoring from persisted session");
+        info!("restoring from persisted session");
     } else {
-        println!("initializing new session");
+        info!("initializing new session");
     }
 
     if let Some(own_id) = NodeOpt::from_args().id {
-        println!("Current node: {}", own_id);
+        info!("Current node: {}", own_id);
         let secret_key_share = secret_keys.secret_key_share(own_id);
 
         // Get networking information
@@ -961,14 +973,14 @@ async fn main() -> Result<(), std::io::Error> {
                 debug!("  - Retrying");
                 async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
             }
-            println!("  - Connected to node {}", id);
+            info!("  - Connected to node {}", id);
         }
 
         // Wait for the networking implementations to connect
         while (own_network.connection_table_size().await as u64) < nodes - 1 {
             async_std::task::sleep(std::time::Duration::from_millis(10)).await;
         }
-        println!("All nodes connected to network");
+        info!("All nodes connected to network");
 
         // Initialize the state and phaselock
         let (mut state, mut phaselock) = init_state_and_phaselock(
@@ -1002,7 +1014,7 @@ async fn main() -> Result<(), std::io::Error> {
         #[cfg(target_os = "linux")]
         let bytes_per_page = procfs::page_size().unwrap() as u64;
         #[cfg(target_os = "linux")]
-        println!("{} bytes per page", bytes_per_page);
+        debug!("{} bytes per page", bytes_per_page);
 
         let fence = || std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 
@@ -1011,7 +1023,7 @@ async fn main() -> Result<(), std::io::Error> {
             #[cfg(target_os = "linux")]
             {
                 let process_stats = procfs::process::Process::myself().unwrap().statm().unwrap();
-                println!(
+                debug!(
                     "{:.3}MiB | raw: {:?}",
                     ((process_stats.size * bytes_per_page) as f64) / ((1u64 << 20) as f64),
                     process_stats
@@ -1029,21 +1041,21 @@ async fn main() -> Result<(), std::io::Error> {
         let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
         let mut txn_proposed_round = 0;
         while num_txn.map(|count| round < count).unwrap_or(true) {
-            println!("Starting round {}", round + 1);
+            info!("Starting round {}", round + 1);
             report_mem();
-            println!("Commitment: {}", phaselock.current_state().await.commit());
+            info!("Commitment: {}", phaselock.current_state().await.commit());
 
             // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
             if own_id == 0 {
                 if let Some(tx) = txn.as_ref() {
-                    println!("  - Reproposing a transaction");
+                    info!("  - Reproposing a transaction");
                     if txn_proposed_round + 5 < round {
                         // TODO
                         phaselock.submit_transaction(tx.clone().3).await.unwrap();
                         txn_proposed_round = round;
                     }
                 } else if let Some(mut true_state) = core::mem::take(&mut state) {
-                    println!("  - Proposing a transaction");
+                    info!("  - Proposing a transaction");
                     let (true_state, mut transactions) =
                         async_std::task::spawn_blocking(move || {
                             let txs = true_state
@@ -1066,10 +1078,10 @@ async fn main() -> Result<(), std::io::Error> {
             }
 
             // If the output below is changed, update the message for line.trim() in Validator::new as well
-            println!("  - Starting consensus");
+            info!("  - Starting consensus");
             phaselock.start_consensus().await;
             let success = loop {
-                println!("Waiting for PhaseLock event");
+                info!("Waiting for PhaseLock event");
                 let event = events.next().await.expect("PhaseLock unexpectedly closed");
 
                 match event.event {
@@ -1078,7 +1090,7 @@ async fn main() -> Result<(), std::io::Error> {
                             let commitment = TaggedBase64::new("LEDG", state[0].commit().as_ref())
                                 .unwrap()
                                 .to_string();
-                            println!(
+                            info!(
                                 "  - Round {} completed. Commitment: {}",
                                 round + 1,
                                 commitment
@@ -1087,15 +1099,15 @@ async fn main() -> Result<(), std::io::Error> {
                         }
                     }
                     EventType::ViewTimeout { view_number: _ } => {
-                        println!("  - Round {} timed out.", round + 1);
+                        info!("  - Round {} timed out.", round + 1);
                         break false;
                     }
                     EventType::Error { error } => {
-                        println!("  - Round {} error: {}", round + 1, error);
+                        info!("  - Round {} error: {}", round + 1, error);
                         break false;
                     }
                     _ => {
-                        println!("EVENT: {:?}", event);
+                        info!("EVENT: {:?}", event);
                     }
                 }
             };
@@ -1105,7 +1117,7 @@ async fn main() -> Result<(), std::io::Error> {
                 // current node), and there is no attached wallet.
                 if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
                     let state = state.as_mut().unwrap();
-                    println!("  - Adding the transaction");
+                    info!("  - Adding the transaction");
                     let mut blk = ElaboratedBlock::default();
                     let (owner_memos, kixs) = {
                         let mut owner_memos = vec![];
@@ -1146,7 +1158,7 @@ async fn main() -> Result<(), std::io::Error> {
             round += 1;
         }
 
-        println!("All rounds completed");
+        info!("All rounds completed");
 
         if NodeOpt::from_args().wait {
             if let Some(join_handle) = web_server {

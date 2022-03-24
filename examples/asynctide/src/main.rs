@@ -133,6 +133,8 @@ async fn handle_web_socket(req: Request<State>, mut wsc: WebSocketConnection) ->
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::fmt()
+        .compact()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_max_level(tracing::Level::DEBUG)
         .init();
     let mut app = tide::with_state(State::new());
