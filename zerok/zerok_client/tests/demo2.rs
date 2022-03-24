@@ -2,6 +2,7 @@ extern crate zerok_client;
 use zerok_client::cli_client::cli_test;
 
 #[test]
+#[ignore]
 fn demo2() {
     cli_test(|t| {
         let key_path0 = t.wallet_key_path(0)?;
