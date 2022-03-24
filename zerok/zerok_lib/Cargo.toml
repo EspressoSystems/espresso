@@ -64,7 +64,6 @@ chrono = "0.4.19"
 mnemonic = "1.0.1"
 reef = { git = "https://github.com/EspressoSystems/reef.git" }
 net = { git = "https://github.com/EspressoSystems/net.git" }
-universal-param = { git = "https://github.com/EspressoSystems/universal-param.git", branch = "no-ssh" }
 seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", features = ["testing"] }
 
 [dev-dependencies]

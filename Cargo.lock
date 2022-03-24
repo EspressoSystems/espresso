@@ -139,7 +139,7 @@ dependencies = [
  "ark-std",
  "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git?tag=0.1.0)",
  "itertools 0.10.3",
- "jf-cap 0.0.1 (git+https://github.com/EspressoSystems/cap.git)",
+ "jf-cap",
  "rand_chacha 0.3.1",
  "serde",
 ]
@@ -1079,21 +1079,6 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 name = "commit"
 version = "0.1.0"
 source = "git+https://github.com/EspressoSystems/commit.git?tag=0.1.0#7685ebd00e5098debe08821b0e068fbc4453b4e0"
-dependencies = [
- "arbitrary",
- "ark-serialize",
- "bitvec",
- "funty",
- "generic-array",
- "hex",
- "serde",
- "sha3 0.9.1",
-]
-
-[[package]]
-name = "commit"
-version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/commit.git?rev=f48cd52c59755eade0605111826eef3df6abdcf8#f48cd52c59755eade0605111826eef3df6abdcf8"
 dependencies = [
  "arbitrary",
  "ark-serialize",
@@ -2272,42 +2257,6 @@ checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 [[package]]
 name = "jf-cap"
 version = "0.0.1"
-source = "git+https://github.com/EspressoSystems/cap.git?rev=16ad157f96d2102d59206df0106fb341302180d3#16ad157f96d2102d59206df0106fb341302180d3"
-dependencies = [
- "anyhow",
- "ark-bn254",
- "ark-ec",
- "ark-ed-on-bn254",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "bincode",
- "commit 0.1.0 (git+ssh://git@github.com/EspressoSystems/commit.git?rev=f48cd52c59755eade0605111826eef3df6abdcf8)",
- "csv",
- "derivative",
- "displaydoc",
- "hex-literal",
- "itertools 0.10.3",
- "jf-plonk 0.1.0 (git+ssh://git@github.com/EspressoSystems/jellyfish.git)",
- "jf-primitives 0.1.0 (git+ssh://git@github.com/EspressoSystems/jellyfish.git)",
- "jf-rescue 0.1.0 (git+ssh://git@github.com/EspressoSystems/jellyfish.git)",
- "jf-utils 0.1.0 (git+ssh://git@github.com/EspressoSystems/jellyfish.git)",
- "num_cpus",
- "percentage",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "rayon",
- "serde",
- "serde_derive",
- "serde_json",
- "sha2 0.9.9",
- "sha3 0.10.1",
- "structopt",
-]
-
-[[package]]
-name = "jf-cap"
-version = "0.0.1"
 source = "git+https://github.com/EspressoSystems/cap.git#f233bdffb89c3e2b86dc366a7dfc886ec4808253"
 dependencies = [
  "anyhow",
@@ -2318,16 +2267,16 @@ dependencies = [
  "ark-serialize",
  "ark-std",
  "bincode",
- "commit 0.1.0 (git+https://github.com/EspressoSystems/commit.git?tag=0.1.0)",
+ "commit",
  "csv",
  "derivative",
  "displaydoc",
  "hex-literal",
  "itertools 0.10.3",
- "jf-plonk 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-primitives 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-rescue 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-rescue",
+ "jf-utils",
  "num_cpus",
  "percentage",
  "rand 0.8.5",
@@ -2344,35 +2293,6 @@ dependencies = [
 [[package]]
 name = "jf-plonk"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/jellyfish.git#9590fac7466ce955c31d94dc9996854f58f7fe2f"
-dependencies = [
- "ark-bls12-377",
- "ark-bls12-381",
- "ark-bn254",
- "ark-bw6-761",
- "ark-ec",
- "ark-ff",
- "ark-poly",
- "ark-poly-commit",
- "ark-serialize",
- "ark-std",
- "derivative",
- "displaydoc",
- "downcast-rs",
- "itertools 0.10.3",
- "jf-rescue 0.1.0 (git+ssh://git@github.com/EspressoSystems/jellyfish.git)",
- "jf-utils 0.1.0 (git+ssh://git@github.com/EspressoSystems/jellyfish.git)",
- "merlin",
- "num-bigint 0.4.3",
- "rand_chacha 0.3.1",
- "rayon",
- "serde",
- "sha3 0.10.1",
-]
-
-[[package]]
-name = "jf-plonk"
-version = "0.1.0"
 source = "git+https://github.com/EspressoSystems/jellyfish.git#9590fac7466ce955c31d94dc9996854f58f7fe2f"
 dependencies = [
  "ark-bls12-377",
@@ -2389,36 +2309,14 @@ dependencies = [
  "displaydoc",
  "downcast-rs",
  "itertools 0.10.3",
- "jf-rescue 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
+ "jf-rescue",
+ "jf-utils",
  "merlin",
  "num-bigint 0.4.3",
  "rand_chacha 0.3.1",
  "rayon",
  "serde",
  "sha3 0.10.1",
-]
-
-[[package]]
-name = "jf-primitives"
-version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/jellyfish.git#9590fac7466ce955c31d94dc9996854f58f7fe2f"
-dependencies = [
- "ark-ec",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "crypto_box",
- "derivative",
- "displaydoc",
- "generic-array",
- "itertools 0.10.3",
- "jf-plonk 0.1.0 (git+ssh://git@github.com/EspressoSystems/jellyfish.git)",
- "jf-rescue 0.1.0 (git+ssh://git@github.com/EspressoSystems/jellyfish.git)",
- "jf-utils 0.1.0 (git+ssh://git@github.com/EspressoSystems/jellyfish.git)",
- "rayon",
- "serde",
- "zeroize",
 ]
 
 [[package]]
@@ -2435,34 +2333,9 @@ dependencies = [
  "displaydoc",
  "generic-array",
  "itertools 0.10.3",
- "jf-plonk 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-rescue 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "rayon",
- "serde",
- "zeroize",
-]
-
-[[package]]
-name = "jf-rescue"
-version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/jellyfish.git#9590fac7466ce955c31d94dc9996854f58f7fe2f"
-dependencies = [
- "ark-bls12-377",
- "ark-bls12-381",
- "ark-bn254",
- "ark-bw6-761",
- "ark-ec",
- "ark-ed-on-bls12-377",
- "ark-ed-on-bls12-381",
- "ark-ed-on-bn254",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "derivative",
- "displaydoc",
- "generic-array",
- "jf-utils 0.1.0 (git+ssh://git@github.com/EspressoSystems/jellyfish.git)",
+ "jf-plonk",
+ "jf-rescue",
+ "jf-utils",
  "rayon",
  "serde",
  "zeroize",
@@ -2487,28 +2360,10 @@ dependencies = [
  "derivative",
  "displaydoc",
  "generic-array",
- "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
+ "jf-utils",
  "rayon",
  "serde",
  "zeroize",
-]
-
-[[package]]
-name = "jf-utils"
-version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/jellyfish.git#9590fac7466ce955c31d94dc9996854f58f7fe2f"
-dependencies = [
- "anyhow",
- "ark-ec",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "digest 0.10.3",
- "jf-utils-derive 0.1.0 (git+ssh://git@github.com/EspressoSystems/jellyfish.git)",
- "serde",
- "sha2 0.10.2",
- "snafu 0.7.0",
- "tagged-base64",
 ]
 
 [[package]]
@@ -2522,21 +2377,11 @@ dependencies = [
  "ark-serialize",
  "ark-std",
  "digest 0.10.3",
- "jf-utils-derive 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
+ "jf-utils-derive",
  "serde",
  "sha2 0.10.2",
  "snafu 0.7.0",
  "tagged-base64",
-]
-
-[[package]]
-name = "jf-utils-derive"
-version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/jellyfish.git#9590fac7466ce955c31d94dc9996854f58f7fe2f"
-dependencies = [
- "ark-std",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -2586,9 +2431,9 @@ source = "git+https://github.com/EspressoSystems/key-set.git#4d73b07b963c64c71c3
 dependencies = [
  "ark-serialize",
  "bincode",
- "commit 0.1.0 (git+https://github.com/EspressoSystems/commit.git?tag=0.1.0)",
+ "commit",
  "itertools 0.10.3",
- "jf-cap 0.0.1 (git+https://github.com/EspressoSystems/cap.git)",
+ "jf-cap",
  "serde",
  "serde_with",
  "snafu 0.6.10",
@@ -2777,10 +2622,10 @@ dependencies = [
  "futures",
  "futures-util",
  "itertools 0.10.3",
- "jf-cap 0.0.1 (git+https://github.com/EspressoSystems/cap.git)",
- "jf-plonk 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-primitives 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
+ "jf-cap",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-utils",
  "key-set",
  "markdown",
  "net",
@@ -2827,12 +2672,12 @@ dependencies = [
  "ark-serialize",
  "ark-std",
  "bincode",
- "commit 0.1.0 (git+https://github.com/EspressoSystems/commit.git?tag=0.1.0)",
+ "commit",
  "futures",
  "generic-array",
  "itertools 0.10.3",
- "jf-cap 0.0.1 (git+https://github.com/EspressoSystems/cap.git)",
- "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
+ "jf-cap",
+ "jf-utils",
  "serde",
  "serde_json",
  "snafu 0.6.10",
@@ -3112,7 +2957,7 @@ dependencies = [
 [[package]]
 name = "phaselock"
 version = "0.0.5"
-source = "git+ssh://github.com/EspressoSystems/phaselock.git?rev=14586ed218a35cb48675b73d4a34ae7ae55c67e6#14586ed218a35cb48675b73d4a34ae7ae55c67e6"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=14586ed218a35cb48675b73d4a34ae7ae55c67e6#14586ed218a35cb48675b73d4a34ae7ae55c67e6"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",
@@ -3566,10 +3411,10 @@ dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
  "ark-serialize",
- "commit 0.1.0 (git+https://github.com/EspressoSystems/commit.git?tag=0.1.0)",
+ "commit",
  "funty",
  "itertools 0.10.3",
- "jf-cap 0.0.1 (git+https://github.com/EspressoSystems/cap.git)",
+ "jf-cap",
  "serde",
  "snafu 0.6.10",
  "strum_macros",
@@ -3820,16 +3665,16 @@ dependencies = [
  "bip0039",
  "chacha20",
  "chrono",
- "commit 0.1.0 (git+https://github.com/EspressoSystems/commit.git?tag=0.1.0)",
+ "commit",
  "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git)",
  "futures",
  "generic-array",
  "hmac 0.11.0",
  "image",
  "itertools 0.10.3",
- "jf-cap 0.0.1 (git+https://github.com/EspressoSystems/cap.git)",
- "jf-primitives 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
+ "jf-cap",
+ "jf-primitives",
+ "jf-utils",
  "key-set",
  "lazy_static",
  "net",
@@ -4904,18 +4749,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "universal-param"
-version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/universal-param.git?branch=no-ssh#3e60794451eafcb2c290e31c454caf8fb0401a19"
-dependencies = [
- "ark-serialize",
- "ark-std",
- "itertools 0.10.3",
- "jf-cap 0.0.1 (git+https://github.com/EspressoSystems/cap.git?rev=16ad157f96d2102d59206df0106fb341302180d3)",
- "rand_chacha 0.3.1",
-]
-
-[[package]]
 name = "untrusted"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5246,10 +5079,10 @@ dependencies = [
  "bincode",
  "escargot",
  "futures",
- "jf-cap 0.0.1 (git+https://github.com/EspressoSystems/cap.git)",
- "jf-plonk 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-primitives 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
+ "jf-cap",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-utils",
  "lazy_static",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
@@ -5289,17 +5122,17 @@ dependencies = [
  "bitvec",
  "chacha20",
  "chrono",
- "commit 0.1.0 (git+https://github.com/EspressoSystems/commit.git?tag=0.1.0)",
+ "commit",
  "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git)",
  "futures",
  "generic-array",
  "hex",
  "hmac 0.11.0",
  "itertools 0.10.3",
- "jf-cap 0.0.1 (git+https://github.com/EspressoSystems/cap.git)",
- "jf-plonk 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-primitives 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
- "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git)",
+ "jf-cap",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-utils",
  "key-set",
  "lazy_static",
  "mnemonic",
@@ -5333,7 +5166,6 @@ dependencies = [
  "threshold_crypto",
  "tide",
  "tracing",
- "universal-param",
  "zeroize",
 ]
 
