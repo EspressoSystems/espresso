@@ -243,11 +243,23 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
 
                     records: {
                         let mut db: RecordDatabase = Default::default();
-                        let key_pair = self
-                            .key_stream
-                            .derive_sub_tree("user".as_bytes())
-                            .derive_user_key_pair(&0u64.to_le_bytes());
                         for (ro, uid) in self.initial_grants.iter() {
+                            let key_pair = {
+                                let mut ret = None;
+                                let key_stream = self.key_stream.derive_sub_tree("user".as_bytes());
+
+                                for i in 0u64..5 {
+                                    let key_pair =
+                                        key_stream.derive_user_key_pair(&i.to_le_bytes());
+                                    if key_pair.pub_key() == ro.pub_key {
+                                        ret = Some(key_pair);
+                                        break;
+                                    }
+                                }
+
+                                ret.unwrap()
+                            };
+
                             db.insert(ro.clone(), *uid, &key_pair);
                         }
                         db
