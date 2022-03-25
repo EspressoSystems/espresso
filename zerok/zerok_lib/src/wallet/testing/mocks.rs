@@ -401,7 +401,7 @@ mod espresso_wallet_tests {
         // resubmitted.
         let (ledger, mut wallets) = t
             .create_test_network(
-                &[(1, 2)],
+                &[(2, 2)],
                 vec![
                     2,
                     0,
@@ -414,12 +414,11 @@ mod espresso_wallet_tests {
         println!("generating transaction: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
         ledger.lock().await.hold_next_transaction();
-        let sender = wallets[0].1.clone();
         let receiver = wallets[1].1.clone();
         wallets[0]
             .0
             .transfer(
-                Some(&sender.first().unwrap()),
+                None,
                 &AssetCode::native(),
                 &[(receiver.first().unwrap().clone(), 1)],
                 1,
@@ -437,11 +436,10 @@ mod espresso_wallet_tests {
         );
         now = Instant::now();
         for _ in 0..ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1 {
-            let sender = wallets[2].1.clone();
             wallets[2]
                 .0
                 .transfer(
-                    Some(sender.first().unwrap()),
+                    None,
                     &AssetCode::native(),
                     &[(receiver.first().unwrap().clone(), 1)],
                     1,
