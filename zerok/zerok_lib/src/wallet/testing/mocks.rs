@@ -16,6 +16,7 @@ use jf_cap::{
     MerkleTree, Signature,
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
+use reef::traits::Transaction as _;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     hd, testing,
@@ -107,6 +108,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
         let txn = &block.block.0[txn_id as usize];
         let comms = txn.output_commitments();
         let uids = block_uids[txn_id as usize].clone();
+        let kind = txn.kind();
 
         txn.verify_receiver_memos_signature(&memos, &sig)
             .context(CryptoError)?;
@@ -124,7 +126,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
             .collect::<Vec<_>>();
         self.generate_event(LedgerEvent::<EspressoLedger>::Memos {
             outputs: izip!(memos, comms, uids, merkle_paths).collect(),
-            transaction: Some((block_id, txn_id, reef::cap::TransactionKind::Unknown)),
+            transaction: Some((block_id, txn_id, kind)),
         });
 
         Ok(())
