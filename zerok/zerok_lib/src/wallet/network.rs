@@ -338,7 +338,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
         txn: PendingTransaction<EspressoLedger>,
         txid: Option<(u64, u64)>,
     ) {
-        // -> Result<(), WalletError<EspressoLedger>> {
+        // -> Result<(), WalletError<EspressoLedger>>
 
         if let Some(txid) = txid {
             let body = api::PostMemos {
@@ -363,7 +363,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
         _from: EventIndex,
     ) -> Result<(MerkleTree, EventIndex), WalletError<EspressoLedger>> {
         // TODO: how should this initialize?
-        let LedgerSnapshot { records, .. } = self.get("getsnapshot/0/true").await?;
+        let LedgerSnapshot { records, .. } = dbg!(self.get("getsnapshot/0/true").await)?;
         Ok((records.0, Default::default()))
     }
 }

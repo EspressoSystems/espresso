@@ -11,6 +11,7 @@ set -e
 
 GIT_ROOT="$(git rev-parse --show-toplevel)"
 pushd $GIT_ROOT >/dev/null
+cargo sort -w -c
 cargo fmt --all -- --check
 cargo clippy --workspace
 popd >/dev/null

@@ -20,77 +20,13 @@ use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     hd, testing,
     testing::MockEventSource,
-    txn_builder::{
-        PendingTransaction, RecordDatabase, TransactionHistoryEntry, TransactionInfo,
-        TransactionState,
-    },
-    AssetInfo, CryptoError, WalletBackend, WalletError, WalletState, WalletStorage,
+    txn_builder::{PendingTransaction, RecordDatabase, TransactionInfo, TransactionState},
+    CryptoError, WalletBackend, WalletError, WalletState,
 };
 use snafu::ResultExt;
 use std::collections::HashMap;
 use std::pin::Pin;
-use testing::MockNetwork;
-
-#[derive(Clone, Debug, Default)]
-pub struct MockStorage<'a> {
-    committed: Option<WalletState<'a, EspressoLedger>>,
-    working: Option<WalletState<'a, EspressoLedger>>,
-    txn_history: Vec<TransactionHistoryEntry<EspressoLedger>>,
-}
-
-#[async_trait]
-impl<'a> WalletStorage<'a, EspressoLedger> for MockStorage<'a> {
-    fn exists(&self) -> bool {
-        self.committed.is_some()
-    }
-
-    async fn load(
-        &mut self,
-    ) -> Result<WalletState<'a, EspressoLedger>, WalletError<EspressoLedger>> {
-        Ok(self.committed.as_ref().unwrap().clone())
-    }
-
-    async fn store_snapshot(
-        &mut self,
-        state: &WalletState<'a, EspressoLedger>,
-    ) -> Result<(), WalletError<EspressoLedger>> {
-        if let Some(working) = &mut self.working {
-            working.txn_state = state.txn_state.clone();
-            working.key_scans = state.key_scans.clone();
-            working.key_state = state.key_state.clone();
-        }
-        Ok(())
-    }
-
-    async fn store_asset(&mut self, asset: &AssetInfo) -> Result<(), WalletError<EspressoLedger>> {
-        if let Some(working) = &mut self.working {
-            working.assets.insert(asset.clone());
-        }
-        Ok(())
-    }
-
-    async fn store_transaction(
-        &mut self,
-        txn: TransactionHistoryEntry<EspressoLedger>,
-    ) -> Result<(), WalletError<EspressoLedger>> {
-        self.txn_history.push(txn);
-        Ok(())
-    }
-
-    async fn transaction_history(
-        &mut self,
-    ) -> Result<Vec<TransactionHistoryEntry<EspressoLedger>>, WalletError<EspressoLedger>> {
-        Ok(self.txn_history.clone())
-    }
-
-    async fn commit(&mut self) {
-        self.committed = self.working.clone();
-    }
-
-    async fn revert(&mut self) {
-        self.working = self.committed.clone();
-    }
-}
+use testing::{mocks::MockStorage, MockNetwork};
 
 pub struct MockEspressoNetwork<'a> {
     validator: ValidatorState,
@@ -215,16 +151,25 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
 #[derive(Clone)]
 pub struct MockEspressoBackend<'a> {
     key_stream: hd::KeyTree,
-    ledger: Arc<Mutex<MockLedger<'a, EspressoLedger, MockEspressoNetwork<'a>, MockStorage<'a>>>>,
+    ledger: Arc<
+        Mutex<
+            MockLedger<
+                'a,
+                EspressoLedger,
+                MockEspressoNetwork<'a>,
+                MockStorage<'a, EspressoLedger>,
+            >,
+        >,
+    >,
     initial_grants: Vec<(RecordOpening, u64)>,
-    storage: Arc<Mutex<MockStorage<'a>>>,
+    storage: Arc<Mutex<MockStorage<'a, EspressoLedger>>>,
 }
 
 #[async_trait]
 impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
     type EventStream =
         Pin<Box<dyn Stream<Item = (LedgerEvent<EspressoLedger>, EventSource)> + Send>>;
-    type Storage = MockStorage<'a>;
+    type Storage = MockStorage<'a, EspressoLedger>;
 
     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
         self.storage.lock().await
@@ -371,7 +316,7 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         &self,
         _from: EventIndex,
     ) -> Result<(MerkleTree, EventIndex), WalletError<EspressoLedger>> {
-        self.ledger.lock().await.get_initial_scan_state()
+        dbg!(self.ledger.lock().await.get_initial_scan_state())
     }
 }
 
@@ -383,7 +328,7 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
     type Ledger = EspressoLedger;
     type MockBackend = MockEspressoBackend<'a>;
     type MockNetwork = MockEspressoNetwork<'a>;
-    type MockStorage = MockStorage<'a>;
+    type MockStorage = MockStorage<'a, EspressoLedger>;
 
     async fn create_network(
         &mut self,
@@ -392,7 +337,8 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
         records: MerkleTree,
         _initial_grants: Vec<(RecordOpening, u64)>,
     ) -> Self::MockNetwork {
-        MockEspressoNetwork {
+        println!("[espresso] creating network");
+        let ret = MockEspressoNetwork {
             validator: ValidatorState::new(verif_crs, records.clone()),
             records,
             nullifiers: SetMerkleTree::default(),
@@ -400,7 +346,10 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
             proving_keys: Arc::new(proof_crs),
             address_map: HashMap::default(),
             events: MockEventSource::new(EventSource::QueryService),
-        }
+        };
+
+        println!("[espresso] created network");
+        ret
     }
 
     async fn create_storage(&mut self) -> Self::MockStorage {
