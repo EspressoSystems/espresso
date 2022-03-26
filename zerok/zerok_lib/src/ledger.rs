@@ -176,4 +176,8 @@ impl Ledger for EspressoLedger {
     fn merkle_height() -> u8 {
         crate::state::MERKLE_HEIGHT
     }
+
+    fn srs() -> &'static jf_cap::proof::UniversalParam {
+        &*crate::universal_params::UNIVERSAL_PARAM
+    }
 }

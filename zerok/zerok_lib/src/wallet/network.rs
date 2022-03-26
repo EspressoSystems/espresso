@@ -210,7 +210,6 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
 
                 transactions: Default::default(),
             },
-            key_scans: Default::default(),
             key_state: Default::default(),
             assets: Default::default(),
             viewing_accounts: Default::default(),

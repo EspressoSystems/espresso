@@ -219,7 +219,6 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                     transactions: Default::default(),
                 },
                 key_state: Default::default(),
-                key_scans: Default::default(),
                 assets: Default::default(),
                 freezing_accounts: Default::default(),
                 sending_accounts: Default::default(),
