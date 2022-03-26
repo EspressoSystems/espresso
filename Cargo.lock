@@ -3665,6 +3665,7 @@ dependencies = [
  "chacha20",
  "chrono",
  "commit",
+ "derivative",
  "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git)",
  "futures",
  "generic-array",

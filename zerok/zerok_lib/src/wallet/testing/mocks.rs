@@ -229,8 +229,7 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
 
         // Persist the initial state.
         let mut storage = self.storage().await;
-        storage.committed = Some(state.clone());
-        storage.working = Some(state.clone());
+        storage.initialize(state.clone(), state.clone()).unwrap();
 
         Ok(state)
     }
