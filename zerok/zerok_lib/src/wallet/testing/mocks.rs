@@ -399,10 +399,6 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
             key_stream,
         }
     }
-
-    fn universal_param(&self) -> &'a jf_cap::proof::UniversalParam {
-        &*crate::universal_params::UNIVERSAL_PARAM
-    }
 }
 
 // Espresso-specific tests

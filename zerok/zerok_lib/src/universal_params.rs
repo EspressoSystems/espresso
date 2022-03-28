@@ -1,7 +1,8 @@
 #![deny(warnings)]
 use lazy_static::lazy_static;
+use reef::Ledger;
 
 lazy_static! {
     pub static ref UNIVERSAL_PARAM: jf_cap::proof::UniversalParam =
-        (&*seahorse::testing::UNIVERSAL_PARAM).clone();
+        reef::cap::Ledger::srs().clone();
 }
