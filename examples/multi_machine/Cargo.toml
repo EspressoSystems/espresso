@@ -24,8 +24,7 @@ net = { git = "https://github.com/EspressoSystems/net.git" }
 # phaselock = { version = "0.0.2", registry = "translucence"}
 phaselock = { git = "ssh://git@github.com/EspressoSystems/phaselock.git", rev = "14586ed218a35cb48675b73d4a34ae7ae55c67e6" }
 rand_chacha = "0.2.2"
-# seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
-seahorse = { path = "../../../seahorse" }
+seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", branch = "joe-dustoff-inprogress" }
 serde = { version = "1.0.123", features = ["derive", "rc"] }
 serde_derive = "1.0.118"
 serde_json = "1.0.61"

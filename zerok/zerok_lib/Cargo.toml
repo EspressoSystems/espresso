@@ -47,8 +47,7 @@ reef = { git = "https://github.com/EspressoSystems/reef.git" }
 rpassword = "5.0.1"
 rust-argon2 = "0.8.3"
 rustyline = "9.0.0"
-# seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", features = ["testing"] }
-seahorse = { path = "../../../seahorse", features = ["testing"] }
+seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", features = ["testing"], branch = "joe-dustoff-inprogress" }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = "*"
 serde_derive = "1.0"
