@@ -12,7 +12,7 @@ use futures::stream::Stream;
 use itertools::izip;
 use jf_cap::{
     keys::{UserAddress, UserKeyPair, UserPubKey},
-    structs::{Nullifier, ReceiverMemo, RecordOpening},
+    structs::{Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
     MerkleTree, Signature,
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
@@ -335,10 +335,10 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
         verif_crs: VerifierKeySet,
         proof_crs: ProverKeySet<'a, OrderByOutputs>,
         records: MerkleTree,
-        _initial_grants: Vec<(RecordOpening, u64)>,
+        initial_grants: Vec<(RecordOpening, u64)>,
     ) -> Self::MockNetwork {
         println!("[espresso] creating network");
-        let ret = MockEspressoNetwork {
+        let mut ret = MockEspressoNetwork {
             validator: ValidatorState::new(verif_crs, records.clone()),
             records,
             nullifiers: SetMerkleTree::default(),
@@ -347,6 +347,35 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
             address_map: HashMap::default(),
             events: MockEventSource::new(EventSource::QueryService),
         };
+
+        // TODO: should we make this deterministic?
+        let mut rng = crate::testing::crypto_rng_from_seed([0x42u8; 32]);
+
+        // Broadcast receiver memos for the records which are included in the tree from the start,
+        // so that clients can access records they have been granted at ledger setup time in a
+        // uniform way.
+        let memo_outputs = initial_grants
+            .into_iter()
+            .map(|(ro, uid)| {
+                let memo = ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap();
+                let (comm, merkle_path) = ret
+                    .records
+                    .get_leaf(uid)
+                    .expect_ok()
+                    .map(|(_, proof)| {
+                        (
+                            RecordCommitment::from_field_element(proof.leaf.0),
+                            proof.path,
+                        )
+                    })
+                    .unwrap();
+                (memo, comm, uid, merkle_path)
+            })
+            .collect();
+        ret.generate_event(LedgerEvent::Memos {
+            outputs: memo_outputs,
+            transaction: None,
+        });
 
         println!("[espresso] created network");
         ret
