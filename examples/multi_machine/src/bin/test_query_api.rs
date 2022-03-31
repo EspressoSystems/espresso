@@ -20,10 +20,12 @@
 
 use async_std::future::timeout;
 use async_tungstenite::async_std::connect_async;
-use client::*;
 use futures::prelude::*;
 use itertools::izip;
 use phaselock::BlockContents;
+use seahorse::{
+    events::LedgerEvent, hd::KeyTree, loader::WalletLoader, KeyError, Wallet, WalletError,
+};
 use serde::Deserialize;
 use snafu::ResultExt;
 use std::fmt::Display;
@@ -32,16 +34,15 @@ use std::time::Duration;
 use structopt::StructOpt;
 use tempdir::TempDir;
 use tracing::{event, Level};
-use wallet::{
-    hd::KeyTree,
-    loader::WalletLoader,
-    network::{NetworkBackend, Url},
-    KeyError, Wallet, WalletError,
+use zerok_lib::{
+    api::client::*,
+    api::*,
+    ledger::SpectrumLedger,
+    node::{LedgerSummary, QueryServiceError},
+    state::ElaboratedBlock,
+    universal_params::UNIVERSAL_PARAM,
+    wallet::network::{NetworkBackend, Url},
 };
-use zerok_lib::api::*;
-use zerok_lib::node::{LedgerEvent, LedgerSummary, QueryServiceError};
-use zerok_lib::wallet;
-use zerok_lib::{state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM};
 
 #[derive(StructOpt)]
 struct Args {
@@ -68,7 +69,7 @@ async fn get<T: for<'de> Deserialize<'de>, S: Display>(route: S) -> T {
     event!(Level::INFO, "GET {}", url);
     response_body(
         &mut surf::get(url)
-            .middleware(parse_error_body)
+            .middleware(parse_error_body::<SpectrumError>)
             .send()
             .await
             .unwrap(),
@@ -77,11 +78,11 @@ async fn get<T: for<'de> Deserialize<'de>, S: Display>(route: S) -> T {
     .unwrap()
 }
 
-async fn get_error(route: impl Display) -> Error {
+async fn get_error(route: impl Display) -> SpectrumError {
     let url = url(route);
     event!(Level::INFO, "GET {}", url);
     match surf::get(url)
-        .middleware(parse_error_body)
+        .middleware(parse_error_body::<SpectrumError>)
         .send()
         .await
         .context(ClientError)
@@ -106,7 +107,10 @@ async fn validate_committed_block(
     assert_eq!(ix, block.index);
     assert!(block.index < num_blocks);
     assert_eq!(block.index, block.id.0);
-    assert_eq!(block.hash, Hash::from(ElaboratedBlock::from(block).hash()));
+    assert_eq!(
+        block.hash,
+        Hash(ElaboratedBlock::from(block).hash().as_ref().to_vec())
+    );
 
     // Check that we get the same block if we query by other methods.
     assert_eq!(*block, get(format!("/getblock/{}", block.id)).await);
@@ -172,19 +176,19 @@ struct UnencryptedWalletLoader {
     dir: TempDir,
 }
 
-impl WalletLoader for UnencryptedWalletLoader {
+impl WalletLoader<SpectrumLedger> for UnencryptedWalletLoader {
     type Meta = ();
 
     fn location(&self) -> PathBuf {
         self.dir.path().into()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError> {
+    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<SpectrumLedger>> {
         let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError> {
+    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError<SpectrumLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)
     }
 }
@@ -238,12 +242,12 @@ async fn main() {
     // Check validity of the individual events. The events are just serialized LedgerEvents, not an
     // API-specific type, so as long as they deserialize properly they should be fine.
     for event in events1.into_iter() {
-        serde_json::from_str::<LedgerEvent>(event.to_text().unwrap()).unwrap();
+        serde_json::from_str::<LedgerEvent<SpectrumLedger>>(event.to_text().unwrap()).unwrap();
     }
 
     // Test some invalid endpoints; check that error response bodies contain error descriptions.
     match get_error(format!("/getblock/index/{}", num_blocks)).await {
-        Error::QueryServiceError {
+        SpectrumError::QueryService {
             source: QueryServiceError::InvalidBlockId { .. },
         } => {}
         err => panic!("expected InvalidBlockId, got {}", err),

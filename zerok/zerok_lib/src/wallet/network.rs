@@ -1,15 +1,12 @@
-use super::hd::KeyTree;
-use super::loader::WalletLoader;
-use super::persistence::AtomicWalletStorage;
-use super::{ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState};
-use crate::api;
-use crate::ledger::AAPLedger;
-use crate::node;
-use crate::set_merkle_tree::{SetMerkleProof, SetMerkleTree};
-use crate::state::key_set::SizedKey;
-use crate::state::{ElaboratedTransaction, ProverKeySet, MERKLE_HEIGHT};
-use crate::txn_builder::TransactionState;
-use api::{client::*, BlockId, ClientError, CommittedTransaction, FromError, TransactionId};
+use crate::{
+    api,
+    api::{ClientError, CommittedTransaction, SpectrumError},
+    ledger::SpectrumLedger,
+    node,
+    set_merkle_tree::{SetMerkleProof, SetMerkleTree},
+    state::{ElaboratedTransaction, MERKLE_HEIGHT},
+};
+use api::{client::*, BlockId, TransactionId};
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
@@ -20,10 +17,20 @@ use jf_aap::keys::{UserAddress, UserPubKey};
 use jf_aap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
 use jf_aap::structs::{Nullifier, ReceiverMemo};
 use jf_aap::Signature;
-use node::{LedgerEvent, LedgerSnapshot};
+use key_set::{ProverKeySet, SizedKey};
+use node::{LedgerSnapshot, LedgerSummary};
+use seahorse::{
+    events::{EventIndex, EventSource, LedgerEvent},
+    hd::KeyTree,
+    loader::WalletLoader,
+    persistence::AtomicWalletStorage,
+    txn_builder::TransactionState,
+    BincodeError, ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;
 use std::convert::TryInto;
+use std::pin::Pin;
 use surf::http::content::{Accept, MediaTypeProposal};
 use surf::http::{headers, mime};
 pub use surf::Url;
@@ -33,7 +40,7 @@ pub struct NetworkBackend<'a, Meta: Serialize + DeserializeOwned> {
     query_client: surf::Client,
     bulletin_client: surf::Client,
     validator_client: surf::Client,
-    storage: Arc<Mutex<AtomicWalletStorage<'a, AAPLedger, Meta>>>,
+    storage: Arc<Mutex<AtomicWalletStorage<'a, SpectrumLedger, Meta>>>,
     key_stream: KeyTree,
 }
 
@@ -43,9 +50,9 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
         query_url: Url,
         bulletin_url: Url,
         validator_url: Url,
-        loader: &mut impl WalletLoader<Meta = Meta>,
-    ) -> Result<Self, WalletError> {
-        let storage = AtomicWalletStorage::new(loader)?;
+        loader: &mut impl WalletLoader<SpectrumLedger, Meta = Meta>,
+    ) -> Result<Self, WalletError<SpectrumLedger>> {
+        let storage = AtomicWalletStorage::new(loader, 1024)?;
         Ok(Self {
             query_client: Self::client(query_url)?,
             bulletin_client: Self::client(bulletin_url)?,
@@ -56,25 +63,25 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
         })
     }
 
-    fn client(base_url: Url) -> Result<surf::Client, WalletError> {
+    fn client(base_url: Url) -> Result<surf::Client, WalletError<SpectrumLedger>> {
         let client: surf::Client = surf::Config::new()
             .set_base_url(base_url)
             .try_into()
             .context(ClientConfigError)?;
-        Ok(client.with(parse_error_body))
+        Ok(client.with(parse_error_body::<SpectrumError>))
     }
 
     async fn get<T: for<'de> Deserialize<'de>>(
         &self,
         uri: impl AsRef<str>,
-    ) -> Result<T, WalletError> {
+    ) -> Result<T, WalletError<SpectrumLedger>> {
         let mut res = self
             .query_client
             .get(uri)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, WalletError>(ClientError)?;
+            .context::<_, WalletError<SpectrumLedger>>(ClientError)?;
         response_body(&mut res).await.context(ClientError)
     }
 
@@ -82,14 +89,14 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
         client: &surf::Client,
         uri: impl AsRef<str>,
         body: &T,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<SpectrumLedger>> {
         client
             .post(uri)
-            .body_bytes(bincode::serialize(body).map_err(WalletError::from_api_error)?)
+            .body_bytes(bincode::serialize(body).context(BincodeError)?)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, WalletError>(ClientError)?;
+            .context::<_, WalletError<SpectrumLedger>>(ClientError)?;
         Ok(())
     }
 
@@ -107,19 +114,28 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
 }
 
 #[async_trait]
-impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
+impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLedger>
     for NetworkBackend<'a, Meta>
 {
-    type EventStream = node::EventStream<LedgerEvent>;
-    type Storage = AtomicWalletStorage<'a, AAPLedger, Meta>;
+    type EventStream = node::EventStream<(LedgerEvent<SpectrumLedger>, EventSource)>;
+    type Storage = AtomicWalletStorage<'a, SpectrumLedger, Meta>;
 
-    async fn create(&mut self) -> Result<WalletState<'a>, WalletError> {
+    async fn create(
+        &mut self,
+    ) -> Result<WalletState<'a, SpectrumLedger>, WalletError<SpectrumLedger>> {
+        let LedgerSummary {
+            num_blocks,
+            num_events,
+            ..
+        } = self.get("getinfo").await?;
         let LedgerSnapshot {
             state: validator,
             nullifiers,
             records,
             ..
-        } = self.get("getsnapshot/0/true").await?;
+        } = self
+            .get(&format!("getsnapshot/{}/true", num_blocks))
+            .await?;
 
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = self.univ_param;
@@ -132,7 +148,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                 .freeze
                 .iter()
                 .map(|k| {
-                    Ok::<FreezeProvingKey, WalletError>(
+                    Ok::<FreezeProvingKey, WalletError<SpectrumLedger>>(
                         jf_aap::proof::freeze::preprocess(
                             univ_param,
                             k.num_inputs(),
@@ -148,7 +164,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                 .xfr
                 .iter()
                 .map(|k| {
-                    Ok::<TransferProvingKey, WalletError>(
+                    Ok::<TransferProvingKey, WalletError<SpectrumLedger>>(
                         jf_aap::proof::transfer::preprocess(
                             univ_param,
                             k.num_inputs(),
@@ -179,7 +195,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
                 nullifiers,
                 record_mt: records.0,
                 merkle_leaf_to_forget,
-                now: 0,
+                now: EventIndex::from_source(EventSource::QueryService, num_events),
                 records: Default::default(),
 
                 transactions: Default::default(),
@@ -205,39 +221,58 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
         self.key_stream.clone()
     }
 
-    async fn subscribe(&self, starting_at: u64) -> Self::EventStream {
+    async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream {
+        // In the current setup, all events come from a single source, which we call the query
+        // service even though it has the responsibilties of query service and bulletin board. In
+        // the future, these should be split into different services and treated as different event
+        // sources.
+        let from = from.index(EventSource::QueryService);
+        let to = to.map(|to| to.index(EventSource::QueryService));
+
         let mut url = self
             .query_client
             .config()
             .base_url
             .as_ref()
             .unwrap()
-            .join(&format!("subscribe/{}", starting_at))
+            .join(&format!("subscribe/{}", from))
             .unwrap();
         url.set_scheme("ws").unwrap();
 
         //todo !jeb.bearer handle connection failures.
         // This should only fail if the server is incorrect or down, so we should handle by retrying
         // or failing over to a different server.
+        let all_events = connect_async(url)
+            .await
+            .expect("failed to connect to server")
+            .0;
+        let chosen_events: Pin<Box<dyn Stream<Item = _> + Send>> = if let Some(to) = to {
+            Box::pin(all_events.take(to - from))
+        } else {
+            Box::pin(all_events)
+        };
+
         Box::pin(
-            connect_async(url)
-                .await
-                .expect("failed to connect to server")
-                .0
+            chosen_events
                 //todo !jeb.bearer handle stream errors
                 // If there is an error in the stream, or the server sends us invalid data, we
                 // should retry or fail over to a different server.
                 .filter_map(|msg| {
-                    ready(match msg {
+                    let item = match msg {
                         Ok(Message::Binary(bytes)) => bincode::deserialize(&bytes).ok(),
                         Ok(Message::Text(json)) => serde_json::from_str(&json).ok(),
                         _ => None,
-                    })
+                    }
+                    .map(|event| (event, EventSource::QueryService));
+                    ready(item)
                 }),
         )
     }
 
-    async fn get_public_key(&self, address: &UserAddress) -> Result<UserPubKey, WalletError> {
+    async fn get_public_key(
+        &self,
+        address: &UserAddress,
+    ) -> Result<UserPubKey, WalletError<SpectrumLedger>> {
         self.get(format!("getuser/{}", api::UserAddress(address.clone())))
             .await
     }
@@ -246,7 +281,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
         &self,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
-    ) -> Result<(bool, SetMerkleProof), WalletError> {
+    ) -> Result<(bool, SetMerkleProof), WalletError<SpectrumLedger>> {
         if let Some(ret) = set.contains(nullifier) {
             Ok(ret)
         } else {
@@ -262,18 +297,24 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
         &self,
         txn_id: u64,
         block_id: u64,
-    ) -> Result<ElaboratedTransaction, WalletError> {
+    ) -> Result<ElaboratedTransaction, WalletError<SpectrumLedger>> {
         let txn_id = TransactionId(BlockId(block_id as usize), txn_id as usize);
         let CommittedTransaction { data, proofs, .. } =
             self.get(format!("/gettransaction/{}", txn_id)).await?;
         Ok(ElaboratedTransaction { txn: data, proofs })
     }
 
-    async fn register_user_key(&mut self, pub_key: &UserPubKey) -> Result<(), WalletError> {
+    async fn register_user_key(
+        &mut self,
+        pub_key: &UserPubKey,
+    ) -> Result<(), WalletError<SpectrumLedger>> {
         Self::post(&self.bulletin_client, "/users", pub_key).await
     }
 
-    async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), WalletError> {
+    async fn submit(
+        &mut self,
+        txn: ElaboratedTransaction,
+    ) -> Result<(), WalletError<SpectrumLedger>> {
         Self::post(&self.validator_client, "/submit", &txn).await
     }
 
@@ -283,7 +324,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, AAPLedger>
         txn_id: u64,
         memos: Vec<ReceiverMemo>,
         signature: Signature,
-    ) -> Result<(), WalletError> {
+    ) -> Result<(), WalletError<SpectrumLedger>> {
         let txid = TransactionId(BlockId(block_id as usize), txn_id as usize);
         let body = api::PostMemos { memos, signature };
         Self::post(&self.bulletin_client, format!("/memos/{}", txid), &body).await

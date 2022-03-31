@@ -1,5 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////
-// The AAP Wallet Frontend
+// The Spectrum Wallet Frontend
 //
 // For now, this "frontend" is simply a comand-line read-eval-print loop which
 // allows the user to enter commands for a wallet interactively.
@@ -8,17 +8,18 @@
 mod cli_client;
 
 use jf_aap::proof::UniversalParam;
+use seahorse::{
+    cli::*,
+    io::SharedIO,
+    loader::{LoadMethod, LoaderMetadata, WalletLoader},
+    WalletError,
+};
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
 use zerok_lib::{
-    ledger::AAPLedger,
-    wallet::{
-        cli::*,
-        loader::{LoadMethod, LoaderMetadata, WalletLoader},
-        network::{NetworkBackend, Url},
-        WalletError,
-    },
+    ledger::SpectrumLedger,
+    wallet::network::{NetworkBackend, Url},
 };
 
 #[derive(StructOpt)]
@@ -78,8 +79,12 @@ impl CLIArgs for Args {
         self.storage.clone()
     }
 
-    fn interactive(&self) -> bool {
-        !self.non_interactive
+    fn io(&self) -> Option<SharedIO> {
+        if self.non_interactive {
+            Some(SharedIO::std())
+        } else {
+            None
+        }
     }
 
     fn encrypted(&self) -> bool {
@@ -99,19 +104,19 @@ impl CLIArgs for Args {
     }
 }
 
-struct AapCli;
+struct SpectrumCli;
 
-impl<'a> CLI<'a> for AapCli {
-    type Ledger = AAPLedger;
+impl<'a> CLI<'a> for SpectrumCli {
+    type Ledger = SpectrumLedger;
     type Backend = NetworkBackend<'a, LoaderMetadata>;
     type Args = Args;
 
     fn init_backend(
         univ_param: &'a UniversalParam,
-        args: &'a Self::Args,
-        loader: &mut impl WalletLoader<Meta = LoaderMetadata>,
-    ) -> Result<Self::Backend, WalletError> {
-        let server = args.server.clone().ok_or(WalletError::Failed {
+        args: Self::Args,
+        loader: &mut impl WalletLoader<SpectrumLedger, Meta = LoaderMetadata>,
+    ) -> Result<Self::Backend, WalletError<SpectrumLedger>> {
+        let server = args.server.ok_or(WalletError::Failed {
             msg: String::from("server is required"),
         })?;
         NetworkBackend::new(univ_param, server.clone(), server.clone(), server, loader)
@@ -120,7 +125,7 @@ impl<'a> CLI<'a> for AapCli {
 
 #[async_std::main]
 async fn main() {
-    if let Err(err) = cli_main::<AapCli>(&Args::from_args()).await {
+    if let Err(err) = cli_main::<SpectrumLedger, SpectrumCli>(Args::from_args()).await {
         println!("{}", err);
         exit(1);
     }

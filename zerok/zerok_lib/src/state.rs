@@ -2,7 +2,6 @@
 
 use zerok_macros::*;
 
-use crate::commit;
 pub use crate::full_persistence::FullPersistence;
 pub use crate::lw_persistence::LWPersistence;
 pub use crate::set_merkle_tree::*;
@@ -15,6 +14,7 @@ use commit::{Commitment, Committable};
 use core::fmt::Debug;
 use jf_aap::{
     errors::TxnApiError,
+<<<<<<< HEAD
     proof::{freeze::FreezeProvingKey, mint::MintProvingKey, transfer::TransferProvingKey},
     structs::{Nullifier, RecordCommitment, BlindFactor},
     txn_batch_verify, MerkleCommitment, MerkleFrontier, MerkleLeafProof, MerkleTree, NodeValue,
@@ -23,14 +23,20 @@ use jf_aap::{
 };
 use jf_utils::tagged_blob;
 use phaselock::{traits::State, traits::BlockContents, H_256};
+=======
+    structs::{Nullifier, RecordCommitment},
+    txn_batch_verify, MerkleCommitment, MerkleFrontier, MerkleLeafProof, MerkleTree, NodeValue,
+    TransactionNote,
+};
+use jf_utils::tagged_blob;
+use key_set::VerifierKeySet;
+use phaselock::{traits::state::State, BlockContents, H_256};
+>>>>>>> origin/main
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 use snafu::Snafu;
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
-use std::iter::FromIterator;
-use std::ops::Bound::*;
 
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
@@ -183,192 +189,6 @@ impl BlockContents<H_256> for ElaboratedBlock {
     }
 }
 
-pub mod key_set {
-    use super::*;
-
-    #[derive(Debug, Snafu)]
-    #[snafu(visibility = "pub")]
-    pub enum Error {
-        DuplicateKeys {
-            num_inputs: usize,
-            num_outputs: usize,
-        },
-        NoKeys,
-    }
-
-    pub trait SizedKey: CanonicalSerialize + CanonicalDeserialize {
-        fn num_inputs(&self) -> usize;
-        fn num_outputs(&self) -> usize;
-    }
-
-    impl<'a> SizedKey for TransferProvingKey<'a> {
-        fn num_inputs(&self) -> usize {
-            self.num_input()
-        }
-
-        fn num_outputs(&self) -> usize {
-            self.num_output()
-        }
-    }
-
-    impl<'a> SizedKey for FreezeProvingKey<'a> {
-        fn num_inputs(&self) -> usize {
-            self.num_input()
-        }
-
-        fn num_outputs(&self) -> usize {
-            self.num_output()
-        }
-    }
-
-    impl SizedKey for TransactionVerifyingKey {
-        fn num_inputs(&self) -> usize {
-            match self {
-                TransactionVerifyingKey::Transfer(xfr) => xfr.num_input(),
-                TransactionVerifyingKey::Freeze(freeze) => freeze.num_input(),
-                TransactionVerifyingKey::Mint(_) => 1,
-            }
-        }
-
-        fn num_outputs(&self) -> usize {
-            match self {
-                TransactionVerifyingKey::Transfer(xfr) => xfr.num_output(),
-                TransactionVerifyingKey::Freeze(freeze) => freeze.num_output(),
-                TransactionVerifyingKey::Mint(_) => 2,
-            }
-        }
-    }
-
-    pub trait KeyOrder {
-        type SortKey: Ord
-            + Debug
-            + Clone
-            + Serialize
-            + for<'a> Deserialize<'a>
-            + CanonicalSerialize
-            + CanonicalDeserialize;
-        fn sort_key(num_inputs: usize, num_outputs: usize) -> Self::SortKey;
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-    pub struct OrderByInputs;
-    impl KeyOrder for OrderByInputs {
-        type SortKey = (usize, usize);
-        fn sort_key(num_inputs: usize, num_outputs: usize) -> Self::SortKey {
-            (num_inputs, num_outputs)
-        }
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-    pub struct OrderByOutputs;
-    impl KeyOrder for OrderByOutputs {
-        type SortKey = (usize, usize);
-        fn sort_key(num_inputs: usize, num_outputs: usize) -> Self::SortKey {
-            (num_outputs, num_inputs)
-        }
-    }
-
-    #[serde_as]
-    #[derive(
-        Debug,
-        Default,
-        Clone,
-        Serialize,
-        Deserialize,
-        CanonicalSerialize,
-        CanonicalDeserialize,
-        PartialEq,
-    )]
-    #[serde(bound = "K: Serialize + for<'a> Deserialize<'a>")]
-    pub struct KeySet<K: SizedKey, Order: KeyOrder = OrderByInputs> {
-        // serde_json does not support maps where the keys are not Strings (or easily convertible
-        // to/from Strings) so we serialize this map as a sequence of key-value pairs.
-        #[serde_as(as = "Vec<(_, _)>")]
-        keys: BTreeMap<Order::SortKey, K>,
-    }
-
-    impl<K: SizedKey, Order: KeyOrder> KeySet<K, Order> {
-        /// Create a new KeySet with the keys in an iterator. `keys` must contain at least one key,
-        /// and it must not contain two keys with the same size.
-        pub fn new(keys: impl Iterator<Item = K>) -> Result<Self, Error> {
-            let mut map = BTreeMap::new();
-            for key in keys {
-                let sort_key = Order::sort_key(key.num_inputs(), key.num_outputs());
-                if map.contains_key(&sort_key) {
-                    return Err(Error::DuplicateKeys {
-                        num_inputs: key.num_inputs(),
-                        num_outputs: key.num_outputs(),
-                    });
-                }
-                map.insert(sort_key, key);
-            }
-            if map.is_empty() {
-                return Err(Error::NoKeys);
-            }
-            Ok(Self { keys: map })
-        }
-
-        /// Get the largest size supported by this KeySet.
-        ///
-        /// Panics if there are no keys in the KeySet. Since new() requires at least one key, this
-        /// can only happen if the KeySet is corrupt (for example, it was deserialized from a
-        /// corrupted file).
-        pub fn max_size(&self) -> (usize, usize) {
-            let key = &self.keys.iter().next_back().unwrap().1;
-            (key.num_inputs(), key.num_outputs())
-        }
-
-        pub fn key_for_size(&self, num_inputs: usize, num_outputs: usize) -> Option<&K> {
-            self.keys.get(&Order::sort_key(num_inputs, num_outputs))
-        }
-
-        /// Return the smallest key whose size is at least (num_inputs, num_outputs). If no such key
-        /// is available, the error contains the largest size that could have been supported.
-        pub fn best_fit_key(
-            &self,
-            num_inputs: usize,
-            num_outputs: usize,
-        ) -> Result<(usize, usize, &K), (usize, usize)> {
-            self.keys
-                .range((
-                    Included(Order::sort_key(num_inputs, num_outputs)),
-                    Unbounded,
-                ))
-                .next()
-                .map(|(_, key)| (key.num_inputs(), key.num_outputs(), key))
-                .ok_or_else(|| self.max_size())
-        }
-
-        pub fn iter(&self) -> impl Iterator<Item = &K> {
-            self.keys.values()
-        }
-    }
-
-    impl<K: SizedKey, Order: KeyOrder> FromIterator<K> for KeySet<K, Order> {
-        fn from_iter<T: IntoIterator<Item = K>>(iter: T) -> Self {
-            Self::new(iter.into_iter()).unwrap()
-        }
-    }
-}
-use key_set::KeySet;
-
-#[derive(
-    Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize, PartialEq,
-)]
-pub struct ProverKeySet<'a, Order: key_set::KeyOrder = key_set::OrderByInputs> {
-    pub mint: MintProvingKey<'a>,
-    pub xfr: KeySet<TransferProvingKey<'a>, Order>,
-    pub freeze: KeySet<FreezeProvingKey<'a>, Order>,
-}
-
-#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize)]
-pub struct VerifierKeySet<Order: key_set::KeyOrder = key_set::OrderByInputs> {
-    // TODO: is there a way to keep these types distinct?
-    pub mint: TransactionVerifyingKey,
-    pub xfr: KeySet<TransactionVerifyingKey, Order>,
-    pub freeze: KeySet<TransactionVerifyingKey, Order>,
-}
-
 // TODO
 #[derive(Debug, Snafu, Serialize, Deserialize)]
 #[snafu(visibility = "pub(crate)")]
@@ -472,22 +292,6 @@ impl Clone for ValidationError {
                 num_inputs: *num_inputs,
             },
         }
-    }
-}
-
-impl Committable for VerifierKeySet {
-    fn commit(&self) -> Commitment<Self> {
-        commit::RawCommitmentBuilder::new("VerifCRS Comm")
-            .var_size_bytes(&canonical::serialize(self).unwrap())
-            .finalize()
-    }
-}
-
-impl Committable for TransactionNote {
-    fn commit(&self) -> Commitment<Self> {
-        commit::RawCommitmentBuilder::new("Txn Comm")
-            .var_size_bytes(&canonical::serialize(self).unwrap())
-            .finalize()
     }
 }
 

@@ -1,9 +1,13 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
 use crate::WebState;
+use api::{
+    server, BlockId, Hash, TaggedBlob, TransactionId, UnspentRecord, UserAddress, UserPubKey,
+};
 use futures::prelude::*;
 use itertools::izip;
 use phaselock::BlockContents;
+use seahorse::events::LedgerEvent;
 use server::{best_response_type, response};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -15,9 +19,13 @@ use tide::http::{content::Accept, mime};
 use tide::StatusCode;
 use tide_websockets::WebSocketConnection;
 use tracing::{event, Level};
-use zerok_lib::api::*;
-use zerok_lib::node::{LedgerEvent, LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService};
-use zerok_lib::state::state_comm::LedgerStateCommitment;
+use zerok_lib::{
+    api,
+    api::*,
+    ledger::SpectrumLedger,
+    node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService},
+    state::{state_comm::LedgerStateCommitment, ElaboratedBlock},
+};
 
 #[derive(Debug, EnumString)]
 pub enum UrlSegmentType {
@@ -143,6 +151,11 @@ pub fn check_api(api: toml::Value) -> bool {
     !missing_definition
 }
 
+// Wrapper around `api::server_error` forcing `SpectrumError` as the error type.
+pub fn server_error<E: Into<SpectrumError>>(err: E) -> tide::Error {
+    api::server_error(err)
+}
+
 // Get a block index from whatever form of block identifier was used in the URL.
 async fn block_index(
     bindings: &HashMap<String, RouteBinding>,
@@ -161,6 +174,10 @@ async fn block_index(
         // latest
         Ok(query_service.num_blocks().await.map_err(server_error)? - 1)
     }
+}
+
+fn block_hash(block: &ElaboratedBlock) -> Hash {
+    Hash(block.hash().as_ref().to_vec())
 }
 
 pub fn dummy_url_eval(
@@ -229,7 +246,7 @@ async fn get_block(
     Ok(CommittedBlock {
         id: BlockId(index),
         index,
-        hash: Hash::from(transition.block.hash()),
+        hash: block_hash(&transition.block),
         state_commitment: state.commit(),
         transactions: izip!(
             transition.block.block.0,
@@ -274,7 +291,7 @@ async fn get_block_hash(
         .await
         .map_err(server_error)?
         .block;
-    Ok(Hash::from(block.hash()))
+    Ok(block_hash(&block))
 }
 
 async fn get_transaction(
@@ -452,7 +469,7 @@ async fn get_nullifier(
 async fn get_event(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &impl QueryService,
-) -> Result<LedgerEvent, tide::Error> {
+) -> Result<LedgerEvent<SpectrumLedger>, tide::Error> {
     let index = bindings[":index"].value.as_index()? as u64;
     let mut events = query_service.subscribe(index).await;
     events.next().await.ok_or_else(|| {

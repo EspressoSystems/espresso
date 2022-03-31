@@ -32,6 +32,8 @@ stdenv.mkDerivation {
     openssl
     binutils-unwrapped
     cargo-udeps
+    libiconv
+    curl
 
     alloy5
   ] ++ lib.optionals stdenv.isDarwin [

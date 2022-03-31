@@ -1,96 +1,221 @@
-///////////////////////////////////////////////////////////////////////////////
-// Rust interface for the query API
-//
-// All data structures returned by query API endpoints correspond directly to
-// Rust data structures via the serde serialization and deserialization
-// interfaces. For query responses which do not directly correspond to data
-// structures elsewhere in this crate or in Jellyfish, data structures are
-// defined in this module which can be serialized to and from the API
-// responses.
-//
-// Types which must be embeddable in URLs (e.g. hashes and identifiers) and
-// binary blob types are serialized as tagged base 64 strings. Other
-// structures use derived serde implementations, which allows them to
-// serialize as human-readable JSON objects or as binary strings, depending
-// on the serializer used. This makes it easy for the API to support multiple
-// content types in its responses, as long as each endpoint handler returns an
-// object with the appropriate Serialize implementation.
-//
-
-use crate::state::{
-    state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction,
-    SetMerkleProof,
+use crate::{
+    ledger::SpectrumLedger,
+    set_merkle_tree::SetMerkleProof,
+    state::{state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction},
 };
-use crate::util::commit;
-use ark_serialize::*;
 use fmt::{Display, Formatter};
-use futures::future::BoxFuture;
-use futures::prelude::*;
-use generic_array::{ArrayLength, GenericArray};
-use jf_aap::{
-    structs::{ReceiverMemo, RecordCommitment},
-    Signature, TransactionNote,
-};
-use jf_utils::{tagged_blob, Tagged};
-use phaselock::data::BlockHash;
+use jf_aap::{structs::ReceiverMemo, Signature, TransactionNote};
 use serde::{Deserialize, Serialize};
-use snafu::{ErrorCompat, IntoError, ResultExt, Snafu};
+use snafu::{ErrorCompat, IntoError, Snafu};
 use std::fmt;
-use tagged_base64::TaggedBase64;
 
-#[tagged_blob("HASH")]
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
-pub struct Hash(pub Vec<u8>);
+pub use net::*;
 
-impl<const N: usize> From<BlockHash<N>> for Hash {
-    fn from(h: BlockHash<N>) -> Self {
-        Self(h.as_ref().to_vec())
+#[derive(Debug, Serialize, Deserialize, Snafu)]
+#[non_exhaustive]
+pub enum SpectrumError {
+    QueryService {
+        source: crate::node::QueryServiceError,
+    },
+    Validation {
+        source: crate::state::ValidationError,
+    },
+    #[snafu(display("{:?}", source))]
+    Consensus {
+        // PhaseLockError cannot be serialized. Instead, if we have to serialize this variant, we
+        // will serialize Ok(err) to Err(format(err)), and when we deserialize we will at least
+        // preserve the variant ConsensusError and a String representation of the underlying error.
+        // Unfortunately, this means we cannot use this variant as a SNAFU error source.
+        #[serde(with = "crate::state::ser_debug")]
+        #[snafu(source(false))]
+        source: Result<Box<phaselock::error::PhaseLockError>, String>,
+    },
+    #[snafu(display("error in parameter {}: {}", param, msg))]
+    Param { param: String, msg: String },
+    #[snafu(display("{}", msg))]
+    Internal { msg: String },
+}
+
+impl Error for SpectrumError {
+    fn catch_all(msg: String) -> Self {
+        Self::Internal { msg }
+    }
+
+    fn status(&self) -> tide::StatusCode {
+        match self {
+            Self::Param { .. } => tide::StatusCode::BadRequest,
+            _ => tide::StatusCode::InternalServerError,
+        }
     }
 }
 
-impl<const N: usize> From<[u8; N]> for Hash {
-    fn from(h: [u8; N]) -> Self {
-        Self(h.as_ref().to_vec())
+impl From<crate::node::QueryServiceError> for SpectrumError {
+    fn from(source: crate::node::QueryServiceError) -> Self {
+        Self::QueryService { source }
     }
 }
 
-impl<U: ArrayLength<u8>> From<GenericArray<u8, U>> for Hash {
-    fn from(a: GenericArray<u8, U>) -> Self {
-        Self((&*a).to_vec())
+impl From<crate::state::ValidationError> for SpectrumError {
+    fn from(source: crate::state::ValidationError) -> Self {
+        Self::Validation { source }
     }
 }
 
-impl<T: commit::Committable> From<commit::Commitment<T>> for Hash {
-    fn from(c: commit::Commitment<T>) -> Self {
-        Self::from(<[u8; 32]>::from(c))
+impl From<phaselock::error::PhaseLockError> for SpectrumError {
+    fn from(source: phaselock::error::PhaseLockError) -> Self {
+        Self::Consensus {
+            source: Ok(Box::new(source)),
+        }
     }
 }
+
+impl From<serde_json::Error> for SpectrumError {
+    fn from(source: serde_json::Error) -> Self {
+        Self::Internal {
+            msg: source.to_string(),
+        }
+    }
+}
+
+impl From<Box<bincode::ErrorKind>> for SpectrumError {
+    fn from(source: Box<bincode::ErrorKind>) -> Self {
+        Self::Internal {
+            msg: source.to_string(),
+        }
+    }
+}
+
+/// Conversion from [SpectrumError] to module-specific error types.
+///
+/// Any error type which has a catch-all variant can implement this trait and get conversions from
+/// other [SpectrumError] variants for free. By default, the conversion function for each variant
+/// simply converts the variant to a String using the Display instance and calls the [catch_all]
+/// method. If the implementing type has a variant for a specific type of error encapsulated in
+/// [SpectrumError], it can override the conversion function for that variant.
+///
+/// Having default conversion functions for each variant ensures that new error types can be added
+/// to [SpectrumError] without breaking existing conversions, as long as a corresponding new default
+/// method is added to this trait.
+pub trait FromError: Sized {
+    fn catch_all(msg: String) -> Self;
+
+    fn from_query_service_error(source: crate::node::QueryServiceError) -> Self {
+        Self::catch_all(source.to_string())
+    }
+
+    fn from_validation_error(source: crate::state::ValidationError) -> Self {
+        Self::catch_all(source.to_string())
+    }
+
+    fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
+        match source {
+            Ok(err) => Self::catch_all(format!("{:?}", err)),
+            Err(msg) => Self::catch_all(msg),
+        }
+    }
+
+    fn from_param_error(param: String, msg: String) -> Self {
+        Self::catch_all(format!("invalid request parameter {}: {}", param, msg))
+    }
+
+    fn from_spectrum_error<E: Into<SpectrumError>>(source: E) -> Self {
+        match source.into() {
+            SpectrumError::QueryService { source } => Self::from_query_service_error(source),
+            SpectrumError::Validation { source } => Self::from_validation_error(source),
+            SpectrumError::Consensus { source } => {
+                Self::from_consensus_error(source.map(|err| *err))
+            }
+            SpectrumError::Param { param, msg } => Self::from_param_error(param, msg),
+            SpectrumError::Internal { msg } => Self::catch_all(msg),
+        }
+    }
+
+    /// Convert from a generic client-side error to a specific error type.
+    ///
+    /// If `source` can be downcast to an [Error], it is converted to the specific type using
+    /// [from_spectrum_error]. Otherwise, it is converted to a [String] using [Display] and then
+    /// converted to the specific type using [catch_all].
+    fn from_client_error(source: surf::Error) -> Self {
+        Self::from_spectrum_error(<SpectrumError as Error>::from_client_error(source))
+    }
+}
+
+impl FromError for SpectrumError {
+    fn catch_all(msg: String) -> Self {
+        Self::Internal { msg }
+    }
+
+    fn from_query_service_error(source: crate::node::QueryServiceError) -> Self {
+        Self::QueryService { source }
+    }
+
+    fn from_validation_error(source: crate::state::ValidationError) -> Self {
+        Self::Validation { source }
+    }
+
+    fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
+        Self::Consensus {
+            source: source.map(Box::new),
+        }
+    }
+
+    fn from_param_error(param: String, msg: String) -> Self {
+        Self::Param { param, msg }
+    }
+
+    fn from_spectrum_error<E: Into<SpectrumError>>(source: E) -> Self {
+        source.into()
+    }
+}
+
+impl FromError for seahorse::WalletError<SpectrumLedger> {
+    fn catch_all(msg: String) -> Self {
+        Self::Failed { msg }
+    }
+
+    fn from_query_service_error(source: crate::node::QueryServiceError) -> Self {
+        source.into()
+    }
+
+    fn from_validation_error(source: crate::state::ValidationError) -> Self {
+        Self::InvalidBlock { source }
+    }
+
+    fn from_consensus_error(source: Result<phaselock::error::PhaseLockError, String>) -> Self {
+        match source {
+            Ok(err) => Self::catch_all(err.to_string()),
+            Err(msg) => Self::catch_all(msg),
+        }
+    }
+}
+
+/// Context for embedding network client errors into specific error types.
+///
+/// This type implements the [IntoError] trait from SNAFU, so it can be used with
+/// [ResultExt::context] just like automatically generated SNAFU contexts.
+///
+/// Calling `some_result.context(SpectrumError)` will convert a potential error from a [surf::Error]
+/// to a specific error type `E: FromError` using the method `E::from_client_error`, provided by the
+/// [FromError] trait.
+pub struct ClientError;
+
+impl<E: FromError + ErrorCompat + std::error::Error> IntoError<E> for ClientError {
+    type Source = surf::Error;
+
+    fn into_error(self, source: Self::Source) -> E {
+        E::from_client_error(source)
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// API response types for Spectrum-specific data structures
+//
 
 impl From<LedgerStateCommitment> for Hash {
     fn from(c: LedgerStateCommitment) -> Self {
         Self::from(commit::Commitment::<_>::from(c))
     }
 }
-
-#[tagged_blob("BK")]
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
-pub struct BlockId(pub usize);
-
-#[tagged_blob("TX")]
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
-pub struct TransactionId(pub BlockId, pub usize);
-
-// UserAddress from jf_aap is just a type alias for VerKey, which serializes with the tag VERKEY,
-// which is confusing. This newtype struct lets us a define a more user-friendly tag.
-#[tagged_blob("ADDR")]
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
-pub struct UserAddress(pub jf_aap::keys::UserAddress);
-
-pub use jf_aap::keys::UserPubKey;
-
-#[tagged_blob("RECPROOF")]
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq)]
-pub struct MerklePath(pub jf_aap::MerklePath);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommittedBlock {
@@ -169,32 +294,6 @@ impl Display for CommittedTransaction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct UnspentRecord {
-    pub commitment: RecordCommitment,
-    pub uid: u64,
-    pub memo: Option<ReceiverMemo>,
-}
-
-impl Display for UnspentRecord {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_as_json(self, f)
-    }
-}
-
-/// Request body for the bulletin board endpoint POST /memos.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PostMemos {
-    pub memos: Vec<ReceiverMemo>,
-    pub signature: Signature,
-}
-
-impl Display for PostMemos {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fmt_as_json(self, f)
-    }
-}
-
 /// Response body for the query service endpoint GET /getnullifier.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NullifierProof {
@@ -207,6 +306,7 @@ impl Display for NullifierProof {
         fmt_as_json(self, f)
     }
 }
+<<<<<<< HEAD
 
 /// Errors which can be serialized in a response body.
 ///
@@ -699,3 +799,5 @@ fn fmt_as_json<T: Serialize>(v: &T, f: &mut Formatter<'_>) -> fmt::Result {
     let string = serde_json::to_string(v).map_err(|_| fmt::Error)?;
     write!(f, "{}", string)
 }
+=======
+>>>>>>> origin/main

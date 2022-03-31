@@ -1,7 +1,7 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 
 use crate::routes::{
-    dispatch_url, dispatch_web_socket, RouteBinding, UrlSegmentType, UrlSegmentValue,
+    dispatch_url, dispatch_web_socket, server_error, RouteBinding, UrlSegmentType, UrlSegmentValue,
 };
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
@@ -10,6 +10,7 @@ use futures_util::StreamExt;
 use jf_aap::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
 use jf_aap::TransactionVerifyingKey;
 use jf_primitives::merkle_tree::FilledMTBuilder;
+use key_set::{KeySet, VerifierKeySet};
 use phaselock::{
     error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
     traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
@@ -31,13 +32,13 @@ use tide_websockets::{WebSocket, WebSocketConnection};
 use toml::Value;
 use tracing::{debug, event, Level};
 use zerok_lib::{
-    api::*,
+    api::SpectrumError,
+    api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
-    state::key_set::KeySet,
     state::{
         ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, ValidatorState,
-        VerifierKeySet, MERKLE_HEIGHT,
+        MERKLE_HEIGHT,
     },
     testing::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo},
     universal_params::UNIVERSAL_PARAM,
@@ -580,7 +581,7 @@ async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respon
     let TransactionId(BlockId(block), tx) =
         UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
             .ok_or_else(|| {
-                server_error(Error::ParamError {
+                server_error(SpectrumError::Param {
                     param: String::from("txid"),
                     msg: String::from(
                         "Valid transaction ID required. Transaction IDs start with TX~.",
@@ -796,7 +797,9 @@ fn init_web_server(
         api: api.clone(),
         node,
     });
-    web_server.with(server::trace).with(server::add_error_body);
+    web_server
+        .with(server::trace)
+        .with(server::add_error_body::<_, SpectrumError>);
 
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;
