@@ -641,16 +641,16 @@ dependencies = [
 
 [[package]]
 name = "async-tungstenite"
-version = "0.16.1"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5682ea0913e5c20780fe5785abacb85a411e7437bf52a1bedb93ddb3972cb8dd"
+checksum = "a1b71b31561643aa8e7df3effe284fa83ab1a840e52294c5f4bd7bfd8b2becbb"
 dependencies = [
  "async-std",
  "futures-io",
  "futures-util",
  "log",
  "pin-project-lite 0.2.8",
- "tungstenite 0.16.0",
+ "tungstenite 0.17.2",
 ]
 
 [[package]]
@@ -689,6 +689,19 @@ name = "atomic-waker"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "065374052e7df7ee4047b1160cca5e1467a12351a40b3da123c870ba0b8eda2a"
+
+[[package]]
+name = "atomic_store"
+version = "0.1.0"
+source = "git+https://github.com/EspressoSystems/atomicstore?tag=0.1.0#a719ad0ec86831fb9b0cb9d9a4889e1bdf0f91e6"
+dependencies = [
+ "ark-serialize",
+ "bincode",
+ "chrono",
+ "glob",
+ "serde",
+ "snafu 0.6.10",
+]
 
 [[package]]
 name = "atomic_store"
@@ -1363,6 +1376,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom_debug"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8225047674d65dcf4321e6bd3e060bdbbe940604a99b1559827f3e61c498d1e"
+dependencies = [
+ "custom_debug_derive",
+]
+
+[[package]]
+name = "custom_debug_derive"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b35d34eb004bf2d33c093f1c55ee77829e8654644288d3b6afd8c2d99d23729"
+dependencies = [
+ "proc-macro2",
+ "syn",
+ "synstructure",
+]
+
+[[package]]
 name = "darling"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1405,6 +1438,17 @@ checksum = "e77a43b28d0668df09411cb0bc9a8c2adc40f9a048afe863e05fd43251e8e39c"
 dependencies = [
  "cfg-if 1.0.0",
  "num_cpus",
+]
+
+[[package]]
+name = "dashmap"
+version = "5.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c8858831f7781322e539ea39e72449c46b059638250c14344fec8d0aa6e539c"
+dependencies = [
+ "cfg-if 1.0.0",
+ "num_cpus",
+ "parking_lot",
 ]
 
 [[package]]
@@ -1669,7 +1713,7 @@ checksum = "46e245f4c8ec30c6415c56cb132c07e69e74f1942f6b4a4061da748b49f486ca"
 dependencies = [
  "cfg-if 1.0.0",
  "rustix",
- "windows-sys",
+ "windows-sys 0.30.0",
 ]
 
 [[package]]
@@ -2091,7 +2135,7 @@ dependencies = [
  "async-std",
  "async-trait",
  "cfg-if 1.0.0",
- "dashmap",
+ "dashmap 4.0.2",
  "http-types",
  "isahc",
  "log",
@@ -2877,6 +2921,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "427c3892f9e783d91cc128285287e70a59e206ca452770ece88a76f7a3eddd72"
 
 [[package]]
+name = "parking_lot"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87f5ec2493a61ac0506c0f4199f99070cbe83857b0337006a30f3e6719b8ef58"
+dependencies = [
+ "lock_api",
+ "parking_lot_core",
+]
+
+[[package]]
+name = "parking_lot_core"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "995f667a6c822200b0433ac218e05582f0e2efa1b922a3fd2fbaadc5f87bab37"
+dependencies = [
+ "cfg-if 1.0.0",
+ "libc",
+ "redox_syscall",
+ "smallvec",
+ "windows-sys 0.34.0",
+]
+
+[[package]]
 name = "password-hash"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2956,29 +3023,66 @@ dependencies = [
 
 [[package]]
 name = "phaselock"
-version = "0.0.5"
-source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=14586ed218a35cb48675b73d4a34ae7ae55c67e6#14586ed218a35cb48675b73d4a34ae7ae55c67e6"
+version = "0.0.6"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c#60b85f7eba2f93704682ce697c109f10eb47894c"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",
  "async-std",
- "async-tungstenite 0.16.1",
+ "async-tungstenite 0.17.2",
+ "atomic_store 0.1.0 (git+https://github.com/EspressoSystems/atomicstore?tag=0.1.0)",
  "bincode",
  "blake3 1.3.1",
  "byteorder",
- "dashmap",
+ "custom_debug",
+ "dashmap 5.2.0",
  "flume 0.10.12",
  "futures",
  "hex_fmt",
+ "phaselock-types",
+ "phaselock-utils",
  "rand 0.7.3",
  "rand_chacha 0.2.2",
  "serde",
- "snafu 0.6.10",
+ "serde_bytes",
+ "snafu 0.7.0",
  "threshold_crypto",
  "tracing",
  "tracing-error",
  "tracing-futures",
  "tracing-unwrap",
+]
+
+[[package]]
+name = "phaselock-types"
+version = "0.0.6"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c#60b85f7eba2f93704682ce697c109f10eb47894c"
+dependencies = [
+ "async-std",
+ "async-tungstenite 0.17.2",
+ "bincode",
+ "blake3 1.3.1",
+ "custom_debug",
+ "futures",
+ "hex_fmt",
+ "rand 0.7.3",
+ "rand_chacha 0.2.2",
+ "serde",
+ "serde_bytes",
+ "snafu 0.7.0",
+ "threshold_crypto",
+]
+
+[[package]]
+name = "phaselock-utils"
+version = "0.0.6"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c#60b85f7eba2f93704682ce697c109f10eb47894c"
+dependencies = [
+ "async-std",
+ "flume 0.10.12",
+ "futures",
+ "tracing",
+ "tracing-error",
 ]
 
 [[package]]
@@ -3662,7 +3766,7 @@ dependencies = [
  "async-scoped",
  "async-std",
  "async-trait",
- "atomic_store",
+ "atomic_store 0.1.0 (git+https://github.com/EspressoSystems/atomicstore.git)",
  "bincode",
  "bip0039",
  "chacha20",
@@ -3747,6 +3851,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce31e24b01e1e524df96f1c2fdd054405f8d7376249a5110886fb4b658484789"
 dependencies = [
  "serde_derive",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16ae07dd2f88a366f15bd0632ba725227018c69a1c8550a927324f8eb8368bb9"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -3838,6 +3951,17 @@ dependencies = [
  "cpufeatures",
  "digest 0.9.0",
  "opaque-debug",
+]
+
+[[package]]
+name = "sha-1"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "028f48d513f9678cda28f6e4064755b3fbb2af6acd672f2c209b62323f7aea0f"
+dependencies = [
+ "cfg-if 1.0.0",
+ "cpufeatures",
+ "digest 0.10.3",
 ]
 
 [[package]]
@@ -4388,7 +4512,7 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_json",
- "sha-1",
+ "sha-1 0.9.8",
  "tide",
 ]
 
@@ -4643,7 +4767,7 @@ dependencies = [
  "input_buffer",
  "log",
  "rand 0.8.5",
- "sha-1",
+ "sha-1 0.9.8",
  "thiserror",
  "url",
  "utf-8",
@@ -4662,7 +4786,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.5",
- "sha-1",
+ "sha-1 0.9.8",
  "thiserror",
  "url",
  "utf-8",
@@ -4670,9 +4794,9 @@ dependencies = [
 
 [[package]]
 name = "tungstenite"
-version = "0.16.0"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ad3713a14ae247f22a728a0456a545df14acf3867f905adff84be99e23b3ad1"
+checksum = "d96a2dea40e7570482f28eb57afbe42d97551905da6a9400acc5c328d24004f5"
 dependencies = [
  "base64 0.13.0",
  "byteorder",
@@ -4681,7 +4805,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.5",
- "sha-1",
+ "sha-1 0.10.0",
  "thiserror",
  "url",
  "utf-8",
@@ -4984,11 +5108,24 @@ version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "030b7ff91626e57a05ca64a07c481973cbb2db774e4852c9c7ca342408c6a99a"
 dependencies = [
- "windows_aarch64_msvc",
- "windows_i686_gnu",
- "windows_i686_msvc",
- "windows_x86_64_gnu",
- "windows_x86_64_msvc",
+ "windows_aarch64_msvc 0.30.0",
+ "windows_i686_gnu 0.30.0",
+ "windows_i686_msvc 0.30.0",
+ "windows_x86_64_gnu 0.30.0",
+ "windows_x86_64_msvc 0.30.0",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5acdd78cb4ba54c0045ac14f62d8f94a03d10047904ae2a40afa1e99d8f70825"
+dependencies = [
+ "windows_aarch64_msvc 0.34.0",
+ "windows_i686_gnu 0.34.0",
+ "windows_i686_msvc 0.34.0",
+ "windows_x86_64_gnu 0.34.0",
+ "windows_x86_64_msvc 0.34.0",
 ]
 
 [[package]]
@@ -4998,10 +5135,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29277a4435d642f775f63c7d1faeb927adba532886ce0287bd985bffb16b6bca"
 
 [[package]]
+name = "windows_aarch64_msvc"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17cffbe740121affb56fad0fc0e421804adf0ae00891205213b5cecd30db881d"
+
+[[package]]
 name = "windows_i686_gnu"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1145e1989da93956c68d1864f32fb97c8f561a8f89a5125f6a2b7ea75524e4b8"
+
+[[package]]
+name = "windows_i686_gnu"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2564fde759adb79129d9b4f54be42b32c89970c18ebf93124ca8870a498688ed"
 
 [[package]]
 name = "windows_i686_msvc"
@@ -5010,16 +5159,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4a09e3a0d4753b73019db171c1339cd4362c8c44baf1bcea336235e955954a6"
 
 [[package]]
+name = "windows_i686_msvc"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cd9d32ba70453522332c14d38814bceeb747d80b3958676007acadd7e166956"
+
+[[package]]
 name = "windows_x86_64_gnu"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ca64fcb0220d58db4c119e050e7af03c69e6f4f415ef69ec1773d9aab422d5a"
 
 [[package]]
+name = "windows_x86_64_gnu"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfce6deae227ee8d356d19effc141a509cc503dfd1f850622ec4b0f84428e1f4"
+
+[[package]]
 name = "windows_x86_64_msvc"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08cabc9f0066848fef4bc6a1c1668e6efce38b661d2aeec75d18d8617eebb5f1"
+
+[[package]]
+name = "windows_x86_64_msvc"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d19538ccc21819d01deaf88d6a17eae6596a12e9aafdbb97916fb49896d89de9"
 
 [[package]]
 name = "wyz"
@@ -5120,7 +5287,7 @@ dependencies = [
  "async-trait",
  "async-tungstenite 0.15.0",
  "async_executors",
- "atomic_store",
+ "atomic_store 0.1.0 (git+https://github.com/EspressoSystems/atomicstore.git)",
  "bincode",
  "bitvec",
  "chacha20",
