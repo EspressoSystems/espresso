@@ -1,6 +1,7 @@
 extern crate zerok_client;
 use zerok_client::cli_client::cli_test;
 
+#[ignore]
 #[test]
 fn demo2() {
     cli_test(|t| {
