@@ -509,8 +509,6 @@ async fn init_state_and_phaselock(
         None
     };
 
-    task::sleep(core::time::Duration::from_secs(5)).await;
-
     let storage = get_store_dir(node_id);
     let phaselock_persistence = [Path::new(&storage), Path::new("phaselock")]
         .iter()
