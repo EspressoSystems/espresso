@@ -1,4 +1,4 @@
-// Copyright © 2021 Translucence Research, Inc. All rights reserved.
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
 
 use async_std::prelude::*;
 use tide_tracing::TraceMiddleware;
@@ -23,6 +23,8 @@ async fn report_params(req: tide::Request<State>) -> tide::Result<String> {
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::fmt()
+        .compact()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_max_level(tracing::Level::DEBUG)
         .init();
     let state = State {

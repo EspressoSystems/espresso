@@ -35,11 +35,11 @@ In the implementation:
  - N == 512, since `Blake2B` has a 64-byte output
  - `EMPTY_HASH` is the all-zero string.
  - `H_elem(nul)`   is `h(canonical_serialize(nul))` where `h` is `Blake2B`
-   personalized with "AAPSet Elem"
+   personalized with "CAPSet Elem"
  - `H_leaf(nul)`   is `h(canonical_serialize(nul))` where `h` is `Blake2B`
-   personalized with "AAPSet Leaf"
+   personalized with "CAPSet Leaf"
  - `H_branch(nul)` is `h("l"||l||"r"||r)` where `h` is `Blake2B`
-   personalized with "AAPSet Branch"
+   personalized with "CAPSet Branch"
 
 We also assume that any sparse array `arr` of size `2^N` has less than
 `negl(N)` non-empty elements.

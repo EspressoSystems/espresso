@@ -1,4 +1,4 @@
-// Copyright © 2021 Translucence Research, Inc. All rights reserved.
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
 
 use crate::WebState;
 use api::{
@@ -22,7 +22,7 @@ use tracing::{event, Level};
 use zerok_lib::{
     api,
     api::*,
-    ledger::SpectrumLedger,
+    ledger::EspressoLedger,
     node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService},
     state::{state_comm::LedgerStateCommitment, ElaboratedBlock},
 };
@@ -151,8 +151,8 @@ pub fn check_api(api: toml::Value) -> bool {
     !missing_definition
 }
 
-// Wrapper around `api::server_error` forcing `SpectrumError` as the error type.
-pub fn server_error<E: Into<SpectrumError>>(err: E) -> tide::Error {
+// Wrapper around `api::server_error` forcing `EspressoError` as the error type.
+pub fn server_error<E: Into<EspressoError>>(err: E) -> tide::Error {
     api::server_error(err)
 }
 
@@ -200,7 +200,7 @@ pub fn dummy_url_eval(
   </body>
 </html>",
             route_pattern.split_once('/').unwrap().0,
-            route_pattern.to_string(),
+            route_pattern,
             bindings
         )))
         .content_type(tide::http::mime::HTML)
@@ -469,7 +469,7 @@ async fn get_nullifier(
 async fn get_event(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &impl QueryService,
-) -> Result<LedgerEvent<SpectrumLedger>, tide::Error> {
+) -> Result<LedgerEvent<EspressoLedger>, tide::Error> {
     let index = bindings[":index"].value.as_index()? as u64;
     let mut events = query_service.subscribe(index).await;
     events.next().await.ok_or_else(|| {

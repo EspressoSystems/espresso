@@ -20,8 +20,8 @@
 // `-w KEY_FILE.pub` and pass the key pair to `random_wallet` with `-k KEY_FILE`.
 
 use async_std::task::sleep;
-use jf_aap::keys::UserPubKey;
-use jf_aap::structs::{AssetCode, AssetPolicy};
+use jf_cap::keys::UserPubKey;
+use jf_cap::structs::{AssetCode, AssetPolicy};
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
@@ -36,13 +36,13 @@ use structopt::StructOpt;
 use tracing::{event, Level};
 use zerok_lib::{
     api::client,
-    api::SpectrumError,
-    ledger::SpectrumLedger,
+    api::EspressoError,
+    ledger::EspressoLedger,
     universal_params::UNIVERSAL_PARAM,
     wallet::network::{NetworkBackend, Url},
 };
 
-type Wallet = seahorse::Wallet<'static, NetworkBackend<'static, ()>, SpectrumLedger>;
+type Wallet = seahorse::Wallet<'static, NetworkBackend<'static, ()>, EspressoLedger>;
 
 #[derive(StructOpt)]
 struct Args {
@@ -67,19 +67,19 @@ struct TrivialWalletLoader {
     dir: PathBuf,
 }
 
-impl WalletLoader<SpectrumLedger> for TrivialWalletLoader {
+impl WalletLoader<EspressoLedger> for TrivialWalletLoader {
     type Meta = ();
 
     fn location(&self) -> PathBuf {
         self.dir.clone()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<SpectrumLedger>> {
+    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<EspressoLedger>> {
         let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &Self::Meta) -> Result<KeyTree, WalletError<SpectrumLedger>> {
+    fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, WalletError<EspressoLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)
     }
 }
@@ -90,7 +90,10 @@ async fn retry_delay() {
 
 #[async_std::main]
 async fn main() {
-    tracing_subscriber::fmt().pretty().init();
+    tracing_subscriber::fmt()
+        .compact()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
     let args = Args::from_args();
 
@@ -120,6 +123,7 @@ async fn main() {
                     bincode::deserialize(&bytes).unwrap_or_else(|err| {
                         panic!("invalid private key file: {}", err);
                     }),
+                    "Random wallet key".to_string(),
                     EventIndex::default(),
                 )
                 .await
@@ -128,9 +132,12 @@ async fn main() {
                 });
         }
         None => {
-            wallet.generate_user_key(None).await.unwrap_or_else(|err| {
-                panic!("error generating random key: {}", err);
-            });
+            wallet
+                .generate_user_key("Random wallet key".to_string(), None)
+                .await
+                .unwrap_or_else(|err| {
+                    panic!("error generating random key: {}", err);
+                });
         }
     }
     let pub_key = wallet.pub_keys().await.remove(0);
@@ -143,7 +150,7 @@ async fn main() {
     );
 
     // Wait for initial balance.
-    while wallet.balance(&address, &AssetCode::native()).await == 0 {
+    while wallet.balance(&AssetCode::native()).await == 0 {
         event!(Level::INFO, "waiting for initial balance");
         retry_delay().await;
     }
@@ -152,20 +159,24 @@ async fn main() {
     let my_asset = match wallet
         .assets()
         .await
-        .into_values()
+        .into_iter()
         .find(|info| info.mint_info.is_some())
     {
         Some(info) => {
             event!(
                 Level::INFO,
                 "found saved wallet with custom asset type {}",
-                info.asset.code
+                info.definition.code
             );
-            info.asset
+            info.definition
         }
         None => {
             let my_asset = wallet
-                .define_asset(&[], AssetPolicy::default())
+                .define_asset(
+                    "Random wallet asset".to_string(),
+                    &[],
+                    AssetPolicy::default(),
+                )
                 .await
                 .expect("failed to define asset");
             event!(Level::INFO, "defined a new asset type: {}", my_asset.code);
@@ -173,7 +184,7 @@ async fn main() {
         }
     };
     // If we don't yet have a balance of our asset type, mint some.
-    if wallet.balance(&address, &my_asset.code).await == 0 {
+    if wallet.balance(&my_asset.code).await == 0 {
         event!(Level::INFO, "minting my asset type {}", my_asset.code);
         loop {
             let txn = wallet
@@ -198,7 +209,7 @@ async fn main() {
         .set_base_url(args.server)
         .try_into()
         .expect("failed to start HTTP client");
-    let client = client.with(client::parse_error_body::<SpectrumError>);
+    let client = client.with(client::parse_error_body::<EspressoError>);
     loop {
         // Get a list of all users in our group (this will include our own public key).
         let peers: Vec<UserPubKey> = match client.get("getusers").recv_json().await {
@@ -215,7 +226,7 @@ async fn main() {
         };
         // Filter out our own public key and randomly choose one of the other ones to transfer to.
         let recipient =
-            match peers.choose_weighted(&mut rng, |pk| if *pk == pub_key { 0 } else { 1 }) {
+            match peers.choose_weighted(&mut rng, |pk| if *pk == pub_key { 0u64 } else { 1u64 }) {
                 Ok(recipient) => recipient,
                 Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
                     event!(Level::WARN, "no peers yet, retrying...");
@@ -229,9 +240,9 @@ async fn main() {
 
         // Get a list of assets for which we have a non-zero balance.
         let mut asset_balances = vec![];
-        for code in wallet.assets().await.keys() {
-            if wallet.balance(&address, code).await > 0 {
-                asset_balances.push(*code);
+        for info in wallet.assets().await {
+            if wallet.balance(&info.definition.code).await > 0 {
+                asset_balances.push(info.definition.code);
             }
         }
         // Randomly choose an asset type for the transfer.
@@ -256,7 +267,7 @@ async fn main() {
             recipient,
         );
         let txn = match wallet
-            .transfer(&address, asset, &[(recipient.address(), amount)], fee)
+            .transfer(Some(&address), asset, &[(recipient.address(), amount)], fee)
             .await
         {
             Ok(txn) => txn,

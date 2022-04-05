@@ -1,24 +1,28 @@
 use crate::{
     api,
-    api::{ClientError, CommittedTransaction, SpectrumError},
-    ledger::SpectrumLedger,
+    api::{ClientError, EspressoError},
+    ledger::EspressoLedger,
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{ElaboratedTransaction, MERKLE_HEIGHT},
 };
-use api::{client::*, BlockId, TransactionId};
+use api::client::*;
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
 use futures::future::ready;
 use futures::prelude::*;
-use jf_aap::keys::{UserAddress, UserPubKey};
-use jf_aap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
-use jf_aap::structs::{Nullifier, ReceiverMemo};
-use jf_aap::Signature;
+use jf_cap::keys::{UserAddress, UserKeyPair, UserPubKey};
+use jf_cap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
+use jf_cap::structs::Nullifier;
+use jf_cap::MerkleTree;
+use jf_cap::Signature;
 use key_set::{ProverKeySet, SizedKey};
+use net::{BlockId, TransactionId};
 use node::{LedgerSnapshot, LedgerSummary};
+use seahorse::txn_builder::PendingTransaction;
+use seahorse::txn_builder::TransactionInfo;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     hd::KeyTree,
@@ -35,23 +39,29 @@ use surf::http::content::{Accept, MediaTypeProposal};
 use surf::http::{headers, mime};
 pub use surf::Url;
 
-pub struct NetworkBackend<'a, Meta: Serialize + DeserializeOwned> {
+pub struct NetworkBackend<'a, Meta: PartialEq + Serialize + DeserializeOwned + Clone> {
     univ_param: &'a UniversalParam,
     query_client: surf::Client,
     bulletin_client: surf::Client,
     validator_client: surf::Client,
-    storage: Arc<Mutex<AtomicWalletStorage<'a, SpectrumLedger, Meta>>>,
+    storage: Arc<Mutex<AtomicWalletStorage<'a, EspressoLedger, Meta>>>,
     key_stream: KeyTree,
 }
 
-impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InsertPubKey {
+    pub pub_key_bytes: Vec<u8>,
+    pub sig: Signature,
+}
+
+impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
     pub fn new(
         univ_param: &'a UniversalParam,
         query_url: Url,
         bulletin_url: Url,
         validator_url: Url,
-        loader: &mut impl WalletLoader<SpectrumLedger, Meta = Meta>,
-    ) -> Result<Self, WalletError<SpectrumLedger>> {
+        loader: &mut impl WalletLoader<EspressoLedger, Meta = Meta>,
+    ) -> Result<Self, WalletError<EspressoLedger>> {
         let storage = AtomicWalletStorage::new(loader, 1024)?;
         Ok(Self {
             query_client: Self::client(query_url)?,
@@ -63,25 +73,25 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
         })
     }
 
-    fn client(base_url: Url) -> Result<surf::Client, WalletError<SpectrumLedger>> {
+    fn client(base_url: Url) -> Result<surf::Client, WalletError<EspressoLedger>> {
         let client: surf::Client = surf::Config::new()
             .set_base_url(base_url)
             .try_into()
             .context(ClientConfigError)?;
-        Ok(client.with(parse_error_body::<SpectrumError>))
+        Ok(client.with(parse_error_body::<EspressoError>))
     }
 
     async fn get<T: for<'de> Deserialize<'de>>(
         &self,
         uri: impl AsRef<str>,
-    ) -> Result<T, WalletError<SpectrumLedger>> {
+    ) -> Result<T, WalletError<EspressoLedger>> {
         let mut res = self
             .query_client
             .get(uri)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, WalletError<SpectrumLedger>>(ClientError)?;
+            .context::<_, WalletError<EspressoLedger>>(ClientError)?;
         response_body(&mut res).await.context(ClientError)
     }
 
@@ -89,14 +99,14 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
         client: &surf::Client,
         uri: impl AsRef<str>,
         body: &T,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
+    ) -> Result<(), WalletError<EspressoLedger>> {
         client
             .post(uri)
             .body_bytes(bincode::serialize(body).context(BincodeError)?)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, WalletError<SpectrumLedger>>(ClientError)?;
+            .context::<_, WalletError<EspressoLedger>>(ClientError)?;
         Ok(())
     }
 
@@ -114,15 +124,15 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
 }
 
 #[async_trait]
-impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLedger>
-    for NetworkBackend<'a, Meta>
+impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
+    WalletBackend<'a, EspressoLedger> for NetworkBackend<'a, Meta>
 {
-    type EventStream = node::EventStream<(LedgerEvent<SpectrumLedger>, EventSource)>;
-    type Storage = AtomicWalletStorage<'a, SpectrumLedger, Meta>;
+    type EventStream = node::EventStream<(LedgerEvent<EspressoLedger>, EventSource)>;
+    type Storage = AtomicWalletStorage<'a, EspressoLedger, Meta>;
 
     async fn create(
         &mut self,
-    ) -> Result<WalletState<'a, SpectrumLedger>, WalletError<SpectrumLedger>> {
+    ) -> Result<WalletState<'a, EspressoLedger>, WalletError<EspressoLedger>> {
         let LedgerSummary {
             num_blocks,
             num_events,
@@ -140,7 +150,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = self.univ_param;
         let proving_keys = Arc::new(ProverKeySet {
-            mint: jf_aap::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
+            mint: jf_cap::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
                 .context(CryptoError)?
                 .0,
             freeze: validator
@@ -148,8 +158,8 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
                 .freeze
                 .iter()
                 .map(|k| {
-                    Ok::<FreezeProvingKey, WalletError<SpectrumLedger>>(
-                        jf_aap::proof::freeze::preprocess(
+                    Ok::<FreezeProvingKey, WalletError<EspressoLedger>>(
+                        jf_cap::proof::freeze::preprocess(
                             univ_param,
                             k.num_inputs(),
                             MERKLE_HEIGHT,
@@ -164,8 +174,8 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
                 .xfr
                 .iter()
                 .map(|k| {
-                    Ok::<TransferProvingKey, WalletError<SpectrumLedger>>(
-                        jf_aap::proof::transfer::preprocess(
+                    Ok::<TransferProvingKey, WalletError<EspressoLedger>>(
+                        jf_cap::proof::transfer::preprocess(
                             univ_param,
                             k.num_inputs(),
                             k.num_outputs(),
@@ -200,13 +210,11 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
 
                 transactions: Default::default(),
             },
-            key_scans: Default::default(),
             key_state: Default::default(),
-            auditable_assets: Default::default(),
-            audit_keys: Default::default(),
-            freeze_keys: Default::default(),
-            user_keys: Default::default(),
-            defined_assets: Default::default(),
+            assets: Default::default(),
+            viewing_accounts: Default::default(),
+            freezing_accounts: Default::default(),
+            sending_accounts: Default::default(),
         };
         self.storage().await.create(&state).await?;
 
@@ -272,7 +280,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
     async fn get_public_key(
         &self,
         address: &UserAddress,
-    ) -> Result<UserPubKey, WalletError<SpectrumLedger>> {
+    ) -> Result<UserPubKey, WalletError<EspressoLedger>> {
         self.get(format!("getuser/{}", api::UserAddress(address.clone())))
             .await
     }
@@ -281,7 +289,7 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
         &self,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
-    ) -> Result<(bool, SetMerkleProof), WalletError<SpectrumLedger>> {
+    ) -> Result<(bool, SetMerkleProof), WalletError<EspressoLedger>> {
         if let Some(ret) = set.contains(nullifier) {
             Ok(ret)
         } else {
@@ -293,40 +301,68 @@ impl<'a, Meta: Send + Serialize + DeserializeOwned> WalletBackend<'a, SpectrumLe
         }
     }
 
-    async fn get_transaction(
-        &self,
-        txn_id: u64,
-        block_id: u64,
-    ) -> Result<ElaboratedTransaction, WalletError<SpectrumLedger>> {
-        let txn_id = TransactionId(BlockId(block_id as usize), txn_id as usize);
-        let CommittedTransaction { data, proofs, .. } =
-            self.get(format!("/gettransaction/{}", txn_id)).await?;
-        Ok(ElaboratedTransaction { txn: data, proofs })
-    }
-
     async fn register_user_key(
         &mut self,
-        pub_key: &UserPubKey,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
-        Self::post(&self.bulletin_client, "/users", pub_key).await
+        key_pair: &UserKeyPair,
+    ) -> Result<(), WalletError<EspressoLedger>> {
+        let pub_key_bytes = bincode::serialize(&key_pair.pub_key()).unwrap();
+        let sig = key_pair.sign(&pub_key_bytes);
+        let json_request = InsertPubKey { pub_key_bytes, sig };
+        match self
+            .bulletin_client
+            .post("users")
+            .content_type(surf::http::mime::JSON)
+            .body_json(&json_request)
+            .unwrap()
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(err) => Err(WalletError::Failed {
+                msg: format!("error inserting public key: {}", err),
+            }),
+        }
     }
 
     async fn submit(
         &mut self,
         txn: ElaboratedTransaction,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
+        // TODO: do something with this?
+        _txn_info: TransactionInfo<EspressoLedger>,
+    ) -> Result<(), WalletError<EspressoLedger>> {
         Self::post(&self.validator_client, "/submit", &txn).await
     }
 
-    async fn post_memos(
+    async fn finalize(
         &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        signature: Signature,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
-        let txid = TransactionId(BlockId(block_id as usize), txn_id as usize);
-        let body = api::PostMemos { memos, signature };
-        Self::post(&self.bulletin_client, format!("/memos/{}", txid), &body).await
+        txn: PendingTransaction<EspressoLedger>,
+        txid: Option<(u64, u64)>,
+    ) {
+        // -> Result<(), WalletError<EspressoLedger>>
+
+        if let Some(txid) = txid {
+            let body = api::PostMemos {
+                memos: txn
+                    .info
+                    .memos
+                    .into_iter()
+                    .collect::<Option<Vec<_>>>()
+                    .unwrap(),
+                signature: txn.info.sig,
+            };
+            let txid = TransactionId(BlockId(txid.0 as usize), txid.1 as usize);
+            // TODO: fix the trait so we don't need this unwrap
+            Self::post(&self.bulletin_client, format!("/memos/{}", txid), &body)
+                .await
+                .unwrap()
+        }
+    }
+
+    async fn get_initial_scan_state(
+        &self,
+        _from: EventIndex,
+    ) -> Result<(MerkleTree, EventIndex), WalletError<EspressoLedger>> {
+        // TODO: how should this initialize?
+        let LedgerSnapshot { records, .. } = dbg!(self.get("getsnapshot/0/true").await)?;
+        Ok((records.0, Default::default()))
     }
 }

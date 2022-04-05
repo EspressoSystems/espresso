@@ -6,7 +6,7 @@ use arbitrary_wrappers::*;
 use ark_serialize::*;
 use bitvec::vec::BitVec;
 use core::mem;
-use jf_aap::structs::Nullifier;
+use jf_cap::structs::Nullifier;
 use serde::{Deserialize, Serialize};
 
 pub mod set_hash {
@@ -19,7 +19,7 @@ pub mod set_hash {
 
     impl commit::Committable for Elem {
         fn commit(&self) -> commit::Commitment<Self> {
-            commit::RawCommitmentBuilder::new("AAPSet Elem")
+            commit::RawCommitmentBuilder::new("CAPSet Elem")
                 .var_size_bytes(&canonical::serialize(&self.0).unwrap())
                 .finalize()
         }
@@ -42,12 +42,12 @@ pub mod set_hash {
             use commit::RawCommitmentBuilder;
             use SetMerkleTreeNode::*;
             match self {
-                EmptySubtree => RawCommitmentBuilder::new("AAPSet Empty").finalize(),
-                Leaf { elem } => RawCommitmentBuilder::new("AAPSet Leaf")
+                EmptySubtree => RawCommitmentBuilder::new("CAPSet Empty").finalize(),
+                Leaf { elem } => RawCommitmentBuilder::new("CAPSet Leaf")
                     .var_size_bytes(&canonical::serialize(elem).unwrap())
                     .finalize(),
 
-                Branch { l, r } => RawCommitmentBuilder::new("AAPSet Branch")
+                Branch { l, r } => RawCommitmentBuilder::new("CAPSet Branch")
                     .field("l", l.0)
                     .field("r", r.0)
                     .finalize(),

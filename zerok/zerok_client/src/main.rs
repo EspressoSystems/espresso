@@ -1,5 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////
-// The Spectrum Wallet Frontend
+// The Espresso Wallet Frontend
 //
 // For now, this "frontend" is simply a comand-line read-eval-print loop which
 // allows the user to enter commands for a wallet interactively.
@@ -7,18 +7,18 @@
 
 mod cli_client;
 
-use jf_aap::proof::UniversalParam;
+use jf_cap::proof::UniversalParam;
 use seahorse::{
     cli::*,
     io::SharedIO,
-    loader::{LoadMethod, LoaderMetadata, WalletLoader},
+    loader::{LoaderMetadata, WalletLoader},
     WalletError,
 };
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
 use zerok_lib::{
-    ledger::SpectrumLedger,
+    ledger::EspressoLedger,
     wallet::network::{NetworkBackend, Url},
 };
 
@@ -36,20 +36,6 @@ pub struct Args {
     /// exists there, it will be loaded. Otherwise, a new wallet will be created.
     #[structopt(short, long)]
     pub storage: Option<PathBuf>,
-
-    /// Store the contents of the wallet in plaintext.
-    ///
-    /// You will not require a password to access your wallet, and your wallet will not be protected
-    /// from malicious software that gains access to a device where you loaded your wallet.
-    ///
-    /// This option is only available when creating a new wallet. When loading an existing wallet, a
-    /// password will always be required if the wallet was created without the --unencrypted flag.
-    #[structopt(long)]
-    pub unencrypted: bool,
-
-    /// Load the wallet using a password and salt, rather than a mnemonic phrase.
-    #[structopt(long)]
-    pub password: bool,
 
     /// Create a new wallet and store it an a temporary location which will be deleted on exit.
     ///
@@ -87,35 +73,23 @@ impl CLIArgs for Args {
         }
     }
 
-    fn encrypted(&self) -> bool {
-        !self.unencrypted
-    }
-
-    fn load_method(&self) -> LoadMethod {
-        if self.password {
-            LoadMethod::Password
-        } else {
-            LoadMethod::Mnemonic
-        }
-    }
-
     fn use_tmp_storage(&self) -> bool {
         self.tmp_storage
     }
 }
 
-struct SpectrumCli;
+struct EspressoCli;
 
-impl<'a> CLI<'a> for SpectrumCli {
-    type Ledger = SpectrumLedger;
+impl<'a> CLI<'a> for EspressoCli {
+    type Ledger = EspressoLedger;
     type Backend = NetworkBackend<'a, LoaderMetadata>;
     type Args = Args;
 
     fn init_backend(
         univ_param: &'a UniversalParam,
         args: Self::Args,
-        loader: &mut impl WalletLoader<SpectrumLedger, Meta = LoaderMetadata>,
-    ) -> Result<Self::Backend, WalletError<SpectrumLedger>> {
+        loader: &mut impl WalletLoader<EspressoLedger, Meta = LoaderMetadata>,
+    ) -> Result<Self::Backend, WalletError<EspressoLedger>> {
         let server = args.server.ok_or(WalletError::Failed {
             msg: String::from("server is required"),
         })?;
@@ -125,7 +99,7 @@ impl<'a> CLI<'a> for SpectrumCli {
 
 #[async_std::main]
 async fn main() {
-    if let Err(err) = cli_main::<SpectrumLedger, SpectrumCli>(Args::from_args()).await {
+    if let Err(err) = cli_main::<EspressoLedger, EspressoCli>(Args::from_args()).await {
         println!("{}", err);
         exit(1);
     }

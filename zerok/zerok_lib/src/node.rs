@@ -1,7 +1,7 @@
 use crate::full_persistence::FullPersistence;
 pub use crate::state::state_comm::LedgerStateCommitment;
 use crate::{
-    ledger::SpectrumLedger,
+    ledger::EspressoLedger,
     ser_test,
     set_merkle_tree::*,
     state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
@@ -18,7 +18,7 @@ pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::task::SpawnExt;
 use itertools::izip;
-use jf_aap::{
+use jf_cap::{
     keys::{UserAddress, UserPubKey},
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
     MerkleTree, Signature,
@@ -180,7 +180,7 @@ pub trait QueryService {
 
     /// Get an asynchronous stream which yields LedgerEvents when things happen on the ledger or
     /// the associated bulletin board.
-    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<SpectrumLedger>>;
+    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<EspressoLedger>>;
 
     /// Broadcast that a set of receiver memos corresponds to a particular transaction. The memos
     /// must be signed using the signing key for the specified transaction. The sender of a message
@@ -282,10 +282,10 @@ struct FullState {
     // persistent storage) and this will not be necessary.
     proposed: ElaboratedBlock,
     // The send ends of all channels which are subscribed to events.
-    subscribers: Vec<mpsc::UnboundedSender<LedgerEvent<SpectrumLedger>>>,
+    subscribers: Vec<mpsc::UnboundedSender<LedgerEvent<EspressoLedger>>>,
     // Clients which have subscribed to events starting at some time in the future, to be added to
     // `subscribers` when the time comes.
-    pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<LedgerEvent<SpectrumLedger>>>>,
+    pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<LedgerEvent<EspressoLedger>>>>,
 }
 
 impl FullState {
@@ -314,7 +314,7 @@ impl FullState {
                             ValidationError::Failed {}
                         }
                     };
-                    self.send_event(LedgerEvent::<SpectrumLedger>::Reject {
+                    self.send_event(LedgerEvent::<EspressoLedger>::Reject {
                         block: self.proposed.clone(),
                         error: err,
                     });
@@ -407,7 +407,7 @@ impl FullState {
         }
     }
 
-    fn send_event(&mut self, event: LedgerEvent<SpectrumLedger>) {
+    fn send_event(&mut self, event: LedgerEvent<EspressoLedger>) {
         // Subscribers who asked for a subscription starting from the current time can now be added
         // to the list of active subscribers.
         let now = self.full_persisted.events_iter().len() as u64;
@@ -428,7 +428,7 @@ impl FullState {
         self.full_persisted.commit_events();
     }
 
-    fn subscribe(&mut self, t: u64) -> EventStream<LedgerEvent<SpectrumLedger>> {
+    fn subscribe(&mut self, t: u64) -> EventStream<LedgerEvent<EspressoLedger>> {
         let (sender, receiver) = mpsc::unbounded();
         if (t as usize) < self.full_persisted.events_iter().len() {
             // If the start time is in the past, send the subscriber all saved events since the
@@ -617,7 +617,11 @@ impl FullState {
                 merkle_paths
             )
             .collect(),
-            transaction: Some((block_id as u64, txn_id as u64)),
+            transaction: Some((
+                block_id as u64,
+                txn_id as u64,
+                reef::cap::TransactionKind::Unknown,
+            )),
         };
         self.send_event(event);
 
@@ -653,7 +657,7 @@ impl FullState {
 
 /// A QueryService that aggregates the full ledger state by observing consensus.
 pub struct PhaseLockQueryService<'a> {
-    _univ_param: &'a jf_aap::proof::UniversalParam,
+    _univ_param: &'a jf_cap::proof::UniversalParam,
     state: Arc<RwLock<FullState>>,
     // When dropped, this handle will cancel and join the event handling task. It is not used
     // explicitly; it is merely stored with the rest of the struct for the auto-generated drop glue.
@@ -667,7 +671,7 @@ impl<'a> PhaseLockQueryService<'a> {
         // The current state of the network.
         //todo !jeb.bearer Query these parameters from another full node if we are not starting off
         // a fresh network.
-        univ_param: &'a jf_aap::proof::UniversalParam,
+        univ_param: &'a jf_cap::proof::UniversalParam,
         mut validator: ValidatorState,
         record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
@@ -759,7 +763,7 @@ impl<'a> PhaseLockQueryService<'a> {
 
     // pub fn load(
     //     event_source: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
-    //     univ_param: &'a jf_aap::proof::UniversalParam,
+    //     univ_param: &'a jf_cap::proof::UniversalParam,
     //     full_persisted: FullPersistence,
     // ) -> Self {
     //     unimplemented!("loading QueryService")
@@ -824,7 +828,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
         Ok(nullifiers.contains(n).unwrap())
     }
 
-    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<SpectrumLedger>> {
+    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<EspressoLedger>> {
         let mut state = self.state.write().await;
         state.subscribe(i)
     }
@@ -873,7 +877,7 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
         // The current state of the network.
         //todo !jeb.bearer Query these parameters from another full node if we are not starting off
         // a fresh network.
-        univ_param: &'a jf_aap::proof::UniversalParam,
+        univ_param: &'a jf_cap::proof::UniversalParam,
         state: ValidatorState,
         record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
@@ -964,7 +968,7 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
         self.as_query_service().nullifier_proof(root, n).await
     }
 
-    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<SpectrumLedger>> {
+    async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<EspressoLedger>> {
         self.as_query_service().subscribe(i).await
     }
 
@@ -1001,7 +1005,7 @@ mod tests {
         universal_params::UNIVERSAL_PARAM,
     };
     use async_std::task::block_on;
-    use jf_aap::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
+    use jf_cap::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
     use jf_primitives::schnorr_dsa::KeyPair;
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};

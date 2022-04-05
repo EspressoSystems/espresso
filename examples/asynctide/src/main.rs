@@ -1,4 +1,4 @@
-// Copyright © 2021 Translucence Research, Inc. All rights reserved.
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use futures_util::StreamExt;
@@ -12,6 +12,7 @@ use tracing::{event, Level};
 
 #[derive(Clone)]
 struct Connection {
+    #[allow(dead_code)]
     id: String,
     wsc: WebSocketConnection,
 }
@@ -132,6 +133,8 @@ async fn handle_web_socket(req: Request<State>, mut wsc: WebSocketConnection) ->
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::fmt()
+        .compact()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_max_level(tracing::Level::DEBUG)
         .init();
     let mut app = tide::with_state(State::new());
