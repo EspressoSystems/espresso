@@ -2637,7 +2637,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "shellexpand",
- "snafu 0.6.10",
+ "snafu 0.7.0",
  "structopt",
  "strum",
  "strum_macros",
@@ -3653,7 +3653,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.2.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#40015f910dcde8d8ea7a8f3715cdc0d433407160"
+source = "git+https://github.com/EspressoSystems/seahorse.git#1c9d03292f728db6b8811f1c47ce8b82e4ca3ec4"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -3691,7 +3691,7 @@ dependencies = [
  "rustyline",
  "serde",
  "sha3 0.9.1",
- "snafu 0.6.10",
+ "snafu 0.7.0",
  "structopt",
  "strum",
  "strum_macros",
@@ -5095,7 +5095,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "snafu 0.6.10",
+ "snafu 0.7.0",
  "structopt",
  "surf",
  "tagged-base64",
@@ -5160,7 +5160,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha3 0.9.1",
- "snafu 0.6.10",
+ "snafu 0.7.0",
  "strum",
  "strum_macros",
  "surf",

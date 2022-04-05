@@ -144,13 +144,10 @@ impl BlockContents<H_256> for ElaboratedBlock {
     }
 
     fn hash(&self) -> phaselock::BlockHash<H_256> {
-        use std::convert::TryInto;
-
         phaselock::BlockHash::<H_256>::from_array(self.commit().try_into().unwrap())
     }
 
     fn hash_bytes(bytes: &[u8]) -> phaselock::BlockHash<H_256> {
-        use std::convert::TryInto;
         // TODO: fix this hack, it is specifically working around the
         // misuse-preventing `T: Committable` on `RawCommitmentBuilder`
         let ret = commit::RawCommitmentBuilder::<Block>::new("PhaseLock bytes")
@@ -160,15 +157,13 @@ impl BlockContents<H_256> for ElaboratedBlock {
     }
 
     fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<H_256> {
-        use std::convert::TryInto;
-
         phaselock::BlockHash::<H_256>::from_array(txn.commit().try_into().unwrap())
     }
 }
 
 // TODO
 #[derive(Debug, Snafu, Serialize, Deserialize)]
-#[snafu(visibility = "pub(crate)")]
+#[snafu(visibility(pub(crate)))]
 pub enum ValidationError {
     NullifierAlreadyExists {
         nullifier: Nullifier,

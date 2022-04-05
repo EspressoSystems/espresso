@@ -22,7 +22,7 @@ use seahorse::{
     hd, testing,
     testing::MockEventSource,
     txn_builder::{PendingTransaction, RecordDatabase, TransactionInfo, TransactionState},
-    CryptoError, WalletBackend, WalletError, WalletState,
+    CryptoSnafu, WalletBackend, WalletError, WalletState,
 };
 use snafu::ResultExt;
 use std::collections::HashMap;
@@ -111,7 +111,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
         let kind = txn.kind();
 
         txn.verify_receiver_memos_signature(&memos, &sig)
-            .context(CryptoError)?;
+            .context(CryptoSnafu)?;
 
         let merkle_paths = uids
             .iter()

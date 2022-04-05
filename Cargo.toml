@@ -1,4 +1,6 @@
 [workspace]
+resolver = "2"
+
 members = [
     "examples/asynctide",
     "examples/multi_machine",
