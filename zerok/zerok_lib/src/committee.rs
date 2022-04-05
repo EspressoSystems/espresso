@@ -1,4 +1,6 @@
-use phaselock::{committee::DynamicCommittee, traits::Election, BlockHash, PrivKey, PubKey, H_256};
+use phaselock::{
+    committee::DynamicCommittee, data::StateHash, traits::Election, PrivKey, PubKey, H_256,
+};
 use std::collections::{hash_map::HashMap, HashSet};
 use std::marker::PhantomData;
 
@@ -63,7 +65,7 @@ impl<S, const N: usize> Election<N> for Committee<S, N> {
         view_number: u64,
         pub_key: PubKey,
         token: Self::VoteToken,
-        next_state: BlockHash<N>,
+        next_state: StateHash<N>,
     ) -> Option<Self::ValidatedVoteToken> {
         DynamicCommittee::<S, N>::get_votes(
             table,
@@ -89,7 +91,7 @@ impl<S, const N: usize> Election<N> for Committee<S, N> {
         selection_threshold: Self::SelectionThreshold,
         view_number: u64,
         private_key: &PrivKey,
-        next_state: BlockHash<N>,
+        next_state: StateHash<N>,
     ) -> Option<Self::VoteToken> {
         DynamicCommittee::<S, N>::make_vote_token(
             table,

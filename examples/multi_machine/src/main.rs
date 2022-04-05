@@ -13,8 +13,9 @@ use jf_cap::TransactionVerifyingKey;
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use key_set::{KeySet, VerifierKeySet};
 use phaselock::{
-    error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
-    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
+    traits::implementations::{AtomicStorage, WNetwork},
+    types::{EventType, Message},
+    PhaseLock, PhaseLockConfig, PhaseLockError, PubKey, H_256,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -312,7 +313,7 @@ async fn get_networking<
 }
 
 type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>;
-type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_256>;
+type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
 
@@ -510,6 +511,13 @@ async fn init_state_and_phaselock(
 
     task::sleep(core::time::Duration::from_secs(5)).await;
 
+    let storage = get_store_dir(node_id);
+    let phaselock_persistence = [Path::new(&storage), Path::new("phaselock")]
+        .iter()
+        .collect::<PathBuf>();
+    let node_persistence = [Path::new(&storage), Path::new("node")]
+        .iter()
+        .collect::<PathBuf>();
     let (_, phaselock) = PhaseLock::init(
         genesis,
         public_keys,
@@ -518,15 +526,15 @@ async fn init_state_and_phaselock(
         config,
         validator,
         networking,
-        MemoryStorage::default(),
+        AtomicStorage::open(&phaselock_persistence).unwrap(),
         lw_persistence,
     )
-    .await;
+    .await
+    .unwrap();
     debug!("phaselock launched");
 
     let validator = if full_node {
-        let full_persisted =
-            FullPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap();
+        let full_persisted = FullPersistence::new(&node_persistence, "full_node").unwrap();
 
         let records = if load_from_store {
             let mut builder = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();

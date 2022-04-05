@@ -20,7 +20,11 @@ use jf_cap::{
 };
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
-use phaselock::{traits::state::State, BlockContents, H_256};
+use phaselock::{
+    data::{BlockHash, LeafHash, TransactionHash},
+    traits::{BlockContents, State},
+    H_256,
+};
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashSet, VecDeque};
@@ -143,26 +147,26 @@ impl BlockContents<H_256> for ElaboratedBlock {
         Ok(ret)
     }
 
-    fn hash(&self) -> phaselock::BlockHash<H_256> {
+    fn hash(&self) -> BlockHash<H_256> {
         use std::convert::TryInto;
 
-        phaselock::BlockHash::<H_256>::from_array(self.commit().try_into().unwrap())
+        BlockHash::<H_256>::from_array(self.commit().try_into().unwrap())
     }
 
-    fn hash_bytes(bytes: &[u8]) -> phaselock::BlockHash<H_256> {
+    fn hash_leaf(bytes: &[u8]) -> LeafHash<H_256> {
         use std::convert::TryInto;
         // TODO: fix this hack, it is specifically working around the
         // misuse-preventing `T: Committable` on `RawCommitmentBuilder`
         let ret = commit::RawCommitmentBuilder::<Block>::new("PhaseLock bytes")
             .var_size_bytes(bytes)
             .finalize();
-        phaselock::BlockHash::<H_256>::from_array(ret.try_into().unwrap())
+        LeafHash::<H_256>::from_array(ret.try_into().unwrap())
     }
 
-    fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<H_256> {
+    fn hash_transaction(txn: &ElaboratedTransaction) -> TransactionHash<H_256> {
         use std::convert::TryInto;
 
-        phaselock::BlockHash::<H_256>::from_array(txn.commit().try_into().unwrap())
+        TransactionHash::<H_256>::from_array(txn.commit().try_into().unwrap())
     }
 }
 
