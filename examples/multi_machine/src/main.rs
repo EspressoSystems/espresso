@@ -508,8 +508,6 @@ async fn init_state_and_phaselock(
         None
     };
 
-    task::sleep(core::time::Duration::from_secs(5)).await;
-
     let (_, phaselock) = PhaseLock::init(
         genesis,
         public_keys,
