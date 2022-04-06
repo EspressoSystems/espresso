@@ -24,7 +24,7 @@ use futures::prelude::*;
 use itertools::izip;
 use phaselock::traits::BlockContents;
 use seahorse::{
-    events::LedgerEvent, hd::KeyTree, loader::WalletLoader, KeyError, Wallet, WalletError,
+    events::LedgerEvent, hd::KeyTree, loader::WalletLoader, KeySnafu, Wallet, WalletError,
 };
 use serde::Deserialize;
 use snafu::ResultExt;
@@ -184,12 +184,12 @@ impl WalletLoader<EspressoLedger> for UnencryptedWalletLoader {
     }
 
     fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<EspressoLedger>> {
-        let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)?;
+        let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
         Ok(((), key))
     }
 
     fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, WalletError<EspressoLedger>> {
-        KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)
+        KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
     }
 }
 

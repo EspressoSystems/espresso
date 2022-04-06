@@ -2471,7 +2471,7 @@ checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
 [[package]]
 name = "key-set"
 version = "0.2.0"
-source = "git+https://github.com/EspressoSystems/key-set.git#4d73b07b963c64c71c3bb94ad1422cee0d235fea"
+source = "git+https://github.com/EspressoSystems/key-set.git#76804010f56b7b551a8cb6cb409fd9cecfb40aed"
 dependencies = [
  "ark-serialize",
  "bincode",
@@ -2480,7 +2480,7 @@ dependencies = [
  "jf-cap",
  "serde",
  "serde_with",
- "snafu 0.6.10",
+ "snafu 0.7.0",
 ]
 
 [[package]]
@@ -2681,7 +2681,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "shellexpand",
- "snafu 0.6.10",
+ "snafu 0.7.0",
  "structopt",
  "strum",
  "strum_macros",
@@ -2711,7 +2711,7 @@ dependencies = [
 [[package]]
 name = "net"
 version = "0.2.0"
-source = "git+https://github.com/EspressoSystems/net.git#6e98531d741f8a37acabfadfd71d154bba4e61c4"
+source = "git+https://github.com/EspressoSystems/net.git#e02a9dd03dd9dd4415d3958f7569a30deb491b81"
 dependencies = [
  "ark-serialize",
  "ark-std",
@@ -2724,7 +2724,7 @@ dependencies = [
  "jf-utils",
  "serde",
  "serde_json",
- "snafu 0.6.10",
+ "snafu 0.7.0",
  "surf",
  "tagged-base64",
  "tide",
@@ -3510,7 +3510,7 @@ dependencies = [
 [[package]]
 name = "reef"
 version = "0.2.0"
-source = "git+https://github.com/EspressoSystems/reef.git#e5457f0e078a7f2bc451def9eba2b8b3c35ed80c"
+source = "git+https://github.com/EspressoSystems/reef.git#34144a56f4317ded58c1092e512d6112bb567df2"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -3522,7 +3522,7 @@ dependencies = [
  "lazy_static",
  "rand_chacha 0.3.1",
  "serde",
- "snafu 0.6.10",
+ "snafu 0.7.0",
  "strum_macros",
 ]
 
@@ -3757,7 +3757,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.2.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#40015f910dcde8d8ea7a8f3715cdc0d433407160"
+source = "git+https://github.com/EspressoSystems/seahorse.git#1c9d03292f728db6b8811f1c47ce8b82e4ca3ec4"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -3795,7 +3795,7 @@ dependencies = [
  "rustyline",
  "serde",
  "sha3 0.9.1",
- "snafu 0.6.10",
+ "snafu 0.7.0",
  "structopt",
  "strum",
  "strum_macros",
@@ -5262,7 +5262,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "snafu 0.6.10",
+ "snafu 0.7.0",
  "structopt",
  "surf",
  "tagged-base64",
@@ -5327,7 +5327,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha3 0.9.1",
- "snafu 0.6.10",
+ "snafu 0.7.0",
  "strum",
  "strum_macros",
  "surf",

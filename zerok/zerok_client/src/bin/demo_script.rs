@@ -13,7 +13,7 @@ fn main() {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (command, line) = match line.split_once(" ") {
+        let (command, line) = match line.split_once(' ') {
             Some(res) => res,
             None => (line, ""),
         };
@@ -44,7 +44,7 @@ fn main() {
             }
 
             "wallet" => {
-                let (wallet, command) = line.split_once(":").unwrap_or((line, ""));
+                let (wallet, command) = line.split_once(':').unwrap_or((line, ""));
                 let command = command.trim();
                 let wallet = match wallet.parse() {
                     Ok(w) => w,
@@ -73,7 +73,7 @@ fn main() {
             }
 
             "validator" => {
-                let (validator, command) = match line.split_once(":") {
+                let (validator, command) = match line.split_once(':') {
                     Some(res) => res,
                     None => {
                         println!(
@@ -93,7 +93,7 @@ fn main() {
                     }
                 };
 
-                let (command, rest) = command.split_once(" ").unwrap_or((command, ""));
+                let (command, rest) = command.split_once(' ').unwrap_or((command, ""));
                 match validator_command(&mut cli, validator, command, rest) {
                     Ok(output) => {
                         for line in output {

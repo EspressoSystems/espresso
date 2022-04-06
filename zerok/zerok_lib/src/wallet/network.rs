@@ -29,7 +29,7 @@ use seahorse::{
     loader::WalletLoader,
     persistence::AtomicWalletStorage,
     txn_builder::TransactionState,
-    BincodeError, ClientConfigError, CryptoError, WalletBackend, WalletError, WalletState,
+    BincodeSnafu, ClientConfigSnafu, CryptoSnafu, WalletBackend, WalletError, WalletState,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;
@@ -77,7 +77,7 @@ impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkB
         let client: surf::Client = surf::Config::new()
             .set_base_url(base_url)
             .try_into()
-            .context(ClientConfigError)?;
+            .context(ClientConfigSnafu)?;
         Ok(client.with(parse_error_body::<EspressoError>))
     }
 
@@ -102,7 +102,7 @@ impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkB
     ) -> Result<(), WalletError<EspressoLedger>> {
         client
             .post(uri)
-            .body_bytes(bincode::serialize(body).context(BincodeError)?)
+            .body_bytes(bincode::serialize(body).context(BincodeSnafu)?)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
@@ -151,7 +151,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
         let univ_param = self.univ_param;
         let proving_keys = Arc::new(ProverKeySet {
             mint: jf_cap::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
-                .context(CryptoError)?
+                .context(CryptoSnafu)?
                 .0,
             freeze: validator
                 .verif_crs
@@ -164,7 +164,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
                             k.num_inputs(),
                             MERKLE_HEIGHT,
                         )
-                        .context(CryptoError)?
+                        .context(CryptoSnafu)?
                         .0,
                     )
                 })
@@ -181,7 +181,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
                             k.num_outputs(),
                             MERKLE_HEIGHT,
                         )
-                        .context(CryptoError)?
+                        .context(CryptoSnafu)?
                         .0,
                     )
                 })

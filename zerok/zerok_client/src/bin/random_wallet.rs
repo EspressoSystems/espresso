@@ -25,7 +25,7 @@ use jf_cap::structs::{AssetCode, AssetPolicy};
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-use seahorse::{events::EventIndex, hd::KeyTree, loader::WalletLoader, KeyError, WalletError};
+use seahorse::{events::EventIndex, hd::KeyTree, loader::WalletLoader, KeySnafu, WalletError};
 use snafu::ResultExt;
 use std::convert::TryInto;
 use std::fs::File;
@@ -75,12 +75,12 @@ impl WalletLoader<EspressoLedger> for TrivialWalletLoader {
     }
 
     fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<EspressoLedger>> {
-        let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)?;
+        let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
         Ok(((), key))
     }
 
     fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, WalletError<EspressoLedger>> {
-        KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeyError)
+        KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
     }
 }
 
