@@ -1,7 +1,9 @@
 use crate::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
 
 use phaselock::{
-    message::Message, networking::NetworkingImplementation, NodeImplementation, Storage, H_256,
+    traits::{NetworkingImplementation, NodeImplementation, Storage},
+    types::Message,
+    H_256,
 };
 
 use core::fmt::Debug;

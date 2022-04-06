@@ -25,10 +25,9 @@ use jf_cap::{
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use phaselock::{
-    error::PhaseLockError,
-    event::EventType,
-    handle::{HandleError, PhaseLockHandle},
-    BlockContents, H_256,
+    traits::BlockContents,
+    types::{EventType, PhaseLockHandle},
+    PhaseLockError, H_256,
 };
 use seahorse::events::LedgerEvent;
 use serde::{Deserialize, Serialize};
@@ -40,7 +39,7 @@ pub trait ConsensusEvent {
     fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState>;
 }
 
-pub type PhaseLockEvent = phaselock::event::Event<ElaboratedBlock, ValidatorState>;
+pub type PhaseLockEvent = phaselock::types::Event<ElaboratedBlock, ValidatorState>;
 
 impl ConsensusEvent for PhaseLockEvent {
     fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState> {
@@ -70,16 +69,7 @@ impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
     }
 
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
-        self.submit_transaction(tx).await.map_err(|err| {
-            if let HandleError::Transaction { source } = err {
-                source
-            } else {
-                panic!(
-                    "unexpected error from PhaseLockHandle::submit_transaction: {:?}",
-                    err
-                );
-            }
-        })
+        self.submit_transaction(tx).await
     }
 
     async fn start_consensus(&self) {
@@ -92,7 +82,6 @@ impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
         Box::pin(stream::unfold(self.clone(), |mut handle| async move {
             match handle.next_event().await {
                 Ok(event) => Some((event, handle)),
-                Err(HandleError::ShutDown) => None,
                 Err(err) => panic!(
                     "unexpected error from PhaseLockHandle::next_event: {:?}",
                     err

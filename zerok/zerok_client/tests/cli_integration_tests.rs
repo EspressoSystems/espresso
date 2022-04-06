@@ -9,7 +9,13 @@ fn create_wallet(t: &mut CliClient, wallet: usize) -> Result<&mut CliClient, Str
             key_path, wallet
         )
     })?;
-    t.open_with_args(wallet, ["--password"])?
+    t.open(wallet)?
+        .output("Your mnemonic phrase will be:")?
+        .output("^(?P<mnemonic>[a-zA-Z ]+)")?
+        .output("1\\) Accept phrase and create wallet")?
+        .output("2\\) Generate a new phrase")?
+        .output("3\\) Manually enter a mnemonic")?
+        .command(wallet, "1")?
         .output("Create password:")?
         .command(wallet, "test_password")?
         .output("Retype password:")?
@@ -21,7 +27,7 @@ fn create_wallet(t: &mut CliClient, wallet: usize) -> Result<&mut CliClient, Str
         .output("Retype password:")?
         .command(wallet, "test_password")?
         .output("connecting...")?
-        .command(wallet, format!("load_key spend {}", key_path))?
+        .command(wallet, format!("load_key sending {}", key_path))?
         .output(format!("(?P<default_addr{}>ADDR~.*)", wallet))
 }
 
@@ -50,7 +56,7 @@ fn cli_basic_info(t: &mut CliClient) -> Result<(), String> {
         .command(0, "info")?
         .output("Addresses:")?
         .output("(?P<addr1>ADDR~.*)")?
-        .output("Public keys:")?
+        .output("Sending keys:")?
         .output("(?P<pubkey1>USERPUBKEY~.*)")?
         // `address`
         .command(0, "address")?
@@ -60,30 +66,30 @@ fn cli_basic_info(t: &mut CliClient) -> Result<(), String> {
         .output("0. (?P<native>ASSET_CODE~.*) \\(native\\)")?;
 
     // add keys and check that they are reported
-    t.command(0, "gen_key audit")?
+    t.command(0, "gen_key view")?
         .output("(?P<audkey>AUDPUBKEY~.*)")?
         .command(0, "gen_key freeze")?
         .output("(?P<freezekey>FREEZEPUBKEY~.*)")?
-        .command(0, "gen_key spend")?
+        .command(0, "gen_key send")?
         .output("(?P<addr2>ADDR~.*)")?
         .command(0, "info")?
         .output("Addresses:")?
         .output("$addr1")?
         .output("$addr2")?
         .command(0, "keys")?
-        .output("Public keys:")?
+        .output("Sending keys:")?
         .output("$pubkey1")?
         .output("USERPUBKEY~.*")?
-        .output("Audit keys:")?
+        .output("Viewing keys:")?
         .output("$audkey")?
-        .output("Freeze keys:")?
+        .output("Freezing keys:")?
         .output("$freezekey")?;
 
     // native asset info, specified two ways
     for command in &["asset 0", "asset $native"] {
         t.command(0, command)?
             .output("Native $native")?
-            .output("Not auditable")?
+            .output("Not viewable")?
             .output("Not freezeable")?
             .output("Not mintable")?;
     }
@@ -96,11 +102,11 @@ fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
     t
         // Get the balance of both wallets.
         .command(0, "balance 0")?
-        .output(format!("$default_addr0 {}", balance))?
+        .output(format!("Total {}", balance))?
         .command(1, "balance 0")?
-        .output("$default_addr1 0")?
+        .output("Total 0")?
         // Transfer some native coins from the primary wallet to the secondary.
-        .command(0, "transfer 0 $default_addr0 $default_addr1 500 1")?
+        .command(0, "transfer 0 $default_addr1 500 1")?
         .output("(?P<txn>TXN~.*)")?
         // Wait for the transaction to complete in both wallets (just because one wallet has
         // received and processed the completed transaction doesn't mean the other has).
@@ -109,20 +115,20 @@ fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
         .command(1, "wait $txn")?
         .output("accepted")?
         .command(0, "balance 0")?
-        .output(format!("$default_addr0 {}", balance - 501))?
+        .output(format!("Total {}", balance - 501))?
         .command(1, "balance 0")?
-        .output("$default_addr1 500")?
+        .output("Total 500")?
         // Transfer part of the money back
-        .command(1, "transfer 0 $default_addr1 $default_addr0 200 2")?
+        .command(1, "transfer 0 $default_addr0 200 2")?
         .output("(?P<txn>TXN~.*)")?
         .command(0, "wait $txn")?
         .output("accepted")?
         .command(1, "wait $txn")?
         .output("accepted")?
         .command(1, "balance 0")?
-        .output("$default_addr1 298")?
+        .output("Total 298")?
         .command(0, "balance 0")?
-        .output(format!("$default_addr0 {}", balance - 301))?;
+        .output(format!("Total {}", balance - 301))?;
     Ok(())
 }
 
@@ -130,11 +136,11 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
     wait_for_starting_balance(t)?;
     t
         // Define a new asset and mint some for the receiver.
-        .command(0, "issue asset1")?
+        .command(0, "create_asset asset1")?
         .output("(?P<asset1>ASSET_CODE~.*)")?
         .command(0, "asset 1")?
         .output("asset1 $asset1")?
-        .output("Not auditable")?
+        .output("Not viewable")?
         .output("Not freezeable")?
         .output("Minter: me")?
         .command(0, "mint 1 $default_addr0 $default_addr1 100 1")?
@@ -148,23 +154,26 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         //  (2) we have a balance of it
         .command(1, "asset 1")?
         .output("Asset $asset1")? // Receiver doesn't know the description "asset1"
-        .output("Not auditable")?
+        .output("Not viewable")?
         .output("Not freezeable")?
         .output("Minter: unknown")? // Receiver doesn't know who minted the asset for them
         .command(1, "balance 1")?
         .output("$default_addr1 100")?
         // Do it again, this time specifiying audit and freeze keys
-        .command(0, "gen_key audit")?
+        .command(0, "gen_key viewing")?
         .output("(?P<audkey0>AUDPUBKEY~.*)")?
-        .command(1, "gen_key freeze")?
+        .command(1, "gen_key freezing")?
         .output("(?P<freezekey1>FREEZEPUBKEY~.*)")?
-        .command(0, "issue asset2 auditor=$audkey0 freezer=$freezekey1")?
+        .command(
+            0,
+            "create_asset asset2 viewing_key=$audkey0 freezing_key=$freezekey1",
+        )?
         .output("(?P<asset2>ASSET_CODE~.*)")?
         // Once there is more than 1 custom asset, we have to refer to it by code, not index,
         // because the order of custom assets is non-deterministic. I should probably fix that.
         .command(0, "asset $asset2")?
         .output("asset2 $asset2")?
-        .output("Auditor: me")?
+        .output("Viewer: me")?
         .output("Freezer: $freezekey1")?
         .output("Minter: me")?
         .command(0, "mint $asset2 $default_addr0 $default_addr1 200 1")?
@@ -176,21 +185,26 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         // Check on the receiving end
         .command(1, "asset $asset2")?
         .output("Asset $asset2")?
-        .output("Auditor: $audkey0")?
+        .output("Viewer: $audkey0")?
         .output("Freezer: me")?
         .output("Minter: unknown")?
         .command(1, "balance $asset2")?
-        .output("$default_addr1 200")?;
+        .output("Total 200")?;
     Ok(())
 }
 
 fn cli_login(t: &mut CliClient) -> Result<(), String> {
     t.close(0)?
-        .open_with_args(0, &["--password"])?
+        .open(0)?
+        .output("Forgot your password\\? Want to change it\\? \\[y/n\\]")?
+        .command(0, "n")?
         .output("Enter password:")?
         // Enter the wrong password to check error handling
         .command(0, "wrong_password")?
         .output("Sorry, that's incorrect")?
+        .output("Forgot your password\\? Want to change it\\? \\[y/n\\]")?
+        .command(0, "n")?
+        .output("Enter password:")?
         .command(0, "test_password")?
         .output("connecting...")?;
 

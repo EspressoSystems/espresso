@@ -6,7 +6,7 @@ use api::{
 };
 use futures::prelude::*;
 use itertools::izip;
-use phaselock::BlockContents;
+use phaselock::traits::BlockContents;
 use seahorse::events::LedgerEvent;
 use server::{best_response_type, response};
 use std::collections::HashMap;
