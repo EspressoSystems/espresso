@@ -1,8 +1,8 @@
 extern crate zerok_client;
 use zerok_client::cli_client::cli_test;
 
-#[test]
 #[ignore]
+#[test]
 fn demo2() {
     cli_test(|t| {
         let key_path0 = t.wallet_key_path(0)?;
@@ -83,12 +83,18 @@ fn demo2() {
             .close(0)?
             .close(1)?
             .open(0)?
-            .output("Enter mnemonic phrase")?
-            .command(0, "$mnemonic0")?
+            .output("Welcome to the Espresso wallet, version 0.2.0")?
+            .output("\\(c\\) 2021 Espresso Systems, Inc.")?
+            .output("Forgot your password\\? Want to change it\\? \\[y/n\\]")?
+            .command(0, "n")?
+            .command(0, "test_password0")?
             .output("connecting...")?
             .open(1)?
-            .output("Enter mnemonic phrase")?
-            .command(1, "$mnemonic1")?
+            .output("Welcome to the Espresso wallet, version 0.2.0")?
+            .output("\\(c\\) 2021 Espresso Systems, Inc.")?
+            .output("Forgot your password\\? Want to change it\\? \\[y/n\\]")?
+            .command(1, "n")?
+            .command(1, "test_password1")?
             .output("connecting...")?
             .command(0, "balance 0")?
             .output(format!("$addr0 {}", balance - 501))?
@@ -102,10 +108,10 @@ fn demo2() {
             // Close a validator (not 0, that's the server for the wallets) and show that we can
             // still complete transactions.
             .close_validator(1)?
-            .command(0, "transfer 0 $addr1 200 2 wait=true")?
+            .command(0, "transfer 0 $addr1 200 2")?
             .output("(?P<txn>TXN~.*)")?
-            /*.command(0, "wait $txn")?
-            .output("accepted")?*/
+            .command(0, "wait $txn")?
+            .output("accepted")?
             .command(1, "wait $txn")?
             .output("accepted")?
             .command(0, "balance 0")?
@@ -130,17 +136,21 @@ fn demo2() {
             //
             // To show that non-native assets work just as well, define, mint and transfer one.
             // Define a new asset and mint some for the receiver.
-            .command(0, "issue MyAsset")?
+            .command(0, "create_asset MyAsset")?
             .output("(?P<asset>ASSET_CODE~.*)")?
             .command(0, "asset 1")?
             .output("MyAsset $asset")?
-            .output("Not auditable")?
+            .output("Not viewable")?
             .output("Not freezeable")?
             .output("Minter: me")?
             // Mint some for myself
             .command(0, "mint 1 $addr0 $addr0 100 1 wait=true")?
+            .command(0, "balance 1")?
+            .output("Address Balance")?
+            .output("$addr0 100")?
+            .output("Total 100")?
             // Transfer some to the secondary
-            .command(0, "transfer 1 $addr0 $addr1 50 1")?
+            .command(0, "transfer 1 $addr1 50 1")?
             .output("(?P<txn>TXN~.*)")?
             .command(0, "wait $txn")?
             .output("accepted")?
@@ -151,7 +161,7 @@ fn demo2() {
             //  (2) we have a balance of it
             .command(1, "asset 1")?
             .output("Asset $asset")? // Receiver doesn't know the description "MyAsset"
-            .output("Not auditable")?
+            .output("Not viewable")?
             .output("Not freezeable")?
             .output("Minter: unknown")? // Receiver doesn't know who minted the asset for them
             .command(1, "balance 1")?

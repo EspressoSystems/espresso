@@ -362,7 +362,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
         _from: EventIndex,
     ) -> Result<(MerkleTree, EventIndex), WalletError<EspressoLedger>> {
         // TODO: how should this initialize?
-        let LedgerSnapshot { records, .. } = dbg!(self.get("getsnapshot/0/true").await)?;
+        let LedgerSnapshot { records, .. } = self.get("getsnapshot/0/true").await?;
         Ok((records.0, Default::default()))
     }
 }
