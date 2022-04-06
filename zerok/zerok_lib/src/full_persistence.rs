@@ -115,7 +115,6 @@ impl FullPersistence {
             .iter()
             .flat_map(|txn| txn.output_commitments().into_iter())
         {
-            #[allow(clippy::init_numbered_fields)]
             self.rmt_leaves_full
                 .store_resource(&MerkleLeaf {
                     0: comm.to_field_element(),
