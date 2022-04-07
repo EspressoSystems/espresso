@@ -7,8 +7,10 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use jf_aap::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
-use jf_aap::TransactionVerifyingKey;
+use jf_aap::{
+    structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
+    TransactionVerifyingKey,
+};
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use key_set::{KeySet, VerifierKeySet};
 use phaselock::{
@@ -52,10 +54,16 @@ const STATE_SEED: [u8; 32] = [0x7au8; 32];
 
 #[derive(Debug, StructOpt)]
 #[structopt(
-    name = "Multi-machine concensus",
+    name = "Multi-machine consensus",
     about = "Simulates consensus among multiple machines"
 )]
 struct NodeOpt {
+    /// Whether to simulate the consensus process with single command.
+    ///
+    /// The `id` option will be ignored.
+    #[structopt(long = "simulate", short = "u")]
+    simulate: bool,
+
     /// Path to the node configuration file.
     #[structopt(
         long = "config",
@@ -106,7 +114,9 @@ struct NodeOpt {
     ///
     /// If the node ID is 0, it will propose and try to add transactions.
     ///
-    /// Skip this option if only want to generate public key files.
+    /// Skip this option in either of the following cases.
+    /// * Generating public key files, i.e, with the `gen_pk` option.
+    /// * Running the single-command simulation, i.e., with the `simulate` option.
     #[structopt(long = "id", short = "i")]
     id: Option<u64>,
 
@@ -552,14 +562,7 @@ async fn init_state_and_phaselock(
 }
 
 #[derive(Clone)]
-struct Connection {
-    id: String,
-    wsc: WebSocketConnection,
-}
-
-#[derive(Clone)]
 pub struct WebState {
-    connections: Arc<RwLock<HashMap<String, Connection>>>,
     web_path: PathBuf,
     api: toml::Value,
     node: Arc<RwLock<FullNode<'static>>>,
@@ -792,7 +795,6 @@ fn init_web_server(
     println!("Web path: {:?}", web_path);
     let api = disco::load_messages(&api_path);
     let mut web_server = tide::with_state(WebState {
-        connections: Default::default(),
         web_path: web_path.clone(),
         api: api.clone(),
         node,
@@ -913,71 +915,87 @@ async fn main() -> Result<(), std::io::Error> {
         println!("initializing new session");
     }
 
-    if let Some(own_id) = NodeOpt::from_args().id {
-        println!("Current node: {}", own_id);
-        let secret_key_share = secret_keys.secret_key_share(own_id);
+    // If we are running the single-command simulation, run all nodes.
+    // Otherwise, run the specified node.
+    let mut nodes_to_run = Vec::new();
+    let mut states = Vec::new();
+    let mut phaselocks = Vec::new();
+    let mut all_events = Vec::new();
+    let mut web_servers = Vec::new();
+    if NodeOpt::from_args().simulate {
+        nodes_to_run = (0..nodes).collect();
+    } else if let Some(id) = NodeOpt::from_args().id {
+        nodes_to_run = vec![id];
+    }
+    if nodes_to_run.len() > 0 {
+        // Connect all nodes
+        for id in nodes_to_run.clone() {
+            println!("Current node: {}", id);
+            let secret_key_share = secret_keys.secret_key_share(id);
 
-        // Get networking information
-        let (own_network, _) =
-            get_networking(own_id, "0.0.0.0", get_host(node_config.clone(), own_id).1).await;
-        #[allow(clippy::type_complexity)]
-        let mut other_nodes: Vec<(u64, PubKey, String, u16)> = Vec::new();
-        for id in 0..nodes {
-            if id != own_id {
-                let (ip, port) = get_host(node_config.clone(), id);
-                let pub_key = get_public_key(id);
-                other_nodes.push((id, pub_key, ip, port));
+            // Get networking information
+            let (network, _) =
+                get_networking(id, "0.0.0.0", get_host(node_config.clone(), id).1).await;
+            #[allow(clippy::type_complexity)]
+            let mut other_nodes: Vec<(u64, PubKey, String, u16)> = Vec::new();
+            for other_id in 0..nodes {
+                if other_id != id {
+                    let (ip, port) = get_host(node_config.clone(), other_id);
+                    let pub_key = get_public_key(other_id);
+                    other_nodes.push((other_id, pub_key, ip, port));
+                }
             }
-        }
 
-        // Connect the networking implementations
-        for (id, pub_key, ip, port) in other_nodes {
-            let socket = format!("{}:{}", ip, port);
-            while own_network
-                .connect_to(pub_key.clone(), &socket)
-                .await
-                .is_err()
-            {
-                debug!("  - Retrying");
-                async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
+            // Connect the networking implementations
+            for (id, pub_key, ip, port) in other_nodes {
+                let socket = format!("{}:{}", ip, port);
+                while network.connect_to(pub_key.clone(), &socket).await.is_err() {
+                    debug!("  - Retrying");
+                    async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
+                }
+                println!("  - Connected to node {}", id);
             }
-            println!("  - Connected to node {}", id);
-        }
 
-        // Wait for the networking implementations to connect
-        while (own_network.connection_table_size().await as u64) < nodes - 1 {
-            async_std::task::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        println!("All nodes connected to network");
+            // Wait for the networking implementations to connect
+            while (network.connection_table_size().await as u64) < nodes - 1 {
+                async_std::task::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            println!("All nodes connected to network");
 
-        // Initialize the state and phaselock
-        let (mut state, mut phaselock) = init_state_and_phaselock(
-            public_keys,
-            secret_key_share,
-            nodes,
-            threshold,
-            own_id,
-            own_network,
-            NodeOpt::from_args().full,
-            load_from_store,
-        )
-        .await;
-        let mut events = phaselock.subscribe();
-
-        // If we are running a full node, also host a query API to inspect the accumulated state.
-        let web_server = if let Node::Full(node) = &phaselock {
-            Some(
-                init_web_server(
-                    &NodeOpt::from_args().api_path,
-                    &NodeOpt::from_args().web_path,
-                    own_id,
-                    node.clone(),
-                )
-                .expect("Failed to initialize web server"),
+            // Initialize the state and phaselock
+            let (mut state, phaselock) = init_state_and_phaselock(
+                public_keys.clone(),
+                secret_key_share,
+                nodes,
+                threshold,
+                id,
+                network,
+                NodeOpt::from_args().full,
+                load_from_store,
             )
-        } else {
-            None
-        };
+            .await;
+
+            // If we are running a full node, also host a query API to inspect the accumulated state.
+            let web_server = if let Node::Full(node) = &phaselock {
+                Some(
+                    init_web_server(
+                        &NodeOpt::from_args().api_path,
+                        &NodeOpt::from_args().web_path,
+                        id,
+                        node.clone(),
+                    )
+                    .expect("Failed to initialize web server"),
+                )
+            } else {
+                None
+            };
+            web_servers.push(web_server);
+
+            states.push(core::mem::take(&mut state));
+            all_events.push(core::mem::take(&mut Some(phaselock.subscribe())));
+            phaselocks.push(core::mem::take(&mut Some(phaselock)));
+        }
+        let mut all_events: Vec<EventStream<_>> = all_events.into_iter().flatten().collect();
 
         #[cfg(target_os = "linux")]
         let bytes_per_page = procfs::page_size().unwrap() as u64;
@@ -1000,139 +1018,173 @@ async fn main() -> Result<(), std::io::Error> {
             fence();
         };
 
-        // Start consensus for each transaction
         let mut round = 0;
-        let num_txn = NodeOpt::from_args().num_txn;
-
         // When `num_txn` is set, run `num_txn` rounds.
         // Otherwise, keeping running till the process is killed.
+        let num_txn = NodeOpt::from_args().num_txn;
+        // Submitted transaction on which the consensus hasn't been reached.
         let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
         let mut txn_proposed_round = 0;
-        while num_txn.map(|count| round < count).unwrap_or(true) {
-            println!("Starting round {}", round + 1);
-            report_mem();
-            println!("Commitment: {}", phaselock.current_state().await.commit());
+        // Table mapping the round number with the number of completed nodes.
+        // Used for the single-command simulation.
+        let mut completed_nodes: HashMap<u64, u64> = HashMap::new();
 
-            // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
-            if own_id == 0 {
-                if let Some(tx) = txn.as_ref() {
+        // Start the consensus for each transaction.
+        while num_txn.map(|count| round < count).unwrap_or(true) {
+            // If a transaction has already been submitted more than 5 rounds ago but the consensus
+            // still hasn't been reached, resubmit it.
+            // Otherwise, use node 0 to submit a transaction if there isn't a wallet to generate it.
+            if let Some(tx) = txn.as_ref() {
+                if txn_proposed_round + 5 < round {
                     println!("  - Reproposing a transaction");
-                    if txn_proposed_round + 5 < round {
-                        // TODO
-                        phaselock.submit_transaction(tx.clone().3).await.unwrap();
-                        txn_proposed_round = round;
-                    }
-                } else if let Some(mut true_state) = core::mem::take(&mut state) {
-                    println!("  - Proposing a transaction");
-                    let (true_state, mut transactions) =
-                        async_std::task::spawn_blocking(move || {
-                            let txs = true_state
-                                .generate_transactions(
-                                    vec![(true, 0, 0, 0, 0, -2)],
-                                    TxnPrintInfo::new_no_time(round as usize, 1),
-                                )
-                                .unwrap();
-                            (true_state, txs)
-                        })
-                        .await;
-                    txn = Some(transactions.remove(0));
-                    state = Some(true_state);
-                    phaselock
-                        .submit_transaction(txn.clone().unwrap().3)
+                    // TODO
+                    phaselocks[0]
+                        .as_ref()
+                        .unwrap()
+                        .submit_transaction(tx.clone().3)
                         .await
                         .unwrap();
                     txn_proposed_round = round;
                 }
-            }
-
-            // If the output below is changed, update the message for line.trim() in Validator::new as well
-            println!("  - Starting consensus");
-            phaselock.start_consensus().await;
-            let success = loop {
-                println!("Waiting for PhaseLock event");
-                let event = events.next().await.expect("PhaseLock unexpectedly closed");
-
-                match event.event {
-                    EventType::Decide { block: _, state } => {
-                        if !state.is_empty() {
-                            let commitment = TaggedBase64::new("LEDG", state[0].commit().as_ref())
-                                .unwrap()
-                                .to_string();
-                            println!(
-                                "  - Round {} completed. Commitment: {}",
-                                round + 1,
-                                commitment
-                            );
-                            break true;
-                        }
-                    }
-                    EventType::ViewTimeout { view_number: _ } => {
-                        println!("  - Round {} timed out.", round + 1);
-                        break false;
-                    }
-                    EventType::Error { error } => {
-                        println!("  - Round {} error: {}", round + 1, error);
-                        break false;
-                    }
-                    _ => {
-                        println!("EVENT: {:?}", event);
-                    }
-                }
-            };
-
-            if success {
-                // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
-                // current node), and there is no attached wallet.
-                if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
-                    let state = state.as_mut().unwrap();
-                    println!("  - Adding the transaction");
-                    let mut blk = ElaboratedBlock::default();
-                    let (owner_memos, kixs) = {
-                        let mut owner_memos = vec![];
-                        let mut kixs = vec![];
-
-                        for (kix, memo) in keys_and_memos {
-                            kixs.push(kix);
-                            owner_memos.push(memo);
-                        }
-                        (owner_memos, kixs)
-                    };
-
-                    // If we're running a full node, publish the receiver memos.
-                    if let Node::Full(node) = &mut phaselock {
-                        node.write()
-                            .await
-                            .post_memos(round, ix as u64, owner_memos.clone(), sig)
-                            .await
-                            .unwrap();
-                    }
-
-                    state
-                        .try_add_transaction(
-                            &mut blk,
-                            t,
-                            ix,
-                            owner_memos,
-                            kixs,
+            } else if let Some(mut true_state) = core::mem::replace(&mut states[0], None) {
+                println!("  - Proposing a transaction");
+                let (true_state, mut transactions) = async_std::task::spawn_blocking(move || {
+                    let txs = true_state
+                        .generate_transactions(
+                            vec![(true, 0, 0, 0, 0, -2)],
                             TxnPrintInfo::new_no_time(round as usize, 1),
                         )
                         .unwrap();
-                    state
-                        .validate_and_apply(blk, 0.0, TxnPrintInfo::new_no_time(round as usize, 1))
-                        .unwrap();
-                }
+                    (true_state, txs)
+                })
+                .await;
+                txn = Some(transactions.remove(0));
+                states[0] = Some(true_state);
+                phaselocks[0]
+                    .as_ref()
+                    .unwrap()
+                    .submit_transaction(txn.clone().unwrap().3)
+                    .await
+                    .unwrap();
+                txn_proposed_round = round;
             }
 
+            // Start the consensus for each node.
+            let tasks: Vec<_> = nodes_to_run
+                .into_iter()
+                .map(|id| {
+                    let phaselock = &mut phaselocks[id as usize].as_ref().unwrap();
+                    println!("Starting round {}", round + 1);
+                    report_mem();
+
+                    // If the output below is changed, update the message for line.trim() in Validator::new as well
+                    println!("  - Starting consensus");
+
+                    async_std::task::spawn(phaselock.start_consensus())
+                })
+                .collect();
+            for task in tasks {
+                task.await;
+            }
+            let success = loop {
+                let tasks: Vec<_> = nodes_to_run
+                    .into_iter()
+                    .map(|id| {
+                        println!("Waiting for PhaseLock event");
+                        async_std::task::spawn(all_events[id as usize].next())
+                    })
+                    .collect();
+                for task in tasks {
+                    let event = task.await.expect("PhaseLock unexpectedly closed");
+                    match event.event {
+                        EventType::Decide { block: _, state } => {
+                            if !state.is_empty() {
+                                let commitment =
+                                    TaggedBase64::new("LEDG", state[0].commit().as_ref())
+                                        .unwrap()
+                                        .to_string();
+                                println!(
+                                    "  - Round {} completed. Commitment: {}",
+                                    round + 1,
+                                    commitment
+                                );
+                                *completed_nodes.entry(round + 1).or_insert(0) += 1;
+                                break true;
+                            }
+                        }
+                        EventType::ViewTimeout { view_number: _ } => {
+                            println!("  - Round {} timed out.", round + 1);
+                            break false;
+                        }
+                        EventType::Error { error } => {
+                            println!("  - Round {} error: {}", round + 1, error);
+                            break false;
+                        }
+                        _ => {
+                            println!("EVENT: {:?}", event);
+                        }
+                    }
+                }
+
+                if success {
+                    // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
+                    // current node), and there is no attached wallet.
+                    if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
+                        let state = states[id as usize].as_mut().unwrap();
+                        println!("  - Adding the transaction");
+                        let mut blk = ElaboratedBlock::default();
+                        let (owner_memos, kixs) = {
+                            let mut owner_memos = vec![];
+                            let mut kixs = vec![];
+
+                            for (kix, memo) in keys_and_memos {
+                                kixs.push(kix);
+                                owner_memos.push(memo);
+                            }
+                            (owner_memos, kixs)
+                        };
+
+                        // If we're running a full node, publish the receiver memos.
+                        if let Node::Full(node) = phaselock {
+                            node.write()
+                                .await
+                                .post_memos(round, ix as u64, owner_memos.clone(), sig)
+                                .await
+                                .unwrap();
+                        }
+
+                        state
+                            .try_add_transaction(
+                                &mut blk,
+                                t,
+                                ix,
+                                owner_memos,
+                                kixs,
+                                TxnPrintInfo::new_no_time(round as usize, 1),
+                            )
+                            .unwrap();
+                        state
+                            .validate_and_apply(
+                                blk,
+                                0.0,
+                                TxnPrintInfo::new_no_time(round as usize, 1),
+                            )
+                            .unwrap();
+                    }
+                }
+            };
             round += 1;
         }
 
         println!("All rounds completed");
 
         if NodeOpt::from_args().wait {
-            if let Some(join_handle) = web_server {
-                join_handle.await.unwrap_or_else(|err| {
-                    panic!("web server exited with an error: {}", err);
-                });
+            for web_server in web_servers {
+                if let Some(join_handle) = web_server {
+                    join_handle.await.unwrap_or_else(|err| {
+                        panic!("web server exited with an error: {}", err);
+                    });
+                }
             }
         }
     }
