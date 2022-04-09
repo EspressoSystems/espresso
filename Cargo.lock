@@ -705,8 +705,8 @@ dependencies = [
 
 [[package]]
 name = "atomic_store"
-version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/atomicstore.git#b036409be09a472aa2fb54b1a138572df485fa1e"
+version = "0.1.1"
+source = "git+https://github.com/EspressoSystems/atomicstore.git#e116cea2de934fd315f690d07d45b3bb7a213654"
 dependencies = [
  "ark-serialize",
  "bincode",
@@ -842,6 +842,17 @@ checksum = "afa748e348ad3be8263be728124b24a24f268266f6f5d58af9d75f6a40b5c587"
 dependencies = [
  "arrayref",
  "arrayvec 0.5.2",
+ "constant_time_eq",
+]
+
+[[package]]
+name = "blake2b_simd"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72936ee4afc7f8f736d1c38383b56480b5497b4617b4a77bdbf1d2ababc76127"
+dependencies = [
+ "arrayref",
+ "arrayvec 0.7.2",
  "constant_time_eq",
 ]
 
@@ -2337,7 +2348,7 @@ dependencies = [
 [[package]]
 name = "jf-plonk"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/jellyfish.git#9590fac7466ce955c31d94dc9996854f58f7fe2f"
+source = "git+https://github.com/EspressoSystems/jellyfish.git#5eb3059c44ac41ef493a3f4002b13682413ed190"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2366,7 +2377,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/jellyfish.git#9590fac7466ce955c31d94dc9996854f58f7fe2f"
+source = "git+https://github.com/EspressoSystems/jellyfish.git#5eb3059c44ac41ef493a3f4002b13682413ed190"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -2388,7 +2399,7 @@ dependencies = [
 [[package]]
 name = "jf-rescue"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/jellyfish.git#9590fac7466ce955c31d94dc9996854f58f7fe2f"
+source = "git+https://github.com/EspressoSystems/jellyfish.git#5eb3059c44ac41ef493a3f4002b13682413ed190"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -2413,7 +2424,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/jellyfish.git#9590fac7466ce955c31d94dc9996854f58f7fe2f"
+source = "git+https://github.com/EspressoSystems/jellyfish.git#5eb3059c44ac41ef493a3f4002b13682413ed190"
 dependencies = [
  "anyhow",
  "ark-ec",
@@ -2431,7 +2442,7 @@ dependencies = [
 [[package]]
 name = "jf-utils-derive"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/jellyfish.git#9590fac7466ce955c31d94dc9996854f58f7fe2f"
+source = "git+https://github.com/EspressoSystems/jellyfish.git#5eb3059c44ac41ef493a3f4002b13682413ed190"
 dependencies = [
  "ark-std",
  "quote",
@@ -2683,7 +2694,7 @@ dependencies = [
  "shellexpand",
  "snafu 0.7.0",
  "structopt",
- "strum",
+ "strum 0.24.0",
  "strum_macros",
  "surf",
  "tagged-base64",
@@ -3030,7 +3041,7 @@ dependencies = [
  "ark-ed-on-bls12-381",
  "async-std",
  "async-tungstenite 0.17.2",
- "atomic_store 0.1.0 (git+https://github.com/EspressoSystems/atomicstore?tag=0.1.0)",
+ "atomic_store 0.1.0",
  "bincode",
  "blake3 1.3.1",
  "byteorder",
@@ -3599,7 +3610,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b18820d944b33caa75a71378964ac46f58517c92b6ae5f762636247c09e78fb"
 dependencies = [
  "base64 0.13.0",
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
+ "constant_time_eq",
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "rust-argon2"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b50162d19404029c1ceca6f6980fe40d45c8b369f6f44446fa14bb39573b5bb9"
+dependencies = [
+ "base64 0.13.0",
+ "blake2b_simd 1.0.0",
  "constant_time_eq",
  "crossbeam-utils",
 ]
@@ -3757,7 +3780,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.2.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#1c9d03292f728db6b8811f1c47ce8b82e4ca3ec4"
+source = "git+https://github.com/EspressoSystems/seahorse.git#a3c18c500b3083bfdf107c31d835ae4a4fbe3d4b"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -3766,7 +3789,7 @@ dependencies = [
  "async-scoped",
  "async-std",
  "async-trait",
- "atomic_store 0.1.0 (git+https://github.com/EspressoSystems/atomicstore.git)",
+ "atomic_store 0.1.1",
  "bincode",
  "bip0039",
  "chacha20",
@@ -3791,13 +3814,13 @@ dependencies = [
  "reef",
  "regex",
  "rpassword",
- "rust-argon2",
+ "rust-argon2 1.0.0",
  "rustyline",
  "serde",
  "sha3 0.9.1",
  "snafu 0.7.0",
  "structopt",
- "strum",
+ "strum 0.24.0",
  "strum_macros",
  "surf",
  "tagged-base64",
@@ -4279,6 +4302,12 @@ name = "strum"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7318c509b5ba57f18533982607f24070a55d353e90d4cae30c467cdb2ad5ac5c"
+
+[[package]]
+name = "strum"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e96acfc1b70604b8b2f1ffa4c57e59176c7dbb05d556c71ecd2f5498a1dee7f8"
 
 [[package]]
 name = "strum_macros"
@@ -5287,7 +5316,7 @@ dependencies = [
  "async-trait",
  "async-tungstenite 0.15.0",
  "async_executors",
- "atomic_store 0.1.0 (git+https://github.com/EspressoSystems/atomicstore.git)",
+ "atomic_store 0.1.1",
  "bincode",
  "bitvec",
  "chacha20",
@@ -5318,7 +5347,7 @@ dependencies = [
  "rayon",
  "reef",
  "rpassword",
- "rust-argon2",
+ "rust-argon2 0.8.3",
  "rustyline",
  "seahorse",
  "serde",
@@ -5328,7 +5357,7 @@ dependencies = [
  "serde_with",
  "sha3 0.9.1",
  "snafu 0.7.0",
- "strum",
+ "strum 0.20.0",
  "strum_macros",
  "surf",
  "tagged-base64",

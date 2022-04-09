@@ -12,7 +12,7 @@ use server::{best_response_type, response};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;
-use strum::{AsStaticRef, IntoEnumIterator};
+use strum::IntoEnumIterator;
 use strum_macros::{AsRefStr, EnumIter, EnumString};
 use tagged_base64::TaggedBase64;
 use tide::http::{content::Accept, mime};
@@ -489,7 +489,7 @@ async fn subscribe(
     let index = bindings[":index"].value.as_index()? as u64;
     let mut events = req.state().node.read().await.subscribe(index).await;
     while let Some(event) = events.next().await {
-        event!(Level::INFO, "broadcast event {}", event.as_static());
+        event!(Level::INFO, "broadcast event {}", <&str>::from(&event));
         if response_type == mime::JSON {
             conn.send_json(&event).await?;
         } else if response_type == mime::BYTE_STREAM {
