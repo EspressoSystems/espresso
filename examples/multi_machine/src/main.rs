@@ -1077,42 +1077,45 @@ async fn main() -> Result<(), std::io::Error> {
             let mut succeeded_nodes: HashSet<u64> = HashSet::new();
             let mut failed_nodes: HashSet<u64> = HashSet::new();
             let success = loop {
-                for e in &mut all_events {
-                    let (id, events): &mut (u64, Option<EventStream<PhaseLockEvent>>) = e;
-                    if succeeded_nodes.contains(&id) || failed_nodes.contains(&id) {
-                        continue;
-                    }
-                    let event = &mut events
-                        .unwrap()
-                        .next()
-                        .await
-                        .expect("PhaseLock unexpectedly closed");
-                    match &mut event.event {
-                        EventType::Decide { block: _, state } => {
-                            if !state.is_empty() {
-                                let commitment =
-                                    TaggedBase64::new("LEDG", state[0].commit().as_ref())
-                                        .unwrap()
-                                        .to_string();
-                                println!(
-                                    "  - Round {} completed. Commitment: {}",
-                                    round + 1,
-                                    commitment
-                                );
-                                succeeded_nodes.insert(*id);
+                for i in 0..nodes_to_run.len() {
+                    if let (id, Some(mut true_events)) =
+                        core::mem::replace(&mut all_events[i], (0, None))
+                    {
+                        if succeeded_nodes.contains(&id) || failed_nodes.contains(&id) {
+                            continue;
+                        }
+                        let event = true_events
+                            .next()
+                            .await
+                            .expect("PhaseLock unexpectedly closed");
+                        match event.event {
+                            EventType::Decide { block: _, state } => {
+                                if !state.is_empty() {
+                                    let commitment =
+                                        TaggedBase64::new("COMM", state[0].commit().as_ref())
+                                            .unwrap()
+                                            .to_string();
+                                    println!(
+                                        "  - Round {} completed. Commitment: {}",
+                                        round + 1,
+                                        commitment
+                                    );
+                                    succeeded_nodes.insert(id);
+                                }
+                            }
+                            EventType::ViewTimeout { view_number: _ } => {
+                                println!("  - Round {} timed out.", round + 1);
+                                failed_nodes.insert(id);
+                            }
+                            EventType::Error { error } => {
+                                println!("  - Round {} error: {}", round + 1, error);
+                                failed_nodes.insert(id);
+                            }
+                            _ => {
+                                println!("EVENT: {:?}", event);
                             }
                         }
-                        EventType::ViewTimeout { view_number: _ } => {
-                            println!("  - Round {} timed out.", round + 1);
-                            failed_nodes.insert(*id);
-                        }
-                        EventType::Error { error } => {
-                            println!("  - Round {} error: {}", round + 1, error);
-                            failed_nodes.insert(*id);
-                        }
-                        _ => {
-                            println!("EVENT: {:?}", event);
-                        }
+                        all_events[i] = (id, Some(true_events));
                     }
                 }
                 if succeeded_nodes.len() >= threshold as usize {
