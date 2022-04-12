@@ -20,7 +20,7 @@ use phaselock::{
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use serde::{de::DeserializeOwned, Serialize};
 use server::request_body;
-use std::collections::hash_map::HashMap;
+use std::collections::{hash_map::HashMap, HashSet};
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::{prelude::*, Read};
@@ -920,7 +920,7 @@ async fn main() -> Result<(), std::io::Error> {
     let mut nodes_to_run = Vec::new();
     let mut states = Vec::new();
     let mut phaselocks = Vec::new();
-    let mut all_events = Vec::new();
+    let mut all_events: Vec<(u64, Option<EventStream<PhaseLockEvent>>)> = Vec::new();
     let mut web_servers = Vec::new();
     if NodeOpt::from_args().simulate {
         nodes_to_run = (0..nodes).collect();
@@ -992,10 +992,9 @@ async fn main() -> Result<(), std::io::Error> {
             web_servers.push(web_server);
 
             states.push(core::mem::take(&mut state));
-            all_events.push(core::mem::take(&mut Some(phaselock.subscribe())));
+            all_events.push((id, core::mem::take(&mut Some(phaselock.subscribe()))));
             phaselocks.push(core::mem::take(&mut Some(phaselock)));
         }
-        let mut all_events: Vec<EventStream<_>> = all_events.into_iter().flatten().collect();
 
         #[cfg(target_os = "linux")]
         let bytes_per_page = procfs::page_size().unwrap() as u64;
@@ -1025,12 +1024,11 @@ async fn main() -> Result<(), std::io::Error> {
         // Submitted transaction on which the consensus hasn't been reached.
         let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
         let mut txn_proposed_round = 0;
-        // Table mapping the round number with the number of completed nodes.
-        // Used for the single-command simulation.
-        let mut completed_nodes: HashMap<u64, u64> = HashMap::new();
 
         // Start the consensus for each transaction.
         while num_txn.map(|count| round < count).unwrap_or(true) {
+            println!("Starting round {}", round + 1);
+
             // If a transaction has already been submitted more than 5 rounds ago but the consensus
             // still hasn't been reached, resubmit it.
             // Otherwise, use node 0 to submit a transaction if there isn't a wallet to generate it.
@@ -1070,33 +1068,26 @@ async fn main() -> Result<(), std::io::Error> {
             }
 
             // Start the consensus for each node.
-            let tasks: Vec<_> = nodes_to_run
-                .into_iter()
-                .map(|id| {
-                    let phaselock = &mut phaselocks[id as usize].as_ref().unwrap();
-                    println!("Starting round {}", round + 1);
-                    report_mem();
-
-                    // If the output below is changed, update the message for line.trim() in Validator::new as well
-                    println!("  - Starting consensus");
-
-                    async_std::task::spawn(phaselock.start_consensus())
-                })
-                .collect();
-            for task in tasks {
-                task.await;
+            // If the output below is changed, update the message for line.trim() in Validator::new as well
+            println!("  - Starting consensus");
+            report_mem();
+            for phaselock in &phaselocks {
+                phaselock.as_ref().unwrap().start_consensus().await;
             }
+            let mut succeeded_nodes: HashSet<u64> = HashSet::new();
+            let mut failed_nodes: HashSet<u64> = HashSet::new();
             let success = loop {
-                let tasks: Vec<_> = nodes_to_run
-                    .into_iter()
-                    .map(|id| {
-                        println!("Waiting for PhaseLock event");
-                        async_std::task::spawn(all_events[id as usize].next())
-                    })
-                    .collect();
-                for task in tasks {
-                    let event = task.await.expect("PhaseLock unexpectedly closed");
-                    match event.event {
+                for e in &mut all_events {
+                    let (id, events): &mut (u64, Option<EventStream<PhaseLockEvent>>) = e;
+                    if succeeded_nodes.contains(&id) || failed_nodes.contains(&id) {
+                        continue;
+                    }
+                    let event = &mut events
+                        .unwrap()
+                        .next()
+                        .await
+                        .expect("PhaseLock unexpectedly closed");
+                    match &mut event.event {
                         EventType::Decide { block: _, state } => {
                             if !state.is_empty() {
                                 let commitment =
@@ -1108,71 +1099,72 @@ async fn main() -> Result<(), std::io::Error> {
                                     round + 1,
                                     commitment
                                 );
-                                *completed_nodes.entry(round + 1).or_insert(0) += 1;
-                                break true;
+                                succeeded_nodes.insert(*id);
                             }
                         }
                         EventType::ViewTimeout { view_number: _ } => {
                             println!("  - Round {} timed out.", round + 1);
-                            break false;
+                            failed_nodes.insert(*id);
                         }
                         EventType::Error { error } => {
                             println!("  - Round {} error: {}", round + 1, error);
-                            break false;
+                            failed_nodes.insert(*id);
                         }
                         _ => {
                             println!("EVENT: {:?}", event);
                         }
                     }
                 }
-
-                if success {
-                    // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
-                    // current node), and there is no attached wallet.
-                    if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
-                        let state = states[id as usize].as_mut().unwrap();
-                        println!("  - Adding the transaction");
-                        let mut blk = ElaboratedBlock::default();
-                        let (owner_memos, kixs) = {
-                            let mut owner_memos = vec![];
-                            let mut kixs = vec![];
-
-                            for (kix, memo) in keys_and_memos {
-                                kixs.push(kix);
-                                owner_memos.push(memo);
-                            }
-                            (owner_memos, kixs)
-                        };
-
-                        // If we're running a full node, publish the receiver memos.
-                        if let Node::Full(node) = phaselock {
-                            node.write()
-                                .await
-                                .post_memos(round, ix as u64, owner_memos.clone(), sig)
-                                .await
-                                .unwrap();
-                        }
-
-                        state
-                            .try_add_transaction(
-                                &mut blk,
-                                t,
-                                ix,
-                                owner_memos,
-                                kixs,
-                                TxnPrintInfo::new_no_time(round as usize, 1),
-                            )
-                            .unwrap();
-                        state
-                            .validate_and_apply(
-                                blk,
-                                0.0,
-                                TxnPrintInfo::new_no_time(round as usize, 1),
-                            )
-                            .unwrap();
-                    }
+                if succeeded_nodes.len() >= threshold as usize {
+                    break true;
+                }
+                if failed_nodes.len() >= threshold as usize {
+                    break false;
                 }
             };
+
+            if success {
+                // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
+                // current node), and there is no attached wallet.
+                if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
+                    let state = states[0].as_mut().unwrap();
+                    println!("  - Adding the transaction");
+                    let mut blk = ElaboratedBlock::default();
+                    let (owner_memos, kixs) = {
+                        let mut owner_memos = vec![];
+                        let mut kixs = vec![];
+
+                        for (kix, memo) in keys_and_memos {
+                            kixs.push(kix);
+                            owner_memos.push(memo);
+                        }
+                        (owner_memos, kixs)
+                    };
+
+                    // If we're running a full node, publish the receiver memos.
+                    if let Some(Node::Full(node)) = &phaselocks[0] {
+                        node.write()
+                            .await
+                            .post_memos(round, ix as u64, owner_memos.clone(), sig)
+                            .await
+                            .unwrap();
+                    }
+
+                    state
+                        .try_add_transaction(
+                            &mut blk,
+                            t,
+                            ix,
+                            owner_memos,
+                            kixs,
+                            TxnPrintInfo::new_no_time(round as usize, 1),
+                        )
+                        .unwrap();
+                    state
+                        .validate_and_apply(blk, 0.0, TxnPrintInfo::new_no_time(round as usize, 1))
+                        .unwrap();
+                }
+            }
             round += 1;
         }
 
