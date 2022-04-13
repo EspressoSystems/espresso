@@ -200,7 +200,7 @@ pub fn dummy_url_eval(
   </body>
 </html>",
             route_pattern.split_once('/').unwrap().0,
-            route_pattern.to_string(),
+            route_pattern,
             bindings
         )))
         .content_type(tide::http::mime::HTML)

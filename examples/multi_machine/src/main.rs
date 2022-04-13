@@ -1086,7 +1086,8 @@ async fn main() -> Result<(), std::io::Error> {
             let mut failed_nodes: HashSet<u64> = HashSet::new();
             let mut commitment = "".to_string();
             let success = loop {
-                for i in 0..nodes_to_run.len() {
+                #[allow(clippy::needless_range_loop)]
+                for i in 0..all_events.len() {
                     if let (id, Some(mut true_events)) = core::mem::take(&mut all_events[i]) {
                         if succeeded_nodes.contains(&id) || failed_nodes.contains(&id) {
                             continue;
@@ -1187,12 +1188,10 @@ async fn main() -> Result<(), std::io::Error> {
         println!("All rounds completed");
 
         if NodeOpt::from_args().wait {
-            for web_server in web_servers {
-                if let Some(join_handle) = web_server {
-                    join_handle.await.unwrap_or_else(|err| {
-                        panic!("web server exited with an error: {}", err);
-                    });
-                }
+            for join_handle in web_servers.into_iter().flatten() {
+                join_handle.await.unwrap_or_else(|err| {
+                    panic!("web server exited with an error: {}", err);
+                });
             }
         }
     }
