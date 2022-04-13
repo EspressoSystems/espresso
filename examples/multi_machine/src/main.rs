@@ -840,6 +840,7 @@ fn init_web_server(
     println!("Web path: {:?}", web_path);
     let api = disco::load_messages(&api_path);
     let mut web_server = tide::with_state(WebState {
+        connections: Default::default(),
         web_path: web_path.clone(),
         api: api.clone(),
         node,
