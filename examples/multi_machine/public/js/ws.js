@@ -1,4 +1,4 @@
-// Copyright © 2021 Translucence Research, Inc. All rights reserved.
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
 let webSocket;
 let clientId;
 // See https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent#status_codes

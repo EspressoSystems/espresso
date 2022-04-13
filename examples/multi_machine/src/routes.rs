@@ -1,4 +1,4 @@
-// Copyright © 2021 Translucence Research, Inc. All rights reserved.
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
 
 use crate::WebState;
 use api::{
@@ -6,13 +6,13 @@ use api::{
 };
 use futures::prelude::*;
 use itertools::izip;
-use phaselock::BlockContents;
+use phaselock::traits::BlockContents;
 use seahorse::events::LedgerEvent;
 use server::{best_response_type, response};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;
-use strum::{AsStaticRef, IntoEnumIterator};
+use strum::IntoEnumIterator;
 use strum_macros::{AsRefStr, EnumIter, EnumString};
 use tagged_base64::TaggedBase64;
 use tide::http::{content::Accept, mime};
@@ -22,7 +22,7 @@ use tracing::{event, Level};
 use zerok_lib::{
     api,
     api::*,
-    ledger::SpectrumLedger,
+    ledger::EspressoLedger,
     node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService},
     state::{state_comm::LedgerStateCommitment, ElaboratedBlock},
 };
@@ -151,8 +151,8 @@ pub fn check_api(api: toml::Value) -> bool {
     !missing_definition
 }
 
-// Wrapper around `api::server_error` forcing `SpectrumError` as the error type.
-pub fn server_error<E: Into<SpectrumError>>(err: E) -> tide::Error {
+// Wrapper around `api::server_error` forcing `EspressoError` as the error type.
+pub fn server_error<E: Into<EspressoError>>(err: E) -> tide::Error {
     api::server_error(err)
 }
 
@@ -469,7 +469,7 @@ async fn get_nullifier(
 async fn get_event(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &impl QueryService,
-) -> Result<LedgerEvent<SpectrumLedger>, tide::Error> {
+) -> Result<LedgerEvent<EspressoLedger>, tide::Error> {
     let index = bindings[":index"].value.as_index()? as u64;
     let mut events = query_service.subscribe(index).await;
     events.next().await.ok_or_else(|| {
@@ -489,7 +489,7 @@ async fn subscribe(
     let index = bindings[":index"].value.as_index()? as u64;
     let mut events = req.state().node.read().await.subscribe(index).await;
     while let Some(event) = events.next().await {
-        event!(Level::INFO, "broadcast event {}", event.as_static());
+        event!(Level::INFO, "broadcast event {}", <&str>::from(&event));
         if response_type == mime::JSON {
             conn.send_json(&event).await?;
         } else if response_type == mime::BYTE_STREAM {

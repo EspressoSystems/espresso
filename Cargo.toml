@@ -1,13 +1,17 @@
 [workspace]
+resolver = "2"
+
 members = [
     "examples/asynctide",
-    "zerok/zerok_lib",
-    "zerok/zerok_client",
-    "zerok/zerok_validator",
     "examples/multi_machine",
     "examples/tideui",
+    "faucet",
+    "zerok/zerok_client",
+    "zerok/zerok_lib",
+    "zerok/zerok_validator",
     ]
 [profile.dev]
 opt-level = 1
-# [profile.release]
+[profile.release]
+debug = true
 # lto = "thin"

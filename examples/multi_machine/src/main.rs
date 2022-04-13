@@ -1,4 +1,5 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
+#![deny(warnings)]
 
 use crate::routes::{
     dispatch_url, dispatch_web_socket, server_error, RouteBinding, UrlSegmentType, UrlSegmentValue,
@@ -7,18 +8,19 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use jf_aap::{
+use jf_cap::{
     structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
     TransactionVerifyingKey,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use key_set::{KeySet, VerifierKeySet};
 use phaselock::{
-    error::PhaseLockError, event::EventType, message::Message, networking::w_network::WNetwork,
-    traits::storage::memory_storage::MemoryStorage, PhaseLock, PhaseLockConfig, PubKey, H_256,
+    traits::implementations::{AtomicStorage, WNetwork},
+    types::{EventType, Message},
+    PhaseLock, PhaseLockConfig, PhaseLockError, PubKey, H_256,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use server::request_body;
 use std::collections::{hash_map::HashMap, HashSet};
 use std::convert::TryInto;
@@ -32,9 +34,9 @@ use threshold_crypto as tc;
 use tide::StatusCode;
 use tide_websockets::{WebSocket, WebSocketConnection};
 use toml::Value;
-use tracing::{debug, event, Level};
+use tracing::{debug, event, info, Level};
 use zerok_lib::{
-    api::SpectrumError,
+    api::EspressoError,
     api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
@@ -321,7 +323,7 @@ async fn get_networking<
 }
 
 type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>;
-type PLStorage = MemoryStorage<ElaboratedBlock, ValidatorState, H_256>;
+type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
 
@@ -416,13 +418,13 @@ async fn init_state_and_phaselock(
             // Set up the validator.
             let univ_setup = &*UNIVERSAL_PARAM;
             let (_, xfr_verif_key_12, _) =
-                jf_aap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
+                jf_cap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
             let (_, xfr_verif_key_23, _) =
-                jf_aap::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
+                jf_cap::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
             let (_, mint_verif_key, _) =
-                jf_aap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
+                jf_cap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
             let (_, freeze_verif_key, _) =
-                jf_aap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
+                jf_cap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
             let verif_keys = VerifierKeySet {
                 mint: TransactionVerifyingKey::Mint(mint_verif_key),
                 xfr: KeySet::new(
@@ -493,7 +495,7 @@ async fn init_state_and_phaselock(
         threshold: threshold as u32,
         max_transactions: 100,
         known_nodes,
-        next_view_timeout: 10000,
+        next_view_timeout: 10_000,
         timeout_ratio: (11, 10),
         round_start_delay: 1,
         start_delay: 1,
@@ -510,6 +512,20 @@ async fn init_state_and_phaselock(
     } else {
         validator.clone()
     };
+
+    let univ_param = if full_node {
+        Some(&*UNIVERSAL_PARAM)
+    } else {
+        None
+    };
+
+    let storage = get_store_dir(node_id);
+    let phaselock_persistence = [Path::new(&storage), Path::new("phaselock")]
+        .iter()
+        .collect::<PathBuf>();
+    let node_persistence = [Path::new(&storage), Path::new("node")]
+        .iter()
+        .collect::<PathBuf>();
     let (_, phaselock) = PhaseLock::init(
         genesis,
         public_keys,
@@ -518,15 +534,15 @@ async fn init_state_and_phaselock(
         config,
         validator,
         networking,
-        MemoryStorage::default(),
+        AtomicStorage::open(&phaselock_persistence).unwrap(),
         lw_persistence,
     )
-    .await;
+    .await
+    .unwrap();
     debug!("phaselock launched");
 
     let validator = if full_node {
-        let full_persisted =
-            FullPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap();
+        let full_persisted = FullPersistence::new(&node_persistence, "full_node").unwrap();
 
         let records = if load_from_store {
             let mut builder = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
@@ -546,7 +562,7 @@ async fn init_state_and_phaselock(
         };
         let node = FullNode::new(
             phaselock,
-            &*UNIVERSAL_PARAM,
+            univ_param.unwrap(),
             stored_state,
             records,
             nullifiers,
@@ -562,7 +578,16 @@ async fn init_state_and_phaselock(
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
+struct Connection {
+    id: String,
+    wsc: WebSocketConnection,
+}
+
+#[derive(Clone)]
 pub struct WebState {
+    #[allow(dead_code)]
+    connections: Arc<RwLock<HashMap<String, Connection>>>,
     web_path: PathBuf,
     api: toml::Value,
     node: Arc<RwLock<FullNode<'static>>>,
@@ -584,7 +609,7 @@ async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respon
     let TransactionId(BlockId(block), tx) =
         UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
             .ok_or_else(|| {
-                server_error(SpectrumError::Param {
+                server_error(EspressoError::Param {
                     param: String::from("txid"),
                     msg: String::from(
                         "Valid transaction ID required. Transaction IDs start with TX~.",
@@ -599,8 +624,28 @@ async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respon
     Ok(tide::Response::new(StatusCode::Ok))
 }
 
+// TODO: factor this out
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InsertPubKey {
+    pub pub_key_bytes: Vec<u8>,
+    pub sig: jf_cap::Signature,
+}
+
+/// Lookup a user public key from a signed public key address. Fail with
+/// tide::StatusCode::BadRequest if key deserialization or the signature check
+/// fail.
+fn verify_sig_and_get_pub_key(insert_request: InsertPubKey) -> Result<UserPubKey, tide::Error> {
+    let pub_key: UserPubKey = bincode::deserialize(&insert_request.pub_key_bytes)
+        .map_err(|e| tide::Error::new(tide::StatusCode::BadRequest, e))?;
+    pub_key
+        .verify_sig(&insert_request.pub_key_bytes, &insert_request.sig)
+        .map_err(|e| tide::Error::new(tide::StatusCode::BadRequest, e))?;
+    Ok(pub_key)
+}
+
 async fn users_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let pub_key: UserPubKey = request_body(&mut req).await?;
+    let insert_request: InsertPubKey = net::server::request_body(&mut req).await?;
+    let pub_key = verify_sig_and_get_pub_key(insert_request)?;
     let mut bulletin = req.state().node.write().await;
     bulletin.introduce(&pub_key).await.map_err(server_error)?;
     Ok(tide::Response::new(StatusCode::Ok))
@@ -704,9 +749,9 @@ fn parse_route(
             length_matches = true;
         }
         if argument_parse_failed {
-            arg_doc.push_str(&"Argument parsing failed.\n".to_string());
+            arg_doc.push_str("Argument parsing failed.\n");
         } else {
-            arg_doc.push_str(&"No argument parsing errors!\n".to_string());
+            arg_doc.push_str("No argument parsing errors!\n");
         }
         if !argument_parse_failed && length_matches && !found_literal_mismatch {
             let route_pattern_str = route_pattern.as_str().unwrap();
@@ -747,7 +792,7 @@ async fn entry_page(req: tide::Request<WebState>) -> Result<tide::Response, tide
 
 async fn handle_web_socket(
     req: tide::Request<WebState>,
-    wsc: WebSocketConnection,
+    #[allow(dead_code)] wsc: WebSocketConnection,
 ) -> tide::Result<()> {
     match parse_route(&req) {
         Ok((pattern, bindings)) => dispatch_web_socket(req, wsc, pattern.as_str(), &bindings).await,
@@ -801,7 +846,7 @@ fn init_web_server(
     });
     web_server
         .with(server::trace)
-        .with(server::add_error_body::<_, SpectrumError>);
+        .with(server::add_error_body::<_, EspressoError>);
 
     // Define the routes handled by the web server.
     web_server.at("/public").serve_dir(web_path)?;
@@ -859,7 +904,10 @@ fn init_web_server(
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
-    tracing_subscriber::fmt().pretty().init();
+    tracing_subscriber::fmt()
+        .compact()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
     // Get configuration
     let node_config = get_node_config();
@@ -904,15 +952,15 @@ async fn main() -> Result<(), std::io::Error> {
                     panic!("Error while writing to the public key file: {}", err)
                 });
         }
-        println!("Public key files created");
+        info!("Public key files created");
     }
 
     // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
     let load_from_store = NodeOpt::from_args().load_from_store;
     if load_from_store {
-        println!("restoring from persisted session");
+        info!("restoring from persisted session");
     } else {
-        println!("initializing new session");
+        info!("initializing new session");
     }
 
     // If we are running the single-command simulation, run all nodes.
@@ -947,7 +995,7 @@ async fn main() -> Result<(), std::io::Error> {
         }
 
         for (id, network) in networks.clone() {
-            println!("Current node: {}", id);
+            info!("Current node: {}", id);
 
             // Connect all nodes.
             for (other_id, pub_key, ip, port) in nodes_info.clone() {
@@ -957,7 +1005,7 @@ async fn main() -> Result<(), std::io::Error> {
                         debug!("  - Retrying");
                         async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
                     }
-                    println!("  - Connected to node {}", other_id);
+                    info!("  - Connected to node {}", other_id);
                 }
             }
 
@@ -966,7 +1014,7 @@ async fn main() -> Result<(), std::io::Error> {
                 async_std::task::sleep(std::time::Duration::from_millis(10)).await;
             }
         }
-        println!("All nodes connected to network");
+        info!("All nodes connected to network");
 
         for (id, network) in networks {
             // Initialize the state and phaselock
@@ -1007,7 +1055,7 @@ async fn main() -> Result<(), std::io::Error> {
         #[cfg(target_os = "linux")]
         let bytes_per_page = procfs::page_size().unwrap() as u64;
         #[cfg(target_os = "linux")]
-        println!("{} bytes per page", bytes_per_page);
+        debug!("{} bytes per page", bytes_per_page);
 
         let fence = || std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 
@@ -1016,7 +1064,7 @@ async fn main() -> Result<(), std::io::Error> {
             #[cfg(target_os = "linux")]
             {
                 let process_stats = procfs::process::Process::myself().unwrap().statm().unwrap();
-                println!(
+                debug!(
                     "{:.3}MiB | raw: {:?}",
                     ((process_stats.size * bytes_per_page) as f64) / ((1u64 << 20) as f64),
                     process_stats
@@ -1035,14 +1083,14 @@ async fn main() -> Result<(), std::io::Error> {
 
         // Start the consensus for each transaction.
         while num_txn.map(|count| round < count).unwrap_or(true) {
-            println!("Starting round {}", round + 1);
+            info!("Starting round {}", round + 1);
 
             // If a transaction has already been submitted more than 5 rounds ago but the consensus
             // still hasn't been reached, resubmit it.
             // Otherwise, use node 0 to submit a transaction if there isn't a wallet to generate it.
             if let Some(tx) = txn.as_ref() {
                 if txn_proposed_round + 5 < round {
-                    println!("  - Reproposing a transaction");
+                    info!("  - Reproposing a transaction");
                     // TODO
                     phaselocks[0]
                         .as_ref()
@@ -1053,7 +1101,7 @@ async fn main() -> Result<(), std::io::Error> {
                     txn_proposed_round = round;
                 }
             } else if let Some(mut true_state) = core::mem::replace(&mut states[0], None) {
-                println!("  - Proposing a transaction");
+                info!("  - Proposing a transaction");
                 let (true_state, mut transactions) = async_std::task::spawn_blocking(move || {
                     let txs = true_state
                         .generate_transactions(
@@ -1076,8 +1124,10 @@ async fn main() -> Result<(), std::io::Error> {
             }
 
             // Start the consensus for each node.
+            // !!!!!!     WARNING !!!!!!!
             // If the output below is changed, update the message for line.trim() in Validator::new as well
-            println!("  - Starting consensus");
+            println!(/* THINK TWICE BEFORE CHANGING THIS */ "  - Starting consensus");
+            // !!!!!! END WARNING !!!!!!!
             report_mem();
             for phaselock in &phaselocks {
                 phaselock.as_ref().unwrap().start_consensus().await;
@@ -1109,7 +1159,7 @@ async fn main() -> Result<(), std::io::Error> {
                                     } else {
                                         commitment = comm;
                                     }
-                                    println!(
+                                    info!(
                                         "  - Round {} completed. Commitment: {}",
                                         round + 1,
                                         commitment
@@ -1118,15 +1168,15 @@ async fn main() -> Result<(), std::io::Error> {
                                 }
                             }
                             EventType::ViewTimeout { view_number: _ } => {
-                                println!("  - Round {} timed out.", round + 1);
+                                info!("  - Round {} timed out.", round + 1);
                                 failed_nodes.insert(id);
                             }
                             EventType::Error { error } => {
-                                println!("  - Round {} error: {}", round + 1, error);
+                                info!("  - Round {} error: {}", round + 1, error);
                                 failed_nodes.insert(id);
                             }
                             _ => {
-                                println!("EVENT: {:?}", event);
+                                info!("EVENT: {:?}", event);
                             }
                         }
                         all_events[i] = (id, Some(true_events));
@@ -1145,7 +1195,7 @@ async fn main() -> Result<(), std::io::Error> {
                 // current node), and there is no attached wallet.
                 if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
                     let state = states[0].as_mut().unwrap();
-                    println!("  - Adding the transaction");
+                    info!("  - Adding the transaction");
                     let mut blk = ElaboratedBlock::default();
                     let (owner_memos, kixs) = {
                         let mut owner_memos = vec![];
@@ -1185,7 +1235,7 @@ async fn main() -> Result<(), std::io::Error> {
             round += 1;
         }
 
-        println!("All rounds completed");
+        info!("All rounds completed");
 
         if NodeOpt::from_args().wait {
             for join_handle in web_servers.into_iter().flatten() {

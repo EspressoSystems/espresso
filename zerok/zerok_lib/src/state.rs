@@ -1,6 +1,6 @@
 #![deny(warnings)]
 
-use zerok_macros::*;
+use espresso_macros::*;
 
 pub use crate::full_persistence::FullPersistence;
 pub use crate::lw_persistence::LWPersistence;
@@ -12,7 +12,7 @@ use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
-use jf_aap::{
+use jf_cap::{
     errors::TxnApiError,
     structs::{Nullifier, RecordCommitment},
     txn_batch_verify, MerkleCommitment, MerkleFrontier, MerkleLeafProof, MerkleTree, NodeValue,
@@ -20,7 +20,11 @@ use jf_aap::{
 };
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
-use phaselock::{traits::state::State, BlockContents, H_256};
+use phaselock::{
+    data::{BlockHash, LeafHash, TransactionHash},
+    traits::{BlockContents, State},
+    H_256,
+};
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashSet, VecDeque};
@@ -143,32 +147,27 @@ impl BlockContents<H_256> for ElaboratedBlock {
         Ok(ret)
     }
 
-    fn hash(&self) -> phaselock::BlockHash<H_256> {
-        use std::convert::TryInto;
-
-        phaselock::BlockHash::<H_256>::from_array(self.commit().try_into().unwrap())
+    fn hash(&self) -> BlockHash<H_256> {
+        BlockHash::<H_256>::from_array(self.commit().try_into().unwrap())
     }
 
-    fn hash_bytes(bytes: &[u8]) -> phaselock::BlockHash<H_256> {
-        use std::convert::TryInto;
+    fn hash_leaf(bytes: &[u8]) -> LeafHash<H_256> {
         // TODO: fix this hack, it is specifically working around the
         // misuse-preventing `T: Committable` on `RawCommitmentBuilder`
         let ret = commit::RawCommitmentBuilder::<Block>::new("PhaseLock bytes")
             .var_size_bytes(bytes)
             .finalize();
-        phaselock::BlockHash::<H_256>::from_array(ret.try_into().unwrap())
+        LeafHash::<H_256>::from_array(ret.try_into().unwrap())
     }
 
-    fn hash_transaction(txn: &ElaboratedTransaction) -> phaselock::BlockHash<H_256> {
-        use std::convert::TryInto;
-
-        phaselock::BlockHash::<H_256>::from_array(txn.commit().try_into().unwrap())
+    fn hash_transaction(txn: &ElaboratedTransaction) -> TransactionHash<H_256> {
+        TransactionHash::<H_256>::from_array(txn.commit().try_into().unwrap())
     }
 }
 
 // TODO
 #[derive(Debug, Snafu, Serialize, Deserialize)]
-#[snafu(visibility = "pub(crate)")]
+#[snafu(visibility(pub(crate)))]
 pub enum ValidationError {
     NullifierAlreadyExists {
         nullifier: Nullifier,

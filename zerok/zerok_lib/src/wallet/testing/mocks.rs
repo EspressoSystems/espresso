@@ -1,7 +1,7 @@
 pub use seahorse::testing::MockLedger;
 
 use crate::{
-    ledger::SpectrumLedger,
+    ledger::EspressoLedger,
     node,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
@@ -10,135 +10,54 @@ use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use futures::stream::Stream;
 use itertools::izip;
-use jf_aap::{
-    keys::{UserAddress, UserPubKey},
-    structs::{AssetCodeSeed, AssetDefinition, Nullifier, ReceiverMemo, RecordOpening},
+use jf_cap::{
+    keys::{UserAddress, UserKeyPair, UserPubKey},
+    structs::{Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
     MerkleTree, Signature,
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
+use reef::traits::Transaction as _;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     hd, testing,
     testing::MockEventSource,
-    txn_builder::{RecordDatabase, TransactionHistoryEntry, TransactionState},
-    CryptoError, RoleKeyPair, WalletBackend, WalletError, WalletState, WalletStorage,
+    txn_builder::{PendingTransaction, RecordDatabase, TransactionInfo, TransactionState},
+    CryptoSnafu, WalletBackend, WalletError, WalletState,
 };
 use snafu::ResultExt;
 use std::collections::HashMap;
 use std::pin::Pin;
-use testing::MockNetwork;
+use testing::{mocks::MockStorage, MockNetwork};
 
-#[derive(Clone, Debug, Default)]
-pub struct MockStorage<'a> {
-    committed: Option<WalletState<'a, SpectrumLedger>>,
-    working: Option<WalletState<'a, SpectrumLedger>>,
-    txn_history: Vec<TransactionHistoryEntry<SpectrumLedger>>,
-}
-
-#[async_trait]
-impl<'a> WalletStorage<'a, SpectrumLedger> for MockStorage<'a> {
-    fn exists(&self) -> bool {
-        self.committed.is_some()
-    }
-
-    async fn load(
-        &mut self,
-    ) -> Result<WalletState<'a, SpectrumLedger>, WalletError<SpectrumLedger>> {
-        Ok(self.committed.as_ref().unwrap().clone())
-    }
-
-    async fn store_snapshot(
-        &mut self,
-        state: &WalletState<'a, SpectrumLedger>,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
-        if let Some(working) = &mut self.working {
-            working.txn_state = state.txn_state.clone();
-            working.key_scans = state.key_scans.clone();
-            working.key_state = state.key_state.clone();
-        }
-        Ok(())
-    }
-
-    async fn store_auditable_asset(
-        &mut self,
-        asset: &AssetDefinition,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
-        if let Some(working) = &mut self.working {
-            working.auditable_assets.insert(asset.code, asset.clone());
-        }
-        Ok(())
-    }
-
-    async fn store_key(&mut self, key: &RoleKeyPair) -> Result<(), WalletError<SpectrumLedger>> {
-        if let Some(working) = &mut self.working {
-            match key {
-                RoleKeyPair::Auditor(key) => {
-                    working.audit_keys.insert(key.pub_key(), key.clone());
-                }
-                RoleKeyPair::Freezer(key) => {
-                    working.freeze_keys.insert(key.pub_key(), key.clone());
-                }
-                RoleKeyPair::User(key) => {
-                    working.user_keys.insert(key.address(), key.clone());
-                }
-            }
-        }
-        Ok(())
-    }
-
-    async fn store_defined_asset(
-        &mut self,
-        asset: &AssetDefinition,
-        seed: AssetCodeSeed,
-        desc: &[u8],
-    ) -> Result<(), WalletError<SpectrumLedger>> {
-        if let Some(working) = &mut self.working {
-            working
-                .defined_assets
-                .insert(asset.code, (asset.clone(), seed, desc.to_vec()));
-        }
-        Ok(())
-    }
-
-    async fn store_transaction(
-        &mut self,
-        txn: TransactionHistoryEntry<SpectrumLedger>,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
-        self.txn_history.push(txn);
-        Ok(())
-    }
-
-    async fn transaction_history(
-        &mut self,
-    ) -> Result<Vec<TransactionHistoryEntry<SpectrumLedger>>, WalletError<SpectrumLedger>> {
-        Ok(self.txn_history.clone())
-    }
-
-    async fn commit(&mut self) {
-        self.committed = self.working.clone();
-    }
-
-    async fn revert(&mut self) {
-        self.working = self.committed.clone();
-    }
-}
-
-pub struct MockSpectrumNetwork<'a> {
+pub struct MockEspressoNetwork<'a> {
     validator: ValidatorState,
     nullifiers: SetMerkleTree,
     records: MerkleTree,
     committed_blocks: Vec<(ElaboratedBlock, Vec<Vec<u64>>)>,
     proving_keys: Arc<ProverKeySet<'a, key_set::OrderByOutputs>>,
     address_map: HashMap<UserAddress, UserPubKey>,
-    events: MockEventSource<SpectrumLedger>,
+    events: MockEventSource<EspressoLedger>,
 }
 
-impl<'a> MockNetwork<'a, SpectrumLedger> for MockSpectrumNetwork<'a> {
+impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
     fn now(&self) -> EventIndex {
         self.events.now()
     }
 
-    fn submit(&mut self, block: ElaboratedBlock) -> Result<(), WalletError<SpectrumLedger>> {
+    fn event(
+        &self,
+        index: EventIndex,
+        source: EventSource,
+    ) -> Result<LedgerEvent<EspressoLedger>, WalletError<EspressoLedger>> {
+        match source {
+            EventSource::QueryService => self.events.get(index),
+            _ => Err(WalletError::Failed {
+                msg: String::from("invalid event source"),
+            }),
+        }
+    }
+
+    fn submit(&mut self, block: ElaboratedBlock) -> Result<(), WalletError<EspressoLedger>> {
         match self.validator.validate_and_apply(
             self.validator.prev_commit_time + 1,
             block.block.clone(),
@@ -184,14 +103,15 @@ impl<'a> MockNetwork<'a, SpectrumLedger> for MockSpectrumNetwork<'a> {
         txn_id: u64,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
+    ) -> Result<(), WalletError<EspressoLedger>> {
         let (block, block_uids) = &self.committed_blocks[block_id as usize];
         let txn = &block.block.0[txn_id as usize];
         let comms = txn.output_commitments();
         let uids = block_uids[txn_id as usize].clone();
+        let kind = txn.kind();
 
         txn.verify_receiver_memos_signature(&memos, &sig)
-            .context(CryptoError)?;
+            .context(CryptoSnafu)?;
 
         let merkle_paths = uids
             .iter()
@@ -204,9 +124,9 @@ impl<'a> MockNetwork<'a, SpectrumLedger> for MockSpectrumNetwork<'a> {
                     .1
             })
             .collect::<Vec<_>>();
-        self.generate_event(LedgerEvent::<SpectrumLedger>::Memos {
+        self.generate_event(LedgerEvent::<EspressoLedger>::Memos {
             outputs: izip!(memos, comms, uids, merkle_paths).collect(),
-            transaction: Some((block_id, txn_id)),
+            transaction: Some((block_id, txn_id, kind)),
         });
 
         Ok(())
@@ -216,7 +136,7 @@ impl<'a> MockNetwork<'a, SpectrumLedger> for MockSpectrumNetwork<'a> {
         EventSource::QueryService
     }
 
-    fn generate_event(&mut self, e: LedgerEvent<SpectrumLedger>) {
+    fn generate_event(&mut self, e: LedgerEvent<EspressoLedger>) {
         println!(
             "generating event {}: {}",
             self.now(),
@@ -231,18 +151,27 @@ impl<'a> MockNetwork<'a, SpectrumLedger> for MockSpectrumNetwork<'a> {
 }
 
 #[derive(Clone)]
-pub struct MockSpectrumBackend<'a> {
+pub struct MockEspressoBackend<'a> {
     key_stream: hd::KeyTree,
-    ledger: Arc<Mutex<MockLedger<'a, SpectrumLedger, MockSpectrumNetwork<'a>, MockStorage<'a>>>>,
+    ledger: Arc<
+        Mutex<
+            MockLedger<
+                'a,
+                EspressoLedger,
+                MockEspressoNetwork<'a>,
+                MockStorage<'a, EspressoLedger>,
+            >,
+        >,
+    >,
     initial_grants: Vec<(RecordOpening, u64)>,
-    storage: Arc<Mutex<MockStorage<'a>>>,
+    storage: Arc<Mutex<MockStorage<'a, EspressoLedger>>>,
 }
 
 #[async_trait]
-impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
+impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
     type EventStream =
-        Pin<Box<dyn Stream<Item = (LedgerEvent<SpectrumLedger>, EventSource)> + Send>>;
-    type Storage = MockStorage<'a>;
+        Pin<Box<dyn Stream<Item = (LedgerEvent<EspressoLedger>, EventSource)> + Send>>;
+    type Storage = MockStorage<'a, EspressoLedger>;
 
     async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
         self.storage.lock().await
@@ -250,7 +179,7 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
 
     async fn create(
         &mut self,
-    ) -> Result<WalletState<'a, SpectrumLedger>, WalletError<SpectrumLedger>> {
+    ) -> Result<WalletState<'a, EspressoLedger>, WalletError<EspressoLedger>> {
         let state = {
             let mut ledger = self.ledger.lock().await;
 
@@ -261,11 +190,23 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
 
                     records: {
                         let mut db: RecordDatabase = Default::default();
-                        let key_pair = self
-                            .key_stream
-                            .derive_sub_tree("user".as_bytes())
-                            .derive_user_keypair(&0u64.to_le_bytes());
                         for (ro, uid) in self.initial_grants.iter() {
+                            let key_pair = {
+                                let mut ret = None;
+                                let key_stream = self.key_stream.derive_sub_tree("user".as_bytes());
+
+                                for i in 0u64..5 {
+                                    let key_pair =
+                                        key_stream.derive_user_key_pair(&i.to_le_bytes());
+                                    if key_pair.pub_key() == ro.pub_key {
+                                        ret = Some(key_pair);
+                                        break;
+                                    }
+                                }
+
+                                ret.unwrap()
+                            };
+
                             db.insert(ro.clone(), *uid, &key_pair);
                         }
                         db
@@ -278,19 +219,16 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
                     transactions: Default::default(),
                 },
                 key_state: Default::default(),
-                key_scans: Default::default(),
-                auditable_assets: Default::default(),
-                audit_keys: Default::default(),
-                freeze_keys: Default::default(),
-                user_keys: Default::default(),
-                defined_assets: HashMap::new(),
+                assets: Default::default(),
+                freezing_accounts: Default::default(),
+                sending_accounts: Default::default(),
+                viewing_accounts: Default::default(),
             }
         };
 
         // Persist the initial state.
         let mut storage = self.storage().await;
-        storage.committed = Some(state.clone());
-        storage.working = Some(state.clone());
+        storage.initialize(state.clone(), state.clone()).unwrap();
 
         Ok(state)
     }
@@ -307,11 +245,11 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
     async fn get_public_key(
         &self,
         address: &UserAddress,
-    ) -> Result<UserPubKey, WalletError<SpectrumLedger>> {
+    ) -> Result<UserPubKey, WalletError<EspressoLedger>> {
         let mut ledger = self.ledger.lock().await;
         match ledger.network().address_map.get(address) {
             Some(key) => Ok(key.clone()),
-            None => Err(WalletError::<SpectrumLedger>::InvalidAddress {
+            None => Err(WalletError::<EspressoLedger>::InvalidAddress {
                 address: address.clone(),
             }),
         }
@@ -321,7 +259,7 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
         &self,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
-    ) -> Result<(bool, SetMerkleProof), WalletError<SpectrumLedger>> {
+    ) -> Result<(bool, SetMerkleProof), WalletError<EspressoLedger>> {
         let mut ledger = self.ledger.lock().await;
         if set.hash() == ledger.network().nullifiers.hash() {
             Ok(ledger.network().nullifiers.contains(nullifier).unwrap())
@@ -330,37 +268,12 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
         }
     }
 
-    async fn get_transaction(
-        &self,
-        block_id: u64,
-        txn_id: u64,
-    ) -> Result<ElaboratedTransaction, WalletError<SpectrumLedger>> {
-        let mut ledger = self.ledger.lock().await;
-        let network = ledger.network();
-        let block = &network
-            .committed_blocks
-            .get(block_id as usize)
-            .ok_or_else(|| {
-                WalletError::<SpectrumLedger>::from(node::QueryServiceError::InvalidBlockId {
-                    index: block_id as usize,
-                    num_blocks: network.committed_blocks.len(),
-                })
-            })?
-            .0;
-
-        if txn_id as usize >= block.block.0.len() {
-            return Err(node::QueryServiceError::InvalidTxnId {}.into());
-        }
-        let txn = block.block.0[txn_id as usize].clone();
-        let proofs = block.proofs[txn_id as usize].clone();
-        Ok(ElaboratedTransaction { txn, proofs })
-    }
-
     async fn register_user_key(
         &mut self,
-        pub_key: &UserPubKey,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
+        key_pair: &UserKeyPair,
+    ) -> Result<(), WalletError<EspressoLedger>> {
         let mut ledger = self.ledger.lock().await;
+        let pub_key = key_pair.pub_key();
         ledger
             .network()
             .address_map
@@ -371,42 +284,61 @@ impl<'a> WalletBackend<'a, SpectrumLedger> for MockSpectrumBackend<'a> {
     async fn submit(
         &mut self,
         txn: ElaboratedTransaction,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
+        _info: TransactionInfo<EspressoLedger>,
+    ) -> Result<(), WalletError<EspressoLedger>> {
         self.ledger.lock().await.submit(txn)
     }
 
-    async fn post_memos(
+    async fn finalize(
         &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), WalletError<SpectrumLedger>> {
-        self.ledger
-            .lock()
-            .await
-            .post_memos(block_id, txn_id, memos, sig)
+        txn: PendingTransaction<EspressoLedger>,
+        txid: Option<(u64, u64)>,
+    ) {
+        // -> Result<(), WalletError<EspressoLedger>>
+
+        if let Some((block_id, txn_id)) = txid {
+            let memos = txn
+                .info
+                .memos
+                .into_iter()
+                .collect::<Option<Vec<_>>>()
+                .unwrap();
+            let sig = txn.info.sig;
+            self.ledger
+                .lock()
+                .await
+                .post_memos(block_id, txn_id, memos, sig)
+                .unwrap()
+        }
+    }
+
+    async fn get_initial_scan_state(
+        &self,
+        _from: EventIndex,
+    ) -> Result<(MerkleTree, EventIndex), WalletError<EspressoLedger>> {
+        dbg!(self.ledger.lock().await.get_initial_scan_state())
     }
 }
 
 #[derive(Default)]
-pub struct SpectrumTest;
+pub struct EspressoTest;
 
 #[async_trait]
-impl<'a> testing::SystemUnderTest<'a> for SpectrumTest {
-    type Ledger = SpectrumLedger;
-    type MockBackend = MockSpectrumBackend<'a>;
-    type MockNetwork = MockSpectrumNetwork<'a>;
-    type MockStorage = MockStorage<'a>;
+impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
+    type Ledger = EspressoLedger;
+    type MockBackend = MockEspressoBackend<'a>;
+    type MockNetwork = MockEspressoNetwork<'a>;
+    type MockStorage = MockStorage<'a, EspressoLedger>;
 
     async fn create_network(
         &mut self,
         verif_crs: VerifierKeySet,
         proof_crs: ProverKeySet<'a, OrderByOutputs>,
         records: MerkleTree,
-        _initial_grants: Vec<(RecordOpening, u64)>,
+        initial_grants: Vec<(RecordOpening, u64)>,
     ) -> Self::MockNetwork {
-        MockSpectrumNetwork {
+        println!("[espresso] creating network");
+        let mut ret = MockEspressoNetwork {
             validator: ValidatorState::new(verif_crs, records.clone()),
             records,
             nullifiers: SetMerkleTree::default(),
@@ -414,7 +346,39 @@ impl<'a> testing::SystemUnderTest<'a> for SpectrumTest {
             proving_keys: Arc::new(proof_crs),
             address_map: HashMap::default(),
             events: MockEventSource::new(EventSource::QueryService),
-        }
+        };
+
+        // TODO: should we make this deterministic?
+        let mut rng = crate::testing::crypto_rng_from_seed([0x42u8; 32]);
+
+        // Broadcast receiver memos for the records which are included in the tree from the start,
+        // so that clients can access records they have been granted at ledger setup time in a
+        // uniform way.
+        let memo_outputs = initial_grants
+            .into_iter()
+            .map(|(ro, uid)| {
+                let memo = ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap();
+                let (comm, merkle_path) = ret
+                    .records
+                    .get_leaf(uid)
+                    .expect_ok()
+                    .map(|(_, proof)| {
+                        (
+                            RecordCommitment::from_field_element(proof.leaf.0),
+                            proof.path,
+                        )
+                    })
+                    .unwrap();
+                (memo, comm, uid, merkle_path)
+            })
+            .collect();
+        ret.generate_event(LedgerEvent::Memos {
+            outputs: memo_outputs,
+            transaction: None,
+        });
+
+        println!("[espresso] created network");
+        ret
     }
 
     async fn create_storage(&mut self) -> Self::MockStorage {
@@ -428,33 +392,29 @@ impl<'a> testing::SystemUnderTest<'a> for SpectrumTest {
         key_stream: hd::KeyTree,
         storage: Arc<Mutex<Self::MockStorage>>,
     ) -> Self::MockBackend {
-        MockSpectrumBackend {
+        MockEspressoBackend {
             ledger,
             initial_grants,
             storage,
             key_stream,
         }
     }
-
-    fn universal_param(&self) -> &'a jf_aap::proof::UniversalParam {
-        &*crate::universal_params::UNIVERSAL_PARAM
-    }
 }
 
-// Spectrum-specific tests
+// Espresso-specific tests
 #[cfg(test)]
-mod spectrum_wallet_tests {
+mod espresso_wallet_tests {
     use super::*;
-    use jf_aap::structs::AssetCode;
+    use jf_cap::structs::AssetCode;
     use std::time::Instant;
     use testing::SystemUnderTest;
 
     use testing::generic_wallet_tests;
-    seahorse::instantiate_generic_wallet_tests!(SpectrumTest);
+    seahorse::instantiate_generic_wallet_tests!(EspressoTest);
 
     #[async_std::test]
     async fn test_resubmit() -> std::io::Result<()> {
-        let mut t = SpectrumTest::default();
+        let mut t = EspressoTest::default();
         let mut now = Instant::now();
 
         // The sender wallet (wallets[0]) gets an initial grant of 2 for a transaction fee and a
@@ -464,7 +424,7 @@ mod spectrum_wallet_tests {
         // resubmitted.
         let (ledger, mut wallets) = t
             .create_test_network(
-                &[(1, 2)],
+                &[(2, 2)],
                 vec![
                     2,
                     0,
@@ -477,11 +437,15 @@ mod spectrum_wallet_tests {
         println!("generating transaction: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
         ledger.lock().await.hold_next_transaction();
-        let sender = wallets[0].1.clone();
         let receiver = wallets[1].1.clone();
         wallets[0]
             .0
-            .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
+            .transfer(
+                None,
+                &AssetCode::native(),
+                &[(receiver.first().unwrap().clone(), 1)],
+                1,
+            )
             .await
             .unwrap();
         println!("transfer generated: {}s", now.elapsed().as_secs_f32());
@@ -495,10 +459,14 @@ mod spectrum_wallet_tests {
         );
         now = Instant::now();
         for _ in 0..ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1 {
-            let sender = wallets[2].1.clone();
             wallets[2]
                 .0
-                .transfer(&sender, &AssetCode::native(), &[(receiver.clone(), 1)], 1)
+                .transfer(
+                    None,
+                    &AssetCode::native(),
+                    &[(receiver.first().unwrap().clone(), 1)],
+                    1,
+                )
                 .await
                 .unwrap();
             t.sync(&ledger, &wallets).await;
@@ -526,18 +494,9 @@ mod spectrum_wallet_tests {
             ledger_time.add_from_source(EventSource::QueryService, 3),
         )
         .await;
+        assert_eq!(wallets[0].0.balance(&AssetCode::native()).await, 0);
         assert_eq!(
-            wallets[0]
-                .0
-                .balance(&wallets[0].1, &AssetCode::native())
-                .await,
-            0
-        );
-        assert_eq!(
-            wallets[1]
-                .0
-                .balance(&wallets[1].1, &AssetCode::native())
-                .await,
+            wallets[1].0.balance(&AssetCode::native()).await,
             1 + (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64
         );
 
