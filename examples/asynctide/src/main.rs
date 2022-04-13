@@ -30,9 +30,7 @@ impl State {
     async fn add_connection(&self, id: &str, wsc: WebSocketConnection) -> tide::Result<()> {
         event!(Level::DEBUG, "main.rs: Adding connection {}", &id);
         let mut connections = self.connections.write().await;
-        let connection = Connection {
-            wsc,
-        };
+        let connection = Connection { wsc };
         connections.insert(id.to_string(), connection);
         Ok(())
     }
