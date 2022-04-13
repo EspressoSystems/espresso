@@ -927,42 +927,50 @@ async fn main() -> Result<(), std::io::Error> {
     } else if let Some(id) = NodeOpt::from_args().id {
         nodes_to_run = vec![id];
     }
-    if nodes_to_run.len() > 0 {
-        // Connect all nodes
+    if !nodes_to_run.is_empty() {
+        // Get the networking implementations of the nodes that we'll run.
+        let mut networks = Vec::new();
         for id in nodes_to_run.clone() {
-            println!("Current node: {}", id);
-            let secret_key_share = secret_keys.secret_key_share(id);
-
-            // Get networking information
             let (network, _) =
                 get_networking(id, "0.0.0.0", get_host(node_config.clone(), id).1).await;
-            #[allow(clippy::type_complexity)]
-            let mut other_nodes: Vec<(u64, PubKey, String, u16)> = Vec::new();
-            for other_id in 0..nodes {
-                if other_id != id {
-                    let (ip, port) = get_host(node_config.clone(), other_id);
-                    let pub_key = get_public_key(other_id);
-                    other_nodes.push((other_id, pub_key, ip, port));
-                }
-            }
 
-            // Connect the networking implementations
-            for (id, pub_key, ip, port) in other_nodes {
-                let socket = format!("{}:{}", ip, port);
-                while network.connect_to(pub_key.clone(), &socket).await.is_err() {
-                    debug!("  - Retrying");
-                    async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
+            networks.push((id, network));
+        }
+
+        // Get all nodes.
+        #[allow(clippy::type_complexity)]
+        let mut nodes_info: Vec<(u64, PubKey, String, u16)> = Vec::new();
+        for id in 0..nodes {
+            let (ip, port) = get_host(node_config.clone(), id);
+            let pub_key = get_public_key(id);
+            nodes_info.push((id, pub_key, ip, port));
+        }
+
+        for (id, network) in networks.clone() {
+            println!("Current node: {}", id);
+
+            // Connect all nodes.
+            for (other_id, pub_key, ip, port) in nodes_info.clone() {
+                if id != other_id {
+                    let socket = format!("{}:{}", ip, port);
+                    while network.connect_to(pub_key.clone(), &socket).await.is_err() {
+                        debug!("  - Retrying");
+                        async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
+                    }
+                    println!("  - Connected to node {}", other_id);
                 }
-                println!("  - Connected to node {}", id);
             }
 
             // Wait for the networking implementations to connect
             while (network.connection_table_size().await as u64) < nodes - 1 {
                 async_std::task::sleep(std::time::Duration::from_millis(10)).await;
             }
-            println!("All nodes connected to network");
+        }
+        println!("All nodes connected to network");
 
+        for (id, network) in networks {
             // Initialize the state and phaselock
+            let secret_key_share = secret_keys.secret_key_share(id);
             let (mut state, phaselock) = init_state_and_phaselock(
                 public_keys.clone(),
                 secret_key_share,
@@ -1076,11 +1084,10 @@ async fn main() -> Result<(), std::io::Error> {
             }
             let mut succeeded_nodes: HashSet<u64> = HashSet::new();
             let mut failed_nodes: HashSet<u64> = HashSet::new();
+            let mut commitment = "".to_string();
             let success = loop {
                 for i in 0..nodes_to_run.len() {
-                    if let (id, Some(mut true_events)) =
-                        core::mem::replace(&mut all_events[i], (0, None))
-                    {
+                    if let (id, Some(mut true_events)) = core::mem::take(&mut all_events[i]) {
                         if succeeded_nodes.contains(&id) || failed_nodes.contains(&id) {
                             continue;
                         }
@@ -1091,10 +1098,16 @@ async fn main() -> Result<(), std::io::Error> {
                         match event.event {
                             EventType::Decide { block: _, state } => {
                                 if !state.is_empty() {
-                                    let commitment =
+                                    let comm =
                                         TaggedBase64::new("COMM", state[0].commit().as_ref())
                                             .unwrap()
                                             .to_string();
+                                    // Check the commitments are consistent.
+                                    if !commitment.is_empty() {
+                                        assert_eq!(comm, commitment)
+                                    } else {
+                                        commitment = comm;
+                                    }
                                     println!(
                                         "  - Round {} completed. Commitment: {}",
                                         round + 1,

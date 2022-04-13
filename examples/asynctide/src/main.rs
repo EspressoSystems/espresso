@@ -12,7 +12,6 @@ use tracing::{event, Level};
 
 #[derive(Clone)]
 struct Connection {
-    id: String,
     wsc: WebSocketConnection,
 }
 
@@ -32,7 +31,6 @@ impl State {
         event!(Level::DEBUG, "main.rs: Adding connection {}", &id);
         let mut connections = self.connections.write().await;
         let connection = Connection {
-            id: id.to_string(),
             wsc,
         };
         connections.insert(id.to_string(), connection);
