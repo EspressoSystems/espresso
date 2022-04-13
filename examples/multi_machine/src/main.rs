@@ -1092,7 +1092,6 @@ async fn main() -> Result<(), std::io::Error> {
             if let Some(tx) = txn.as_ref() {
                 if txn_proposed_round + 5 < round {
                     info!("  - Reproposing a transaction");
-                    // TODO
                     phaselocks[0]
                         .as_ref()
                         .unwrap()
