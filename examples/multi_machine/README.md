@@ -16,7 +16,7 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
 * If there are public key files under `examples/multi_machine/src`, skip this section.
 * Otherwise, in a terminal window:
     * Cd to `target/release/`.
-    * Run `multi_machine --config {config} --generate_keys`.
+    * Run `./multi_machine --config {config} --generate_keys`.
     * Check that public key files are stored under `examples/multi_machine/src`, file names starting `pk_`.
 
 ### Simulate consensus
@@ -24,7 +24,7 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
     * Open 7 terminal windows (or split a window into 7 sessions using tmux). Let them be `window 0, 1, ..., 6`, each representing a node.
     * In each window:
         * Cd to `target/release/`.
-        * Run `multi_machine --config {config} --id {id} --num_txn {num_txn}`.
+        * Run `./multi_machine --config {config} --id {id} --num_txn {num_txn}`.
             * `config` is the path to the node config file.
                 * Skip this option if using the default file, `examples/multi_machine/src/node-config.toml`.
             * `id` is the ID of the current node, starting from `0` to `6`.
@@ -36,10 +36,9 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
         * Check that at least 5 windows display `Round {num_txn} completed` where `num_txn` is the number of transactions, and have the same commitment.
         * Note: Nodes that have completed all (i.e., 3) rounds or timed out will terminate their processes, which may lead to connection errors displayed in other windows. It is okay to ignore these errors as long as there are 5 identical commitments after the final round.
 * To simulate the single-command consensus:
-    * Open one terminal window.
-    * In each window:
+    * In a terminal window:
         * Cd to `target/release/`.
-        * Run `multi_machine --simulate --num_txn {num_txn}`.
+        * Run `./multi_machine --simulate --num_txn {num_txn}`.
             * `num_txn` is the number of transactions to generate.
                 * If skipped, the consensus will keep running till the process is killed. For easier manual testing, do not skip it.
     * Unlike the multi-process simulation, the single-command simulation will automatically check if the commitments of each round are the same.
