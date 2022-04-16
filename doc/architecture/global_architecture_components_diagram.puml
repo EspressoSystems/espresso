@@ -1,0 +1,77 @@
+@startuml
+skinparam componentStyle rectangle
+
+component "Wallet" as WAPI
+
+
+package "Wallet API" {
+    issue_asset -down- WAPI
+    transfer_asset -down- WAPI
+    freeze_record -down- WAPI
+    trace_asset -down- WAPI
+    manage_keys_cap -down- WAPI
+    view_balances_cap -down- WAPI
+    view_txs_cap -down- WAPI
+    manage_address_book_cap -down- WAPI
+}
+
+[Espresso Query Service] as EsQS
+interface get_mt_proof_asset_record
+interface get_txs_cap_since_block
+interface get_latest_cap_state
+interface get_plonk_verif_keys
+interface get_nullifiers
+get_nullifiers -down- EsQS
+get_plonk_verif_keys -down- EsQS
+get_txs_cap_since_block -down- EsQS
+get_mt_proof_asset_record -down- EsQS
+get_latest_cap_state -down- EsQS
+
+[Owner's memos store] as OMS
+interface fetch_memos
+interface push_memo
+fetch_memos -down- OMS
+push_memo -down- OMS
+
+
+[AddressBook] as AB
+interface register_addr_and_enc_pub_key
+interface get_enc_pub_key_from_addr
+register_addr_and_enc_pub_key -down- AB
+get_enc_pub_key_from_addr -down- AB
+
+[Faucet] as F
+interface get_cap_fee_record
+get_cap_fee_record -down- F
+
+component PhaseLock {
+
+    package "PhaseLock API" {
+        interface submit_tx
+        interface get_new_block
+    }
+
+    database "CAP Ledger" as CAPLedger{
+        submit_tx -down-> CAPLedger
+        get_new_block -down-> CAPLedger
+    }
+}
+
+EsQS -down-> get_new_block
+
+
+WAPI -down-> fetch_memos
+WAPI -down-> submit_tx
+WAPI -down-> push_memo
+WAPI -down-> get_mt_proof_asset_record
+WAPI -down-> get_txs_cap_since_block
+WAPI -down-> register_addr_and_enc_pub_key
+WAPI -down-> get_enc_pub_key_from_addr
+WAPI -down-> get_latest_cap_state
+WAPI -down-> get_plonk_verif_keys
+WAPI -down-> get_cap_fee_record
+WAPI -down-> get_nullifiers
+
+
+
+@enduml
