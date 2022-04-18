@@ -10,7 +10,7 @@ on:
 jobs:
   code-coverage:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
