@@ -24,9 +24,11 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
     * Open 7 terminal windows (or split a window into 7 sessions using tmux). Let them be `window 0, 1, ..., 6`, each representing a node.
     * In each window:
         * Cd to `target/release/`.
-        * Run `./multi_machine --config {config} --id {id} --num_txn {num_txn}`.
+        * Run `./multi_machine --config {config} --pk_path {pk_path} --id {id} --num_txn {num_txn}`.
             * `config` is the path to the node config file.
                 * Skip this option if using the default file, `examples/multi_machine/src/node-config.toml`.
+            * `pk_path` is the directory where publik key files are stored.
+                * Skip this option if using the default directory, `examples/multi_machine/src`.
             * `id` is the ID of the current node, starting from `0` to `6`.
                 * `Node 0` is going to propose all transactions, but not necessarily the leader in each round.
             * `num_txn` is the number of transactions to generate.
@@ -35,13 +37,16 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
     * After all processes are done:
         * Check that at least 5 windows display `Round {num_txn} completed` where `num_txn` is the number of transactions, and have the same commitment.
         * Note: Nodes that have completed all (i.e., 3) rounds or timed out will terminate their processes, which may lead to connection errors displayed in other windows. It is okay to ignore these errors as long as there are 5 identical commitments after the final round.
-* To simulate the single-command consensus:
+* To automate a single-command consensus:
     * In a terminal window:
         * Cd to `target/release/`.
-        * Run `./multi_machine --simulate --num_txn {num_txn}`.
+        * Run `./multi_machine_automation --num_txn {num_txn} --config {config} --pk_path {pk_path}`.
             * `num_txn` is the number of transactions to generate.
-                * If skipped, the consensus will keep running till the process is killed. For easier manual testing, do not skip it.
-    * Unlike the multi-process simulation, the single-command simulation will automatically check if the commitments of each round are the same.
+            * `config` is the path to the node config file.
+                * Skip this option if using the default file, `examples/multi_machine/src/node-config.toml`.
+            * `pk_path` is the directory where publik key files are stored.
+                * Skip this option if using the default directory, `examples/multi_machine/src`.
+    * Unlike the multi-process simulation, the single-command simulation will automatically check if the final commitments are the same and the number of succeeded nodes meets the threshold.
 
 ### Initialize web server
 * Port

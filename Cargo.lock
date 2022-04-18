@@ -4420,7 +4420,7 @@ dependencies = [
 [[package]]
 name = "tagged-base64"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/tagged-base64?branch=main#03b74bacf3e99b1b9504d9b9532ee384c26fbae6"
+source = "git+https://github.com/EspressoSystems/tagged-base64.git?branch=main#03b74bacf3e99b1b9504d9b9532ee384c26fbae6"
 dependencies = [
  "base64 0.13.0",
  "console_error_panic_hook",
