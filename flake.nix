@@ -29,7 +29,7 @@
       devShell =
         let
 
-          stableToolchain = pkgs.rust-bin.stable."1.58.1".minimal.override {
+          stableToolchain = pkgs.rust-bin.stable."1.59.0".minimal.override {
             extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
           };
           rustDeps = with pkgs; [
