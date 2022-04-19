@@ -23,7 +23,8 @@ markdown = "0.3"
 net = { git = "https://github.com/EspressoSystems/net.git" }
 # phaselock = { version = "0.0.6" }
 phaselock = { git = "ssh://git@github.com/EspressoSystems/phaselock.git", rev = "60b85f7eba2f93704682ce697c109f10eb47894c" }
-rand_chacha = "0.2.2"
+rand_chacha = {package = "rand_chacha", version = "0.3.1" }
+rand_chacha_02 = { package = "rand_chacha", version = "0.2.2" }
 seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
 serde = { version = "1.0.123", features = ["derive", "rc"] }
 serde_derive = "1.0.118"

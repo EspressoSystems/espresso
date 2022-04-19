@@ -9,7 +9,7 @@ use async_std::task;
 use async_trait::async_trait;
 use jf_cap::{
     structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
-    TransactionVerifyingKey,
+    MerkleTree, TransactionVerifyingKey,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use key_set::{KeySet, VerifierKeySet};
@@ -18,7 +18,8 @@ use phaselock::{
     types::Message,
     PhaseLock, PhaseLockConfig, PhaseLockError, PubKey, H_256,
 };
-use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+use rand_chacha::ChaChaRng;
+use rand_chacha_02::{rand_core::SeedableRng, ChaChaRng as ChaChaRng02};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
@@ -39,8 +40,8 @@ use zerok_lib::{
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
     state::{
-        ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, ValidatorState,
-        MERKLE_HEIGHT,
+        ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, SetMerkleTree,
+        ValidatorState, MERKLE_HEIGHT,
     },
     testing::{MultiXfrRecordSpec, MultiXfrTestState},
     universal_params::UNIVERSAL_PARAM,
@@ -132,22 +133,20 @@ pub struct NodeOpt {
     )]
     pub api_path: String,
 
-    /// Use an external wallet to generate transactions.
+    /// Public key which should own a faucet record in the genesis block.
     ///
-    /// The argument is the path to the wallet's public key. If this option is given, the ledger
-    /// will be initialized with a record of 2^32 native tokens, owned by the wallet's public key.
-    /// The demo will then wait for the wallet to generate some transactions and submit them to the
-    /// validators using the network API.
+    /// If this option is given, the ledger will be initialized with a record
+    /// of 2^32 native tokens, owned by the public key.
     ///
-    /// This option may be passed multiple times to initialize the ledger with multiple native token
-    /// records for different wallets.
-    #[structopt(short, long = "wallet")]
-    pub wallet_pk_path: Option<Vec<PathBuf>>,
+    /// This option may be passed multiple times to initialize the ledger with
+    /// multiple native token records
+    #[structopt(long)]
+    pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.
     ///
-    /// Skip this option if want to keep generating transactions till the process is killed.
-    #[structopt(long = "num_txn", short = "n")]
+    /// If not provided, the validator will wait for externally submitted transactions.
+    #[structopt(long = "num_txn", short = "n", conflicts_with("faucet_pub_key"))]
     pub num_txn: Option<u64>,
 
     /// Wait for web server to exit after transactions complete.
@@ -328,9 +327,120 @@ impl Validator for Node {
     }
 }
 
+pub struct GenesisState {
+    pub validator: ValidatorState,
+    pub records: MerkleTree,
+    pub nullifiers: SetMerkleTree,
+    pub memos: Vec<(ReceiverMemo, u64)>,
+}
+
+impl GenesisState {
+    pub fn new(rng: &mut ChaChaRng, faucet_pub_keys: impl IntoIterator<Item = UserPubKey>) -> Self {
+        let mut records = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
+        let mut memos = Vec::new();
+
+        // Process the initial native token records for the faucet.
+        for (i, pub_key) in faucet_pub_keys.into_iter().enumerate() {
+            // Create the initial grant.
+            event!(
+                Level::INFO,
+                "creating initial native token record for {}",
+                pub_key.address()
+            );
+            let ro = RecordOpening::new(
+                rng,
+                1u64 << 32,
+                AssetDefinition::native(),
+                pub_key,
+                FreezeFlag::Unfrozen,
+            );
+            records.push(RecordCommitment::from(&ro).to_field_element());
+            memos.push((ReceiverMemo::from_ro(rng, &ro, &[]).unwrap(), i as u64));
+        }
+        let records = records.build();
+
+        // Set up the validator.
+        let univ_setup = &*UNIVERSAL_PARAM;
+        let (_, xfr_verif_key_12, _) =
+            jf_cap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
+        let (_, xfr_verif_key_23, _) =
+            jf_cap::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
+        let (_, mint_verif_key, _) =
+            jf_cap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
+        let (_, freeze_verif_key, _) =
+            jf_cap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
+        let verif_keys = VerifierKeySet {
+            mint: TransactionVerifyingKey::Mint(mint_verif_key),
+            xfr: KeySet::new(
+                vec![
+                    TransactionVerifyingKey::Transfer(xfr_verif_key_12),
+                    TransactionVerifyingKey::Transfer(xfr_verif_key_23),
+                ]
+                .into_iter(),
+            )
+            .unwrap(),
+            freeze: KeySet::new(
+                vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
+            )
+            .unwrap(),
+        };
+
+        let nullifiers = Default::default();
+        let validator = ValidatorState::new(verif_keys, records.clone());
+        Self {
+            validator,
+            records,
+            nullifiers,
+            memos,
+        }
+    }
+
+    pub fn new_for_test() -> (Self, MultiXfrTestState) {
+        let state = MultiXfrTestState::initialize(
+            STATE_SEED,
+            10,
+            10,
+            (
+                MultiXfrRecordSpec {
+                    asset_def_ix: 0,
+                    owner_key_ix: 0,
+                    asset_amount: 100,
+                },
+                vec![
+                    MultiXfrRecordSpec {
+                        asset_def_ix: 1,
+                        owner_key_ix: 0,
+                        asset_amount: 50,
+                    },
+                    MultiXfrRecordSpec {
+                        asset_def_ix: 0,
+                        owner_key_ix: 0,
+                        asset_amount: 70,
+                    },
+                ],
+            ),
+        )
+        .unwrap();
+
+        let validator = state.validator.clone();
+        let records = state.record_merkle_tree.clone();
+        let nullifiers = state.nullifiers.clone();
+        let memos = state.unspent_memos();
+        (
+            Self {
+                validator,
+                records,
+                nullifiers,
+                memos,
+            },
+            state,
+        )
+    }
+}
+
 /// Creates the initial state and phaselock for simulation.
 #[allow(clippy::too_many_arguments)]
-async fn init_state_and_phaselock(
+async fn init_phaselock(
     options: &NodeOpt,
     public_keys: tc::PublicKeySet,
     secret_key_share: tc::SecretKeyShare,
@@ -340,114 +450,8 @@ async fn init_state_and_phaselock(
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
     full_node: bool,
     load_from_store: bool,
-) -> (Option<MultiXfrTestState>, Node) {
-    // Create the initial state
-    let (state, validator, records, nullifiers, memos) =
-        if let Some(pk_paths) = options.wallet_pk_path.clone() {
-            let mut rng = zerok_lib::testing::crypto_rng_from_seed([0x42u8; 32]);
-
-            let mut records = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
-            let mut memos = Vec::new();
-
-            // Process the initial native token records for the wallets.
-            for (i, pk_path) in pk_paths.into_iter().enumerate() {
-                // Read in the public key of the wallet which will get an initial grant of native
-                // coins.
-                let mut file = File::open(pk_path).unwrap();
-                let mut bytes = Vec::new();
-                file.read_to_end(&mut bytes).unwrap();
-                let pub_key: UserPubKey = bincode::deserialize(&bytes).unwrap();
-
-                // Create the initial grant.
-                event!(
-                    Level::INFO,
-                    "creating initial native token record for {}",
-                    pub_key.address()
-                );
-                let ro = RecordOpening::new(
-                    &mut rng,
-                    1u64 << 32,
-                    AssetDefinition::native(),
-                    pub_key,
-                    FreezeFlag::Unfrozen,
-                );
-                records.push(RecordCommitment::from(&ro).to_field_element());
-                memos.push((ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap(), i as u64));
-            }
-            let records = records.build();
-
-            // Set up the validator.
-            let univ_setup = &*UNIVERSAL_PARAM;
-            let (_, xfr_verif_key_12, _) =
-                jf_cap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
-            let (_, xfr_verif_key_23, _) =
-                jf_cap::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
-            let (_, mint_verif_key, _) =
-                jf_cap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
-            let (_, freeze_verif_key, _) =
-                jf_cap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
-            let verif_keys = VerifierKeySet {
-                mint: TransactionVerifyingKey::Mint(mint_verif_key),
-                xfr: KeySet::new(
-                    vec![
-                        TransactionVerifyingKey::Transfer(xfr_verif_key_12),
-                        TransactionVerifyingKey::Transfer(xfr_verif_key_23),
-                    ]
-                    .into_iter(),
-                )
-                .unwrap(),
-                freeze: KeySet::new(
-                    vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
-                )
-                .unwrap(),
-            };
-
-            let nullifiers = Default::default();
-            let validator = ValidatorState::new(verif_keys, records.clone());
-            (None, validator, records, nullifiers, memos)
-        } else {
-            let state = async_std::task::spawn_blocking(|| {
-                MultiXfrTestState::initialize(
-                    STATE_SEED,
-                    10,
-                    10,
-                    (
-                        MultiXfrRecordSpec {
-                            asset_def_ix: 0,
-                            owner_key_ix: 0,
-                            asset_amount: 100,
-                        },
-                        vec![
-                            MultiXfrRecordSpec {
-                                asset_def_ix: 1,
-                                owner_key_ix: 0,
-                                asset_amount: 50,
-                            },
-                            MultiXfrRecordSpec {
-                                asset_def_ix: 0,
-                                owner_key_ix: 0,
-                                asset_amount: 70,
-                            },
-                        ],
-                    ),
-                )
-                .unwrap()
-            })
-            .await;
-
-            let validator = state.validator.clone();
-            let record_merkle_tree = state.record_merkle_tree.clone();
-            let nullifiers = state.nullifiers.clone();
-            let unspent_memos = state.unspent_memos();
-            (
-                Some(state),
-                validator,
-                record_merkle_tree,
-                nullifiers,
-                unspent_memos,
-            )
-        };
-
+    state: GenesisState,
+) -> Node {
     // Create the initial phaselock
     let known_nodes: Vec<_> = (0..nodes).map(|id| get_public_key(options, id)).collect();
 
@@ -469,9 +473,9 @@ async fn init_state_and_phaselock(
     let stored_state = if load_from_store {
         lw_persistence
             .load_latest_state()
-            .unwrap_or_else(|_| validator.clone())
+            .unwrap_or_else(|_| state.validator.clone())
     } else {
-        validator.clone()
+        state.validator.clone()
     };
 
     let univ_param = if full_node {
@@ -493,7 +497,7 @@ async fn init_state_and_phaselock(
         secret_key_share,
         node_id,
         config,
-        validator,
+        state.validator,
         networking,
         AtomicStorage::open(&phaselock_persistence).unwrap(),
         lw_persistence,
@@ -512,14 +516,14 @@ async fn init_state_and_phaselock(
             }
             builder.build()
         } else {
-            records
+            state.records
         };
         let nullifiers = if load_from_store {
             full_persisted
                 .get_latest_nullifier_set()
                 .unwrap_or_else(|_| Default::default())
         } else {
-            nullifiers
+            state.nullifiers
         };
         let node = FullNode::new(
             phaselock,
@@ -527,7 +531,7 @@ async fn init_state_and_phaselock(
             stored_state,
             records,
             nullifiers,
-            memos,
+            state.memos,
             full_persisted,
         );
         Node::Full(Arc::new(RwLock::new(node)))
@@ -535,7 +539,7 @@ async fn init_state_and_phaselock(
         Node::Light(phaselock)
     };
 
-    (state, validator)
+    validator
 }
 
 #[derive(Clone)]
@@ -904,7 +908,7 @@ fn secret_keys(node_config: &Value) -> (u64, tc::SecretKeySet) {
     let threshold = ((nodes * 2) / 3) + 1;
     (
         threshold,
-        tc::SecretKeySet::random(threshold as usize - 1, &mut ChaChaRng::from_seed(seed)),
+        tc::SecretKeySet::random(threshold as usize - 1, &mut ChaChaRng02::from_seed(seed)),
     )
 }
 
@@ -934,8 +938,9 @@ pub fn gen_pub_keys(options: &NodeOpt, node_config: &Value) {
 pub async fn init_validator(
     options: &NodeOpt,
     node_config: &Value,
+    genesis: GenesisState,
     own_id: u64,
-) -> (Option<MultiXfrTestState>, Node) {
+) -> Node {
     let nodes = node_config["nodes"]
         .as_table()
         .expect("Missing nodes info")
@@ -992,7 +997,7 @@ pub async fn init_validator(
     info!("All nodes connected to network");
 
     // Initialize the state and phaselock
-    init_state_and_phaselock(
+    init_phaselock(
         options,
         secret_keys.public_keys(),
         secret_key_share,
@@ -1002,6 +1007,7 @@ pub async fn init_validator(
         own_network,
         options.full,
         load_from_store,
+        genesis,
     )
     .await
 }
