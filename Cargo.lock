@@ -1644,6 +1644,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "espresso-archival-query-api"
+version = "0.1.0"
+dependencies = [
+ "commit",
+ "jf-cap",
+ "zerok_lib",
+]
+
+[[package]]
 name = "espresso-macros"
 version = "0.1.0"
 source = "git+https://github.com/EspressoSystems/espresso-macros.git?tag=0.1.0#9e0b0258c99757c567676c4dd92f1501db0cf580"
@@ -1661,6 +1670,31 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "espresso-nullifier-check-api"
+version = "0.1.0"
+dependencies = [
+ "jf-cap",
+ "zerok_lib",
+]
+
+[[package]]
+name = "espresso-validation-event-api"
+version = "0.1.0"
+dependencies = [
+ "jf-cap",
+ "seahorse",
+ "zerok_lib",
+]
+
+[[package]]
+name = "espresso-validator-status-api"
+version = "0.1.0"
+dependencies = [
+ "jf-cap",
+ "zerok_lib",
 ]
 
 [[package]]
