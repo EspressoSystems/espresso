@@ -8,8 +8,10 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use jf_cap::structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening};
-use jf_cap::TransactionVerifyingKey;
+use jf_cap::{
+    structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
+    TransactionVerifyingKey,
+};
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use key_set::{KeySet, VerifierKeySet};
 use phaselock::{
@@ -54,7 +56,7 @@ const STATE_SEED: [u8; 32] = [0x7au8; 32];
 
 #[derive(Debug, StructOpt)]
 #[structopt(
-    name = "Multi-machine concensus",
+    name = "Multi-machine consensus",
     about = "Simulates consensus among multiple machines"
 )]
 struct NodeOpt {
@@ -76,6 +78,7 @@ struct NodeOpt {
     ///
     /// Skip this option if public key files already exist.
     #[structopt(long = "gen_pk", short = "g")]
+    #[structopt(conflicts_with("id"))]
     gen_pk: bool,
 
     /// Whether to load from persisted state.
@@ -110,6 +113,7 @@ struct NodeOpt {
     ///
     /// Skip this option if only want to generate public key files.
     #[structopt(long = "id", short = "i")]
+    #[structopt(conflicts_with("gen_pk"))]
     id: Option<u64>,
 
     /// Whether the current node should run a full node.
@@ -1098,14 +1102,19 @@ async fn main() -> Result<(), std::io::Error> {
                 match event.event {
                     EventType::Decide { block: _, state } => {
                         if !state.is_empty() {
-                            let commitment = TaggedBase64::new("LEDG", state[0].commit().as_ref())
+                            let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                                 .unwrap()
                                 .to_string();
-                            info!(
+                            // !!!!!!     WARNING !!!!!!!
+                            // If the output below is changed, update the message for main() in
+                            // src/multi_machine_automation.rs as well
+                            println!(
+                                /* THINK TWICE BEFORE CHANGING THIS */
                                 "  - Round {} completed. Commitment: {}",
                                 round + 1,
                                 commitment
                             );
+                            // !!!!!! END WARNING !!!!!!!
                             break true;
                         }
                     }
