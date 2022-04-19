@@ -494,7 +494,7 @@ impl Validator {
         let id = self.id;
         let port = self.port;
         let child = spawn_blocking(move || {
-            let mut child = cargo_run("multi_machine")
+            let mut child = cargo_run("espresso-validator")
                 .map_err(err)?
                 .args([
                     "--config",

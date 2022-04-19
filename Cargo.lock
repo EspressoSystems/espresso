@@ -1664,6 +1664,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "espresso-validator"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "async-trait",
+ "async-tungstenite 0.15.0",
+ "bincode",
+ "futures",
+ "futures-util",
+ "itertools 0.10.3",
+ "jf-cap",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-utils",
+ "key-set",
+ "markdown",
+ "net",
+ "phaselock",
+ "procfs",
+ "rand_chacha 0.2.2",
+ "seahorse",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "shellexpand",
+ "snafu 0.7.0",
+ "structopt",
+ "strum 0.24.0",
+ "strum_macros",
+ "surf",
+ "tagged-base64",
+ "tempdir",
+ "threshold_crypto",
+ "tide",
+ "tide-websockets",
+ "toml",
+ "tracing",
+ "tracing-distributed",
+ "tracing-futures",
+ "tracing-subscriber 0.2.25",
+ "zerok_lib",
+]
+
+[[package]]
 name = "event-listener"
 version = "2.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2702,50 +2746,6 @@ checksum = "29fae0e4c0b155d3b019a7cbc27abe4a90e15c06814d27889ce9f5f44e2faf77"
 dependencies = [
  "byteorder",
  "lazy_static",
-]
-
-[[package]]
-name = "multi_machine"
-version = "0.1.0"
-dependencies = [
- "async-std",
- "async-trait",
- "async-tungstenite 0.15.0",
- "bincode",
- "futures",
- "futures-util",
- "itertools 0.10.3",
- "jf-cap",
- "jf-plonk",
- "jf-primitives",
- "jf-utils",
- "key-set",
- "markdown",
- "net",
- "phaselock",
- "procfs",
- "rand_chacha 0.2.2",
- "seahorse",
- "serde",
- "serde_derive",
- "serde_json",
- "shellexpand",
- "snafu 0.7.0",
- "structopt",
- "strum 0.24.0",
- "strum_macros",
- "surf",
- "tagged-base64",
- "tempdir",
- "threshold_crypto",
- "tide",
- "tide-websockets",
- "toml",
- "tracing",
- "tracing-distributed",
- "tracing-futures",
- "tracing-subscriber 0.2.25",
- "zerok_lib",
 ]
 
 [[package]]

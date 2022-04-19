@@ -1,8 +1,9 @@
+use async_std::task::spawn_blocking;
 use std::fs::File;
 use std::io::Read;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{ChildStdout, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use structopt::StructOpt;
 use toml::Value;
 
@@ -97,40 +98,39 @@ struct NodeOpt {
     /// Wait for web server to exit after transactions complete.
     #[structopt(long)]
     wait: bool,
+
+    #[structopt(short, long)]
+    verbose: bool,
 }
 
 #[async_std::main]
 async fn main() {
     // Construct arguments to pass to the multi-machine demo.
-    let config = NodeOpt::from_args().config;
-    let gen_pk = NodeOpt::from_args().gen_pk.to_string();
-    let load_from_store = NodeOpt::from_args().load_from_store.to_string();
-    let pk_path = NodeOpt::from_args().pk_path;
-    let store_path = NodeOpt::from_args().store_path;
-    let full = NodeOpt::from_args().full.to_string();
-    let web_path = NodeOpt::from_args().web_path;
-    let api_path = NodeOpt::from_args().api_path;
-    let wait = NodeOpt::from_args().wait.to_string();
+    let options = NodeOpt::from_args();
     let mut args = vec![
         "--config",
-        &config,
-        "--gen_pk",
-        &gen_pk,
-        "--load_from_store",
-        &load_from_store,
+        &options.config,
         "--pk_path",
-        &pk_path,
+        &options.pk_path,
         "--store_path",
-        &store_path,
-        "--full",
-        &full,
-        "--web_path",
-        &web_path,
-        "--api_path",
-        &api_path,
-        "--wait",
-        &wait,
+        &options.store_path,
+        "--assets",
+        &options.web_path,
+        "--api",
+        &options.api_path,
     ];
+    if options.gen_pk {
+        args.push("--gen_pk");
+    }
+    if options.load_from_store {
+        args.push("--load_from_store");
+    }
+    if options.full {
+        args.push("--full");
+    }
+    if options.wait {
+        args.push("--wait");
+    }
     let universal_param_path;
     if let Some(path) = NodeOpt::from_args().universal_param_path {
         universal_param_path = path;
@@ -151,10 +151,10 @@ async fn main() {
     }
 
     // Read node info from node configuration file.
-    let num_nodes = if config.is_empty() {
+    let num_nodes = if options.config.is_empty() {
         7
     } else {
-        let path = PathBuf::from(&config);
+        let path = PathBuf::from(&options.config);
         let mut config_str = String::new();
         File::open(&path)
             .expect("Failed to find node config file")
@@ -169,7 +169,7 @@ async fn main() {
     };
 
     // Start the consensus for each node.
-    let processes: Vec<_> = (0..num_nodes)
+    let mut processes: Vec<_> = (0..num_nodes)
         .map(|id| {
             let mut this_args = args.clone();
             let id_str = id.to_string();
@@ -177,41 +177,62 @@ async fn main() {
             this_args.push(&id_str);
             (
                 id,
-                Command::new("./multi_machine")
+                Command::new("./espresso-validator")
                     .args(this_args)
                     .stdout(Stdio::piped())
                     .spawn()
-                    .unwrap_or_else(|_| {
-                        panic!("Failed to start the multi_machine demo for node {}", id)
-                    }),
+                    .unwrap_or_else(|_| panic!("Failed to start the validator for node {}", id)),
             )
         })
         .collect();
 
+    // Collect output from each process as they run. If we don't do this eagerly, validators can
+    // block when their output pipes fill up causing deadlock.
+    let outputs = processes
+        .iter_mut()
+        .map(|(id, p)| {
+            let mut stdout = BufReader::new(p.stdout.take().unwrap());
+            let id = *id;
+            let verbose = options.verbose;
+            spawn_blocking(move || {
+                let mut lines = Vec::new();
+                let mut line = String::new();
+                loop {
+                    if stdout
+                        .read_line(&mut line)
+                        .unwrap_or_else(|_| panic!("Failed to read stdout for node {}", id))
+                        == 0
+                    {
+                        break;
+                    }
+                    if verbose {
+                        print!("[{}] {}", id, line);
+                    }
+                    lines.push(std::mem::take(&mut line));
+                }
+                lines
+            })
+        })
+        .collect::<Vec<_>>();
+
     // Check each process.
     let mut commitment = "".to_string();
     let mut succeeded_nodes = 0;
-    for (id, mut p) in processes {
+    for ((id, mut p), output) in processes.into_iter().zip(outputs) {
+        println!("waiting for validator {}", id);
         let process: Result<ExitStatus, _> = p.wait();
-        process.unwrap_or_else(|_| panic!("Failed to run the multi_machine demo for node {}", id));
-        let mut stdout: BufReader<ChildStdout> = BufReader::new(p.stdout.take().unwrap());
-        let mut line = String::new();
+        process.unwrap_or_else(|_| panic!("Failed to run the validator for node {}", id));
         // Check whether the commitments are the same.
         if let Some(num_txn) = NodeOpt::from_args().num_txn {
-            loop {
-                stdout
-                    .read_line(&mut line)
-                    .unwrap_or_else(|_| panic!("Failed to read stdout for node {}", id));
-                let line = std::mem::take(&mut line);
+            for line in output.await {
                 let trimmed_line = line.trim();
-                if trimmed_line
-                    .trim()
-                    .starts_with(&format!("- Round {} completed. Commitment:", num_txn))
+                if trimmed_line.starts_with(&format!("- Round {} completed. Commitment:", num_txn))
                 {
                     let strs: Vec<&str> = trimmed_line.split(' ').collect();
                     let comm = strs
                         .last()
                         .unwrap_or_else(|| panic!("Failed to parse commitment for node {}", id));
+                    println!("Validator {} finished with commitment {}", id, comm);
                     if commitment.is_empty() {
                         commitment = comm.to_string();
                     } else {

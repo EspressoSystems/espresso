@@ -59,18 +59,18 @@ const STATE_SEED: [u8; 32] = [0x7au8; 32];
     name = "Multi-machine consensus",
     about = "Simulates consensus among multiple machines"
 )]
-struct NodeOpt {
+pub struct NodeOpt {
     /// Path to the node configuration file.
     #[structopt(
         long = "config",
         short = "c",
         default_value = ""      // See fn default_config_path().
     )]
-    config: String,
+    pub config: String,
 
     /// Path to the universal parameter file.
     #[structopt(long = "universal_param_path", short = "u")]
-    universal_param_path: Option<String>,
+    pub universal_param_path: Option<String>,
 
     /// Whether to generate and store public keys for all nodes.
     ///
@@ -79,12 +79,12 @@ struct NodeOpt {
     /// Skip this option if public key files already exist.
     #[structopt(long = "gen_pk", short = "g")]
     #[structopt(conflicts_with("id"))]
-    gen_pk: bool,
+    pub gen_pk: bool,
 
     /// Whether to load from persisted state.
     ///
     #[structopt(long = "load_from_store", short = "l")]
-    load_from_store: bool,
+    pub load_from_store: bool,
 
     /// Path to public keys.
     ///
@@ -95,7 +95,7 @@ struct NodeOpt {
         short = "p", 
         default_value = ""      // See fn default_pk_path().
     )]
-    pk_path: String,
+    pub pk_path: String,
 
     /// Path to persistence files.
     ///
@@ -105,7 +105,7 @@ struct NodeOpt {
         short = "s", 
         default_value = ""      // See fn default_store_path().
     )]
-    store_path: String,
+    pub store_path: String,
 
     /// Id of the current node.
     ///
@@ -114,25 +114,25 @@ struct NodeOpt {
     /// Skip this option if only want to generate public key files.
     #[structopt(long = "id", short = "i")]
     #[structopt(conflicts_with("gen_pk"))]
-    id: Option<u64>,
+    pub id: Option<u64>,
 
     /// Whether the current node should run a full node.
     #[structopt(long = "full", short = "f")]
-    full: bool,
+    pub full: bool,
 
     /// Path to assets including web server files.
     #[structopt(
         long = "assets",
         default_value = ""      // See fn default_web_path().
     )]
-    web_path: String,
+    pub web_path: String,
 
     /// Path to API specification and messages.
     #[structopt(
         long = "api",
         default_value = ""      // See fn default_api_path().
     )]
-    api_path: String,
+    pub api_path: String,
 
     /// Use an external wallet to generate transactions.
     ///
@@ -144,22 +144,22 @@ struct NodeOpt {
     /// This option may be passed multiple times to initialize the ledger with multiple native token
     /// records for different wallets.
     #[structopt(short, long = "wallet")]
-    wallet_pk_path: Option<Vec<PathBuf>>,
+    pub wallet_pk_path: Option<Vec<PathBuf>>,
 
     /// Number of transactions to generate.
     ///
     /// Skip this option if want to keep generating transactions till the process is killed.
     #[structopt(long = "num_txn", short = "n")]
-    num_txn: Option<u64>,
+    pub num_txn: Option<u64>,
 
     /// Wait for web server to exit after transactions complete.
     #[structopt(long)]
-    wait: bool,
+    pub wait: bool,
 }
 
 /// Gets public key of a node from its public key file.
-fn get_public_key(node_id: u64) -> PubKey {
-    let path_str = format!("{}/pk_{}", get_pk_dir(), node_id);
+fn get_public_key(options: &NodeOpt, node_id: u64) -> PubKey {
+    let path_str = format!("{}/pk_{}", get_pk_dir(options), node_id);
     let path = Path::new(&path_str);
     let mut pk_file = File::open(&path)
         .unwrap_or_else(|_| panic!("Cannot find public key file: {}", path.display()));
@@ -177,19 +177,7 @@ fn project_path() -> PathBuf {
     path
 }
 
-/// Returns "<repo>/public/" where <repo> is
-/// derived from the executable path assuming the executable is in
-/// two directory levels down and the project directory name
-/// can be derived from the executable name.
-///
-/// For example, if the executable path is
-/// ```
-///    ~/tri/systems/system/examples/multi_machine/target/release/multi_machine
-/// ```
-/// then the asset path is
-/// ```
-///    ~/tri/systems/system/examples/multi_machine/public/
-/// ```
+/// Returns "<project>/public/".
 fn default_web_path() -> PathBuf {
     const ASSET_DIR: &str = "public";
     let dir = project_path();
@@ -230,30 +218,9 @@ fn default_api_path() -> PathBuf {
     [&dir, Path::new(API_FILE)].iter().collect()
 }
 
-/// Reads configuration file path and node id from options
-fn get_node_config() -> Value {
-    let config_path_str = NodeOpt::from_args().config;
-    let path = if config_path_str.is_empty() {
-        println!("default config path");
-        default_config_path()
-    } else {
-        println!("command line config path");
-        PathBuf::from(&config_path_str)
-    };
-
-    // Read node info from node configuration file
-    let mut config_file = File::open(&path)
-        .unwrap_or_else(|_| panic!("Cannot find node config file: {}", path.display()));
-    let mut config_str = String::new();
-    config_file
-        .read_to_string(&mut config_str)
-        .unwrap_or_else(|err| panic!("Error while reading node config file: {}", err));
-    toml::from_str(&config_str).expect("Error while reading node config file")
-}
-
 /// Gets the directory to public key files.
-fn get_pk_dir() -> String {
-    let pk_path = NodeOpt::from_args().pk_path;
+fn get_pk_dir(options: &NodeOpt) -> String {
+    let pk_path = options.pk_path.clone();
     if pk_path.is_empty() {
         default_pk_path()
             .into_os_string()
@@ -265,8 +232,8 @@ fn get_pk_dir() -> String {
 }
 
 /// Gets the directory to public key files.
-fn get_store_dir(node_id: u64) -> String {
-    let store_path = NodeOpt::from_args().store_path;
+fn get_store_dir(options: &NodeOpt, node_id: u64) -> String {
+    let store_path = options.store_path.clone();
     if store_path.is_empty() {
         default_store_path(node_id)
             .into_os_string()
@@ -291,11 +258,12 @@ fn get_host(node_config: Value, node_id: u64) -> (String, u16) {
 async fn get_networking<
     T: Clone + Serialize + DeserializeOwned + Send + Sync + std::fmt::Debug + 'static,
 >(
+    options: &NodeOpt,
     node_id: u64,
     listen_addr: &str,
     port: u16,
 ) -> (WNetwork<T>, PubKey) {
-    let pub_key = get_public_key(node_id);
+    let pub_key = get_public_key(options, node_id);
     debug!(?pub_key);
     let network = WNetwork::new(pub_key.clone(), listen_addr, port, None).await;
     if let Ok(n) = network {
@@ -365,6 +333,7 @@ impl Validator for Node {
 /// Creates the initial state and phaselock for simulation.
 #[allow(clippy::too_many_arguments)]
 async fn init_state_and_phaselock(
+    options: &NodeOpt,
     public_keys: tc::PublicKeySet,
     secret_key_share: tc::SecretKeyShare,
     nodes: u64,
@@ -376,7 +345,7 @@ async fn init_state_and_phaselock(
 ) -> (Option<MultiXfrTestState>, Node) {
     // Create the initial state
     let (state, validator, records, nullifiers, memos) =
-        if let Some(pk_paths) = NodeOpt::from_args().wallet_pk_path {
+        if let Some(pk_paths) = options.wallet_pk_path.clone() {
             let mut rng = zerok_lib::testing::crypto_rng_from_seed([0x42u8; 32]);
 
             let mut records = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
@@ -482,7 +451,7 @@ async fn init_state_and_phaselock(
         };
 
     // Create the initial phaselock
-    let known_nodes: Vec<_> = (0..nodes).map(get_public_key).collect();
+    let known_nodes: Vec<_> = (0..nodes).map(|id| get_public_key(options, id)).collect();
 
     let config = PhaseLockConfig {
         total_nodes: nodes as u32,
@@ -498,7 +467,7 @@ async fn init_state_and_phaselock(
     let genesis = ElaboratedBlock::default();
 
     let lw_persistence =
-        LWPersistence::new(Path::new(&get_store_dir(node_id)), "multi_machine_demo").unwrap();
+        LWPersistence::new(Path::new(&get_store_dir(options, node_id)), "validator").unwrap();
     let stored_state = if load_from_store {
         lw_persistence
             .load_latest_state()
@@ -513,7 +482,7 @@ async fn init_state_and_phaselock(
         None
     };
 
-    let storage = get_store_dir(node_id);
+    let storage = get_store_dir(options, node_id);
     let phaselock_persistence = [Path::new(&storage), Path::new("phaselock")]
         .iter()
         .collect::<PathBuf>();
@@ -897,21 +866,28 @@ fn init_web_server(
     Ok(join_handle)
 }
 
-#[async_std::main]
-async fn main() -> Result<(), std::io::Error> {
-    tracing_subscriber::fmt()
-        .compact()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+/// Reads configuration file path and node id from options
+pub fn get_node_config(options: &NodeOpt) -> Value {
+    let config_path_str = &options.config;
+    let path = if config_path_str.is_empty() {
+        println!("default config path");
+        default_config_path()
+    } else {
+        println!("command line config path");
+        PathBuf::from(config_path_str)
+    };
 
-    // Get configuration
-    let node_config = get_node_config();
+    // Read node info from node configuration file
+    let mut config_file = File::open(&path)
+        .unwrap_or_else(|_| panic!("Cannot find node config file: {}", path.display()));
+    let mut config_str = String::new();
+    config_file
+        .read_to_string(&mut config_str)
+        .unwrap_or_else(|err| panic!("Error while reading node config file: {}", err));
+    toml::from_str(&config_str).expect("Error while reading node config file")
+}
 
-    // Override the path to the universal parameter file if it's specified
-    if let Some(dir) = NodeOpt::from_args().universal_param_path {
-        std::env::set_var("UNIVERSAL_PARAM_PATH", dir);
-    }
-
+pub async fn run_validator(options: &NodeOpt, node_config: &Value) -> Result<(), std::io::Error> {
     // Get secret key set
     let seed: [u8; 32] = node_config["seed"]
         .as_array()
@@ -933,8 +909,8 @@ async fn main() -> Result<(), std::io::Error> {
     let public_keys = secret_keys.public_keys();
 
     // Generate public key for each node
-    let pk_dir = get_pk_dir();
-    if NodeOpt::from_args().gen_pk {
+    let pk_dir = get_pk_dir(options);
+    if options.gen_pk {
         for node_id in 0..nodes {
             let pub_key = PubKey::from_secret_key_set_escape_hatch(&secret_keys, node_id);
             let pub_key_str = serde_json::to_string(&pub_key)
@@ -951,26 +927,31 @@ async fn main() -> Result<(), std::io::Error> {
     }
 
     // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
-    let load_from_store = NodeOpt::from_args().load_from_store;
+    let load_from_store = options.load_from_store;
     if load_from_store {
         info!("restoring from persisted session");
     } else {
         info!("initializing new session");
     }
 
-    if let Some(own_id) = NodeOpt::from_args().id {
+    if let Some(own_id) = options.id {
         info!("Current node: {}", own_id);
         let secret_key_share = secret_keys.secret_key_share(own_id);
 
         // Get networking information
-        let (own_network, _) =
-            get_networking(own_id, "0.0.0.0", get_host(node_config.clone(), own_id).1).await;
+        let (own_network, _) = get_networking(
+            options,
+            own_id,
+            "0.0.0.0",
+            get_host(node_config.clone(), own_id).1,
+        )
+        .await;
         #[allow(clippy::type_complexity)]
         let mut other_nodes: Vec<(u64, PubKey, String, u16)> = Vec::new();
         for id in 0..nodes {
             if id != own_id {
                 let (ip, port) = get_host(node_config.clone(), id);
-                let pub_key = get_public_key(id);
+                let pub_key = get_public_key(options, id);
                 other_nodes.push((id, pub_key, ip, port));
             }
         }
@@ -997,13 +978,14 @@ async fn main() -> Result<(), std::io::Error> {
 
         // Initialize the state and phaselock
         let (mut state, mut phaselock) = init_state_and_phaselock(
+            options,
             public_keys,
             secret_key_share,
             nodes,
             threshold,
             own_id,
             own_network,
-            NodeOpt::from_args().full,
+            options.full,
             load_from_store,
         )
         .await;
@@ -1012,13 +994,8 @@ async fn main() -> Result<(), std::io::Error> {
         // If we are running a full node, also host a query API to inspect the accumulated state.
         let web_server = if let Node::Full(node) = &phaselock {
             Some(
-                init_web_server(
-                    &NodeOpt::from_args().api_path,
-                    &NodeOpt::from_args().web_path,
-                    own_id,
-                    node.clone(),
-                )
-                .expect("Failed to initialize web server"),
+                init_web_server(&options.api_path, &options.web_path, own_id, node.clone())
+                    .expect("Failed to initialize web server"),
             )
         } else {
             None
@@ -1047,7 +1024,7 @@ async fn main() -> Result<(), std::io::Error> {
 
         // Start consensus for each transaction
         let mut round = 0;
-        let num_txn = NodeOpt::from_args().num_txn;
+        let num_txn = options.num_txn;
 
         // When `num_txn` is set, run `num_txn` rounds.
         // Otherwise, keeping running till the process is killed.
@@ -1180,7 +1157,7 @@ async fn main() -> Result<(), std::io::Error> {
 
         info!("All rounds completed");
 
-        if NodeOpt::from_args().wait {
+        if options.wait {
             if let Some(join_handle) = web_server {
                 join_handle.await.unwrap_or_else(|err| {
                     panic!("web server exited with an error: {}", err);
