@@ -42,6 +42,7 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
         * Cd to `target/release/`.
         * Run `./multi_machine_automation --num_txn {num_txn} --config {config} --pk_path {pk_path}`.
             * `num_txn` is the number of transactions to generate.
+                * If skipped, the consensus will keep running till the process is killed. For easier manual testing, do not skip it.
             * `config` is the path to the node config file.
                 * Skip this option if using the default file, `examples/multi_machine/src/node-config.toml`.
             * `pk_path` is the directory where publik key files are stored.
