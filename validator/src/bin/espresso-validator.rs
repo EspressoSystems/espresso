@@ -163,7 +163,7 @@ async fn generate_transactions(
                         // If the output below is changed, update the message for main() in
                         // src/multi_machine_automation.rs as well
                         println!(
-                            /* THINK TWICE BEFORE CHANGING THIS */
+                            // THINK TWICE BEFORE CHANGING THIS
                             "  - Round {} completed. Commitment: {}",
                             succeeded_rounds, commitment
                         );
