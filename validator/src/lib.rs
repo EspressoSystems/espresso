@@ -52,28 +52,7 @@ mod routes;
 const STATE_SEED: [u8; 32] = [0x7au8; 32];
 
 #[derive(Debug, StructOpt)]
-#[structopt(
-    name = "Multi-machine consensus",
-    about = "Simulates consensus among multiple machines"
-)]
 pub struct NodeOpt {
-    /// Path to the node configuration file.
-    #[structopt(long = "config", short = "c")]
-    pub config: Option<PathBuf>,
-
-    /// Path to the universal parameter file.
-    #[structopt(long = "universal_param_path", short = "u")]
-    pub universal_param_path: Option<String>,
-
-    /// Whether to generate and store public keys for all nodes.
-    ///
-    /// Public keys will be stored under the directory specified by `pk_path`.
-    ///
-    /// Skip this option if public key files already exist.
-    #[structopt(long = "gen_pk", short = "g")]
-    #[structopt(conflicts_with("id"))]
-    pub gen_pk: bool,
-
     /// Whether to load from persisted state.
     ///
     #[structopt(long = "load_from_store", short = "l")]
@@ -100,15 +79,6 @@ pub struct NodeOpt {
     )]
     pub store_path: String,
 
-    /// Id of the current node.
-    ///
-    /// If the node ID is 0, it will propose and try to add transactions.
-    ///
-    /// Skip this option if only want to generate public key files.
-    #[structopt(long = "id", short = "i")]
-    #[structopt(conflicts_with("gen_pk"))]
-    pub id: Option<u64>,
-
     /// Whether the current node should run a full node.
     #[structopt(long = "full", short = "f")]
     pub full: bool,
@@ -126,26 +96,6 @@ pub struct NodeOpt {
         default_value = ""      // See fn default_api_path().
     )]
     pub api_path: String,
-
-    /// Public key which should own a faucet record in the genesis block.
-    ///
-    /// If this option is given, the ledger will be initialized with a record
-    /// of 2^32 native tokens, owned by the public key.
-    ///
-    /// This option may be passed multiple times to initialize the ledger with
-    /// multiple native token records
-    #[structopt(long)]
-    pub faucet_pub_key: Vec<UserPubKey>,
-
-    /// Number of transactions to generate.
-    ///
-    /// If not provided, the validator will wait for externally submitted transactions.
-    #[structopt(long = "num_txn", short = "n", conflicts_with("faucet_pub_key"))]
-    pub num_txn: Option<u64>,
-
-    /// Wait for web server to exit after transactions complete.
-    #[structopt(long)]
-    pub wait: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -879,14 +829,14 @@ pub fn init_web_server(
 }
 
 fn secret_keys(config: &ConsensusConfig) -> (u64, tc::SecretKeySet) {
-    // Get secret key seed
-    let seed = config.seed.clone();
-
     // Generate key sets
     let threshold = ((config.nodes.len() as u64 * 2) / 3) + 1;
     (
         threshold,
-        tc::SecretKeySet::random(threshold as usize - 1, &mut ChaChaRng02::from_seed(seed)),
+        tc::SecretKeySet::random(
+            threshold as usize - 1,
+            &mut ChaChaRng02::from_seed(config.seed),
+        ),
     )
 }
 

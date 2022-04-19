@@ -1,97 +1,47 @@
 use async_std::task::spawn_blocking;
-use espresso_validator::ConsensusConfig;
+use espresso_validator::{ConsensusConfig, NodeOpt};
+use jf_cap::keys::UserPubKey;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
+#[derive(StructOpt)]
 #[structopt(
-    name = "Multi-machine consensus automation",
-    about = "Simulates the multi-machine consensus with a single-command"
+    name = "Multi-machine consensus",
+    about = "Simulates consensus among multiple machines"
 )]
-struct NodeOpt {
+struct Options {
+    #[structopt(flatten)]
+    node_opt: NodeOpt,
+
     /// Path to the node configuration file.
     #[structopt(long = "config", short = "c")]
-    config: Option<PathBuf>,
+    pub config: Option<PathBuf>,
 
     /// Path to the universal parameter file.
     #[structopt(long = "universal_param_path", short = "u")]
-    universal_param_path: Option<String>,
+    pub universal_param_path: Option<String>,
 
-    /// Whether to generate and store public keys for all nodes.
+    /// Public key which should own a faucet record in the genesis block.
     ///
-    /// Public keys will be stored under the directory specified by `pk_path`.
+    /// If this option is given, the ledger will be initialized with a record
+    /// of 2^32 native tokens, owned by the public key.
     ///
-    /// Skip this option if public key files already exist.
-    #[structopt(long = "gen_pk", short = "g")]
-    gen_pk: bool,
-
-    /// Whether to load from persisted state.
-    ///
-    #[structopt(long = "load_from_store", short = "l")]
-    load_from_store: bool,
-
-    /// Path to public keys.
-    ///
-    /// Public keys will be stored under the specified directory, file names starting
-    /// with `pk_`.
-    #[structopt(
-        long = "pk_path", 
-        short = "p", 
-        default_value = ""      // See fn default_pk_path().
-    )]
-    pk_path: String,
-
-    /// Path to persistence files.
-    ///
-    /// Persistence files will be nested under the specified directory
-    #[structopt(
-        long = "store_path", 
-        short = "s", 
-        default_value = ""      // See fn default_store_path().
-    )]
-    store_path: String,
-
-    /// Whether the current node should run a full node.
-    #[structopt(long = "full", short = "f")]
-    full: bool,
-
-    /// Path to assets including web server files.
-    #[structopt(
-        long = "assets",
-        default_value = ""      // See fn default_web_path().
-    )]
-    web_path: String,
-
-    /// Path to API specification and messages.
-    #[structopt(
-        long = "api",
-        default_value = ""      // See fn default_api_path().
-    )]
-    api_path: String,
-
-    /// Use an external wallet to generate transactions.
-    ///
-    /// The argument is the path to the wallet's public key. If this option is given, the ledger
-    /// will be initialized with a record of 2^32 native tokens, owned by the wallet's public key.
-    /// The demo will then wait for the wallet to generate some transactions and submit them to the
-    /// validators using the network API.
-    ///
-    /// This option may be passed multiple times to initialize the ledger with multiple native token
-    /// records for different wallets.
-    #[structopt(short, long = "wallet")]
-    wallet_pk_path: Option<Vec<PathBuf>>,
+    /// This option may be passed multiple times to initialize the ledger with
+    /// multiple native token records
+    #[structopt(long)]
+    pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.
     ///
-    /// Skip this option if want to keep generating transactions till the process is killed.
-    #[structopt(long = "num_txn", short = "n")]
-    num_txn: Option<u64>,
+    /// If not provided, the validator will wait for externally submitted transactions.
+    #[structopt(long = "num_txn", short = "n", conflicts_with("faucet_pub_key"))]
+    pub num_txn: Option<u64>,
 
     /// Wait for web server to exit after transactions complete.
     #[structopt(long)]
-    wait: bool,
+    pub wait: bool,
 
     #[structopt(short, long)]
     verbose: bool,
@@ -100,24 +50,21 @@ struct NodeOpt {
 #[async_std::main]
 async fn main() {
     // Construct arguments to pass to the multi-machine demo.
-    let options = NodeOpt::from_args();
+    let options = Options::from_args();
     let mut args = vec![
         "--pk_path",
-        &options.pk_path,
+        &options.node_opt.pk_path,
         "--store_path",
-        &options.store_path,
+        &options.node_opt.store_path,
         "--assets",
-        &options.web_path,
+        &options.node_opt.web_path,
         "--api",
-        &options.api_path,
+        &options.node_opt.api_path,
     ];
-    if options.gen_pk {
-        args.push("--gen_pk");
-    }
-    if options.load_from_store {
+    if options.node_opt.load_from_store {
         args.push("--load_from_store");
     }
-    if options.full {
+    if options.node_opt.full {
         args.push("--full");
     }
     if options.wait {
@@ -135,11 +82,14 @@ async fn main() {
         args.push("--universal_param_path");
         args.push(&universal_param_path);
     }
-    let wallet_pk_path;
-    if let Some(path) = &options.wallet_pk_path {
-        wallet_pk_path = format!("{:?}", path);
-        args.push("--wallet_pk_path");
-        args.push(&wallet_pk_path);
+    let faucet_pub_keys = options
+        .faucet_pub_key
+        .iter()
+        .map(|k| k.to_string())
+        .collect::<Vec<_>>();
+    for pub_key in &faucet_pub_keys {
+        args.push("--faucet_pub_key");
+        args.push(pub_key);
     }
     let num_txn;
     if let Some(num) = options.num_txn {
@@ -209,7 +159,7 @@ async fn main() {
         let process: Result<ExitStatus, _> = p.wait();
         process.unwrap_or_else(|_| panic!("Failed to run the validator for node {}", id));
         // Check whether the commitments are the same.
-        if let Some(num_txn) = NodeOpt::from_args().num_txn {
+        if let Some(num_txn) = options.num_txn {
             for line in output.await {
                 let trimmed_line = line.trim();
                 if trimmed_line.starts_with(&format!("- Round {} completed. Commitment:", num_txn))
