@@ -5,6 +5,7 @@ use espresso_validator::*;
 use futures::StreamExt;
 use phaselock::types::EventType;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use tracing::info;
@@ -13,6 +14,13 @@ use zerok_lib::{
     state::{ElaboratedBlock, ElaboratedTransaction},
     testing::{MultiXfrTestState, TxnPrintInfo},
 };
+
+/// Returns the default path to the node configuration file.
+fn default_config_path() -> PathBuf {
+    const CONFIG_FILE: &str = "src/node-config.toml";
+    let dir = project_path();
+    [&dir, Path::new(CONFIG_FILE)].iter().collect()
+}
 
 async fn generate_transactions(
     num_txn: u64,
@@ -177,7 +185,8 @@ async fn main() -> Result<(), std::io::Error> {
 
     // Get configuration
     let options = NodeOpt::from_args();
-    let node_config = get_node_config(&options);
+    let config_path = options.config.clone().unwrap_or_else(default_config_path);
+    let config = ConsensusConfig::from_file(&config_path);
 
     // Override the path to the universal parameter file if it's specified
     if let Some(dir) = options.universal_param_path.as_ref() {
@@ -185,7 +194,7 @@ async fn main() -> Result<(), std::io::Error> {
     }
 
     if options.gen_pk {
-        gen_pub_keys(&options, &node_config);
+        gen_pub_keys(&options, &config);
     }
 
     // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
@@ -212,7 +221,7 @@ async fn main() -> Result<(), std::io::Error> {
                 None,
             )
         };
-        let phaselock = init_validator(&options, &node_config, genesis, own_id).await;
+        let phaselock = init_validator(&options, &config, genesis, own_id as usize).await;
 
         // If we are running a full node, also host a query API to inspect the accumulated state.
         let web_server = if let Node::Full(node) = &phaselock {

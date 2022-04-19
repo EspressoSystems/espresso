@@ -23,7 +23,6 @@ use rand_chacha_02::{rand_core::SeedableRng, ChaChaRng as ChaChaRng02};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
-use std::convert::TryInto;
 use std::fs::File;
 use std::io::{prelude::*, Read};
 use std::path::{Path, PathBuf};
@@ -32,7 +31,6 @@ use structopt::StructOpt;
 use threshold_crypto as tc;
 use tide::StatusCode;
 use tide_websockets::{WebSocket, WebSocketConnection};
-use toml::Value;
 use tracing::{debug, event, info, Level};
 use zerok_lib::{
     api::EspressoError,
@@ -60,12 +58,8 @@ const STATE_SEED: [u8; 32] = [0x7au8; 32];
 )]
 pub struct NodeOpt {
     /// Path to the node configuration file.
-    #[structopt(
-        long = "config",
-        short = "c",
-        default_value = ""      // See fn default_config_path().
-    )]
-    pub config: String,
+    #[structopt(long = "config", short = "c")]
+    pub config: Option<PathBuf>,
 
     /// Path to the universal parameter file.
     #[structopt(long = "universal_param_path", short = "u")]
@@ -154,6 +148,31 @@ pub struct NodeOpt {
     pub wait: bool,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NodeConfig {
+    pub ip: String,
+    pub port: u16,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConsensusConfig {
+    pub seed: [u8; 32],
+    pub nodes: Vec<NodeConfig>,
+}
+
+impl ConsensusConfig {
+    pub fn from_file(path: &Path) -> Self {
+        // Read node info from node configuration file
+        let mut config_file = File::open(&path)
+            .unwrap_or_else(|_| panic!("Cannot find node config file: {}", path.display()));
+        let mut config_str = String::new();
+        config_file
+            .read_to_string(&mut config_str)
+            .unwrap_or_else(|err| panic!("Error while reading node config file: {}", err));
+        toml::from_str(&config_str).expect("Error while reading node config file")
+    }
+}
+
 /// Gets public key of a node from its public key file.
 fn get_public_key(options: &NodeOpt, node_id: u64) -> PubKey {
     let path_str = format!("{}/pk_{}", get_pk_dir(options), node_id);
@@ -168,7 +187,7 @@ fn get_public_key(options: &NodeOpt, node_id: u64) -> PubKey {
 }
 
 /// Returns the project directory.
-fn project_path() -> PathBuf {
+pub fn project_path() -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     println!("path {}", path.display());
     path
@@ -179,13 +198,6 @@ fn default_web_path() -> PathBuf {
     const ASSET_DIR: &str = "public";
     let dir = project_path();
     [&dir, Path::new(ASSET_DIR)].iter().collect()
-}
-
-/// Returns the default path to the node configuration file.
-fn default_config_path() -> PathBuf {
-    const CONFIG_FILE: &str = "src/node-config.toml";
-    let dir = project_path();
-    [&dir, Path::new(CONFIG_FILE)].iter().collect()
 }
 
 /// Returns the default directory to store public key files.
@@ -242,10 +254,9 @@ fn get_store_dir(options: &NodeOpt, node_id: u64) -> String {
 }
 
 /// Gets IP address and port number of a node from node configuration file.
-fn get_host(node_config: Value, node_id: u64) -> (String, u16) {
-    let node = &node_config["nodes"][node_id.to_string()];
-    let ip = node["ip"].as_str().expect("Missing IP info").to_owned();
-    let port = node["port"].as_integer().expect("Missing port info") as u16;
+fn get_host(node: &NodeConfig) -> (String, u16) {
+    let ip = node.ip.clone();
+    let port = node.port;
     (ip, port)
 }
 
@@ -867,63 +878,25 @@ pub fn init_web_server(
     Ok(join_handle)
 }
 
-/// Reads configuration file path and node id from options
-pub fn get_node_config(options: &NodeOpt) -> Value {
-    let config_path_str = &options.config;
-    let path = if config_path_str.is_empty() {
-        println!("default config path");
-        default_config_path()
-    } else {
-        println!("command line config path");
-        PathBuf::from(config_path_str)
-    };
-
-    // Read node info from node configuration file
-    let mut config_file = File::open(&path)
-        .unwrap_or_else(|_| panic!("Cannot find node config file: {}", path.display()));
-    let mut config_str = String::new();
-    config_file
-        .read_to_string(&mut config_str)
-        .unwrap_or_else(|err| panic!("Error while reading node config file: {}", err));
-    toml::from_str(&config_str).expect("Error while reading node config file")
-}
-
-fn secret_keys(node_config: &Value) -> (u64, tc::SecretKeySet) {
-    let nodes = node_config["nodes"]
-        .as_table()
-        .expect("Missing nodes info")
-        .len() as u64;
-
+fn secret_keys(config: &ConsensusConfig) -> (u64, tc::SecretKeySet) {
     // Get secret key seed
-    let seed: [u8; 32] = node_config["seed"]
-        .as_array()
-        .expect("Missing seed value")
-        .iter()
-        .map(|i| i.as_integer().expect("Invalid seed value") as u8)
-        .collect::<Vec<u8>>()
-        .try_into()
-        .expect("Error while converting the seed into an array");
+    let seed = config.seed.clone();
 
     // Generate key sets
-    let threshold = ((nodes * 2) / 3) + 1;
+    let threshold = ((config.nodes.len() as u64 * 2) / 3) + 1;
     (
         threshold,
         tc::SecretKeySet::random(threshold as usize - 1, &mut ChaChaRng02::from_seed(seed)),
     )
 }
 
-pub fn gen_pub_keys(options: &NodeOpt, node_config: &Value) {
-    let nodes = node_config["nodes"]
-        .as_table()
-        .expect("Missing nodes info")
-        .len() as u64;
-
-    let (_, secret_keys) = secret_keys(node_config);
+pub fn gen_pub_keys(options: &NodeOpt, config: &ConsensusConfig) {
+    let (_, secret_keys) = secret_keys(config);
 
     // Generate public key for each node
     let pk_dir = get_pk_dir(options);
-    for node_id in 0..nodes {
-        let pub_key = PubKey::from_secret_key_set_escape_hatch(&secret_keys, node_id);
+    for node_id in 0..config.nodes.len() {
+        let pub_key = PubKey::from_secret_key_set_escape_hatch(&secret_keys, node_id as u64);
         let pub_key_str = serde_json::to_string(&pub_key)
             .unwrap_or_else(|err| panic!("Error while serializing the public key: {}", err));
         let mut pk_file = File::create(format!("{}/pk_{}", pk_dir, node_id))
@@ -937,15 +910,10 @@ pub fn gen_pub_keys(options: &NodeOpt, node_config: &Value) {
 
 pub async fn init_validator(
     options: &NodeOpt,
-    node_config: &Value,
+    config: &ConsensusConfig,
     genesis: GenesisState,
-    own_id: u64,
+    own_id: usize,
 ) -> Node {
-    let nodes = node_config["nodes"]
-        .as_table()
-        .expect("Missing nodes info")
-        .len() as u64;
-
     // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
     let load_from_store = options.load_from_store;
     if load_from_store {
@@ -955,24 +923,24 @@ pub async fn init_validator(
     }
 
     info!("Current node: {}", own_id);
-    let (threshold, secret_keys) = secret_keys(node_config);
+    let (threshold, secret_keys) = secret_keys(config);
     let secret_key_share = secret_keys.secret_key_share(own_id);
 
     // Get networking information
     let (own_network, _) = get_networking(
         options,
-        own_id,
+        own_id as u64,
         "0.0.0.0",
-        get_host(node_config.clone(), own_id).1,
+        get_host(&config.nodes[own_id]).1,
     )
     .await;
     #[allow(clippy::type_complexity)]
     let mut other_nodes: Vec<(u64, PubKey, String, u16)> = Vec::new();
-    for id in 0..nodes {
+    for (id, node) in config.nodes.iter().enumerate() {
         if id != own_id {
-            let (ip, port) = get_host(node_config.clone(), id);
-            let pub_key = get_public_key(options, id);
-            other_nodes.push((id, pub_key, ip, port));
+            let (ip, port) = get_host(node);
+            let pub_key = get_public_key(options, id as u64);
+            other_nodes.push((id as u64, pub_key, ip, port));
         }
     }
 
@@ -991,7 +959,7 @@ pub async fn init_validator(
     }
 
     // Wait for the networking implementations to connect
-    while (own_network.connection_table_size().await as u64) < nodes - 1 {
+    while own_network.connection_table_size().await < config.nodes.len() - 1 {
         async_std::task::sleep(std::time::Duration::from_millis(10)).await;
     }
     info!("All nodes connected to network");
@@ -1001,9 +969,9 @@ pub async fn init_validator(
         options,
         secret_keys.public_keys(),
         secret_key_share,
-        nodes,
+        config.nodes.len() as u64,
         threshold,
-        own_id,
+        own_id as u64,
         own_network,
         options.full,
         load_from_store,

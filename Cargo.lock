@@ -5323,6 +5323,7 @@ dependencies = [
  "async-trait",
  "bincode",
  "escargot",
+ "espresso-validator",
  "futures",
  "jf-cap",
  "jf-plonk",

@@ -1,11 +1,9 @@
 use async_std::task::spawn_blocking;
-use std::fs::File;
-use std::io::Read;
+use espresso_validator::ConsensusConfig;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 use structopt::StructOpt;
-use toml::Value;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -14,12 +12,8 @@ use toml::Value;
 )]
 struct NodeOpt {
     /// Path to the node configuration file.
-    #[structopt(
-        long = "config",
-        short = "c",
-        default_value = ""      // See fn default_config_path().
-    )]
-    config: String,
+    #[structopt(long = "config", short = "c")]
+    config: Option<PathBuf>,
 
     /// Path to the universal parameter file.
     #[structopt(long = "universal_param_path", short = "u")]
@@ -108,8 +102,6 @@ async fn main() {
     // Construct arguments to pass to the multi-machine demo.
     let options = NodeOpt::from_args();
     let mut args = vec![
-        "--config",
-        &options.config,
         "--pk_path",
         &options.pk_path,
         "--store_path",
@@ -131,41 +123,35 @@ async fn main() {
     if options.wait {
         args.push("--wait");
     }
+    let config_path;
+    if let Some(path) = &options.config {
+        config_path = path.display().to_string();
+        args.push("--config");
+        args.push(&config_path);
+    }
     let universal_param_path;
-    if let Some(path) = NodeOpt::from_args().universal_param_path {
-        universal_param_path = path;
+    if let Some(path) = &options.universal_param_path {
+        universal_param_path = path.clone();
         args.push("--universal_param_path");
         args.push(&universal_param_path);
     }
     let wallet_pk_path;
-    if let Some(path) = NodeOpt::from_args().wallet_pk_path {
+    if let Some(path) = &options.wallet_pk_path {
         wallet_pk_path = format!("{:?}", path);
         args.push("--wallet_pk_path");
         args.push(&wallet_pk_path);
     }
     let num_txn;
-    if let Some(num) = NodeOpt::from_args().num_txn {
+    if let Some(num) = options.num_txn {
         num_txn = num.to_string();
         args.push("--num_txn");
         args.push(&num_txn);
     }
 
     // Read node info from node configuration file.
-    let num_nodes = if options.config.is_empty() {
-        7
-    } else {
-        let path = PathBuf::from(&options.config);
-        let mut config_str = String::new();
-        File::open(&path)
-            .expect("Failed to find node config file")
-            .read_to_string(&mut config_str)
-            .unwrap_or_else(|err| panic!("Failed to read node config file: {}", err));
-        let node_config: Value =
-            toml::from_str(&config_str).expect("Error while reading node config file");
-        node_config["nodes"]
-            .as_table()
-            .expect("Missing nodes info")
-            .len()
+    let num_nodes = match &options.config {
+        None => 7,
+        Some(path) => ConsensusConfig::from_file(path).nodes.len(),
     };
 
     // Start the consensus for each node.

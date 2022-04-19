@@ -2,17 +2,18 @@
 
 use async_std::task::{block_on, spawn_blocking};
 use escargot::CargoBuild;
+use espresso_validator::{ConsensusConfig, NodeConfig};
+use jf_cap::keys::UserPubKey;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tempdir::TempDir;
-use toml::Value;
 
 /// Set up and run a test of the wallet CLI.
 ///
@@ -45,6 +46,9 @@ impl CliClient {
         let mut key_path = PathBuf::from(tmp_dir.path());
         key_path.push("primary_key");
         Wallet::key_gen(&key_path)?;
+        let mut pub_key_path = key_path.clone();
+        pub_key_path.set_extension(".pub");
+        let pub_key = bincode::deserialize(&fs::read(&pub_key_path).unwrap()).unwrap();
 
         // Each validator gets two ports: one for its PhaseLock node and one for the web sever.
         let mut ports = [(0, 0); 6];
@@ -56,7 +60,7 @@ impl CliClient {
             wallets: Default::default(),
             variables: Default::default(),
             prev_output: Default::default(),
-            validators: Self::start_validators(tmp_dir.path(), &key_path, &ports)?,
+            validators: Self::start_validators(tmp_dir.path(), pub_key, &ports)?,
             server_port: ports[0].1,
             _tmp_dir: tmp_dir,
         };
@@ -222,52 +226,33 @@ impl CliClient {
 
     fn start_validators(
         tmp_dir: &Path,
-        key_path: &Path,
+        pub_key: UserPubKey,
         ports: &[(u64, u64)],
     ) -> Result<Vec<Validator>, String> {
         let (phaselock_ports, server_ports): (Vec<_>, Vec<_>) = ports.iter().cloned().unzip();
-        let seed = vec![
-            1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5,
-            6, 7, 8,
-        ];
-        let nodes = Value::from(
-            phaselock_ports
+        let config = ConsensusConfig {
+            seed: [
+                1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4,
+                5, 6, 7, 8,
+            ],
+            nodes: phaselock_ports
                 .into_iter()
-                .enumerate()
-                .map(|(i, port)| {
-                    (
-                        i.to_string(),
-                        Value::from(
-                            vec![
-                                ("ip", Value::from("localhost")),
-                                ("port", Value::Integer(port as i64)),
-                            ]
-                            .into_iter()
-                            .collect::<HashMap<_, _>>(),
-                        ),
-                    )
+                .map(|port| NodeConfig {
+                    ip: "localhost".into(),
+                    port: port as u16,
                 })
-                .collect::<HashMap<_, _>>(),
-        );
-        let config = Value::from(
-            vec![
-                ("title", Value::from("Node Configuration")),
-                ("seed", Value::from(seed)),
-                ("nodes", nodes),
-            ]
-            .into_iter()
-            .collect::<HashMap<_, _>>(),
-        );
+                .collect(),
+        };
         let mut config_file = tmp_dir.to_path_buf();
         config_file.push("node-config.toml");
         File::create(&config_file)
             .unwrap()
-            .write_all(config.to_string().as_bytes())
+            .write_all(toml::to_string(&config).unwrap().as_bytes())
             .unwrap();
 
         let ret = block_on(futures::future::join_all(
             server_ports.into_iter().enumerate().map(|(i, port)| {
-                let mut v = Validator::new(&config_file, key_path, i, port);
+                let mut v = Validator::new(&config_file, pub_key.clone(), i, port);
                 async move {
                     v.open().await?;
                     Ok(v)
@@ -444,7 +429,7 @@ pub struct Validator {
     id: usize,
     cfg_path: PathBuf,
     store_path: PathBuf,
-    key_path: PathBuf,
+    pub_key: UserPubKey,
     port: u64,
 }
 
@@ -461,7 +446,7 @@ impl Validator {
         self.port
     }
 
-    fn new(cfg_path: &Path, key_path: &Path, id: usize, port: u64) -> Self {
+    fn new(cfg_path: &Path, pub_key: UserPubKey, id: usize, port: u64) -> Self {
         let cfg_path = PathBuf::from(cfg_path);
         let mut store_path = cfg_path.clone();
         store_path.pop(); // remove config toml file
@@ -470,15 +455,13 @@ impl Validator {
             "Launching validator with store path {}",
             store_path.as_os_str().to_str().unwrap()
         );
-        let mut key_path = PathBuf::from(key_path);
-        key_path.set_extension("pub");
 
         Self {
             process: None,
             id,
             cfg_path,
             store_path,
-            key_path,
+            pub_key,
             port,
         }
     }
@@ -490,7 +473,7 @@ impl Validator {
 
         let cfg_path = self.cfg_path.clone();
         let store_path = self.store_path.clone();
-        let key_path = self.key_path.clone();
+        let pub_key = self.pub_key.clone();
         let id = self.id;
         let port = self.port;
         let child = spawn_blocking(move || {
@@ -504,8 +487,8 @@ impl Validator {
                     "--full",
                     "--id",
                     &id.to_string(),
-                    "--wallet",
-                    key_path.as_os_str().to_str().unwrap(),
+                    "--faucet-pub-key",
+                    &pub_key.to_string(),
                 ])
                 .env("PORT", port.to_string())
                 .stdin(Stdio::piped())
