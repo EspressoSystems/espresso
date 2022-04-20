@@ -5,8 +5,8 @@ use jf_cap::{
 use zerok_lib::state::{ BlockCommitment, ElaboratedTransactionHash };
 
 pub trait ArchivalDataSource {
-    type BlockIterType: Iterator;
-    type StateIterType: Iterator;
+    type BlockIterType: Iterator<Item = BlockQueryData>;
+    type StateIterType: Iterator<Item = StateQueryData>;
     // or possibly just get_nth_block and get_nth_state,
     // since we aren't likely to iterate these?
     fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType;

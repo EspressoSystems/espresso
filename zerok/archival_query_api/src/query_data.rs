@@ -1,12 +1,12 @@
 use zerok_lib::state::{ BlockCommitment, ElaboratedBlock, ElaboratedTransactionHash, ValidatorState, state_comm::LedgerStateCommitment };
 
 pub struct BlockQueryData {
-    raw_block: ElaboratedBlock,
-    block_hash: BlockCommitment,
-    txn_hashes: Vec<ElaboratedTransactionHash>,
+    pub raw_block: ElaboratedBlock,
+    pub block_hash: BlockCommitment,
+    pub txn_hashes: Vec<ElaboratedTransactionHash>,
 }
 
 pub struct StateQueryData {
-    state: ValidatorState,
-    commitment: LedgerStateCommitment,
+    pub state: ValidatorState,
+    pub commitment: LedgerStateCommitment,
 }
