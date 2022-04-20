@@ -6,4 +6,5 @@ edition = "2021"
 
 [dependencies]
 jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git" }
+phaselock = { git = "ssh://git@github.com/EspressoSystems/phaselock.git", rev = "60b85f7eba2f93704682ce697c109f10eb47894c" }
 zerok_lib = { path = "../zerok_lib/" }

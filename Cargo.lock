@@ -1690,14 +1690,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "espresso-validator-status-api"
-version = "0.1.0"
-dependencies = [
- "jf-cap",
- "zerok_lib",
-]
-
-[[package]]
 name = "espresso-validator"
 version = "0.1.0"
 dependencies = [
@@ -1739,6 +1731,15 @@ dependencies = [
  "tracing-distributed",
  "tracing-futures",
  "tracing-subscriber 0.2.25",
+ "zerok_lib",
+]
+
+[[package]]
+name = "espresso-validator-status-api"
+version = "0.1.0"
+dependencies = [
+ "jf-cap",
+ "phaselock",
  "zerok_lib",
 ]
 
