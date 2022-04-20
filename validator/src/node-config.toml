@@ -7,32 +7,30 @@ title = "Node Configuration"
 seed = [1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8]
 
 # Node information
-[nodes]
-
-[nodes.0]
+[[nodes]]
 ip = "localhost"
 port = 19392
 
-[nodes.1]
+[[nodes]]
 ip = "localhost"
 port = 26940
 
-[nodes.2]
+[[nodes]]
 ip = "localhost"
 port = 21396
 
-[nodes.3]
+[[nodes]]
 ip = "localhost"
 port = 14967
 
-[nodes.4]
+[[nodes]]
 ip = "localhost"
 port = 18333
 
-[nodes.5]
+[[nodes]]
 ip = "localhost"
 port = 35254
 
-[nodes.6]
+[[nodes]]
 ip = "localhost"
 port = 47196

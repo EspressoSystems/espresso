@@ -1,10 +1,10 @@
 [package]
-name = "multi_machine"
+name = "espresso-validator"
 version = "0.1.0"
 authors = ["Keyao Shen <keyao@translucence.net>", "corbett@pictographer.com"]
 edition = "2018"
 license = "Copyright (c) 2022 Espresso Systems (espressosys.com)"
-default-run = "multi_machine"
+default-run = "espresso-validator"
 
 [dependencies]
 async-std = { version = "1.9.0", features = ["unstable", "attributes"] }
@@ -23,7 +23,8 @@ markdown = "0.3"
 net = { git = "https://github.com/EspressoSystems/net.git" }
 # phaselock = { version = "0.0.6" }
 phaselock = { git = "ssh://git@github.com/EspressoSystems/phaselock.git", rev = "60b85f7eba2f93704682ce697c109f10eb47894c" }
-rand_chacha = "0.2.2"
+rand_chacha = {package = "rand_chacha", version = "0.3.1" }
+rand_chacha_02 = { package = "rand_chacha", version = "0.2.2" }
 seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
 serde = { version = "1.0.123", features = ["derive", "rc"] }
 serde_derive = "1.0.118"
@@ -44,7 +45,7 @@ tracing = "0.1.26"
 tracing-distributed = "0.3.1"
 tracing-futures = "0.2"
 tracing-subscriber = "0.2.19"
-zerok_lib = { path = "../../zerok/zerok_lib/" }
+zerok_lib = { path = "../zerok/zerok_lib/" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.11.0"
