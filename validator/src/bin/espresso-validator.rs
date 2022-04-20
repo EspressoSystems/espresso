@@ -85,6 +85,11 @@ async fn generate_transactions(
     mut phaselock: Node,
     mut state: MultiXfrTestState,
 ) {
+    #[cfg(target_os = "linux")]
+    let bytes_per_page = procfs::page_size().unwrap() as u64;
+    #[cfg(target_os = "linux")]
+    tracing::debug!("{} bytes per page", bytes_per_page);
+
     let fence = || std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 
     let report_mem = || {
@@ -289,11 +294,6 @@ async fn main() -> Result<(), std::io::Error> {
         } else {
             None
         };
-
-        #[cfg(target_os = "linux")]
-        let bytes_per_page = procfs::page_size().unwrap() as u64;
-        #[cfg(target_os = "linux")]
-        tracing::debug!("{} bytes per page", bytes_per_page);
 
         // !!!!!!     WARNING !!!!!!!
         // If the output below is changed, update the message for line.trim() in Validator::new as well
