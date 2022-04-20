@@ -166,7 +166,7 @@ async fn generate_transactions(
                         succeeded_rounds += 1;
                         // !!!!!!     WARNING !!!!!!!
                         // If the output below is changed, update the message for main() in
-                        // src/multi_machine_automation.rs as well
+                        // src/bin/multi_machine_automation.rs as well
                         println!(
                             // THINK TWICE BEFORE CHANGING THIS
                             "  - Round {} completed. Commitment: {}",
