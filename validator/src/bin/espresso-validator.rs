@@ -92,7 +92,7 @@ async fn generate_transactions(
         #[cfg(target_os = "linux")]
         {
             let process_stats = procfs::process::Process::myself().unwrap().statm().unwrap();
-            debug!(
+            tracing::debug!(
                 "{:.3}MiB | raw: {:?}",
                 ((process_stats.size * bytes_per_page) as f64) / ((1u64 << 20) as f64),
                 process_stats
@@ -293,7 +293,7 @@ async fn main() -> Result<(), std::io::Error> {
         #[cfg(target_os = "linux")]
         let bytes_per_page = procfs::page_size().unwrap() as u64;
         #[cfg(target_os = "linux")]
-        debug!("{} bytes per page", bytes_per_page);
+        tracing::debug!("{} bytes per page", bytes_per_page);
 
         // !!!!!!     WARNING !!!!!!!
         // If the output below is changed, update the message for line.trim() in Validator::new as well
