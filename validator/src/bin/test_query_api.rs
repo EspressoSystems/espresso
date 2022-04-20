@@ -13,7 +13,7 @@
 //
 // This test works well with the multi-machine demo, which populuates a ledger with some non-trivial
 // state and serves a query API. To use with the demo, run the demo to completion following the
-// instructions in examples/multi_machine/README.md. Be sure to use the `--full` flag to at least
+// instructions in validator/README.md. Be sure to use the `--full` flag to at least
 // one of the nodes, because a full node is required to host the query service. After the demo has
 // completed all rounds, leave at least one of the full node processes running, and then run this
 // test, pointing it at the URL of one of the full nodes.

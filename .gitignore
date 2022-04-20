@@ -42,3 +42,6 @@ package-lock.json
 
 # The cache for chain data in container
 .local
+
+# Validator storage
+validator/store
