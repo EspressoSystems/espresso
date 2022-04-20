@@ -1,16 +1,7 @@
 use core::time::Duration;
-use phaselock::{
-    data::{
-        QuorumCertificate,
-    },
-    H_256,
-    PubKey,
-};
+use phaselock::{data::QuorumCertificate, PubKey, H_256};
 use std::collections::HashMap;
-use zerok_lib::state::{
-    ElaboratedBlock,
-    ValidatorState,
-};
+use zerok_lib::state::{ElaboratedBlock, ValidatorState};
 
 pub struct PeerInfo {
     pub peer_id: PubKey,

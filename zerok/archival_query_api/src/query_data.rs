@@ -1,4 +1,7 @@
-use zerok_lib::state::{ BlockCommitment, ElaboratedBlock, ElaboratedTransactionHash, ValidatorState, state_comm::LedgerStateCommitment };
+use zerok_lib::state::{
+    state_comm::LedgerStateCommitment, BlockCommitment, ElaboratedBlock, ElaboratedTransactionHash,
+    ValidatorState,
+};
 
 pub struct BlockQueryData {
     pub raw_block: ElaboratedBlock,
