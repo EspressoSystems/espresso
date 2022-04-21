@@ -102,7 +102,8 @@ Wallet -down-> get_latest_cap_state
 Wallet -down-> get_plonk_verif_keys
 Wallet -down-> get_cap_fee_record
 Wallet -down-> get_nullifiers
-
+Wallet -down-> get_block_block_id
+Wallet -down-> check_nullifier_block_id_nullifier
 
 BE -down- get_block_block_id
 BE -down- get_block_hash
