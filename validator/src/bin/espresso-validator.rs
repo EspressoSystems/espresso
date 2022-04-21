@@ -53,11 +53,11 @@ struct Options {
 
     /// Public key which should own a faucet record in the genesis block.
     ///
-    /// If this option is given, the ledger will be initialized with a record
-    /// of 2^32 native tokens, owned by the public key.
+    /// For each given public key, the ledger will be initialized with a record of 2^32 native
+    /// tokens, owned by the public key.
     ///
-    /// This option may be passed multiple times to initialize the ledger with
-    /// multiple native token records
+    /// This option may be passed multiple times to initialize the ledger with multiple native
+    /// token records.
     #[structopt(long)]
     pub faucet_pub_key: Vec<UserPubKey>,
 
