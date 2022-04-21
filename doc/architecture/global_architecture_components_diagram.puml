@@ -1,31 +1,61 @@
 @startuml
-skinparam componentStyle rectangle
 
-component "Wallet" as WAPI
-
-
-package "Wallet API" {
-    issue_asset -down- WAPI
-    transfer_asset -down- WAPI
-    freeze_record -down- WAPI
-    trace_asset -down- WAPI
-    manage_keys_cap -down- WAPI
-    view_balances_cap -down- WAPI
-    view_txs_cap -down- WAPI
-    manage_address_book_cap -down- WAPI
+skinparam component {
+    backgroundColor<<not_for_V1>> DarkKhaki
 }
 
-[Espresso Query Service] as EsQS
-interface get_mt_proof_asset_record
-interface get_txs_cap_since_block
-interface get_latest_cap_state
-interface get_plonk_verif_keys
-interface get_nullifiers
-get_nullifiers -down- EsQS
-get_plonk_verif_keys -down- EsQS
-get_txs_cap_since_block -down- EsQS
-get_mt_proof_asset_record -down- EsQS
-get_latest_cap_state -down- EsQS
+component "Wallet" as Wallet
+
+package "Wallet API" {
+    issue_asset -down- Wallet
+    transfer_asset -down- Wallet
+    freeze_record -down- Wallet
+    trace_asset -down- Wallet
+    manage_keys_cap -down- Wallet
+    view_balances_cap -down- Wallet
+    view_txs_cap -down- Wallet
+    manage_address_book_cap -down- Wallet
+}
+
+component "Espresso Query Service" as EsQS
+component BlockExplorer <<not_for_V1>> as BE
+component NetworkStats <<not_for_V1>> as NS
+
+
+package "Validation Event Stream" as VES {
+    interface "subscribe_for_events/:first" as sus_events_first
+    interface  "get_events_since/:first" as get_events_since_first
+    interface  "get_events_since/:first/:count" as get_events_since_first_count
+    sus_events_first -down- EsQS
+    get_events_since_first -down- EsQS
+    get_events_since_first_count -down- EsQS
+}
+
+package "Block queries" as BQ {
+    interface "getblock/:block_id" as get_block_block_id
+    interface  "getblock/hash/:hash" as get_block_hash
+    interface  "gettransaction/:block_id/:txn_id" as get_transaction_block_id_tx_id
+    interface "gettransaction/hash/:hash" as get_transaction_hash
+    interface "getrecord/:block_id/:tx_id/:output_index" as get_record_block_id_tx_id_output_index
+    interface "getrecord/uid/:uid" as get_record_uid
+    interface "check_nullifier/:block_id/:nullifier" as check_nullifier_block_id_nullifier
+
+    get_block_block_id -down- EsQS
+    get_block_hash -down- EsQS
+    get_transaction_block_id_tx_id -down- EsQS
+    get_transaction_hash -down- EsQS
+    get_record_block_id_tx_id_output_index -down- EsQS
+    get_record_uid -down- EsQS
+    check_nullifier_block_id_nullifier -down- EsQS
+}
+
+package "Ledger state queries" as LSQ {
+    get_latest_cap_state -down- EsQS
+    get_plonk_verif_keys -down- EsQS
+    get_nullifiers -down-> EsQS
+    get_mt_proof_asset_record -down- EsQS
+}
+
 
 [Owner's memos store] as OMS
 interface fetch_memos
@@ -41,14 +71,23 @@ register_addr_and_enc_pub_key -down- AB
 get_enc_pub_key_from_addr -down- AB
 
 [Faucet] as F
-interface get_cap_fee_record
 get_cap_fee_record -down- F
 
-component PhaseLock {
+component Validator {
 
-    package "PhaseLock API" {
+    package "Main API" {
         interface submit_tx
         interface get_new_block
+    }
+
+    package ValidatorStatusAPI {
+        interface list_peers
+        interface "qc/:index" as qc_index
+        interface "pending_blocks"
+        interface latest_block_id
+        interface mempool_info
+        interface success_rate
+        interface throughput
     }
 
     database "CAP Ledger" as CAPLedger{
@@ -60,18 +99,37 @@ component PhaseLock {
 EsQS -down-> get_new_block
 
 
-WAPI -down-> fetch_memos
-WAPI -down-> submit_tx
-WAPI -down-> push_memo
-WAPI -down-> get_mt_proof_asset_record
-WAPI -down-> get_txs_cap_since_block
-WAPI -down-> register_addr_and_enc_pub_key
-WAPI -down-> get_enc_pub_key_from_addr
-WAPI -down-> get_latest_cap_state
-WAPI -down-> get_plonk_verif_keys
-WAPI -down-> get_cap_fee_record
-WAPI -down-> get_nullifiers
+Wallet -down-> fetch_memos
+Wallet -down-> submit_tx
+Wallet -down-> push_memo
+Wallet -down-> get_mt_proof_asset_record
+Wallet -down-> register_addr_and_enc_pub_key
+Wallet -down-> get_enc_pub_key_from_addr
+Wallet -down-> get_latest_cap_state
+Wallet -down-> get_plonk_verif_keys
+Wallet -down-> get_cap_fee_record
+Wallet -down-> get_nullifiers
 
+Wallet -down-> sus_events_first
+Wallet -down-> get_events_since_first
+Wallet -down-> get_events_since_first_count
 
+BE -down- get_block_block_id
+BE -down- get_block_hash
+BE -down- get_transaction_block_id_tx_id
+BE -down- get_transaction_hash
+BE -down- get_record_block_id_tx_id_output_index
+BE -down- get_record_uid
+BE -down- check_nullifier_block_id_nullifier
+
+NS -down- list_peers
+NS -down- qc_index
+NS -down- latest_block_id
+NS -down- pending_blocks
+NS -down- mempool_info
+NS -down- success_rate
+NS -down- throughput
+
+F -down- submit_tx
 
 @enduml
