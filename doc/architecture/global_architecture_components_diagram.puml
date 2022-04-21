@@ -1,10 +1,7 @@
 @startuml
 
-skinparam component {
-    backgroundColor<<not_for_V1>> DarkKhaki
-}
-
 component "Wallet" as Wallet
+skinparam ranksep 300
 
 package "Wallet API" {
     issue_asset -down- Wallet
@@ -20,16 +17,6 @@ package "Wallet API" {
 component "Espresso Query Service" as EsQS
 component BlockExplorer <<not_for_V1>> as BE
 component NetworkStats <<not_for_V1>> as NS
-
-
-package "Validation Event Stream" as VES {
-    interface "subscribe_for_events/:first" as sus_events_first
-    interface  "get_events_since/:first" as get_events_since_first
-    interface  "get_events_since/:first/:count" as get_events_since_first_count
-    sus_events_first -down- EsQS
-    get_events_since_first -down- EsQS
-    get_events_since_first_count -down- EsQS
-}
 
 package "Block queries" as BQ {
     interface "getblock/:block_id" as get_block_block_id
@@ -90,6 +77,12 @@ component Validator {
         interface throughput
     }
 
+    package "Validation Event Stream" as VES {
+        interface "subscribe_for_events/:first" as sus_events_first
+        interface  "get_events_since/:first" as get_events_since_first
+        interface  "get_events_since/:first/:count" as get_events_since_first_count
+    }
+
     database "CAP Ledger" as CAPLedger{
         submit_tx -down-> CAPLedger
         get_new_block -down-> CAPLedger
@@ -110,9 +103,6 @@ Wallet -down-> get_plonk_verif_keys
 Wallet -down-> get_cap_fee_record
 Wallet -down-> get_nullifiers
 
-Wallet -down-> sus_events_first
-Wallet -down-> get_events_since_first
-Wallet -down-> get_events_since_first_count
 
 BE -down- get_block_block_id
 BE -down- get_block_hash
@@ -129,6 +119,10 @@ NS -down- pending_blocks
 NS -down- mempool_info
 NS -down- success_rate
 NS -down- throughput
+
+EsQS -down- sus_events_first
+EsQS -down- get_events_since_first
+EsQS -down- get_events_since_first_count
 
 F -down- submit_tx
 
