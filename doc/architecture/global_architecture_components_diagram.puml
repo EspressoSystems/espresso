@@ -22,6 +22,7 @@ component NetworkStats as NS
 note top of NS: <<not_for_V1>>
 
 [Owner's memos store] as OMS
+note top of OMS: <<not_for_V1>>
 package "Memo store API" #lightgray {
     interface fetch_memos
     interface push_memo
