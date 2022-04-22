@@ -2,10 +2,11 @@
 #![deny(warnings)]
 
 use espresso_validator::*;
-use futures::StreamExt;
+use futures::{future::pending, StreamExt};
 use jf_cap::keys::UserPubKey;
-use phaselock::types::EventType;
-use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+use phaselock::{types::EventType, PubKey};
+use std::fs::File;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
@@ -42,6 +43,13 @@ struct Options {
     #[structopt(conflicts_with("id"))]
     pub gen_pk: bool,
 
+    /// Path to public keys.
+    ///
+    /// Public keys will be stored under the specified directory, file names starting
+    /// with `pk_`.
+    #[structopt(long = "pk_path", short = "p")]
+    pub pk_path: Option<PathBuf>,
+
     /// Id of the current node.
     ///
     /// If the node ID is 0, it will propose and try to add transactions.
@@ -77,6 +85,52 @@ fn default_config_path() -> PathBuf {
     const CONFIG_FILE: &str = "src/node-config.toml";
     let dir = project_path();
     [&dir, Path::new(CONFIG_FILE)].iter().collect()
+}
+
+/// Returns the default directory to store public key files.
+fn default_pk_path() -> PathBuf {
+    const PK_DIR: &str = "src";
+    let dir = project_path();
+    [&dir, Path::new(PK_DIR)].iter().collect()
+}
+
+/// Gets the directory to public key files.
+fn get_pk_dir(options: &Options) -> PathBuf {
+    options.pk_path.clone().unwrap_or_else(default_pk_path)
+}
+
+fn generate_keys(options: &Options, config: &ConsensusConfig) {
+    let pk_dir = get_pk_dir(options);
+
+    // Generate public key for each node
+    for (node_id, pub_key) in gen_pub_keys(config).into_iter().enumerate() {
+        let pub_key_str = serde_json::to_string(&pub_key)
+            .unwrap_or_else(|err| panic!("Error while serializing the public key: {}", err));
+        let mut pk_file = File::create(
+            [&pk_dir, Path::new(&format!("pk_{}", node_id))]
+                .iter()
+                .collect::<PathBuf>(),
+        )
+        .unwrap_or_else(|err| panic!("Error while creating a public key file: {}", err));
+        pk_file
+            .write_all(pub_key_str.as_bytes())
+            .unwrap_or_else(|err| panic!("Error while writing to the public key file: {}", err));
+    }
+    info!("Public key files created");
+}
+
+/// Gets public key of a node from its public key file.
+fn get_public_key(options: &Options, node_id: u64) -> PubKey {
+    let path = [&get_pk_dir(options), Path::new(&format!("pk_{}", node_id))]
+        .iter()
+        .collect::<PathBuf>();
+    let mut pk_file = File::open(&path)
+        .unwrap_or_else(|_| panic!("Cannot find public key file: {}", path.display()));
+    let mut pk_str = String::new();
+    pk_file
+        .read_to_string(&mut pk_str)
+        .unwrap_or_else(|err| panic!("Error while reading public key file: {}", err));
+    serde_json::from_str(&pk_str).expect("Error while reading public key")
 }
 
 async fn generate_transactions(
@@ -247,7 +301,7 @@ async fn main() -> Result<(), std::io::Error> {
 
     // Get configuration
     let options = Options::from_args();
-    let config_path = options.config.unwrap_or_else(default_config_path);
+    let config_path = options.config.clone().unwrap_or_else(default_config_path);
     let config = ConsensusConfig::from_file(&config_path);
 
     // Override the path to the universal parameter file if it's specified
@@ -256,7 +310,7 @@ async fn main() -> Result<(), std::io::Error> {
     }
 
     if options.gen_pk {
-        gen_pub_keys(&options.node_opt, &config);
+        generate_keys(&options, &config);
     }
 
     // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
@@ -275,59 +329,35 @@ async fn main() -> Result<(), std::io::Error> {
             let (genesis, state) = GenesisState::new_for_test();
             (genesis, Some(state))
         } else {
-            (
-                GenesisState::new(
-                    &mut ChaChaRng::from_entropy(),
-                    options.faucet_pub_key.clone(),
-                ),
-                None,
-            )
+            (GenesisState::new(options.faucet_pub_key.clone()), None)
         };
-        let phaselock = init_validator(&options.node_opt, &config, genesis, own_id as usize).await;
+        let pub_keys = (0..config.nodes.len())
+            .into_iter()
+            .map(|i| get_public_key(&options, i as u64))
+            .collect();
+        let phaselock = init_validator(
+            &options.node_opt,
+            &config,
+            pub_keys,
+            genesis,
+            own_id as usize,
+        )
+        .await;
 
         // If we are running a full node, also host a query API to inspect the accumulated state.
         let web_server = if let Node::Full(node) = &phaselock {
             Some(
-                init_web_server(&options.node_opt, own_id, node.clone())
+                init_web_server(&options.node_opt, node.clone())
                     .expect("Failed to initialize web server"),
             )
         } else {
             None
         };
 
-        // !!!!!!     WARNING !!!!!!!
-        // If the output below is changed, update the message for line.trim() in Validator::new as well
-        println!(/* THINK TWICE BEFORE CHANGING THIS */ "  - Starting consensus");
-        // !!!!!! END WARNING !!!!!!!
-
         if let Some(num_txn) = options.num_txn {
             generate_transactions(num_txn, own_id, phaselock, state.unwrap()).await;
         } else {
-            phaselock.start_consensus().await;
-
-            // Wait for transactions to be submitted
-            let mut events = phaselock.subscribe();
-            while let Some(event) = events.next().await {
-                match event.event {
-                    EventType::Decide { block: _, state } => {
-                        if !state.is_empty() {
-                            let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
-                                .unwrap()
-                                .to_string();
-                            info!(". - Committed state {}", commitment);
-                        }
-                    }
-                    EventType::ViewTimeout { view_number } => {
-                        info!("  - Round {} timed out.", view_number);
-                    }
-                    EventType::Error { error } => {
-                        info!("  - Phaselock error: {}", error);
-                    }
-                    _ => {
-                        info!("EVENT: {:?}", event);
-                    }
-                }
-            }
+            phaselock.run(pending::<()>()).await;
         }
 
         if options.wait {

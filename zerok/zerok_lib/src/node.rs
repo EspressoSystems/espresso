@@ -12,11 +12,9 @@ use arbitrary_wrappers::*;
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
 use async_trait::async_trait;
-use futures::channel::mpsc;
-use futures::future::RemoteHandle;
 pub use futures::prelude::*;
 pub use futures::stream::Stream;
-use futures::task::SpawnExt;
+use futures::{channel::mpsc, future::RemoteHandle, select, task::SpawnExt};
 use itertools::izip;
 use jf_cap::{
     keys::{UserAddress, UserPubKey},
@@ -34,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
+use tracing::{debug, error};
 
 pub trait ConsensusEvent {
     fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState>;
@@ -56,6 +55,46 @@ pub trait Validator {
     async fn start_consensus(&self);
     async fn current_state(&self) -> Arc<ValidatorState>;
     fn subscribe(&self) -> EventStream<Self::Event>;
+
+    async fn run<F: Send + Future>(self, kill: F)
+    where
+        Self: Sized + Sync,
+    {
+        self.start_consensus().await;
+        let mut events = self.subscribe().fuse();
+        let mut kill = Box::pin(kill.fuse());
+
+        loop {
+            select! {
+                _ = kill => {
+                    debug!("Validator killed");
+                    return;
+                }
+                event = events.next() => match event {
+                    None => {
+                        debug!("Validator exiting");
+                        return;
+                    }
+                    Some(event) => match event.into_event() {
+                        EventType::Decide { block: _, state } => {
+                            if let Some(state) = state.last() {
+                                debug!(". - Committed state {}", state.commit());
+                            }
+                        }
+                        EventType::ViewTimeout { view_number } => {
+                            debug!("  - Round {} timed out.", view_number);
+                        }
+                        EventType::Error { error } => {
+                            error!("  - Phaselock error: {}", error);
+                        }
+                        event => {
+                            debug!("EVENT: {:?}", event);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 pub type LightWeightNode<NET, STORE> = PhaseLockHandle<ValidatorNodeImpl<NET, STORE>, H_256>;
