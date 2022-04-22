@@ -11,15 +11,15 @@ use jf_cap::proof::UniversalParam;
 use seahorse::{
     cli::*,
     io::SharedIO,
-    loader::{LoaderMetadata, KeystoreLoader},
+    loader::{KeystoreLoader, LoaderMetadata},
     KeystoreError,
 };
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
 use zerok_lib::{
-    ledger::EspressoLedger,
     keystore::network::{NetworkBackend, Url},
+    ledger::EspressoLedger,
 };
 
 #[derive(StructOpt)]

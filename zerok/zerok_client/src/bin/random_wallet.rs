@@ -37,9 +37,9 @@ use tracing::{event, Level};
 use zerok_lib::{
     api::client,
     api::EspressoError,
+    keystore::network::{NetworkBackend, Url},
     ledger::EspressoLedger,
     universal_params::UNIVERSAL_PARAM,
-    keystore::network::{NetworkBackend, Url},
 };
 
 type Keystore = seahorse::Keystore<'static, NetworkBackend<'static, ()>, EspressoLedger>;
@@ -108,7 +108,9 @@ async fn main() {
         &mut loader,
     )
     .expect("failed to connect to backend");
-    let mut keystore = Keystore::new(backend).await.expect("error loading keystore");
+    let mut keystore = Keystore::new(backend)
+        .await
+        .expect("error loading keystore");
     match args.key_path {
         Some(path) => {
             let mut file = File::open(path).unwrap_or_else(|err| {

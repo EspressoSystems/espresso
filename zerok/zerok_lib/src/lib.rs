@@ -3,6 +3,7 @@
 pub mod api;
 pub mod committee;
 pub mod full_persistence;
+pub mod keystore;
 pub mod ledger;
 pub mod lw_persistence;
 pub mod node;
@@ -12,7 +13,6 @@ pub mod testing;
 pub mod universal_params;
 mod util;
 pub mod validator_node;
-pub mod keystore;
 
 #[cfg(test)]
 mod macro_tests;

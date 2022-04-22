@@ -22,7 +22,6 @@ use structopt::StructOpt;
 use surf::Url;
 use tempdir::TempDir;
 use zerok_lib::{
-    universal_params::UNIVERSAL_PARAM,
     keystore::{
         hd::KeyTree,
         loader::{Loader, LoaderMetadata},
@@ -30,6 +29,7 @@ use zerok_lib::{
         txn_builder::TransactionStatus,
         EspressoKeystore, EspressoKeystoreError,
     },
+    universal_params::UNIVERSAL_PARAM,
 };
 
 #[derive(Debug, StructOpt)]
@@ -64,7 +64,8 @@ async fn create_keystore(
     rng: &mut ChaChaRng,
     mnemonic: String,
     dir: PathBuf,
-) -> Result<EspressoKeystore<'static, NetworkBackend<'static, LoaderMetadata>>, EspressoKeystoreError> {
+) -> Result<EspressoKeystore<'static, NetworkBackend<'static, LoaderMetadata>>, EspressoKeystoreError>
+{
     // We are never going to re-open this keystore once it's created, so we don't really need a
     // password. Just make it random bytes.
     let mut password = [0; 32];

@@ -37,11 +37,11 @@ use tracing::{event, Level};
 use zerok_lib::{
     api::client::*,
     api::*,
+    keystore::network::{NetworkBackend, Url},
     ledger::EspressoLedger,
     node::{LedgerSummary, QueryServiceError},
     state::ElaboratedBlock,
     universal_params::UNIVERSAL_PARAM,
-    keystore::network::{NetworkBackend, Url},
 };
 
 #[derive(StructOpt)]
