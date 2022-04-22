@@ -21,14 +21,6 @@ note top of BE: <<not_for_V1>>
 component NetworkStats as NS
 note top of NS: <<not_for_V1>>
 
-package "Ledger state queries" as LSQ #lightgray {
-    get_latest_cap_state --> EsQS
-    get_plonk_verif_keys --> EsQS
-    get_nullifiers --> EsQS
-    get_mt_proof_asset_record --> EsQS
-}
-
-
 [Owner's memos store] as OMS
 package "Memo store API" #lightgray {
     interface fetch_memos
@@ -58,6 +50,7 @@ package "Block queries" as BQ #lightgray {
     interface "getrecord/:block_id/:tx_id/:output_index" as get_record_block_id_tx_id_output_index
     interface "getrecord/uid/:uid" as get_record_uid
     interface "check_nullifier/:block_id/:nullifier" as check_nullifier_block_id_nullifier
+    interface "get_cap_state/:block_id" as get_cap_state_block_id
 
     get_block_block_id --> EsQS
     get_block_hash --> EsQS
@@ -66,13 +59,18 @@ package "Block queries" as BQ #lightgray {
     get_record_block_id_tx_id_output_index --> EsQS
     get_record_uid --> EsQS
     check_nullifier_block_id_nullifier --> EsQS
+
+    get_cap_state_block_id --> EsQS
+    get_plonk_verif_keys --> EsQS
+    get_nullifiers --> EsQS
+    get_mt_proof_asset_record --> EsQS
+
 }
 
 component Validator #white {
 
-    package "Main API" #lightgray {
+    package "Submit API" #lightgray {
         interface submit_tx
-        interface get_new_block
     }
 
     package ValidatorStatusAPI #lightgray {
@@ -93,12 +91,12 @@ component Validator #white {
 
     database "CAP Ledger" as CAPLedger{
         submit_tx --> CAPLedger
-        get_new_block --> CAPLedger
     }
+
+    sus_events_first --> CAPLedger
+    get_events_since_first --> CAPLedger
+    get_events_since_first_count --> CAPLedger
 }
-
-EsQS --> get_new_block
-
 
 Wallet --> fetch_memos
 Wallet --> submit_tx
@@ -106,12 +104,13 @@ Wallet --> push_memo
 Wallet --> get_mt_proof_asset_record
 Wallet --> register_addr_and_enc_pub_key
 Wallet --> get_enc_pub_key_from_addr
-Wallet --> get_latest_cap_state
+Wallet --> get_cap_state_block_id
 Wallet --> get_plonk_verif_keys
 Wallet --> get_cap_fee_record
 Wallet --> get_nullifiers
 Wallet --> get_block_block_id
 Wallet --> check_nullifier_block_id_nullifier
+Wallet --> latest_block_id
 
 BE --> get_block_block_id
 BE --> get_block_hash
