@@ -35,6 +35,7 @@ use tracing::{debug, event, info, Level};
 use zerok_lib::{
     api::EspressoError,
     api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
+    committee::Committee,
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
     state::{
@@ -415,6 +416,7 @@ async fn init_phaselock(
 ) -> Node {
     // Create the initial phaselock
     let known_nodes: Vec<_> = (0..nodes).map(|id| get_public_key(options, id)).collect();
+    let stake_table = known_nodes.iter().map(|pk| (pk.clone(), 1)).collect();
 
     let config = PhaseLockConfig {
         total_nodes: nodes as u32,
@@ -452,7 +454,7 @@ async fn init_phaselock(
     let node_persistence = [Path::new(&storage), Path::new("node")]
         .iter()
         .collect::<PathBuf>();
-    let (_, phaselock) = PhaseLock::init(
+    let phaselock = PhaseLock::init(
         genesis,
         public_keys,
         secret_key_share,
@@ -462,6 +464,7 @@ async fn init_phaselock(
         networking,
         AtomicStorage::open(&phaselock_persistence).unwrap(),
         lw_persistence,
+        Committee::new(stake_table),
     )
     .await
     .unwrap();
