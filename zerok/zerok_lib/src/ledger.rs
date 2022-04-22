@@ -3,7 +3,7 @@ use crate::state::{
     ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
 use jf_cap::{
-    keys::{AuditorKeyPair, AuditorPubKey},
+    keys::{ViewerKeyPair, ViewerPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
     TransactionNote,
 };
@@ -55,12 +55,12 @@ impl traits::Transaction for ElaboratedTransaction {
         Self { txn: note, proofs }
     }
 
-    fn open_audit_memo(
+    fn open_viewing_memo(
         &self,
         assets: &HashMap<AssetCode, AssetDefinition>,
-        keys: &HashMap<AuditorPubKey, AuditorKeyPair>,
-    ) -> Result<AuditMemoOpening, AuditError> {
-        self.txn.open_audit_memo(assets, keys)
+        keys: &HashMap<ViewerPubKey, ViewerKeyPair>,
+    ) -> Result<ViewingMemoOpening, ViewingError> {
+        self.txn.open_viewing_memo(assets, keys)
     }
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {

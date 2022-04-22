@@ -1,43 +1,43 @@
 extern crate zerok_client;
 use zerok_client::cli_client::{cli_test, CliClient};
 
-fn create_wallet(t: &mut CliClient, wallet: usize) -> Result<&mut CliClient, String> {
-    let key_path = t.wallet_key_path(wallet)?;
+fn create_keystore(t: &mut CliClient, keystore: usize) -> Result<&mut CliClient, String> {
+    let key_path = t.keystore_key_path(keystore)?;
     let key_path = key_path.as_os_str().to_str().ok_or_else(|| {
         format!(
-            "failed to convert key path {:?} for wallet {} to string",
-            key_path, wallet
+            "failed to convert key path {:?} for keystore {} to string",
+            key_path, keystore
         )
     })?;
-    t.open(wallet)?
+    t.open(keystore)?
         .output("Your mnemonic phrase will be:")?
         .output("^(?P<mnemonic>[a-zA-Z ]+)")?
-        .output("1\\) Accept phrase and create wallet")?
+        .output("1\\) Accept phrase and create keystore")?
         .output("2\\) Generate a new phrase")?
         .output("3\\) Manually enter a mnemonic")?
-        .command(wallet, "1")?
+        .command(keystore, "1")?
         .output("Create password:")?
-        .command(wallet, "test_password")?
+        .command(keystore, "test_password")?
         .output("Retype password:")?
         // Try typing the incorrect password, to check the error handling
-        .command(wallet, "wrong_password")?
+        .command(keystore, "wrong_password")?
         .output("Passwords do not match.")?
         .output("Create password:")?
-        .command(wallet, "test_password")?
+        .command(keystore, "test_password")?
         .output("Retype password:")?
-        .command(wallet, "test_password")?
+        .command(keystore, "test_password")?
         .output("connecting...")?
-        .command(wallet, format!("load_key sending {}", key_path))?
-        .output(format!("(?P<default_addr{}>ADDR~.*)", wallet))
+        .command(keystore, format!("load_key sending {}", key_path))?
+        .output(format!("(?P<default_addr{}>ADDR~.*)", keystore))
 }
 
 fn wait_for_native_balance(
     t: &mut CliClient,
-    wallet: usize,
+    keystore: usize,
     account: &str,
 ) -> Result<usize, String> {
     loop {
-        t.command(wallet, "balance 0")?
+        t.command(keystore, "balance 0")?
             .output(format!("${} (?P<balance>\\d+)", account))?;
         let balance = t.var("balance").unwrap().parse().unwrap();
         if balance > 0 {
@@ -100,15 +100,15 @@ fn cli_basic_info(t: &mut CliClient) -> Result<(), String> {
 fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
     let balance = wait_for_starting_balance(t)?;
     t
-        // Get the balance of both wallets.
+        // Get the balance of both keystores.
         .command(0, "balance 0")?
         .output(format!("Total {}", balance))?
         .command(1, "balance 0")?
         .output("Total 0")?
-        // Transfer some native coins from the primary wallet to the secondary.
+        // Transfer some native coins from the primary keystore to the secondary.
         .command(0, "transfer 0 $default_addr1 500 1")?
         .output("(?P<txn>TXN~.*)")?
-        // Wait for the transaction to complete in both wallets (just because one wallet has
+        // Wait for the transaction to complete in both keystores (just because one keystore has
         // received and processed the completed transaction doesn't mean the other has).
         .command(0, "wait $txn")?
         .output("accepted")?
@@ -159,7 +159,7 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         .output("Minter: unknown")? // Receiver doesn't know who minted the asset for them
         .command(1, "balance 1")?
         .output("$default_addr1 100")?
-        // Do it again, this time specifiying audit and freeze keys
+        // Do it again, this time specifiying view and freeze keys
         .command(0, "gen_key viewing")?
         .output("(?P<audkey0>AUDPUBKEY~.*)")?
         .command(1, "gen_key freezing")?
@@ -208,7 +208,7 @@ fn cli_login(t: &mut CliClient) -> Result<(), String> {
         .command(0, "test_password")?
         .output("connecting...")?;
 
-    // Check that the wallet is functional.
+    // Check that the keystore is functional.
     cli_basic_info(t)
 }
 
@@ -216,8 +216,8 @@ fn cli_login(t: &mut CliClient) -> Result<(), String> {
 #[ignore]
 fn cli_integration_tests() {
     cli_test(|t| {
-        create_wallet(t, 0)?;
-        create_wallet(t, 1)?;
+        create_keystore(t, 0)?;
+        create_keystore(t, 1)?;
 
         cli_basic_info(t)?;
         cli_transfer_native(t)?;
@@ -232,24 +232,24 @@ fn cli_integration_tests() {
 #[ignore]
 fn recover_from_mnemonic() {
     cli_test(|t| {
-        let key_path = t.wallet_key_path(0)?;
+        let key_path = t.keystore_key_path(0)?;
         let key_path = key_path.as_os_str().to_str().ok_or_else(|| {
             format!(
-                "failed to convert key path {:?} for wallet {} to string",
+                "failed to convert key path {:?} for keystore {} to string",
                 key_path, 0
             )
         })?;
         t.open(0)?
             .output("Your mnemonic phrase will be:")?
             .output("^(?P<mnemonic>[a-zA-Z\\-]+)$")?
-            .output("1\\) Accept phrase and create wallet")?
+            .output("1\\) Accept phrase and create keystore")?
             .output("2\\) Generate a new phrase")?
             .output("3\\) Manually enter a mnemonic")?
             // Ask for a new mnemonic just so we hit every code path
             .command(0, "2")?
             .output("Your mnemonic phrase will be:")?
             .output("^(?P<mnemonic>[a-zA-Z\\-]+)$")?
-            .output("1\\) Accept phrase and create wallet")?
+            .output("1\\) Accept phrase and create keystore")?
             .output("2\\) Generate a new phrase")?
             .output("3\\) Manually enter a mnemonic")?
             .command(0, "1")?
@@ -265,7 +265,7 @@ fn recover_from_mnemonic() {
             .command(0, "transfer 0 $default_addr0 $addr 100 1 wait=true")?
             .command(0, "balance 0")?
             .output("$addr 100")?
-            // Create a new wallet with the same mnemonic and check that we get the balance.
+            // Create a new keystore with the same mnemonic and check that we get the balance.
             .open(1)?
             .output("3\\) Manually enter a mnemonic")?
             .command(1, "3")?

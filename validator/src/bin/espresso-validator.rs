@@ -121,7 +121,7 @@ async fn generate_transactions(
         report_mem();
         info!("Commitment: {}", phaselock.current_state().await.commit());
 
-        // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
+        // Generate a transaction if the node ID is 0 and if there isn't a keystore to generate it.
         if own_id == 0 {
             if let Some(tx) = txn.as_ref() {
                 info!("  - Reproposing a transaction");
@@ -192,7 +192,7 @@ async fn generate_transactions(
 
         if success {
             // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
-            // current node), and there is no attached wallet.
+            // current node), and there is no attached keystore.
             if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
                 info!("  - Adding the transaction");
                 let mut blk = ElaboratedBlock::default();

@@ -490,7 +490,7 @@ impl MultiXfrTestState {
                     for i in (0..(self.owners.len() - in1)).rev() {
                         let memo = &self.memos[i];
                         let kix = self.owners[i];
-                        // it's their fee wallet
+                        // it's their fee keystore
                         if i as u64 == self.fee_records[kix] {
                             continue;
                         }
@@ -1492,7 +1492,7 @@ mod tests {
             },
         };
 
-        let mut wallet_merkle_tree = t.clone();
+        let mut keystore_merkle_tree = t.clone();
         let mut validator = ValidatorState::new(verif_keys, t);
 
         println!("Validator set up: {}s", now.elapsed().as_secs_f32());
@@ -1585,7 +1585,7 @@ mod tests {
 
         assert_eq!(&new_uids[1..], &[2]);
         for r in new_recs {
-            wallet_merkle_tree.push(r.to_field_element());
+            keystore_merkle_tree.push(r.to_field_element());
         }
 
         let bob_rec = TransferNoteInput {
@@ -1593,7 +1593,7 @@ mod tests {
             owner_keypair: &bob_key,
             cred: None,
             acc_member_witness: AccMemberWitness {
-                merkle_path: wallet_merkle_tree.get_leaf(2).expect_ok().unwrap().1.path,
+                merkle_path: keystore_merkle_tree.get_leaf(2).expect_ok().unwrap().1.path,
                 root: validator.record_merkle_commitment.root_value,
                 uid: 2,
             },

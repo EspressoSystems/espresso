@@ -1,23 +1,23 @@
-// A wallet that generates random transactions, for testing purposes.
+// A keystore that generates random transactions, for testing purposes.
 //
-// Spin up a random wallet and point it at a query service like so:
-//  random_wallet storage/random_wallet_N localhost:50000
+// Spin up a random keystore and point it at a query service like so:
+//  random_keystore storage/random_keystore_N localhost:50000
 //
-// The wallet will discover its peers (all of the other wallets connected to the same query service)
+// The keystore will discover its peers (all of the other keystores connected to the same query service)
 // and begin making random transactions as follows:
 //  * define a new custom asset type and mint 2^32 tokens for ourselves
 //  * repeatedly:
 //      - randomly select an asset type for which we have a nonzero balance
 //      - transfer a fraction of that asset type to a randomly selected peer
 //
-// There can be multiple groups of wallets connected to different query servers. Wallets will only
-// interact with other wallets in the same group.
+// There can be multiple groups of keystores connected to different query servers. Keystores will only
+// interact with other keystores in the same group.
 //
-// Note that the ledger must be initialized with a balance of native assets for each random wallet
-// by passing the public key of each wallet that should receive funds to each validator with
-// `--wallet`. This requires having the public key before starting `random_wallet`. You can generate
+// Note that the ledger must be initialized with a balance of native assets for each random keystore
+// by passing the public key of each keystore that should receive funds to each validator with
+// `--keystore`. This requires having the public key before starting `random_keystore`. You can generate
 // a key pair using `zerok_client -g KEY_FILE`, and then pass the public key to the validators with
-// `-w KEY_FILE.pub` and pass the key pair to `random_wallet` with `-k KEY_FILE`.
+// `-w KEY_FILE.pub` and pass the key pair to `random_keystore` with `-k KEY_FILE`.
 
 use async_std::task::sleep;
 use jf_cap::keys::UserPubKey;
@@ -25,7 +25,7 @@ use jf_cap::structs::{AssetCode, AssetPolicy};
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-use seahorse::{events::EventIndex, hd::KeyTree, loader::WalletLoader, KeySnafu, WalletError};
+use seahorse::{events::EventIndex, hd::KeyTree, loader::KeystoreLoader, KeySnafu, KeystoreError};
 use snafu::ResultExt;
 use std::convert::TryInto;
 use std::fs::File;
@@ -39,14 +39,14 @@ use zerok_lib::{
     api::EspressoError,
     ledger::EspressoLedger,
     universal_params::UNIVERSAL_PARAM,
-    wallet::network::{NetworkBackend, Url},
+    keystore::network::{NetworkBackend, Url},
 };
 
-type Wallet = seahorse::Wallet<'static, NetworkBackend<'static, ()>, EspressoLedger>;
+type Keystore = seahorse::Keystore<'static, NetworkBackend<'static, ()>, EspressoLedger>;
 
 #[derive(StructOpt)]
 struct Args {
-    /// Path to a private key file to use for the wallet.
+    /// Path to a private key file to use for the keystore.
     ///
     /// If not given, new keys are generated randomly.
     #[structopt(short, long)]
@@ -56,30 +56,30 @@ struct Args {
     #[structopt(short, long)]
     seed: Option<u64>,
 
-    /// Path to a saved wallet, or a new directory where this wallet will be saved.
+    /// Path to a saved keystore, or a new directory where this keystore will be saved.
     storage: PathBuf,
 
     /// URL of a server for interacting with the ledger
     server: Url,
 }
 
-struct TrivialWalletLoader {
+struct TrivialKeystoreLoader {
     dir: PathBuf,
 }
 
-impl WalletLoader<EspressoLedger> for TrivialWalletLoader {
+impl KeystoreLoader<EspressoLedger> for TrivialKeystoreLoader {
     type Meta = ();
 
     fn location(&self) -> PathBuf {
         self.dir.clone()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<EspressoLedger>> {
+    fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
         let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, WalletError<EspressoLedger>> {
+    fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
     }
 }
@@ -99,7 +99,7 @@ async fn main() {
 
     let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
 
-    let mut loader = TrivialWalletLoader { dir: args.storage };
+    let mut loader = TrivialKeystoreLoader { dir: args.storage };
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
         args.server.clone(),
@@ -108,7 +108,7 @@ async fn main() {
         &mut loader,
     )
     .expect("failed to connect to backend");
-    let mut wallet = Wallet::new(backend).await.expect("error loading wallet");
+    let mut keystore = Keystore::new(backend).await.expect("error loading keystore");
     match args.key_path {
         Some(path) => {
             let mut file = File::open(path).unwrap_or_else(|err| {
@@ -118,12 +118,12 @@ async fn main() {
             file.read_to_end(&mut bytes).unwrap_or_else(|err| {
                 panic!("error reading private key file: {}", err);
             });
-            wallet
+            keystore
                 .add_user_key(
                     bincode::deserialize(&bytes).unwrap_or_else(|err| {
                         panic!("invalid private key file: {}", err);
                     }),
-                    "Random wallet key".to_string(),
+                    "Random keystore key".to_string(),
                     EventIndex::default(),
                 )
                 .await
@@ -132,31 +132,31 @@ async fn main() {
                 });
         }
         None => {
-            wallet
-                .generate_user_key("Random wallet key".to_string(), None)
+            keystore
+                .generate_user_key("Random keystore key".to_string(), None)
                 .await
                 .unwrap_or_else(|err| {
                     panic!("error generating random key: {}", err);
                 });
         }
     }
-    let pub_key = wallet.pub_keys().await.remove(0);
+    let pub_key = keystore.pub_keys().await.remove(0);
     let address = pub_key.address();
     event!(
         Level::INFO,
-        "initialized wallet\n  address: {}\n  pub key: {}",
+        "initialized keystore\n  address: {}\n  pub key: {}",
         address,
         pub_key,
     );
 
     // Wait for initial balance.
-    while wallet.balance(&AssetCode::native()).await == 0 {
+    while keystore.balance(&AssetCode::native()).await == 0 {
         event!(Level::INFO, "waiting for initial balance");
         retry_delay().await;
     }
 
-    // Check if we already have a mintable asset (if we are loading from a saved wallet).
-    let my_asset = match wallet
+    // Check if we already have a mintable asset (if we are loading from a saved keystore).
+    let my_asset = match keystore
         .assets()
         .await
         .into_iter()
@@ -165,15 +165,15 @@ async fn main() {
         Some(info) => {
             event!(
                 Level::INFO,
-                "found saved wallet with custom asset type {}",
+                "found saved keystore with custom asset type {}",
                 info.definition.code
             );
             info.definition
         }
         None => {
-            let my_asset = wallet
+            let my_asset = keystore
                 .define_asset(
-                    "Random wallet asset".to_string(),
+                    "Random keystore asset".to_string(),
                     &[],
                     AssetPolicy::default(),
                 )
@@ -184,14 +184,14 @@ async fn main() {
         }
     };
     // If we don't yet have a balance of our asset type, mint some.
-    if wallet.balance(&my_asset.code).await == 0 {
+    if keystore.balance(&my_asset.code).await == 0 {
         event!(Level::INFO, "minting my asset type {}", my_asset.code);
         loop {
-            let txn = wallet
+            let txn = keystore
                 .mint(&address, 1, &my_asset.code, 1u64 << 32, address.clone())
                 .await
                 .expect("failed to generate mint transaction");
-            let status = wallet
+            let status = keystore
                 .await_transaction(&txn)
                 .await
                 .expect("error waiting for mint to complete");
@@ -240,8 +240,8 @@ async fn main() {
 
         // Get a list of assets for which we have a non-zero balance.
         let mut asset_balances = vec![];
-        for info in wallet.assets().await {
-            if wallet.balance(&info.definition.code).await > 0 {
+        for info in keystore.assets().await {
+            if keystore.balance(&info.definition.code).await > 0 {
                 asset_balances.push(info.definition.code);
             }
         }
@@ -266,7 +266,7 @@ async fn main() {
             },
             recipient,
         );
-        let txn = match wallet
+        let txn = match keystore
             .transfer(Some(&address), asset, &[(recipient.address(), amount)], fee)
             .await
         {
@@ -276,7 +276,7 @@ async fn main() {
                 continue;
             }
         };
-        match wallet.await_transaction(&txn).await {
+        match keystore.await_transaction(&txn).await {
             Ok(status) => {
                 if !status.succeeded() {
                     // Transfers are allowed to fail. It can happen, for instance, if we get starved

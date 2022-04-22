@@ -1,32 +1,32 @@
 # Setup
 
-You can use the `demo_script` interpreter to control many validator and wallet processes at once, from a single terminal. This makes interacting with the demo a lot smoother. To start it,
+You can use the `demo_script` interpreter to control many validator and keystore processes at once, from a single terminal. This makes interacting with the demo a lot smoother. To start it,
 ```
 cargo run --release --bin demo_script
 ```
 
-# Create wallets
+# Create keystores
 
-You can route commands to individual wallets using the wallet's numeric ID. Type the following (excluding # lines, which show the expected output) to create a new password-protected wallet:
+You can route commands to individual keystores using the keystore's numeric ID. Type the following (excluding # lines, which show the expected output) to create a new password-protected keystore:
 ```
-wallet 0: open
+keystore 0: open
 # Enter password:
-wallet 0: test_password0
+keystore 0: test_password0
 # Retype password:
-wallet 0: test_password0
+keystore 0: test_password0
 ```
-Repeat the process using wallet ID 1, so we will have to wallets to transfer assets between.
+Repeat the process using keystore ID 1, so we will have to keystores to transfer assets between.
 
 # Check initial state
-At any time, you can type `list` to list the active processes in the demo. Right now, typing `list` should show a number of validators and the two wallets we just created.
+At any time, you can type `list` to list the active processes in the demo. Right now, typing `list` should show a number of validators and the two keystores we just created.
 
-The demo is set up so that the primary wallet, wallet 0, has an initial balance of 2^32 native tokens, and all other wallets have no balance:
+The demo is set up so that the primary keystore, keystore 0, has an initial balance of 2^32 native tokens, and all other keystores have no balance:
 ```
-wallet 0: assets
+keystore 0: assets
 # Lists available assets, notice the native asset type has index 0
-wallet 0: balance 0
+keystore 0: balance 0
 # 4294967296
-wallet 1: balance 0
+keystore 1: balance 0
 # 0
 ```
 
@@ -40,27 +40,27 @@ You can use getstatecomm with each of the validators to check that the validator
 # Make a transfer
 Get the receiver address with
 ```
-wallet 1: address
+keystore 1: address
 ```
 And then start a transfer with
 ```
-wallet 0: transfer 0 <ADDRESS> 500 1
+keystore 0: transfer 0 <ADDRESS> 500 1
 ```
 The arguments to `transfer` are asset index, destination address, amount, fee amount. Note that you can also use an asset code in place of the asset index.
 
-The `transfer` command should print a transaction ID. You can wait for this transaction to complete (and for both wallets to process its completion) using
+The `transfer` command should print a transaction ID. You can wait for this transaction to complete (and for both keystores to process its completion) using
 ```
-wallet 0: wait <TXN1>
+keystore 0: wait <TXN1>
 # accepted
-wallet 1: wait <TXN1>
+keystore 1: wait <TXN1>
 # accepted
 ```
 
 And check that the assets were actually transferred:
 ```
-wallet 0: balance 0
+keystore 0: balance 0
 # 4294966795
-wallet 1: balance 0
+keystore 1: balance 0
 # 500
 ```
 
@@ -81,13 +81,13 @@ validator 1: close
 ```
 Uh oh! Validator #1 has been disconnected from the system. Can the rest of the validators still form consensus and continue to make progress? Let's see...
 ```
-wallet 0: transfer 0 <ADDRESS> 200 2
-wallet 0: wait <TXN2>
-wallet 1: wait <TXN2>
+keystore 0: transfer 0 <ADDRESS> 200 2
+keystore 0: wait <TXN2>
+keystore 1: wait <TXN2>
 
-wallet 0: balance 0
+keystore 0: balance 0
 # 4294966593
-wallet 1: balance 0
+keystore 1: balance 0
 # 700
 ```
 
@@ -99,13 +99,13 @@ validator 1: open
 ```
 Validator #1 is back online. Can it catch up to the other validators and start successfully participating in consensus again?
 ```
-wallet 0: transfer 0 <ADDRESS> 200 2
-wallet 0: wait <TXN3>
-wallet 1: wait <TXN3>
+keystore 0: transfer 0 <ADDRESS> 200 2
+keystore 0: wait <TXN3>
+keystore 1: wait <TXN3>
 
-wallet 0: balance 0
+keystore 0: balance 0
 # 4294966391
-wallet 1: balance 0
+keystore 1: balance 0
 # 900
 ```
 

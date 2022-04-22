@@ -22,7 +22,7 @@ use seahorse::{
     hd, testing,
     testing::MockEventSource,
     txn_builder::{PendingTransaction, RecordDatabase, TransactionInfo, TransactionState},
-    CryptoSnafu, WalletBackend, WalletError, WalletState,
+    CryptoSnafu, KeystoreBackend, KeystoreError, KeystoreState,
 };
 use snafu::ResultExt;
 use std::collections::HashMap;
@@ -48,16 +48,16 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
         &self,
         index: EventIndex,
         source: EventSource,
-    ) -> Result<LedgerEvent<EspressoLedger>, WalletError<EspressoLedger>> {
+    ) -> Result<LedgerEvent<EspressoLedger>, KeystoreError<EspressoLedger>> {
         match source {
             EventSource::QueryService => self.events.get(index),
-            _ => Err(WalletError::Failed {
+            _ => Err(KeystoreError::Failed {
                 msg: String::from("invalid event source"),
             }),
         }
     }
 
-    fn submit(&mut self, block: ElaboratedBlock) -> Result<(), WalletError<EspressoLedger>> {
+    fn submit(&mut self, block: ElaboratedBlock) -> Result<(), KeystoreError<EspressoLedger>> {
         match self.validator.validate_and_apply(
             self.validator.prev_commit_time + 1,
             block.block.clone(),
@@ -103,7 +103,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
         txn_id: u64,
         memos: Vec<ReceiverMemo>,
         sig: Signature,
-    ) -> Result<(), WalletError<EspressoLedger>> {
+    ) -> Result<(), KeystoreError<EspressoLedger>> {
         let (block, block_uids) = &self.committed_blocks[block_id as usize];
         let txn = &block.block.0[txn_id as usize];
         let comms = txn.output_commitments();
@@ -168,7 +168,7 @@ pub struct MockEspressoBackend<'a> {
 }
 
 #[async_trait]
-impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
+impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
     type EventStream =
         Pin<Box<dyn Stream<Item = (LedgerEvent<EspressoLedger>, EventSource)> + Send>>;
     type Storage = MockStorage<'a, EspressoLedger>;
@@ -179,11 +179,11 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
 
     async fn create(
         &mut self,
-    ) -> Result<WalletState<'a, EspressoLedger>, WalletError<EspressoLedger>> {
+    ) -> Result<KeystoreState<'a, EspressoLedger>, KeystoreError<EspressoLedger>> {
         let state = {
             let mut ledger = self.ledger.lock().await;
 
-            WalletState {
+            KeystoreState {
                 proving_keys: ledger.network().proving_keys.clone(),
                 txn_state: TransactionState {
                     validator: ledger.network().validator.clone(),
@@ -245,11 +245,11 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
     async fn get_public_key(
         &self,
         address: &UserAddress,
-    ) -> Result<UserPubKey, WalletError<EspressoLedger>> {
+    ) -> Result<UserPubKey, KeystoreError<EspressoLedger>> {
         let mut ledger = self.ledger.lock().await;
         match ledger.network().address_map.get(address) {
             Some(key) => Ok(key.clone()),
-            None => Err(WalletError::<EspressoLedger>::InvalidAddress {
+            None => Err(KeystoreError::<EspressoLedger>::InvalidAddress {
                 address: address.clone(),
             }),
         }
@@ -259,7 +259,7 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         &self,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
-    ) -> Result<(bool, SetMerkleProof), WalletError<EspressoLedger>> {
+    ) -> Result<(bool, SetMerkleProof), KeystoreError<EspressoLedger>> {
         let mut ledger = self.ledger.lock().await;
         if set.hash() == ledger.network().nullifiers.hash() {
             Ok(ledger.network().nullifiers.contains(nullifier).unwrap())
@@ -271,7 +271,7 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
     async fn register_user_key(
         &mut self,
         key_pair: &UserKeyPair,
-    ) -> Result<(), WalletError<EspressoLedger>> {
+    ) -> Result<(), KeystoreError<EspressoLedger>> {
         let mut ledger = self.ledger.lock().await;
         let pub_key = key_pair.pub_key();
         ledger
@@ -285,7 +285,7 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         &mut self,
         txn: ElaboratedTransaction,
         _info: TransactionInfo<EspressoLedger>,
-    ) -> Result<(), WalletError<EspressoLedger>> {
+    ) -> Result<(), KeystoreError<EspressoLedger>> {
         self.ledger.lock().await.submit(txn)
     }
 
@@ -294,7 +294,7 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         txn: PendingTransaction<EspressoLedger>,
         txid: Option<(u64, u64)>,
     ) {
-        // -> Result<(), WalletError<EspressoLedger>>
+        // -> Result<(), KeystoreError<EspressoLedger>>
 
         if let Some((block_id, txn_id)) = txid {
             let memos = txn
@@ -315,7 +315,7 @@ impl<'a> WalletBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
     async fn get_initial_scan_state(
         &self,
         _from: EventIndex,
-    ) -> Result<(MerkleTree, EventIndex), WalletError<EspressoLedger>> {
+    ) -> Result<(MerkleTree, EventIndex), KeystoreError<EspressoLedger>> {
         dbg!(self.ledger.lock().await.get_initial_scan_state())
     }
 }
@@ -403,26 +403,26 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
 
 // Espresso-specific tests
 #[cfg(test)]
-mod espresso_wallet_tests {
+mod espresso_keystore_tests {
     use super::*;
     use jf_cap::structs::AssetCode;
     use std::time::Instant;
     use testing::SystemUnderTest;
 
-    use testing::generic_wallet_tests;
-    seahorse::instantiate_generic_wallet_tests!(EspressoTest);
+    use testing::generic_keystore_tests;
+    seahorse::instantiate_generic_keystore_tests!(EspressoTest);
 
     #[async_std::test]
     async fn test_resubmit() -> std::io::Result<()> {
         let mut t = EspressoTest::default();
         let mut now = Instant::now();
 
-        // The sender wallet (wallets[0]) gets an initial grant of 2 for a transaction fee and a
-        // payment. wallets[1] will act as the receiver, and wallets[2] will be a third party
-        // which generates RECORD_ROOT_HISTORY_SIZE-1 transfers while a transfer from wallets[0] is
+        // The sender keystore (keystores[0]) gets an initial grant of 2 for a transaction fee and a
+        // payment. keystores[1] will act as the receiver, and keystores[2] will be a third party
+        // which generates RECORD_ROOT_HISTORY_SIZE-1 transfers while a transfer from keystores[0] is
         // pending, after which we will check if the pending transaction can be updated and
         // resubmitted.
-        let (ledger, mut wallets) = t
+        let (ledger, mut keystores) = t
             .create_test_network(
                 &[(2, 2)],
                 vec![
@@ -437,8 +437,8 @@ mod espresso_wallet_tests {
         println!("generating transaction: {}s", now.elapsed().as_secs_f32());
         now = Instant::now();
         ledger.lock().await.hold_next_transaction();
-        let receiver = wallets[1].1.clone();
-        wallets[0]
+        let receiver = keystores[1].1.clone();
+        keystores[0]
             .0
             .transfer(
                 None,
@@ -459,7 +459,7 @@ mod espresso_wallet_tests {
         );
         now = Instant::now();
         for _ in 0..ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1 {
-            wallets[2]
+            keystores[2]
                 .0
                 .transfer(
                     None,
@@ -469,11 +469,11 @@ mod espresso_wallet_tests {
                 )
                 .await
                 .unwrap();
-            t.sync(&ledger, &wallets).await;
+            t.sync(&ledger, &keystores).await;
         }
 
         // Check that the pending transaction eventually succeeds, after being automatically
-        // resubmitted by the wallet.
+        // resubmitted by the keystore.
         println!(
             "submitting invalid transaction: {}s",
             now.elapsed().as_secs_f32()
@@ -483,20 +483,20 @@ mod espresso_wallet_tests {
         ledger.lock().await.flush().unwrap();
         // Wait for the Reject event.
         t.sync_with(
-            &wallets,
+            &keystores,
             ledger_time.add_from_source(EventSource::QueryService, 1),
         )
         .await;
-        // Wait for the Commit and Memos events after the wallet resubmits.
+        // Wait for the Commit and Memos events after the keystore resubmits.
         ledger.lock().await.flush().unwrap();
         t.sync_with(
-            &wallets,
+            &keystores,
             ledger_time.add_from_source(EventSource::QueryService, 3),
         )
         .await;
-        assert_eq!(wallets[0].0.balance(&AssetCode::native()).await, 0);
+        assert_eq!(keystores[0].0.balance(&AssetCode::native()).await, 0);
         assert_eq!(
-            wallets[1].0.balance(&AssetCode::native()).await,
+            keystores[1].0.balance(&AssetCode::native()).await,
             1 + (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64
         );
 

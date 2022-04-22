@@ -24,7 +24,7 @@ use futures::prelude::*;
 use itertools::izip;
 use phaselock::traits::BlockContents;
 use seahorse::{
-    events::LedgerEvent, hd::KeyTree, loader::WalletLoader, KeySnafu, Wallet, WalletError,
+    events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnafu, Keystore, KeystoreError,
 };
 use serde::Deserialize;
 use snafu::ResultExt;
@@ -41,7 +41,7 @@ use zerok_lib::{
     node::{LedgerSummary, QueryServiceError},
     state::ElaboratedBlock,
     universal_params::UNIVERSAL_PARAM,
-    wallet::network::{NetworkBackend, Url},
+    keystore::network::{NetworkBackend, Url},
 };
 
 #[derive(StructOpt)]
@@ -172,23 +172,23 @@ async fn validate_committed_block(
     }
 }
 
-struct UnencryptedWalletLoader {
+struct UnencryptedKeystoreLoader {
     dir: TempDir,
 }
 
-impl WalletLoader<EspressoLedger> for UnencryptedWalletLoader {
+impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
     type Meta = ();
 
     fn location(&self) -> PathBuf {
         self.dir.path().into()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), WalletError<EspressoLedger>> {
+    fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
         let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, WalletError<EspressoLedger>> {
+    fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
     }
 }
@@ -256,12 +256,12 @@ async fn main() {
         err => panic!("expected InvalidBlockId, got {}", err),
     }
 
-    // Check that we can create a wallet using this server as a backend.
+    // Check that we can create a keystore using this server as a backend.
     let url = url("/");
-    let mut loader = UnencryptedWalletLoader {
+    let mut loader = UnencryptedKeystoreLoader {
         dir: TempDir::new("test_query_api").unwrap(),
     };
-    let _wallet = Wallet::new(
+    let _keystore = Keystore::new(
         NetworkBackend::new(
             &*UNIVERSAL_PARAM,
             url.clone(),

@@ -239,7 +239,7 @@ pub enum QueryServiceError {
     },
 }
 
-impl<L: reef::Ledger> From<QueryServiceError> for seahorse::WalletError<L> {
+impl<L: reef::Ledger> From<QueryServiceError> for seahorse::KeystoreError<L> {
     fn from(source: QueryServiceError) -> Self {
         Self::Failed {
             msg: source.to_string(),

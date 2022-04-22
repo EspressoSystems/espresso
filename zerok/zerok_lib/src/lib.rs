@@ -12,7 +12,7 @@ pub mod testing;
 pub mod universal_params;
 mod util;
 pub mod validator_node;
-pub mod wallet;
+pub mod keystore;
 
 #[cfg(test)]
 mod macro_tests;

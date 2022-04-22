@@ -6,9 +6,9 @@
 
 //! Turns a trickle into a shower.
 //!
-//! Give faucet-shower a master mnemonic for a funded wallet and a number N and it will generate N
-//! new wallets, transfer some tokens from the master wallet to each new wallet, and print the
-//! mnemonics and public keys of the newly funded wallets.
+//! Give faucet-shower a master mnemonic for a funded keystore and a number N and it will generate N
+//! new keystores, transfer some tokens from the master keystore to each new keystore, and print the
+//! mnemonics and public keys of the newly funded keystores.
 use futures::stream::{iter, StreamExt};
 use jf_cap::structs::AssetCode;
 use rand_chacha::{
@@ -23,30 +23,30 @@ use surf::Url;
 use tempdir::TempDir;
 use zerok_lib::{
     universal_params::UNIVERSAL_PARAM,
-    wallet::{
+    keystore::{
         hd::KeyTree,
         loader::{Loader, LoaderMetadata},
         network::NetworkBackend,
         txn_builder::TransactionStatus,
-        EspressoWallet, EspressoWalletError,
+        EspressoKeystore, EspressoKeystoreError,
     },
 };
 
 #[derive(Debug, StructOpt)]
 pub struct Options {
-    /// mnemonic for the master faucet wallet
+    /// mnemonic for the master faucet keystore
     #[structopt(short, long, env = "ESPRESSO_FAUCET_WALLET_MNEMONIC")]
     pub master_mnemonic: String,
 
-    /// number of new wallets to generate
+    /// number of new keystores to generate
     #[structopt(short, long, default_value = "10")]
-    pub num_wallets: usize,
+    pub num_keystores: usize,
 
-    /// number of records to create in each new wallet
+    /// number of records to create in each new keystore
     #[structopt(short, long, default_value = "1")]
     pub num_records: u64,
 
-    /// size of each record to create in the new wallets
+    /// size of each record to create in the new keystores
     #[structopt(short, long, default_value = "1000000")]
     pub record_size: u64,
 
@@ -59,13 +59,13 @@ pub struct Options {
     pub esqs_url: Url,
 }
 
-async fn create_wallet(
+async fn create_keystore(
     opt: &Options,
     rng: &mut ChaChaRng,
     mnemonic: String,
     dir: PathBuf,
-) -> Result<EspressoWallet<'static, NetworkBackend<'static, LoaderMetadata>>, EspressoWalletError> {
-    // We are never going to re-open this wallet once it's created, so we don't really need a
+) -> Result<EspressoKeystore<'static, NetworkBackend<'static, LoaderMetadata>>, EspressoKeystoreError> {
+    // We are never going to re-open this keystore once it's created, so we don't really need a
     // password. Just make it random bytes.
     let mut password = [0; 32];
     rng.fill_bytes(&mut password);
@@ -77,7 +77,7 @@ async fn create_wallet(
         opt.esqs_url.clone(),
         &mut loader,
     )?;
-    EspressoWallet::new(backend).await
+    EspressoKeystore::new(backend).await
 }
 
 #[async_std::main]
@@ -86,9 +86,9 @@ async fn main() {
     let mut rng = ChaChaRng::from_entropy();
     let dir = TempDir::new("faucet-shower").unwrap();
 
-    // Create the parent wallet.
+    // Create the parent keystore.
     let parent_dir = [dir.path(), Path::new("parent")].iter().collect();
-    let mut parent = create_wallet(&opt, &mut rng, opt.master_mnemonic.clone(), parent_dir)
+    let mut parent = create_keystore(&opt, &mut rng, opt.master_mnemonic.clone(), parent_dir)
         .await
         .unwrap();
 
@@ -99,39 +99,39 @@ async fn main() {
         .await
         .unwrap();
 
-    // While the ledger scan is going, create the child wallets.
-    let children = iter(0..opt.num_wallets)
+    // While the ledger scan is going, create the child keystores.
+    let children = iter(0..opt.num_keystores)
         .then(|i| {
             let mut rng = ChaChaRng::from_rng(&mut rng).unwrap();
             let dir = &dir;
             let opt = &opt;
             async move {
                 let (_, mnemonic) = KeyTree::random(&mut rng);
-                let dir = [dir.path(), Path::new(&format!("child_wallet_{}", i))]
+                let dir = [dir.path(), Path::new(&format!("child_keystore_{}", i))]
                     .iter()
                     .collect();
-                let mut wallet = create_wallet(opt, &mut rng, mnemonic.to_string(), dir)
+                let mut keystore = create_keystore(opt, &mut rng, mnemonic.to_string(), dir)
                     .await
                     .unwrap();
-                let key = wallet
+                let key = keystore
                     .generate_user_key(format!("child key {}", i), None)
                     .await
                     .unwrap();
-                (wallet, mnemonic, key)
+                (keystore, mnemonic, key)
             }
         })
         .collect::<Vec<_>>()
         .await;
 
-    // Once we have all the wallets, we need to wait for the ledger scan so that the parent wallet
+    // Once we have all the keystores, we need to wait for the ledger scan so that the parent keystore
     // can discover a record to transfer from.
     parent.await_key_scan(&parent_key.address()).await.unwrap();
     let balance = parent.balance(&AssetCode::native()).await;
-    if balance < opt.record_size * (opt.num_records as u64) * (opt.num_wallets as u64) {
+    if balance < opt.record_size * (opt.num_records as u64) * (opt.num_keystores as u64) {
         eprintln!(
-            "Insufficient balance for transferring {} units to {} wallets: {}",
+            "Insufficient balance for transferring {} units to {} keystores: {}",
             opt.record_size * opt.num_records,
-            opt.num_wallets,
+            opt.num_keystores,
             balance
         );
         exit(1);
@@ -141,7 +141,7 @@ async fn main() {
     // panic or get killed for any reason after we have transferred, it is crucial that we have
     // already reported all of the mnemonics needed to recover the funds.
     println!(
-        "Transferring {} units each to the following wallets:",
+        "Transferring {} units each to the following keystores:",
         opt.record_size * opt.num_records
     );
     for (_, mnemonic, key) in &children {
@@ -176,8 +176,8 @@ async fn main() {
     }
 
     // Wait for the children to report the new balances.
-    for (wallet, _, key) in &children {
-        while wallet.balance(&AssetCode::native()).await < opt.record_size * opt.num_records {
+    for (keystore, _, key) in &children {
+        while keystore.balance(&AssetCode::native()).await < opt.record_size * opt.num_records {
             eprintln!(
                 "Waiting for {} to receive {} tokens",
                 key,
