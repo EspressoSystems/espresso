@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
-use async_std::task::{block_on, spawn_blocking};
+use async_std::task::{block_on, sleep, spawn_blocking};
 use escargot::CargoBuild;
 use espresso_validator::{ConsensusConfig, NodeConfig};
 use jf_cap::keys::UserPubKey;
-use lazy_static::lazy_static;
+use portpicker::pick_unused_port;
 use regex::Regex;
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -12,7 +12,8 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use surf::Url;
 use tempdir::TempDir;
 
 /// Set up and run a test of the wallet CLI.
@@ -35,7 +36,7 @@ pub struct CliClient {
     wallets: Vec<Wallet>,
     variables: HashMap<String, String>,
     prev_output: Vec<String>,
-    server_port: u64,
+    server_port: u16,
     _tmp_dir: TempDir,
 }
 
@@ -47,13 +48,16 @@ impl CliClient {
         key_path.push("primary_key");
         Wallet::key_gen(&key_path)?;
         let mut pub_key_path = key_path.clone();
-        pub_key_path.set_extension(".pub");
+        pub_key_path.set_extension("pub");
         let pub_key = bincode::deserialize(&fs::read(&pub_key_path).unwrap()).unwrap();
 
         // Each validator gets two ports: one for its PhaseLock node and one for the web sever.
         let mut ports = [(0, 0); 6];
         for p in &mut ports {
-            *p = (get_port(), get_port());
+            *p = (
+                pick_unused_port().ok_or_else(|| "no available ports".to_owned())?,
+                pick_unused_port().ok_or_else(|| "no available ports".to_owned())?,
+            );
         }
 
         let mut state = Self {
@@ -227,7 +231,7 @@ impl CliClient {
     fn start_validators(
         tmp_dir: &Path,
         pub_key: UserPubKey,
-        ports: &[(u64, u64)],
+        ports: &[(u16, u16)],
     ) -> Result<Vec<Validator>, String> {
         let (phaselock_ports, server_ports): (Vec<_>, Vec<_>) = ports.iter().cloned().unzip();
         let config = ConsensusConfig {
@@ -390,7 +394,9 @@ impl Wallet {
             let mut lines = Vec::new();
             let mut line = String::new();
             loop {
-                child.stdout.read_line(&mut line).map_err(err)?;
+                if child.stdout.read_line(&mut line).map_err(err)? == 0 {
+                    return Err("wallet reached EOF before printing prompt".to_string());
+                }
                 let line = std::mem::take(&mut line);
                 let line = line.trim();
                 println!("< {}", line);
@@ -430,7 +436,7 @@ pub struct Validator {
     cfg_path: PathBuf,
     store_path: PathBuf,
     pub_key: UserPubKey,
-    port: u64,
+    port: u16,
 }
 
 impl Validator {
@@ -442,11 +448,11 @@ impl Validator {
         String::from("localhost")
     }
 
-    pub fn port(&self) -> u64 {
+    pub fn port(&self) -> u16 {
         self.port
     }
 
-    fn new(cfg_path: &Path, pub_key: UserPubKey, id: usize, port: u64) -> Self {
+    fn new(cfg_path: &Path, pub_key: UserPubKey, id: usize, port: u16) -> Self {
         let cfg_path = PathBuf::from(cfg_path);
         let mut store_path = cfg_path.clone();
         store_path.pop(); // remove config toml file
@@ -476,8 +482,8 @@ impl Validator {
         let pub_key = self.pub_key.clone();
         let id = self.id;
         let port = self.port;
-        let child = spawn_blocking(move || {
-            let mut child = cargo_run("espresso-validator")
+        let mut child = spawn_blocking(move || {
+            cargo_run("espresso-validator")
                 .map_err(err)?
                 .args([
                     "--config",
@@ -490,36 +496,30 @@ impl Validator {
                     "--faucet-pub-key",
                     &pub_key.to_string(),
                 ])
-                .env("PORT", port.to_string())
+                .env("ESPRESSO_VALIDATOR_PORT", port.to_string())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
-                .map_err(err)?;
-            let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-            while let Some(line) = lines.next() {
-                let line = line.unwrap();
-                println!("[id {}] Waiting for start: {}", id, line);
-                if line.trim() == "- Starting consensus" {
-                    async_std::task::spawn_blocking(
-                        // A detached task to consume the validator's
-                        // stdout. If we don't do this, the validator will
-                        // eventually fill up its output pipe and block.
-                        move || {
-                            for line in lines {
-                                if line.is_ok() {
-                                    println!("[id {}]{}", id, line.unwrap());
-                                } else {
-                                    println!("[id {}]{:?}", id, line.err())
-                                }
-                            }
-                        },
-                    );
-                    return Ok(child);
-                }
-            }
-            Err(format!("validator {} exited", id))
+                .map_err(err)
         })
         .await?;
+
+        // Spawn a detached task to consume the validator's stdout. If we
+        // don't do this, the validator will eventually fill up its output
+        // pipe and block.
+        let lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        spawn_blocking(move || {
+            for line in lines {
+                if line.is_ok() {
+                    println!("[id {}]{}", id, line.unwrap());
+                } else {
+                    println!("[id {}]{:?}", id, line.err())
+                }
+            }
+        });
+
+        // Wait for the child to initialize its web server.
+        wait_for_connect(port).await?;
 
         self.process = Some(child);
         println!("Leaving Validator::new for {}", id);
@@ -544,28 +544,6 @@ fn err(err: impl std::fmt::Display) -> String {
     err.to_string()
 }
 
-lazy_static! {
-    static ref FREE_PORT: Arc<Mutex<u64>> = Arc::new(Mutex::new(
-        std::env::var("PORT")
-            .ok()
-            .and_then(|port| port
-                .parse()
-                .map_err(|err| {
-                    println!("PORT env var must be an integer. Falling back to 50000.");
-                    err
-                })
-                .ok())
-            .unwrap_or(50000)
-    ));
-}
-
-fn get_port() -> u64 {
-    let mut first_free_port = FREE_PORT.lock().unwrap();
-    let port = *first_free_port;
-    *first_free_port += 1;
-    port
-}
-
 fn cargo_run(bin: impl AsRef<str>) -> Result<Command, String> {
     Ok(CargoBuild::new()
         .package(bin.as_ref())
@@ -575,4 +553,20 @@ fn cargo_run(bin: impl AsRef<str>) -> Result<Command, String> {
         .run()
         .map_err(err)?
         .command())
+}
+
+async fn wait_for_connect(port: u16) -> Result<(), String> {
+    let url: Url = format!("http://localhost:{}", port).parse().unwrap();
+    let mut backoff = Duration::from_millis(500);
+    for _ in 0..10 {
+        if surf::connect(&url).await.is_ok() {
+            return Ok(());
+        }
+        sleep(backoff).await;
+        backoff *= 2;
+    }
+    return Err(format!(
+        "failed to connect to port {} in {:?}",
+        port, backoff
+    ));
 }
