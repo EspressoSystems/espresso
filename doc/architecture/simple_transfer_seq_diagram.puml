@@ -8,13 +8,21 @@ WalletBob --> Validator: subscribe_for_events(20)
 
 Alice --> WalletAlice: key_gen()
 WalletAlice --> Alice: (sk_a,pk_a,addr_a)
+
+note right Alice
+Alice needs to register her public key in case she wants her assets unfrozen.
+end note
 WalletAlice --> AddressBook: register_addr_and_enc_pub_key(addr_a,pk_a)
 
 Bob --> WalletBob: key_gen()
 WalletBob --> Bob: (sk_b,pk_b, addr_b)
+
+note right Alice
+Bob needs to register his public key in case she wants his assets unfrozen.
+end note
 WalletBob --> AddressBook: register_addr_and_enc_pub_key(addr_b,pk_b)
 
-Bob --> Alice: addr_b
+Bob --> Alice: (pk_b,addr_b)
 
 note right Alice
 Alice balance in USD is 100
@@ -24,7 +32,7 @@ note right Bob
 Bob balance in USD is 20
 end note
 
-Alice --> WalletAlice: transfer_asset(sk_a,USDC,15,addr_b)
+Alice --> WalletAlice: transfer_asset(sk_a,USDC,15,pk_b,addr_b)
 
 WalletAlice --> Validator: latest_block_id()
 Validator --> WalletAlice: 78
@@ -32,15 +40,10 @@ WalletAlice --> EsQS: get_cap_state(78)
 EsQS --> WalletAlice: cap_state_78
 
 note right WalletAlice
-In order to compute the memo
-end note
-WalletAlice --> AddressBook: get_enc_pub_key_from_addr(addr_b)
-
-note right WalletAlice
 Memo is part of the transaction and stored on chain
 end note
 
-WalletAlice --> WalletAlice: tx = build_tx(sk_a,USDC,15,pk_b,cap_state_78)
+WalletAlice --> WalletAlice: tx = build_tx(sk_a,USDC,15,pk_b,addr_b,cap_state_78)
 
 WalletAlice --> Validator: submit_tx(tx)
 
