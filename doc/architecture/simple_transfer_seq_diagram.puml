@@ -26,11 +26,11 @@ WalletBob --> AddressBook: register_addr_and_enc_pub_key(addr_b,pk_b)
 Bob --> Alice: (pk_b,addr_b)
 
 note right Alice
-Alice balance in USD is 100
+Alice balance in USDC is 100
 end note
 
 note right Bob
-Bob balance in USD is 20
+Bob balance in USDC is 20
 end note
 
 note right Alice
@@ -68,11 +68,11 @@ WalletAlice --> WalletAlice: memos = get_memos_from_block(new_block_79)
 WalletAlice --> WalletAlice: for each memo in memos: \n   plain = decrypt(sk_a,memo) \n   if plain != Err: \n     update local state(plain)
 
 note right Alice
-Alice balance in USD is  85
+Alice balance in USDC is  85
 end note
 
 note right Bob
-Bob balance in USD is 35
+Bob balance in USDC is 35
 end note
 
 
