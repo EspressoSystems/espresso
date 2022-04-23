@@ -64,7 +64,7 @@ note right WalletAlice
 Alice decrypts the memos from the new block.
 end note
 WalletAlice --> WalletAlice: memos = get_memos_from_block(new_block_79)
-WalletAlice --> WalletAlice: for each memo in memos: \n   plain = decrypt(sk_b,memo) \n   if plain != Err: \n     update local state(plain)
+WalletAlice --> WalletAlice: for each memo in memos: \n   plain = decrypt(sk_a,memo) \n   if plain != Err: \n     update local state(plain)
 
 note right Alice
 Alice balance in USD is  85
