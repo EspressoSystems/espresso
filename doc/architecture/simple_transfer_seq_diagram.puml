@@ -32,6 +32,10 @@ note right Bob
 Bob balance in USD is 20
 end note
 
+note right Alice
+For V1 fees will be 0.
+end note
+
 Alice --> WalletAlice: transfer_asset(sk_a,USDC,15,pk_b,addr_b)
 
 WalletAlice --> Validator: latest_block_id()
