@@ -1,4 +1,5 @@
 @startuml
+autonumber
 Actor Alice
 Actor Bob
 Database EsQS
