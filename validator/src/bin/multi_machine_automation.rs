@@ -46,18 +46,18 @@ struct Options {
     #[structopt(short, long)]
     verbose: bool,
 
-    /// Number of nodes to kill after `fail_after_round` rounds.
+    /// Number of nodes to run only `fail_after_txn` rounds.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
     #[structopt(long = "num_fail_nodes")]
-    pub num_fail_nodes: Option<u64>,
+    num_fail_nodes: Option<u64>,
 
     /// Number of rounds that all nodes will be running, after which `num_fail_nodes` nodes will be
     /// killed.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
-    #[structopt(long = "fail_after_round")]
-    fail_after_round: Option<u64>,
+    #[structopt(long = "fail_after_txn")]
+    fail_after_txn: Option<u64>,
 }
 
 #[async_std::main]
@@ -104,12 +104,20 @@ async fn main() {
         args.push("--faucet_pub_key");
         args.push(pub_key);
     }
-    let num_txn;
-    if let Some(num) = options.num_txn {
-        num_txn = num.to_string();
-        args.push("--num_txn");
-        args.push(&num_txn);
-    }
+    let num_txn_str = match options.num_txn {
+        Some(num_txn) => num_txn.to_string(),
+        None => "".to_string(),
+    };
+    let (num_fail_nodes, fail_after_txn_str) = match options.num_fail_nodes {
+        Some(num_fail_nodes) => {
+            let fail_after_txn_str = options
+                .fail_after_txn
+                .expect("`fail_after_txn` isn't specified when `num_failed_nodes` is.")
+                .to_string();
+            (num_fail_nodes, fail_after_txn_str)
+        }
+        None => (0, "".to_string()),
+    };
 
     // Read node info from node configuration file.
     let num_nodes = match &options.config {
@@ -118,13 +126,22 @@ async fn main() {
     };
 
     // Start the consensus for each node.
+    let first_fail_id = num_nodes - num_fail_nodes as usize;
     let mut processes: Vec<_> = (0..num_nodes)
         .map(|id| {
             let mut this_args = args.clone();
             let id_str = id.to_string();
             this_args.push("--id");
             this_args.push(&id_str);
-            Some(
+            if id >= first_fail_id as usize {
+                this_args.push("--num_txn");
+                this_args.push(&fail_after_txn_str);
+            } else if !num_txn_str.is_empty() {
+                this_args.push("--num_txn");
+                this_args.push(&num_txn_str);
+            }
+            (
+                id,
                 Command::new("./espresso-validator")
                     .args(this_args)
                     .stdout(Stdio::piped())
@@ -136,60 +153,15 @@ async fn main() {
 
     // Collect output from each process as they run. If we don't do this eagerly, validators can
     // block when their output pipes fill up causing deadlock.
-    // let mut processes = processes.iter_mut().map(|p| Some(p)).collect::<Vec<_>>();
-    // let mut commitment = "".to_string();
-    let (num_fail_nodes, fail_after_round) = match options.num_fail_nodes {
-        Some(num) => {
-            let round = options
-                .fail_after_round
-                .expect("`fail_after_round` isn't specified when `num_failed_nodes` is.");
-            (num, round)
-        }
-        None => (0, 0),
-    };
-    // let mut outputs = processes
-    //     .iter_mut()
-    //     .enumerate()
-    //     .map(|(id, p)| {
-    let mut outputs = Vec::new();
-    for id in (num_nodes - num_fail_nodes as usize)..num_nodes {
-        let mut p = std::mem::take(&mut processes[id]).expect("Expected some process");
-        let mut stdout = BufReader::new(p.stdout.take().unwrap());
-        let verbose = options.verbose;
-        let output = Some(spawn_blocking(move || {
-            let mut lines = Vec::new();
-            let mut line = String::new();
-            if id >= num_nodes - num_fail_nodes as usize {
-                loop {
-                    if stdout
-                        .read_line(&mut line)
-                        .unwrap_or_else(|_| panic!("Failed to read stdout for node {}", id))
-                        == 0
-                    {
-                        break;
-                    }
-                    let trimmed_line = line.trim();
-                    if trimmed_line.starts_with(&format!(
-                        "- Round {} completed. Commitment:",
-                        fail_after_round
-                    )) {
-                        let strs: Vec<&str> = trimmed_line.split(' ').collect();
-                        let comm = strs.last().unwrap_or_else(|| {
-                            panic!("Failed to parse commitment for node {}", id)
-                        });
-                        // if commitment.is_empty() {
-                        //     commitment = comm.to_string();
-                        // } else {
-                        //     assert_eq!(comm, &commitment);
-                        // }
-                        p.kill().unwrap_or_else(|_| {
-                            panic!("Failed to kill the validator for node {}", id)
-                        });
-                        println!("Validator {} killed with commitment {}", id, comm);
-                        break;
-                    }
-                }
-            } else {
+    let outputs = processes
+        .iter_mut()
+        .map(|(id, p)| {
+            let mut stdout = BufReader::new(p.stdout.take().unwrap());
+            let id = *id;
+            let verbose = options.verbose;
+            spawn_blocking(move || {
+                let mut lines = Vec::new();
+                let mut line = String::new();
                 loop {
                     if stdout
                         .read_line(&mut line)
@@ -203,28 +175,21 @@ async fn main() {
                     }
                     lines.push(std::mem::take(&mut line));
                 }
-            }
-            lines
-        }));
-        // TODO: where to put this?
-        // processes[id] = Some(p);
-        outputs.push(output);
-        // })
-        // .collect::<Vec<_>>();
-    }
+                lines
+            })
+        })
+        .collect::<Vec<_>>();
 
-    // Check each process that is supposed to succeed.
+    // Check each process.
     let mut commitment = "".to_string();
     let mut succeeded_nodes = 0;
-    for id in 0..(num_nodes - num_fail_nodes as usize) {
-        let mut p = std::mem::take(&mut processes[id]).expect("Expected some process");
-        let output = std::mem::take(&mut outputs[id]);
+    for ((id, mut p), output) in processes.into_iter().zip(outputs) {
         println!("waiting for validator {}", id);
         let process: Result<ExitStatus, _> = p.wait();
         process.unwrap_or_else(|_| panic!("Failed to run the validator for node {}", id));
         // Check whether the commitments are the same.
         if let Some(num_txn) = options.num_txn {
-            for line in output.expect("Expected some output").await {
+            for line in output.await {
                 let trimmed_line = line.trim();
                 if trimmed_line.starts_with(&format!("- Round {} completed. Commitment:", num_txn))
                 {
