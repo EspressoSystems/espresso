@@ -106,6 +106,10 @@ impl FullPersistence {
         self.commit(&[StateHistory, NullifierSnapshots, RmtLeavesFull, KnownNodes]);
     }
 
+    // clippy introduces a lint in 1.59.0 that incorrectly applies to this construction;
+    // make that toolchain not break, without breaking earlier toolchains.
+    #[allow(unknown_lints)]
+    #[allow(clippy::init_numbered_fields)]
     pub fn store_for_commit(&mut self, block: &ElaboratedBlock, state: &ValidatorState) {
         self.state_history.store_resource(state).unwrap();
         self.block_history.store_resource(block).unwrap();
