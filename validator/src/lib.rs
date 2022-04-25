@@ -190,7 +190,7 @@ fn get_pk_dir(options: &NodeOpt) -> String {
     }
 }
 
-/// Gets the directory to public key files.
+/// Gets the directory to persistence files.
 fn get_store_dir(options: &NodeOpt, node_id: u64) -> String {
     let store_path = options.store_path.clone();
     if store_path.is_empty() {
