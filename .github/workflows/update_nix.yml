@@ -15,6 +15,6 @@ jobs:
         uses: cachix/install-nix-action@v17
 
       - name: Update flake.lock
-        uses: DeterminateSystems/update-flake-lock@v8
+        uses: DeterminateSystems/update-flake-lock@v9
         with:
           pr-title: "Weekly PR to bump flake.nix" # Title of PR to be created
