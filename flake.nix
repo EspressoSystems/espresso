@@ -84,7 +84,7 @@
         devShells = {
           perfShell = pkgs.mkShell {
             buildInputs = with pkgs;
-              [ flamegraph fd cargo-llvm-cov stableToolchain ] ++ buildDeps;
+              [ git flamegraph fd cargo-llvm-cov stableToolchain ] ++ buildDeps;
           };
         };
 
