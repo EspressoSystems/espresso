@@ -15,15 +15,12 @@ on:
 jobs:
   code-coverage:
     runs-on: self-hosted
-        container:
-          image: ghcr.io/espressosystems/nix:2.8.0
-          volumes:
-            - github_nix_280:/nix
-    timeout-minutes: 30
+    container:
+      image: ghcr.io/espressosystems/nix:2.8.0
+      volumes:
+        - github_nix_280:/nix
+    timeout-minutes: 60
     steps:
-      - name: Install Nix
-        uses: cachix/install-nix-action@v17
-
       - name: Configure Git
         run: |
           git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf git://github.com/
