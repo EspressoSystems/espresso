@@ -18,13 +18,15 @@
         stableToolchain = pkgs.rust-bin.stable."1.59.0".minimal.override {
           extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
         };
+        sixtyStableToolchain = pkgs.rust-bin.stable."1.59.0".minimal.override {
+          extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
+        };
         rustDeps = with pkgs;
           [
             pkgconfig
             openssl
 
             curl
-            stableToolchain
 
             cargo-edit
             cargo-udeps
@@ -75,12 +77,19 @@
               nixpkgs-fmt
               git
               mdbook # make-doc, documentation generation
-              cargo-llvm-cov
+              stableToolchain
             ] ++ rustDeps;
 
           RUST_SRC_PATH = "${stableToolchain}/lib/rustlib/src/rust/library";
           RUST_BACKTRACE = 1;
           RUST_LOG = "info";
         };
+        devShells = {
+          perfShell = pkgs.mkShell {
+            buildInputs = with pkgs;
+              [ cargo-llvm-cov sixtyStableToolchain ] ++ rustDeps;
+          };
+        };
+
       });
 }
