@@ -75,18 +75,12 @@
               nixpkgs-fmt
               git
               mdbook # make-doc, documentation generation
+              cargo-llvm-cov
             ] ++ rustDeps;
 
           RUST_SRC_PATH = "${stableToolchain}/lib/rustlib/src/rust/library";
           RUST_BACKTRACE = 1;
           RUST_LOG = "info";
         };
-        devShells = {
-          perfShell = pkgs.mkShell {
-            buildInputs = with pkgs;
-              [ git flamegraph fd cargo-llvm-cov stableToolchain ] ++ buildDeps;
-          };
-        };
-
       });
 }

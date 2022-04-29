@@ -31,11 +31,7 @@ jobs:
 
       - name: Generate coverage reports
         run: |
-          # export COMMAND="cd ${PWD} && cargo-llvm-cov llvm-cov --lib --bins --tests --benches --release --workspace --all-features --lcov --output-path lcov.info"
-          # echo $COMMAND
-          stat "${PWD}/flake.nix" ; echo "flake exists: $?"
-          stat "${PWD}/.git" ; echo "git directory exists: $?"
-          nix develop "${PWD}"#perfShell 
+          nix-shell --run "cargo-llvm-cov llvm-cov --lib --bins --tests --benches --release --workspace --all-features --lcov --output-path lcov.info"
 
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
