@@ -1,0 +1,44 @@
+name: Code Coverage Workflow
+
+on:
+  push:
+    branches:
+      - '*/*'
+      - 'main'
+  pull_request:
+    branches:
+      - '*/*'
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+jobs:
+  code-coverage:
+    runs-on: self-hosted
+        container:
+          image: ghcr.io/espressosystems/nix:2.8.0
+          volumes:
+            - github_nix_280:/nix
+    timeout-minutes: 30
+    steps:
+      - name: Install Nix
+        uses: cachix/install-nix-action@v17
+
+      - name: Configure Git
+        run: |
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf git://github.com/
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf ssh://git@github.com/
+
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Generate coverage reports
+        run: |
+          nix develop .#perfShell -c cargo-llvm-cov llvm-cov --lib --bins --tests --benches --release --workspace --all-features --lcov --output-path lcov.info
+
+      - name: Coveralls upload
+        uses: coverallsapp/github-action@master
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: lcov.info
+          fail_ci_if_error: true
