@@ -18,7 +18,7 @@
         stableToolchain = pkgs.rust-bin.stable."1.59.0".minimal.override {
           extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
         };
-        sixtyStableToolchain = pkgs.rust-bin.stable."1.59.0".minimal.override {
+        sixtyStableToolchain = pkgs.rust-bin.stable."1.60.0".minimal.override {
           extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
         };
         rustDeps = with pkgs;

@@ -32,7 +32,7 @@ jobs:
       - name: Generate coverage reports
         run: |
           git config --global --add safe.directory "$PWD"
-          nix run github:NixOS/nix -- develop .#perfShell -c "bash -c cargo-llvm-cov llvm-cov --lib --bins --tests --benches --release --workspace --all-features --lcov --output-path lcov.info"
+          nix run github:NixOS/nix -- develop .#perfShell -c cargo-llvm-cov llvm-cov --lib --bins --tests --benches --release --workspace --all-features --lcov --output-path lcov.info
 
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
