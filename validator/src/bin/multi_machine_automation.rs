@@ -275,14 +275,21 @@ mod test {
         run_demo_exe(50, 0, 0, true).await;
     }
 
-    // #[async_std::test]
-    // async fn test_small_fail_some() {
-    //     run_demo_exe(5, 2, 0, true).await;
-    //     // run_demo_exe(5, 2, 2, true).await;
-    // }
+    #[async_std::test]
+    async fn test_small_fail_some() {
+        run_demo_exe(5, 1, 0, true).await;
+        run_demo_exe(5, 1, 3, true).await;
+        run_demo_exe(5, 2, 2, true).await;
+    }
+
+    #[async_std::test]
+    async fn test_small_fail_many() {
+        run_demo_exe(5, 3, 1, false).await;
+    }
 
     // #[async_std::test]
-    // async fn test_small_fail_many() {
-    //     run_demo_exe(5, 3, 0, false).await;
+    // async fn test_large_fail_some() {
+    //     run_demo_exe(50, 1, 1, true).await;
+    //     // run_demo_exe(5, 2, 2, true).await;
     // }
 }
