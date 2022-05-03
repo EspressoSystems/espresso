@@ -166,8 +166,6 @@ async fn generate_transactions(
     let mut round = 0;
     let mut succeeded_rounds = 0;
 
-    // When `num_txn` is set, run `num_txn` rounds.
-    // Otherwise, keeping running till the process is killed.
     let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
     let mut txn_proposed_round = 0;
     while succeeded_rounds < num_txn {
