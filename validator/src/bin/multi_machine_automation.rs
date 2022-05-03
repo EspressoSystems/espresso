@@ -1,8 +1,8 @@
 use async_std::task::spawn_blocking;
-use espresso_validator::{ConsensusConfig, NodeOpt};
+use espresso_validator::{project_path, ConsensusConfig, NodeOpt};
 use jf_cap::keys::UserPubKey;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use structopt::StructOpt;
 
@@ -58,6 +58,14 @@ struct Options {
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
     #[structopt(long = "fail_after_txn")]
     fail_after_txn: Option<u64>,
+}
+
+pub fn exe_dir() -> String {
+    let project_path = project_path();
+    let exe_dir: PathBuf = [&project_path, Path::new("../target/release")]
+        .iter()
+        .collect();
+    exe_dir.to_str().unwrap().to_string()
 }
 
 #[async_std::main]
@@ -142,7 +150,7 @@ async fn main() {
             }
             (
                 id,
-                Command::new("./espresso-validator")
+                Command::new(format!("{}/espresso-validator", exe_dir()))
                     .args(this_args)
                     .stdout(Stdio::piped())
                     .spawn()
@@ -188,23 +196,24 @@ async fn main() {
         let process: Result<ExitStatus, _> = p.wait();
         process.unwrap_or_else(|_| panic!("Failed to run the validator for node {}", id));
         // Check whether the commitments are the same.
-        if let Some(num_txn) = options.num_txn {
-            for line in output.await {
-                let trimmed_line = line.trim();
-                if trimmed_line.starts_with(&format!("- Round {} completed. Commitment:", num_txn))
-                {
-                    let strs: Vec<&str> = trimmed_line.split(' ').collect();
-                    let comm = strs
-                        .last()
-                        .unwrap_or_else(|| panic!("Failed to parse commitment for node {}", id));
-                    println!("Validator {} finished with commitment {}", id, comm);
-                    if commitment.is_empty() {
-                        commitment = comm.to_string();
-                    } else {
-                        assert_eq!(comm, &commitment);
+        if options.num_txn.is_some() {
+            let lines = output.await;
+            if id < first_fail_id as usize {
+                for line in lines {
+                    if line.starts_with("Final commitment:") {
+                        let strs: Vec<&str> = line.split(' ').collect();
+                        let comm = strs.last().unwrap_or_else(|| {
+                            panic!("Failed to parse commitment for node {}", id)
+                        });
+                        println!("Validator {} finished with commitment {}", id, comm);
+                        if commitment.is_empty() {
+                            commitment = comm.to_string();
+                        } else {
+                            assert_eq!(comm, &commitment);
+                        }
+                        succeeded_nodes += 1;
+                        break;
                     }
-                    succeeded_nodes += 1;
-                    break;
                 }
             }
         }
@@ -214,4 +223,66 @@ async fn main() {
     let threshold = ((num_nodes * 2) / 3) + 1;
     assert!(succeeded_nodes >= threshold);
     println!("Consensus completed for all nodes")
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::time::Instant;
+
+    fn demo_exe() -> String {
+        format!("{}/multi_machine_automation", exe_dir())
+    }
+
+    async fn run_demo_exe(
+        num_txn: u64,
+        num_fail_nodes: u64,
+        fail_after_txn: u64,
+        expect_success: bool,
+    ) {
+        let num_txn = &num_txn.to_string();
+        let num_fail_nodes = &num_fail_nodes.to_string();
+        let fail_after_txn = &fail_after_txn.to_string();
+        let args = vec![
+            "--num_txn",
+            num_txn,
+            "--num_fail_nodes",
+            num_fail_nodes,
+            "--fail_after_txn",
+            fail_after_txn,
+            "--verbose",
+        ];
+        let now = Instant::now();
+        let status = Command::new(demo_exe())
+            .args(args)
+            .status()
+            .expect("Failed to execute the multi-machine automation");
+        println!(
+            "Completed {} txns in {} s",
+            num_txn,
+            now.elapsed().as_secs_f32()
+        );
+        assert_eq!(expect_success, status.success());
+    }
+
+    #[async_std::test]
+    async fn test_small() {
+        run_demo_exe(5, 0, 0, true).await;
+    }
+
+    #[async_std::test]
+    async fn test_large() {
+        run_demo_exe(50, 0, 0, true).await;
+    }
+
+    // #[async_std::test]
+    // async fn test_small_fail_some() {
+    //     run_demo_exe(5, 2, 0, true).await;
+    //     // run_demo_exe(5, 2, 2, true).await;
+    // }
+
+    // #[async_std::test]
+    // async fn test_small_fail_many() {
+    //     run_demo_exe(5, 3, 0, false).await;
+    // }
 }

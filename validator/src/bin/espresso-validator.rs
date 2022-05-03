@@ -110,13 +110,13 @@ async fn generate_transactions(
 
     // Start consensus for each transaction
     let mut round = 0;
-    let mut succeeded_rounds = 0;
 
     // When `num_txn` is set, run `num_txn` rounds.
     // Otherwise, keeping running till the process is killed.
     let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
     let mut txn_proposed_round = 0;
-    while succeeded_rounds < num_txn {
+    let mut final_commitment = "".to_string();
+    while round < num_txn {
         info!("Starting round {}", round + 1);
         report_mem();
         info!("Commitment: {}", phaselock.current_state().await.commit());
@@ -163,16 +163,8 @@ async fn generate_transactions(
                         let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                             .unwrap()
                             .to_string();
-                        succeeded_rounds += 1;
-                        // !!!!!!     WARNING !!!!!!!
-                        // If the output below is changed, update the message for main() in
-                        // src/bin/multi_machine_automation.rs as well
-                        println!(
-                            // THINK TWICE BEFORE CHANGING THIS
-                            "  - Round {} completed. Commitment: {}",
-                            succeeded_rounds, commitment
-                        );
-                        // !!!!!! END WARNING !!!!!!!
+                        info!("  - Round {} completed. Commitment: {}", round, commitment);
+                        final_commitment = commitment;
                         break true;
                     }
                 }
@@ -235,7 +227,18 @@ async fn generate_transactions(
         round += 1;
     }
 
-    info!("All rounds completed");
+    info!("All rounds completed.");
+    // !!!!!!     WARNING !!!!!!!
+    // If the output below is changed, update the message for main() in
+    // src/bin/multi_machine_automation.rs as well
+    if !final_commitment.is_empty() {
+        println!(
+            // THINK TWICE BEFORE CHANGING THIS
+            "Final commitment: {}",
+            final_commitment
+        );
+    }
+    // !!!!!! END WARNING !!!!!!!
 }
 
 #[async_std::main]
