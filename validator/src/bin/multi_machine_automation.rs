@@ -21,7 +21,14 @@ struct Options {
 
     /// Path to the universal parameter file.
     #[structopt(long = "universal_param_path", short = "u")]
-    pub universal_param_path: Option<String>,
+    pub universal_param_path: Option<PathBuf>,
+
+    /// Path to public keys.
+    ///
+    /// Public keys will be stored under the specified directory, file names starting
+    /// with `pk_`.
+    #[structopt(long = "pk_path", short = "p")]
+    pub pk_path: Option<PathBuf>,
 
     /// Public key which should own a faucet record in the genesis block.
     ///
@@ -72,16 +79,7 @@ pub fn exe_dir() -> String {
 async fn main() {
     // Construct arguments to pass to the multi-machine demo.
     let options = Options::from_args();
-    let mut args = vec![
-        "--pk_path",
-        &options.node_opt.pk_path,
-        "--store_path",
-        &options.node_opt.store_path,
-        "--assets",
-        &options.node_opt.web_path,
-        "--api",
-        &options.node_opt.api_path,
-    ];
+    let mut args = vec![];
     if options.node_opt.load_from_store {
         args.push("--load_from_store");
     }
@@ -91,6 +89,24 @@ async fn main() {
     if options.wait {
         args.push("--wait");
     }
+    let store_path;
+    if let Some(path) = &options.node_opt.store_path {
+        store_path = path.display().to_string();
+        args.push("--store_path");
+        args.push(&store_path);
+    }
+    let web_path;
+    if let Some(path) = &options.node_opt.web_path {
+        web_path = path.display().to_string();
+        args.push("--assets");
+        args.push(&web_path);
+    }
+    let api_path;
+    if let Some(path) = &options.node_opt.api_path {
+        api_path = path.display().to_string();
+        args.push("--api");
+        args.push(&api_path);
+    }
     let config_path;
     if let Some(path) = &options.config {
         config_path = path.display().to_string();
@@ -99,9 +115,15 @@ async fn main() {
     }
     let universal_param_path;
     if let Some(path) = &options.universal_param_path {
-        universal_param_path = path.clone();
+        universal_param_path = path.display().to_string();
         args.push("--universal_param_path");
         args.push(&universal_param_path);
+    }
+    let pk_path;
+    if let Some(path) = &options.pk_path {
+        pk_path = path.display().to_string();
+        args.push("--pk_path");
+        args.push(&pk_path);
     }
     let faucet_pub_keys = options
         .faucet_pub_key

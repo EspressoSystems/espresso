@@ -1,7 +1,6 @@
-use phaselock::{
-    committee::DynamicCommittee, data::StateHash, traits::Election, PrivKey, PubKey, H_256,
-};
-use std::collections::{hash_map::HashMap, HashSet};
+use phaselock::{committee::DynamicCommittee, data::StateHash, PrivKey, PubKey, H_256};
+use phaselock_types::traits::election::Election;
+use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 
 use threshold_crypto as tc;
@@ -9,7 +8,7 @@ use threshold_crypto as tc;
 /// A structure for committee election.
 pub struct Committee<S, const N: usize> {
     /// A table mapping public keys with their associated stake.
-    stake_table: HashMap<PubKey, u64>,
+    stake_table: BTreeMap<PubKey, u64>,
 
     /// Inner structure for committee election.
     _election: PhantomData<DynamicCommittee<S, N>>,
@@ -20,7 +19,7 @@ pub struct Committee<S, const N: usize> {
 
 impl<S, const N: usize> Committee<S, N> {
     /// Creates a new committee.
-    pub fn new(stake_table: HashMap<PubKey, u64>) -> Self {
+    pub fn new(stake_table: BTreeMap<PubKey, u64>) -> Self {
         Self {
             stake_table,
             _election: PhantomData,
@@ -29,9 +28,9 @@ impl<S, const N: usize> Committee<S, N> {
     }
 }
 
-impl<S, const N: usize> Election<N> for Committee<S, N> {
+impl<S: Send + Sync + Default, const N: usize> Election<N> for Committee<S, N> {
     /// A table mapping public keys with their associated stake.
-    type StakeTable = HashMap<PubKey, u64>;
+    type StakeTable = BTreeMap<PubKey, u64>;
 
     /// Constructed by `p * pow(2, 256)`, where `p` is the predetermined probability of a stake
     /// being selected. A stake will be selected iff `H(vrf_output | stake)` is smaller than the

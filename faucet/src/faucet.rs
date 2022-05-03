@@ -60,7 +60,7 @@ pub struct FaucetOptions {
 
     /// binding port for the faucet service
     #[structopt(long, env = "ESPRESSO_FAUCET_PORT", default_value = "50079")]
-    pub faucet_port: String,
+    pub faucet_port: u16,
 
     /// size of transfer for faucet grant
     #[structopt(long, env = "ESPRESSO_FAUCET_GRANT_SIZE", default_value = "5000")]
@@ -77,6 +77,14 @@ pub struct FaucetOptions {
         default_value = "http://localhost:50087"
     )]
     pub esqs_url: Url,
+
+    /// URL for a validator to submit transactions to.
+    #[structopt(
+        long,
+        env = "ESPRESSO_SUBMIT_URL",
+        default_value = "http://localhost:50087"
+    )]
+    pub submit_url: Url,
 }
 
 #[derive(Clone)]
@@ -178,7 +186,7 @@ pub async fn init_web_server(
         &*UNIVERSAL_PARAM,
         opt.esqs_url.clone(),
         opt.esqs_url.clone(),
-        opt.esqs_url.clone(),
+        opt.submit_url.clone(),
         &mut loader,
     )
     .unwrap();
@@ -235,4 +243,99 @@ async fn main() -> Result<(), std::io::Error> {
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use async_std::task::sleep;
+    use espresso_validator::testing::minimal_test_network;
+    use futures::Future;
+    use portpicker::pick_unused_port;
+    use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+    use std::path::PathBuf;
+    use std::time::Duration;
+    use tempdir::TempDir;
+    use tracing_test::traced_test;
+    use zerok_lib::wallet::hd::KeyTree;
+
+    async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
+        let mut backoff = Duration::from_millis(100);
+        for _ in 0..10 {
+            if f().await {
+                return;
+            }
+            sleep(backoff).await;
+            backoff *= 2;
+        }
+        panic!("retry loop did not complete in {:?}", backoff);
+    }
+
+    #[traced_test]
+    #[async_std::test]
+    async fn test_faucet_transfer() {
+        let mut rng = ChaChaRng::from_seed([1u8; 32]);
+
+        // Create test network with a faucet key pair.
+        let (key_stream, mnemonic) = KeyTree::random(&mut rng);
+        let faucet_key_pair = key_stream
+            .derive_sub_tree("wallet".as_bytes())
+            .derive_sub_tree("user".as_bytes())
+            .derive_user_key_pair(&0u64.to_le_bytes());
+        let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key()).await;
+
+        // Initiate a faucet server with the mnemonic associated with the faucet key pair.
+        let faucet_dir = TempDir::new("cape_wallet_faucet").unwrap();
+        let faucet_port = pick_unused_port().unwrap();
+        let grant_size = 5000;
+        let opt = FaucetOptions {
+            mnemonic: mnemonic.to_string(),
+            faucet_wallet_path: PathBuf::from(faucet_dir.path()),
+            faucet_password: "".to_string(),
+            faucet_port: faucet_port.clone(),
+            esqs_url: network.query_api.clone(),
+            submit_url: network.submit_api.clone(),
+            grant_size,
+            fee_size: 100,
+        };
+        init_web_server(&opt, Some(faucet_key_pair)).await.unwrap();
+        println!("Faucet server initiated.");
+
+        // Create a receiver wallet.
+        let receiver_dir = TempDir::new("cape_wallet_receiver").unwrap();
+        let mut receiver_loader = Loader::from_literal(
+            Some(KeyTree::random(&mut rng).1.to_string().replace('-', " ")),
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 16),
+            PathBuf::from(receiver_dir.path()),
+        );
+        let receiver_backend = NetworkBackend::new(
+            &*UNIVERSAL_PARAM,
+            opt.esqs_url.clone(),
+            opt.esqs_url.clone(),
+            opt.esqs_url.clone(),
+            &mut receiver_loader,
+        )
+        .unwrap();
+        let mut receiver = EspressoWallet::new(receiver_backend).await.unwrap();
+        let receiver_key = receiver
+            .generate_user_key("receiver".into(), None)
+            .await
+            .unwrap();
+        let receiver_key_bytes = bincode::serialize(&receiver_key).unwrap();
+        println!("Receiver wallet created.");
+
+        // Request native asset for the receiver.
+        surf::post(format!(
+            "http://localhost:{}/request_fee_assets",
+            faucet_port
+        ))
+        .content_type(surf::http::mime::BYTE_STREAM)
+        .body_bytes(&receiver_key_bytes)
+        .await
+        .unwrap();
+        println!("Asset transferred.");
+
+        // Check the balance.
+        retry(|| async { receiver.balance(&AssetCode::native()).await == grant_size }).await;
+    }
 }
