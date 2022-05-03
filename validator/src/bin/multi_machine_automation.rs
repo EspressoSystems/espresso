@@ -253,7 +253,9 @@ mod test {
     use std::time::Instant;
 
     fn demo_exe() -> String {
-        format!("{}/multi_machine_automation", exe_dir())
+        let exe = format!("{}/multi_machine_automation", exe_dir());
+        println!("Demo exe: {}", exe);
+        exe
     }
 
     async fn run_demo_exe(
@@ -288,19 +290,22 @@ mod test {
     }
 
     #[async_std::test]
-    async fn test_small() {
+    async fn test_small_fail_none() {
         run_demo_exe(5, 0, 0, true).await;
     }
 
     #[async_std::test]
-    async fn test_large() {
+    async fn test_large_fail_none() {
         run_demo_exe(50, 0, 0, true).await;
     }
 
     #[async_std::test]
-    async fn test_small_fail_some() {
-        run_demo_exe(5, 1, 0, true).await;
+    async fn test_small_fail_one() {
         run_demo_exe(5, 1, 3, true).await;
+    }
+
+    #[async_std::test]
+    async fn test_small_fail_some() {
         run_demo_exe(5, 2, 2, true).await;
     }
 
