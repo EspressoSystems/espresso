@@ -25,6 +25,7 @@
           [
             pkgconfig
             openssl
+            bash
 
             curl
 
