@@ -18,23 +18,24 @@ use phaselock::{
     types::Message,
     PhaseLock, PhaseLockConfig, PhaseLockError, PubKey, H_256,
 };
-use rand_chacha::ChaChaRng;
-use rand_chacha_02::{rand_core::SeedableRng, ChaChaRng as ChaChaRng02};
+use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
+use rand_chacha_02::{rand_core::SeedableRng as _, ChaChaRng as ChaChaRng02};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
 use std::fs::File;
-use std::io::{prelude::*, Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use structopt::StructOpt;
 use threshold_crypto as tc;
 use tide::StatusCode;
 use tide_websockets::{WebSocket, WebSocketConnection};
-use tracing::{debug, event, info, Level};
+use tracing::{debug, event, Level};
 use zerok_lib::{
     api::EspressoError,
     api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
+    committee::Committee,
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
     state::{
@@ -49,7 +50,12 @@ mod disco;
 mod ip;
 mod routes;
 
-const STATE_SEED: [u8; 32] = [0x7au8; 32];
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+
+pub const MINIMUM_NODES: usize = 5;
+
+const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 
 #[derive(Debug, StructOpt)]
 pub struct NodeOpt {
@@ -58,44 +64,32 @@ pub struct NodeOpt {
     #[structopt(long = "load_from_store", short = "l")]
     pub load_from_store: bool,
 
-    /// Path to public keys.
-    ///
-    /// Public keys will be stored under the specified directory, file names starting
-    /// with `pk_`.
-    #[structopt(
-        long = "pk_path", 
-        short = "p", 
-        default_value = ""      // See fn default_pk_path().
-    )]
-    pub pk_path: String,
-
     /// Path to persistence files.
     ///
     /// Persistence files will be nested under the specified directory
-    #[structopt(
-        long = "store_path", 
-        short = "s", 
-        default_value = ""      // See fn default_store_path().
-    )]
-    pub store_path: String,
+    #[structopt(long = "store_path", short = "s")]
+    pub store_path: Option<PathBuf>,
 
     /// Whether the current node should run a full node.
     #[structopt(long = "full", short = "f")]
     pub full: bool,
 
     /// Path to assets including web server files.
-    #[structopt(
-        long = "assets",
-        default_value = ""      // See fn default_web_path().
-    )]
-    pub web_path: String,
+    #[structopt(long = "assets")]
+    pub web_path: Option<PathBuf>,
 
     /// Path to API specification and messages.
-    #[structopt(
-        long = "api",
-        default_value = ""      // See fn default_api_path().
-    )]
-    pub api_path: String,
+    #[structopt(long = "api")]
+    pub api_path: Option<PathBuf>,
+
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_PORT", default_value = "5000")]
+    pub web_server_port: u16,
+}
+
+impl Default for NodeOpt {
+    fn default() -> Self {
+        Self::from_iter(std::iter::empty::<String>())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -123,24 +117,9 @@ impl ConsensusConfig {
     }
 }
 
-/// Gets public key of a node from its public key file.
-fn get_public_key(options: &NodeOpt, node_id: u64) -> PubKey {
-    let path_str = format!("{}/pk_{}", get_pk_dir(options), node_id);
-    let path = Path::new(&path_str);
-    let mut pk_file = File::open(&path)
-        .unwrap_or_else(|_| panic!("Cannot find public key file: {}", path.display()));
-    let mut pk_str = String::new();
-    pk_file
-        .read_to_string(&mut pk_str)
-        .unwrap_or_else(|err| panic!("Error while reading public key file: {}", err));
-    serde_json::from_str(&pk_str).expect("Error while reading public key")
-}
-
 /// Returns the project directory.
 pub fn project_path() -> PathBuf {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    println!("path {}", path.display());
-    path
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
 /// Returns "<project>/public/".
@@ -148,13 +127,6 @@ fn default_web_path() -> PathBuf {
     const ASSET_DIR: &str = "public";
     let dir = project_path();
     [&dir, Path::new(ASSET_DIR)].iter().collect()
-}
-
-/// Returns the default directory to store public key files.
-fn default_pk_path() -> PathBuf {
-    const PK_DIR: &str = "src";
-    let dir = project_path();
-    [&dir, Path::new(PK_DIR)].iter().collect()
 }
 
 /// Returns the default directory to store persistence files.
@@ -178,29 +150,11 @@ fn default_api_path() -> PathBuf {
 }
 
 /// Gets the directory to public key files.
-fn get_pk_dir(options: &NodeOpt) -> String {
-    let pk_path = options.pk_path.clone();
-    if pk_path.is_empty() {
-        default_pk_path()
-            .into_os_string()
-            .into_string()
-            .expect("Error while converting public key path to a string")
-    } else {
-        pk_path
-    }
-}
-
-/// Gets the directory to public key files.
-fn get_store_dir(options: &NodeOpt, node_id: u64) -> String {
-    let store_path = options.store_path.clone();
-    if store_path.is_empty() {
-        default_store_path(node_id)
-            .into_os_string()
-            .into_string()
-            .expect("Error while converting store path to a string")
-    } else {
-        store_path
-    }
+fn get_store_dir(options: &NodeOpt, node_id: u64) -> PathBuf {
+    options
+        .store_path
+        .clone()
+        .unwrap_or_else(|| default_store_path(node_id))
 }
 
 /// Gets IP address and port number of a node from node configuration file.
@@ -216,14 +170,12 @@ fn get_host(node: &NodeConfig) -> (String, u16) {
 async fn get_networking<
     T: Clone + Serialize + DeserializeOwned + Send + Sync + std::fmt::Debug + 'static,
 >(
-    options: &NodeOpt,
-    node_id: u64,
+    pub_key: PubKey,
     listen_addr: &str,
     port: u16,
-) -> (WNetwork<T>, PubKey) {
-    let pub_key = get_public_key(options, node_id);
+) -> WNetwork<T> {
     debug!(?pub_key);
-    let network = WNetwork::new(pub_key.clone(), listen_addr, port, None).await;
+    let network = WNetwork::new(pub_key, listen_addr, port, None).await;
     if let Ok(n) = network {
         let (c, sync) = futures::channel::oneshot::channel();
         match n.generate_task(c) {
@@ -237,7 +189,7 @@ async fn get_networking<
                 panic!("Failed to launch networking task");
             }
         }
-        return (n, pub_key);
+        return n;
     }
     panic!("Failed to open a port");
 }
@@ -247,6 +199,7 @@ type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
 
+#[derive(Clone)]
 pub enum Node {
     Light(LWNode),
     Full(Arc<RwLock<FullNode<'static>>>),
@@ -288,6 +241,7 @@ impl Validator for Node {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct GenesisState {
     pub validator: ValidatorState,
     pub records: MerkleTree,
@@ -296,7 +250,8 @@ pub struct GenesisState {
 }
 
 impl GenesisState {
-    pub fn new(rng: &mut ChaChaRng, faucet_pub_keys: impl IntoIterator<Item = UserPubKey>) -> Self {
+    pub fn new(faucet_pub_keys: impl IntoIterator<Item = UserPubKey>) -> Self {
+        let mut rng = ChaChaRng::from_seed(GENESIS_SEED);
         let mut records = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
         let mut memos = Vec::new();
 
@@ -309,14 +264,14 @@ impl GenesisState {
                 pub_key.address()
             );
             let ro = RecordOpening::new(
-                rng,
+                &mut rng,
                 1u64 << 32,
                 AssetDefinition::native(),
                 pub_key,
                 FreezeFlag::Unfrozen,
             );
             records.push(RecordCommitment::from(&ro).to_field_element());
-            memos.push((ReceiverMemo::from_ro(rng, &ro, &[]).unwrap(), i as u64));
+            memos.push((ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap(), i as u64));
         }
         let records = records.build();
 
@@ -358,7 +313,7 @@ impl GenesisState {
 
     pub fn new_for_test() -> (Self, MultiXfrTestState) {
         let state = MultiXfrTestState::initialize(
-            STATE_SEED,
+            GENESIS_SEED,
             10,
             10,
             (
@@ -405,7 +360,7 @@ async fn init_phaselock(
     options: &NodeOpt,
     public_keys: tc::PublicKeySet,
     secret_key_share: tc::SecretKeyShare,
-    nodes: u64,
+    known_nodes: Vec<PubKey>,
     threshold: u64,
     node_id: u64,
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
@@ -414,10 +369,9 @@ async fn init_phaselock(
     state: GenesisState,
 ) -> Node {
     // Create the initial phaselock
-    let known_nodes: Vec<_> = (0..nodes).map(|id| get_public_key(options, id)).collect();
-
+    let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
     let config = PhaseLockConfig {
-        total_nodes: nodes as u32,
+        total_nodes: known_nodes.len() as u32,
         threshold: threshold as u32,
         max_transactions: 100,
         known_nodes,
@@ -452,7 +406,7 @@ async fn init_phaselock(
     let node_persistence = [Path::new(&storage), Path::new("node")]
         .iter()
         .collect::<PathBuf>();
-    let (_, phaselock) = PhaseLock::init(
+    let phaselock = PhaseLock::init(
         genesis,
         public_keys,
         secret_key_share,
@@ -462,6 +416,7 @@ async fn init_phaselock(
         networking,
         AtomicStorage::open(&phaselock_persistence).unwrap(),
         lw_persistence,
+        Committee::new(stake_table),
     )
     .await
     .unwrap();
@@ -736,33 +691,16 @@ fn add_form_demonstration(web_server: &mut tide::Server<WebState>) {
 }
 
 /// Initialize the web server.
-///
-/// `opt_web_path` is the path to the web assets directory. If the path
-/// is empty, the default is constructed assuming Cargo is used to
-/// build the executable in the customary location.
-///
-/// `own_id` is the identifier of this instance of the executable. The
-/// port the web server listens on is `own_id + 50000`, unless the
-/// PORT environment variable is set.
 pub fn init_web_server(
     options: &NodeOpt,
-    own_id: u64,
     node: Arc<RwLock<FullNode<'static>>>,
 ) -> Result<task::JoinHandle<Result<(), std::io::Error>>, tide::Error> {
     // Take the command line option for the web asset directory path
     // provided it is not empty. Otherwise, construct the default from
     // the executable path.
-    let web_path = if options.web_path.is_empty() {
-        default_web_path()
-    } else {
-        PathBuf::from(&options.web_path)
-    };
-    let api_path = if options.api_path.is_empty() {
-        default_api_path()
-    } else {
-        PathBuf::from(&options.api_path)
-    };
-    println!("Web path: {:?}", web_path);
+    let web_path = options.web_path.clone().unwrap_or_else(default_web_path);
+    let api_path = options.api_path.clone().unwrap_or_else(default_api_path);
+    debug!("Web path: {:?}", web_path);
     let api = disco::load_messages(&api_path);
     let mut web_server = tide::with_state(WebState {
         connections: Default::default(),
@@ -822,7 +760,7 @@ pub fn init_web_server(
         });
     }
 
-    let port = std::env::var("PORT").unwrap_or_else(|_| (50000 + &own_id).to_string());
+    let port = options.web_server_port;
     let addr = format!("0.0.0.0:{}", port);
     let join_handle = async_std::task::spawn(web_server.listen(addr));
     Ok(join_handle)
@@ -840,57 +778,50 @@ fn secret_keys(config: &ConsensusConfig) -> (u64, tc::SecretKeySet) {
     )
 }
 
-pub fn gen_pub_keys(options: &NodeOpt, config: &ConsensusConfig) {
+pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<PubKey> {
     let (_, secret_keys) = secret_keys(config);
 
     // Generate public key for each node
-    let pk_dir = get_pk_dir(options);
-    for node_id in 0..config.nodes.len() {
-        let pub_key = PubKey::from_secret_key_set_escape_hatch(&secret_keys, node_id as u64);
-        let pub_key_str = serde_json::to_string(&pub_key)
-            .unwrap_or_else(|err| panic!("Error while serializing the public key: {}", err));
-        let mut pk_file = File::create(format!("{}/pk_{}", pk_dir, node_id))
-            .unwrap_or_else(|err| panic!("Error while creating a public key file: {}", err));
-        pk_file
-            .write_all(pub_key_str.as_bytes())
-            .unwrap_or_else(|err| panic!("Error while writing to the public key file: {}", err));
-    }
-    info!("Public key files created");
+    config
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(node_id, _)| PubKey::from_secret_key_set_escape_hatch(&secret_keys, node_id as u64))
+        .collect()
 }
 
 pub async fn init_validator(
     options: &NodeOpt,
     config: &ConsensusConfig,
+    pub_keys: Vec<PubKey>,
     genesis: GenesisState,
     own_id: usize,
 ) -> Node {
     // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
     let load_from_store = options.load_from_store;
     if load_from_store {
-        info!("restoring from persisted session");
+        debug!("restoring from persisted session");
     } else {
-        info!("initializing new session");
+        debug!("initializing new session");
     }
 
-    info!("Current node: {}", own_id);
+    debug!("Current node: {}", own_id);
     let (threshold, secret_keys) = secret_keys(config);
     let secret_key_share = secret_keys.secret_key_share(own_id);
 
     // Get networking information
-    let (own_network, _) = get_networking(
-        options,
-        own_id as u64,
+    let own_network = get_networking(
+        pub_keys[own_id].clone(),
         "0.0.0.0",
         get_host(&config.nodes[own_id]).1,
     )
     .await;
     #[allow(clippy::type_complexity)]
-    let mut other_nodes: Vec<(u64, PubKey, String, u16)> = Vec::new();
+    let mut other_nodes: Vec<(u64, &PubKey, String, u16)> = Vec::new();
     for (id, node) in config.nodes.iter().enumerate() {
         if id != own_id {
             let (ip, port) = get_host(node);
-            let pub_key = get_public_key(options, id as u64);
-            other_nodes.push((id as u64, pub_key, ip, port));
+            other_nodes.push((id as u64, &pub_keys[id], ip, port));
         }
     }
 
@@ -905,21 +836,21 @@ pub async fn init_validator(
             debug!("  - Retrying");
             async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
         }
-        info!("  - Connected to node {}", id);
+        debug!("  - Connected to node {}", id);
     }
 
     // Wait for the networking implementations to connect
     while own_network.connection_table_size().await < config.nodes.len() - 1 {
         async_std::task::sleep(std::time::Duration::from_millis(10)).await;
     }
-    info!("All nodes connected to network");
+    debug!("All nodes connected to network");
 
     // Initialize the state and phaselock
     init_phaselock(
         options,
         secret_keys.public_keys(),
         secret_key_share,
-        config.nodes.len() as u64,
+        pub_keys,
         threshold,
         own_id as u64,
         own_network,

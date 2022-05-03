@@ -1,3 +1,4 @@
+use crate::committee::Committee;
 use crate::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
 
 use phaselock::{
@@ -61,4 +62,6 @@ impl<NET: PLNet, STORE: PLStore> NodeImplementation<H_256> for ValidatorNodeImpl
     type Networking = NET;
 
     type StatefulHandler = LWPersistence;
+
+    type Election = Committee<(), H_256>;
 }
