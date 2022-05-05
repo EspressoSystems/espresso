@@ -1,0 +1,38 @@
+name: Code Coverage Workflow
+
+on:
+  push:
+    branches:
+      - 'main'
+  schedule:
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
+jobs:
+  code-coverage:
+    runs-on: self-hosted
+    container:
+      image: ghcr.io/espressosystems/nix:2.8.0
+      volumes:
+        - github_nix_280:/nix
+    timeout-minutes: 240
+    steps:
+      - name: Configure Git
+        run: |
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf git://github.com/
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf ssh://git@github.com/
+
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Generate coverage reports
+        run: |
+          git config --global --add safe.directory "$PWD"
+          nix run github:NixOS/nix -- develop .#perfShell -c cargo-llvm-cov llvm-cov --lib --bins --tests --benches --release --workspace --all-features --lcov --output-path lcov.info -- --test-threads=1
+
+      - name: Coveralls upload
+        uses: coverallsapp/github-action@master
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: lcov.info
+          fail_ci_if_error: true

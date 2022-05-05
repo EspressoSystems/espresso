@@ -706,19 +706,6 @@ checksum = "065374052e7df7ee4047b1160cca5e1467a12351a40b3da123c870ba0b8eda2a"
 
 [[package]]
 name = "atomic_store"
-version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/atomicstore?tag=0.1.0#a719ad0ec86831fb9b0cb9d9a4889e1bdf0f91e6"
-dependencies = [
- "ark-serialize",
- "bincode",
- "chrono",
- "glob",
- "serde",
- "snafu 0.6.10",
-]
-
-[[package]]
-name = "atomic_store"
 version = "0.1.1"
 source = "git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.1#e116cea2de934fd315f690d07d45b3bb7a213654"
 dependencies = [
@@ -740,7 +727,19 @@ dependencies = [
  "chrono",
  "glob",
  "serde",
- "snafu 0.7.0",
+ "snafu",
+]
+
+[[package]]
+name = "atomic_store"
+version = "0.1.2"
+source = "git+https://github.com/EspressoSystems/atomicstore?tag=0.1.2#55d9753e1fcb35c61566b8e056426e85e9e7eeeb"
+dependencies = [
+ "ark-serialize",
+ "bincode",
+ "glob",
+ "serde",
+ "snafu",
 ]
 
 [[package]]
@@ -1127,6 +1126,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddfc5b9aa5d4507acaf872de71051dfd0e309860e88966e1051e462a077aac4f"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "color-eyre"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ebf286c900a6d5867aeff75cfee3192857bb7f24b547d4f0df2ed6baa812c90"
+dependencies = [
+ "backtrace",
+ "color-spantrace",
+ "eyre",
+ "indenter",
+ "once_cell",
+ "owo-colors",
+ "tracing-error",
+]
+
+[[package]]
+name = "color-spantrace"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ba75b3d9449ecdccb27ecbc479fdc0b87fa2dd43d2f8298f9bf0e59aacc8dce"
+dependencies = [
+ "once_cell",
+ "owo-colors",
+ "tracing-core",
+ "tracing-error",
 ]
 
 [[package]]
@@ -1782,6 +1808,7 @@ dependencies = [
  "markdown",
  "net 0.3.0 (git+https://github.com/EspressoSystems/net.git)",
  "phaselock",
+ "portpicker",
  "procfs",
  "rand_chacha 0.2.2",
  "rand_chacha 0.3.1",
@@ -1790,7 +1817,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "shellexpand",
- "snafu 0.7.0",
+ "snafu",
  "structopt",
  "strum 0.24.0",
  "strum_macros",
@@ -1840,6 +1867,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "eyre"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c2b6b5a29c02cdc822728b7d7b8ae1bab3e3b05d44522770ddd49722eeac7eb"
+dependencies = [
+ "indenter",
+ "once_cell",
+]
+
+[[package]]
 name = "failure"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1877,17 +1914,19 @@ dependencies = [
  "ark-std",
  "async-std",
  "bincode",
+ "espresso-validator",
  "futures",
  "hex",
  "jf-cap 0.0.2",
  "key-set 0.3.0 (git+https://github.com/EspressoSystems/key-set.git)",
  "net 0.3.0 (git+https://github.com/EspressoSystems/net.git)",
  "num-bigint 0.4.3",
+ "portpicker",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "serde",
  "serde_json",
- "snafu 0.7.0",
+ "snafu",
  "structopt",
  "surf",
  "tempdir",
@@ -1896,6 +1935,7 @@ dependencies = [
  "tracing-futures",
  "tracing-log",
  "tracing-subscriber 0.3.9",
+ "tracing-test",
  "zerok_lib",
 ]
 
@@ -2401,6 +2441,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indenter"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce23b50ad8242c51a442f3ff322d56b02f08852c77e4c0b4d3fd684abc89c683"
+
+[[package]]
 name = "infer"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2829,7 +2875,7 @@ dependencies = [
  "jf-cap 0.0.2",
  "serde",
  "serde_with",
- "snafu 0.7.0",
+ "snafu",
 ]
 
 [[package]]
@@ -3038,7 +3084,7 @@ dependencies = [
  "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
  "serde",
  "serde_json",
- "snafu 0.7.0",
+ "snafu",
  "surf",
  "tagged-base64 0.1.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.1.0)",
  "tide",
@@ -3246,6 +3292,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "owo-colors"
+version = "3.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e72e30578e0d0993c8ae20823dd9cff2bc5517d2f586a8aef462a581e8a03eb"
+
+[[package]]
 name = "pairing"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3367,13 +3419,14 @@ dependencies = [
 [[package]]
 name = "phaselock"
 version = "0.0.6"
-source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c#60b85f7eba2f93704682ce697c109f10eb47894c"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git#6c8fed015a9fc5edf90eacc4f9f346b1c7ff361d"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",
  "async-std",
+ "async-trait",
  "async-tungstenite 0.17.2",
- "atomic_store 0.1.0",
+ "atomic_store 0.1.2",
  "bincode",
  "blake3 1.3.1",
  "byteorder",
@@ -3388,7 +3441,7 @@ dependencies = [
  "rand_chacha 0.2.2",
  "serde",
  "serde_bytes",
- "snafu 0.7.0",
+ "snafu",
  "threshold_crypto",
  "tracing",
  "tracing-error",
@@ -3399,10 +3452,12 @@ dependencies = [
 [[package]]
 name = "phaselock-types"
 version = "0.0.6"
-source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c#60b85f7eba2f93704682ce697c109f10eb47894c"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git#6c8fed015a9fc5edf90eacc4f9f346b1c7ff361d"
 dependencies = [
  "async-std",
+ "async-trait",
  "async-tungstenite 0.17.2",
+ "atomic_store 0.1.2",
  "bincode",
  "blake3 1.3.1",
  "custom_debug",
@@ -3412,16 +3467,18 @@ dependencies = [
  "rand_chacha 0.2.2",
  "serde",
  "serde_bytes",
- "snafu 0.7.0",
+ "snafu",
  "threshold_crypto",
 ]
 
 [[package]]
 name = "phaselock-utils"
 version = "0.0.6"
-source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c#60b85f7eba2f93704682ce697c109f10eb47894c"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git#6c8fed015a9fc5edf90eacc4f9f346b1c7ff361d"
 dependencies = [
  "async-std",
+ "async-trait",
+ "color-eyre",
  "flume 0.10.12",
  "futures",
  "tracing",
@@ -3560,6 +3617,15 @@ dependencies = [
  "cpuid-bool",
  "opaque-debug",
  "universal-hash",
+]
+
+[[package]]
+name = "portpicker"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be97d76faf1bfab666e1375477b23fde79eccf0276e9b63b92a39d676a889ba9"
+dependencies = [
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -3912,7 +3978,7 @@ dependencies = [
  "lazy_static",
  "rand_chacha 0.3.1",
  "serde",
- "snafu 0.7.0",
+ "snafu",
  "strum_macros",
 ]
 
@@ -4205,7 +4271,7 @@ dependencies = [
  "rustyline",
  "serde",
  "sha3 0.9.1",
- "snafu 0.7.0",
+ "snafu",
  "structopt",
  "strum 0.24.0",
  "strum_macros",
@@ -4558,35 +4624,13 @@ checksum = "f2dd574626839106c320a323308629dcb1acfc96e32a8cba364ddc61ac23ee83"
 
 [[package]]
 name = "snafu"
-version = "0.6.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eab12d3c261b2308b0d80c26fffb58d17eba81a4be97890101f416b478c79ca7"
-dependencies = [
- "backtrace",
- "doc-comment",
- "snafu-derive 0.6.10",
-]
-
-[[package]]
-name = "snafu"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2eba135d2c579aa65364522eb78590cdf703176ef71ad4c32b00f58f7afb2df5"
 dependencies = [
  "backtrace",
  "doc-comment",
- "snafu-derive 0.7.0",
-]
-
-[[package]]
-name = "snafu-derive"
-version = "0.6.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1508efa03c362e23817f96cde18abed596a25219a8b2c66e8db33c03543d315b"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
+ "snafu-derive",
 ]
 
 [[package]]
@@ -5246,6 +5290,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-test"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3eb7bda2e93bbc9c5b247034acc6a4b3d04f033a3d4b8fc1cb87d4d1c7c7ebd7"
+dependencies = [
+ "lazy_static",
+ "tracing-core",
+ "tracing-subscriber 0.3.9",
+ "tracing-test-macro",
+]
+
+[[package]]
+name = "tracing-test-macro"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4801dca35e4e2cee957c469bd4a1c370fadb7894c0d50721a40eba3523e6e91c"
+dependencies = [
+ "lazy_static",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "tracing-unwrap"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5776,6 +5843,7 @@ dependencies = [
  "jf-primitives 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
  "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
  "lazy_static",
+ "portpicker",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "regex",
@@ -5784,7 +5852,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "snafu 0.7.0",
+ "snafu",
  "structopt",
  "surf",
  "tagged-base64 0.1.0 (git+https://github.com/EspressoSystems/tagged-base64.git?branch=main)",
@@ -5830,6 +5898,7 @@ dependencies = [
  "mnemonic",
  "net 0.3.0 (git+https://github.com/EspressoSystems/net.git)",
  "phaselock",
+ "phaselock-types",
  "procfs",
  "proptest",
  "quickcheck",
@@ -5849,7 +5918,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha3 0.9.1",
- "snafu 0.7.0",
+ "snafu",
  "strum 0.20.0",
  "strum_macros",
  "surf",

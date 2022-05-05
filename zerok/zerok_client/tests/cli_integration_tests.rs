@@ -213,7 +213,6 @@ fn cli_login(t: &mut CliClient) -> Result<(), String> {
 }
 
 #[test]
-#[ignore]
 fn cli_integration_tests() {
     cli_test(|t| {
         create_keystore(t, 0)?;
@@ -229,7 +228,6 @@ fn cli_integration_tests() {
 }
 
 #[test]
-#[ignore]
 fn recover_from_mnemonic() {
     cli_test(|t| {
         let key_path = t.keystore_key_path(0)?;
@@ -241,28 +239,32 @@ fn recover_from_mnemonic() {
         })?;
         t.open(0)?
             .output("Your mnemonic phrase will be:")?
-            .output("^(?P<mnemonic>[a-zA-Z\\-]+)$")?
+            .output("^(?P<mnemonic>(?:[a-z]+ ){11}(?:[a-z]+))$")?
             .output("1\\) Accept phrase and create keystore")?
             .output("2\\) Generate a new phrase")?
             .output("3\\) Manually enter a mnemonic")?
             // Ask for a new mnemonic just so we hit every code path
             .command(0, "2")?
             .output("Your mnemonic phrase will be:")?
-            .output("^(?P<mnemonic>[a-zA-Z\\-]+)$")?
+            .output("^(?P<mnemonic>(?:[a-z]+ ){11}(?:[a-z]+))$")?
             .output("1\\) Accept phrase and create keystore")?
             .output("2\\) Generate a new phrase")?
             .output("3\\) Manually enter a mnemonic")?
             .command(0, "1")?
+            .output("Create password")?
+            .command(0, "password")?
+            .output("Retype password")?
+            .command(0, "password")?
             .output("connecting...")?
-            .command(0, format!("load_key spend {}", key_path))?
+            .command(0, format!("load_key sending {}", key_path))?
             .output("(?P<default_addr0>ADDR~.*)")?;
         wait_for_starting_balance(t)?;
         t
             // Create a determinstic key
-            .command(0, "gen_key spend")?
+            .command(0, "gen_key sending")?
             .output("(?P<addr>ADDR~.*)")?
             // Give the key some assets
-            .command(0, "transfer 0 $default_addr0 $addr 100 1 wait=true")?
+            .command(0, "transfer 0 $addr 100 1 wait=true")?
             .command(0, "balance 0")?
             .output("$addr 100")?
             // Create a new keystore with the same mnemonic and check that we get the balance.
@@ -271,6 +273,10 @@ fn recover_from_mnemonic() {
             .command(1, "3")?
             .output("Enter mnemonic phrase")?
             .command(1, "$mnemonic")?
+            .output("Create password")?
+            .command(1, "password")?
+            .output("Retype password")?
+            .command(1, "password")?
             .output("connecting...")?
             .command(1, "gen_key spend scan_from=0")?;
         let balance = wait_for_native_balance(t, 0, "addr")?;
