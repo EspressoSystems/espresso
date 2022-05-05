@@ -63,17 +63,17 @@ pub struct NodeOpt {
     ///
     /// If the path to a node's persistence files doesn't exist, its persisted state will be reset
     /// regardless of this argument.
-    #[structopt(long = "reset_store_state", short = "r")]
+    #[structopt(long, short)]
     pub reset_store_state: bool,
 
     /// Path to persistence files for all nodes.
     ///
     /// Persistence files will be nested under the specified directory.
-    #[structopt(long = "store_path", short = "s")]
+    #[structopt(long, short)]
     pub store_path: Option<PathBuf>,
 
     /// Whether the current node should run a full node.
-    #[structopt(long = "full", short = "f")]
+    #[structopt(long, short)]
     pub full: bool,
 
     /// Path to assets including web server files.
@@ -154,7 +154,7 @@ fn default_api_path() -> PathBuf {
 /// Gets the directory to persistence files.
 ///
 /// The returned path can be passed to `reset_store_dir` to remove the contents, if the
-/// `--reset_store_state` argument is true.
+/// `--reset-store-state` argument is true.
 fn get_store_dir(options: &NodeOpt, node_id: u64) -> PathBuf {
     options
         .store_path

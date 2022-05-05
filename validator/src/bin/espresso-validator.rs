@@ -27,11 +27,11 @@ struct Options {
     node_opt: NodeOpt,
 
     /// Path to the node configuration file.
-    #[structopt(long = "config", short = "c")]
+    #[structopt(long, short)]
     pub config: Option<PathBuf>,
 
     /// Path to the universal parameter file.
-    #[structopt(long = "universal_param_path", short = "u")]
+    #[structopt(long, short)]
     pub universal_param_path: Option<String>,
 
     /// Whether to generate and store public keys for all nodes.
@@ -39,7 +39,7 @@ struct Options {
     /// Public keys will be stored under the directory specified by `pk_path`.
     ///
     /// Skip this option if public key files already exist.
-    #[structopt(long = "gen_pk", short = "g")]
+    #[structopt(long, short)]
     #[structopt(conflicts_with("id"))]
     pub gen_pk: bool,
 
@@ -47,7 +47,7 @@ struct Options {
     ///
     /// Public keys will be stored under the specified directory, file names starting
     /// with `pk_`.
-    #[structopt(long = "pk_path", short = "p")]
+    #[structopt(long, short)]
     pub pk_path: Option<PathBuf>,
 
     /// Id of the current node.
@@ -55,8 +55,8 @@ struct Options {
     /// If the node ID is 0, it will propose and try to add transactions.
     ///
     /// Skip this option if only want to generate public key files.
-    #[structopt(long = "id", short = "i")]
-    #[structopt(conflicts_with("gen_pk"))]
+    #[structopt(long, short)]
+    #[structopt(conflicts_with("gen-pk"))]
     pub id: Option<u64>,
 
     /// Public key which should own a faucet record in the genesis block.
@@ -72,7 +72,7 @@ struct Options {
     /// Number of transactions to generate.
     ///
     /// If not provided, the validator will wait for externally submitted transactions.
-    #[structopt(long = "num_txn", short = "n", conflicts_with("faucet_pub_key"))]
+    #[structopt(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txn: Option<u64>,
 
     /// Wait for web server to exit after transactions complete.
