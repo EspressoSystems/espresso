@@ -16,18 +16,18 @@ struct Options {
     node_opt: NodeOpt,
 
     /// Path to the node configuration file.
-    #[structopt(long = "config", short = "c")]
+    #[structopt(long, short)]
     pub config: Option<PathBuf>,
 
     /// Path to the universal parameter file.
-    #[structopt(long = "universal_param_path", short = "u")]
+    #[structopt(long, short)]
     pub universal_param_path: Option<PathBuf>,
 
     /// Path to public keys.
     ///
     /// Public keys will be stored under the specified directory, file names starting
     /// with `pk_`.
-    #[structopt(long = "pk_path", short = "p")]
+    #[structopt(long, short)]
     pub pk_path: Option<PathBuf>,
 
     /// Public key which should own a faucet record in the genesis block.
@@ -43,7 +43,7 @@ struct Options {
     /// Number of transactions to generate.
     ///
     /// If not provided, the validator will wait for externally submitted transactions.
-    #[structopt(long = "num_txn", short = "n", conflicts_with("faucet_pub_key"))]
+    #[structopt(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txn: Option<u64>,
 
     /// Wait for web server to exit after transactions complete.
@@ -81,7 +81,7 @@ async fn main() {
     let options = Options::from_args();
     let mut args = vec![];
     if options.node_opt.reset_store_state {
-        args.push("--reset_store_state");
+        args.push("--reset-store-state");
     }
     if options.node_opt.full {
         args.push("--full");
@@ -92,7 +92,7 @@ async fn main() {
     let store_path;
     if let Some(path) = &options.node_opt.store_path {
         store_path = path.display().to_string();
-        args.push("--store_path");
+        args.push("--store-path");
         args.push(&store_path);
     }
     let web_path;
@@ -116,13 +116,13 @@ async fn main() {
     let universal_param_path;
     if let Some(path) = &options.universal_param_path {
         universal_param_path = path.display().to_string();
-        args.push("--universal_param_path");
+        args.push("--universal-param-path");
         args.push(&universal_param_path);
     }
     let pk_path;
     if let Some(path) = &options.pk_path {
         pk_path = path.display().to_string();
-        args.push("--pk_path");
+        args.push("--pk-path");
         args.push(&pk_path);
     }
     let faucet_pub_keys = options
@@ -131,7 +131,7 @@ async fn main() {
         .map(|k| k.to_string())
         .collect::<Vec<_>>();
     for pub_key in &faucet_pub_keys {
-        args.push("--faucet_pub_key");
+        args.push("--faucet-pub-key");
         args.push(pub_key);
     }
     let num_txn_str = match options.num_txn {
