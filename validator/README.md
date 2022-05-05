@@ -24,7 +24,7 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
     * Open 7 terminal windows (or split a window into 7 sessions using tmux). Let them be `window 0, 1, ..., 6`, each representing a node.
     * In each window:
         * Cd to `target/release/`.
-        * Run `./espresso-validator --config {config} --pk_path {pk_path} --id {id} --num_txn {num_txn}`.
+        * Run `./espresso-validator --config {config} --pk-path {pk_path} --id {id} --num-txn {num_txn}`.
             * `config` is the path to the node config file.
                 * Skip this option if using the default file, `validator/src/node-config.toml`.
             * `pk_path` is the directory where publik key files are stored.
@@ -40,7 +40,7 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
 * To automate a single-command consensus:
     * In a terminal window:
         * Cd to `target/release/`.
-        * Run `./multi_machine_automation --num_txn {num_txn} --config {config} --pk_path {pk_path}`.
+        * Run `./multi_machine_automation --num-txn {num_txn} --config {config} --pk-path {pk_path}`.
             * `num_txn` is the number of transactions to generate.
                 * If skipped, the consensus will keep running till the process is killed. For easier manual testing, do not skip it.
             * `config` is the path to the node config file.

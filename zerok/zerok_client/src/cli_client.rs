@@ -488,7 +488,7 @@ impl Validator {
                 .args([
                     "--config",
                     cfg_path.as_os_str().to_str().unwrap(),
-                    "--store_path",
+                    "--store-path",
                     store_path.as_os_str().to_str().unwrap(),
                     "--full",
                     "--id",
