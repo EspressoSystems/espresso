@@ -85,7 +85,6 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         async move {
             let mut opt = NodeOpt::default();
             opt.store_path = Some(store_path);
-            opt.reset_store_state = true;
             if i == 0 {
                 opt.full = true;
                 opt.web_server_port = pick_unused_port().unwrap();

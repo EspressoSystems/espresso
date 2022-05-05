@@ -59,13 +59,16 @@ const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 
 #[derive(Debug, StructOpt)]
 pub struct NodeOpt {
-    /// Whether to reset the persisted state if the persistence files exist.
+    /// Whether to reset the persisted state.
+    ///
+    /// If the path to a node's persistence files doesn't exist, its persisted state will be reset
+    /// regardless of this argument.
     #[structopt(long = "reset_store_state", short = "r")]
     pub reset_store_state: bool,
 
-    /// Path to store persistence files.
+    /// Path to persistence files for all nodes.
     ///
-    /// Persistence files will be nested under the specified directory
+    /// Persistence files will be nested under the specified directory.
     #[structopt(long = "store_path", short = "s")]
     pub store_path: Option<PathBuf>,
 
@@ -373,7 +376,6 @@ async fn init_phaselock(
     node_id: u64,
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
     full_node: bool,
-    reset_store_state: bool,
     state: GenesisState,
 ) -> Node {
     // Create the initial phaselock
@@ -393,12 +395,21 @@ async fn init_phaselock(
 
     let storage = get_store_dir(options, node_id);
     let storage_path = Path::new(&storage);
+    let reset_store_state;
     if storage_path.exists() {
         if options.reset_store_state {
+            reset_store_state = true;
             reset_store_dir(storage.clone());
+        } else {
+            reset_store_state = false;
         }
-    } else if !options.reset_store_state {
-        debug!("Will create a new directory for persistence files.");
+    } else {
+        reset_store_state = true;
+    }
+    if reset_store_state {
+        debug!("Initializing new session");
+    } else {
+        debug!("Restoring from persisted session");
     }
     let lw_persistence = LWPersistence::new(storage_path, "validator").unwrap();
     let stored_state = if reset_store_state {
@@ -812,13 +823,6 @@ pub async fn init_validator(
     genesis: GenesisState,
     own_id: usize,
 ) -> Node {
-    let reset_store_state = options.reset_store_state;
-    if reset_store_state {
-        debug!("initializing new session");
-    } else {
-        debug!("restoring from persisted session");
-    }
-
     debug!("Current node: {}", own_id);
     let (threshold, secret_keys) = secret_keys(config);
     let secret_key_share = secret_keys.secret_key_share(own_id);
@@ -869,7 +873,6 @@ pub async fn init_validator(
         own_id as u64,
         own_network,
         options.full,
-        reset_store_state,
         genesis,
     )
     .await
