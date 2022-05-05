@@ -9,7 +9,7 @@
 use num_bigint::BigUint;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use structopt::StructOpt;
-use zerok_lib::wallet::hd::{KeyTree, Mnemonic};
+use zerok_lib::keystore::hd::{KeyTree, Mnemonic};
 
 pub fn field_to_hex(f: impl Into<BigUint>) -> String {
     let bytes = f
@@ -27,7 +27,7 @@ pub fn field_to_hex(f: impl Into<BigUint>) -> String {
     about = "Create address and encryption key from mnemonic"
 )]
 pub struct Options {
-    /// mnemonic for the faucet wallet (if not provided, a random mnemonic will be generated)
+    /// mnemonic for the faucet keystore (if not provided, a random mnemonic will be generated)
     #[structopt(long, env = "ESPRESSO_FAUCET_MANAGER_MNEMONIC")]
     pub mnemonic: Option<String>,
 }
@@ -40,8 +40,8 @@ async fn main() -> Result<(), std::io::Error> {
         None => KeyTree::random(&mut ChaChaRng::from_entropy()).1,
     };
 
-    // We don't actually want to create a wallet, just generate a key, so we will directly generate
-    // the key stream that the faucet wallet will use.
+    // We don't actually want to create a keystore, just generate a key, so we will directly generate
+    // the key stream that the faucet keystore will use.
     let pub_key = KeyTree::from_mnemonic(&mnemonic)
         .sending_key_stream()
         .sending_key(0)

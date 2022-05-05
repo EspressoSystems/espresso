@@ -169,7 +169,7 @@ impl FromError for EspressoError {
     }
 }
 
-impl FromError for seahorse::WalletError<EspressoLedger> {
+impl FromError for seahorse::KeystoreError<EspressoLedger> {
     fn catch_all(msg: String) -> Self {
         Self::Failed { msg }
     }

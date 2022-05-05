@@ -27,13 +27,13 @@ use tide::{
     StatusCode,
 };
 use zerok_lib::{
-    universal_params::UNIVERSAL_PARAM,
-    wallet::{
+    keystore::{
         events::EventIndex,
         loader::{Loader, LoaderMetadata},
         network::NetworkBackend,
-        EspressoWallet, EspressoWalletError,
+        EspressoKeystore, EspressoKeystoreError,
     },
+    universal_params::UNIVERSAL_PARAM,
 };
 
 #[derive(Debug, StructOpt)]
@@ -42,17 +42,17 @@ use zerok_lib::{
     about = "Grants a native asset seed to a provided UserPubKey"
 )]
 pub struct FaucetOptions {
-    /// mnemonic for the faucet wallet
+    /// mnemonic for the faucet keystore
     #[structopt(long, env = "ESPRESSO_FAUCET_WALLET_MNEMONIC")]
     pub mnemonic: String,
 
-    /// path to the faucet wallet
-    #[structopt(long = "wallet-path", env = "ESPRESSO_FAUCET_WALLET_PATH")]
-    pub faucet_wallet_path: PathBuf,
+    /// path to the faucet keystore
+    #[structopt(long = "keystore-path", env = "ESPRESSO_FAUCET_WALLET_PATH")]
+    pub faucet_keystore_path: PathBuf,
 
     /// password on the faucet account keyfile
     #[structopt(
-        long = "wallet-password",
+        long = "keystore-password",
         env = "ESPRESSO_FAUCET_WALLET_PASSWORD",
         default_value = ""
     )]
@@ -89,7 +89,7 @@ pub struct FaucetOptions {
 
 #[derive(Clone)]
 struct FaucetState {
-    wallet: Arc<Mutex<EspressoWallet<'static, NetworkBackend<'static, LoaderMetadata>>>>,
+    keystore: Arc<Mutex<EspressoKeystore<'static, NetworkBackend<'static, LoaderMetadata>>>>,
     grant_size: u64,
     fee_size: u64,
 }
@@ -120,7 +120,7 @@ pub fn faucet_server_error<E: Into<FaucetError>>(err: E) -> tide::Error {
     net::server_error(err)
 }
 
-pub fn faucet_error(source: EspressoWalletError) -> tide::Error {
+pub fn faucet_error(source: EspressoKeystoreError) -> tide::Error {
     faucet_server_error(FaucetError::Transfer {
         msg: source.to_string(),
     })
@@ -143,17 +143,17 @@ async fn request_fee_assets(
     mut req: tide::Request<FaucetState>,
 ) -> Result<tide::Response, tide::Error> {
     let pub_key: UserPubKey = net::server::request_body(&mut req).await?;
-    let mut wallet = req.state().wallet.lock().await;
-    let faucet_addr = wallet.pub_keys().await[0].address();
+    let mut keystore = req.state().keystore.lock().await;
+    let faucet_addr = keystore.pub_keys().await[0].address();
     tracing::info!(
         "transferring {} tokens from {} to {}",
         req.state().grant_size,
         net::UserAddress(faucet_addr.clone()),
         net::UserAddress(pub_key.address())
     );
-    let bal = wallet.balance(&AssetCode::native()).await;
-    tracing::info!("Wallet balance before transfer: {}", bal);
-    wallet
+    let bal = keystore.balance(&AssetCode::native()).await;
+    tracing::info!("Keystore balance before transfer: {}", bal);
+    keystore
         .transfer(
             Some(&faucet_addr),
             &AssetCode::native(),
@@ -168,7 +168,7 @@ async fn request_fee_assets(
     net::server::response(&req, ())
 }
 
-/// `faucet_key_pair` - If provided, will be added to the faucet wallet.
+/// `faucet_key_pair` - If provided, will be added to the faucet keystore.
 pub async fn init_web_server(
     opt: &FaucetOptions,
     faucet_key_pair: Option<UserKeyPair>,
@@ -180,7 +180,7 @@ pub async fn init_web_server(
     let mut loader = Loader::recovery(
         opt.mnemonic.clone().replace('-', " "),
         password,
-        opt.faucet_wallet_path.clone(),
+        opt.faucet_keystore_path.clone(),
     );
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
@@ -190,29 +190,29 @@ pub async fn init_web_server(
         &mut loader,
     )
     .unwrap();
-    let mut wallet = EspressoWallet::new(backend).await.unwrap();
+    let mut keystore = EspressoKeystore::new(backend).await.unwrap();
 
-    // If a faucet key pair is provided, add it to the wallet. Otherwise, if we're initializing
+    // If a faucet key pair is provided, add it to the keystore. Otherwise, if we're initializing
     // for the first time, we need to generate a key. The faucet should be set up so that the
     // first HD sending key is the faucet key.
     if let Some(key) = faucet_key_pair {
-        wallet
+        keystore
             .add_user_key(key, "faucet".into(), EventIndex::default())
             .await
             .unwrap();
-    } else if wallet.pub_keys().await.is_empty() {
+    } else if keystore.pub_keys().await.is_empty() {
         // We pass `EventIndex::default()` to start a scan of the ledger from the beginning, in
         // order to discove the faucet record.
-        wallet
+        keystore
             .generate_user_key("faucet".into(), Some(EventIndex::default()))
             .await
             .unwrap();
     }
 
-    let bal = wallet.balance(&AssetCode::native()).await;
-    tracing::info!("Wallet balance before init: {}", bal);
+    let bal = keystore.balance(&AssetCode::native()).await;
+    tracing::info!("Keystore balance before init: {}", bal);
     let state = FaucetState {
-        wallet: Arc::new(Mutex::new(wallet)),
+        keystore: Arc::new(Mutex::new(keystore)),
         grant_size: opt.grant_size,
         fee_size: opt.fee_size,
     };
@@ -257,7 +257,7 @@ mod test {
     use std::time::Duration;
     use tempdir::TempDir;
     use tracing_test::traced_test;
-    use zerok_lib::wallet::hd::KeyTree;
+    use zerok_lib::keystore::hd::KeyTree;
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
         let mut backoff = Duration::from_millis(100);
@@ -279,18 +279,18 @@ mod test {
         // Create test network with a faucet key pair.
         let (key_stream, mnemonic) = KeyTree::random(&mut rng);
         let faucet_key_pair = key_stream
-            .derive_sub_tree("wallet".as_bytes())
+            .derive_sub_tree("keystore".as_bytes())
             .derive_sub_tree("user".as_bytes())
             .derive_user_key_pair(&0u64.to_le_bytes());
         let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key()).await;
 
         // Initiate a faucet server with the mnemonic associated with the faucet key pair.
-        let faucet_dir = TempDir::new("cape_wallet_faucet").unwrap();
+        let faucet_dir = TempDir::new("cape_keystore_faucet").unwrap();
         let faucet_port = pick_unused_port().unwrap();
         let grant_size = 5000;
         let opt = FaucetOptions {
             mnemonic: mnemonic.to_string(),
-            faucet_wallet_path: PathBuf::from(faucet_dir.path()),
+            faucet_keystore_path: PathBuf::from(faucet_dir.path()),
             faucet_password: "".to_string(),
             faucet_port: faucet_port.clone(),
             esqs_url: network.query_api.clone(),
@@ -301,8 +301,8 @@ mod test {
         init_web_server(&opt, Some(faucet_key_pair)).await.unwrap();
         println!("Faucet server initiated.");
 
-        // Create a receiver wallet.
-        let receiver_dir = TempDir::new("cape_wallet_receiver").unwrap();
+        // Create a receiver keystore.
+        let receiver_dir = TempDir::new("cape_keystore_receiver").unwrap();
         let mut receiver_loader = Loader::from_literal(
             Some(KeyTree::random(&mut rng).1.to_string().replace('-', " ")),
             Alphanumeric.sample_string(&mut rand::thread_rng(), 16),
@@ -316,13 +316,13 @@ mod test {
             &mut receiver_loader,
         )
         .unwrap();
-        let mut receiver = EspressoWallet::new(receiver_backend).await.unwrap();
+        let mut receiver = EspressoKeystore::new(receiver_backend).await.unwrap();
         let receiver_key = receiver
             .generate_user_key("receiver".into(), None)
             .await
             .unwrap();
         let receiver_key_bytes = bincode::serialize(&receiver_key).unwrap();
-        println!("Receiver wallet created.");
+        println!("Receiver keystore created.");
 
         // Request native asset for the receiver.
         surf::post(format!(

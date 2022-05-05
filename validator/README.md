@@ -57,14 +57,14 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
 * API file
     * By default, API and messages are specified in `validator/api/api.toml`. Use `--api` to change the file.
 
-## Running with a wallet
-By default, one of the validator nodes in the demo will automatically generate transactions to propose to the other nodes. But the demo can also be driven by a wallet,
+## Running with a keystore
+By default, one of the validator nodes in the demo will automatically generate transactions to propose to the other nodes. But the demo can also be driven by a keystore,
 running externally to all of the nodes.
 
-To use a wallet with the demo, first generate a key pair for the wallet by logging into the CLI (`zerok_client`) and generating a key (`gen_key sending`). Next,
-start the demo as you normally would, but pass the extra argument `--faucet-pub-key $PUB_KEY` to each node, and pass `--full` to at least one node. The lead node will initialize a ledger containing a single record of 2^32 native tokens, owned by the wallet.
+To use a keystore with the demo, first generate a key pair for the keystore by logging into the CLI (`zerok_client`) and generating a key (`gen_key sending`). Next,
+start the demo as you normally would, but pass the extra argument `--faucet-pub-key $PUB_KEY` to each node, and pass `--full` to at least one node. The lead node will initialize a ledger containing a single record of 2^32 native tokens, owned by the keystore.
 
-In a separate terminal, you can now enter the interactive wallet REPL:
+In a separate terminal, you can now enter the interactive keystore REPL:
 ```
 cd zerok/zerok_client
 cargo run -- localhost:$port

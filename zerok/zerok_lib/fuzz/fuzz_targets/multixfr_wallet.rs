@@ -1,11 +1,11 @@
-// fuzz target for randomized testing of walletlib
-// run with `cargo fuzz run --release -s none multixfr_wallet`
+// fuzz target for randomized testing of keystorelib
+// run with `cargo fuzz run --release -s none multixfr_keystore`
 
 #![no_main]
 use async_std::task::block_on;
 use libfuzzer_sys::arbitrary::{Arbitrary, Result, Unstructured};
 use libfuzzer_sys::fuzz_target;
-use zerok_lib::wallet::test_helpers::*;
+use zerok_lib::keystore::test_helpers::*;
 
 #[derive(Debug)]
 struct MultiXfrParams {
@@ -85,5 +85,5 @@ fuzz_target!(|params: MultiXfrParams| {
         init_recs,
     } = params;
 
-    block_on(test_multixfr_wallet(txs, nkeys, ndefs, init_rec, init_recs))
+    block_on(test_multixfr_keystore(txs, nkeys, ndefs, init_rec, init_recs))
 });
