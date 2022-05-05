@@ -47,23 +47,23 @@ struct Options {
     pub num_txn: Option<u64>,
 
     /// Wait for web server to exit after transactions complete.
-    #[structopt(long)]
+    #[structopt(long, short)]
     pub wait: bool,
 
-    #[structopt(short, long)]
+    #[structopt(long, short)]
     verbose: bool,
 
     /// Number of nodes to run only `fail_after_txn` rounds.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
-    #[structopt(long = "num_fail_nodes")]
+    #[structopt(long)]
     num_fail_nodes: Option<u64>,
 
     /// Number of rounds that all nodes will be running, after which `num_fail_nodes` nodes will be
     /// killed.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
-    #[structopt(long = "fail_after_txn")]
+    #[structopt(long)]
     fail_after_txn: Option<u64>,
 }
 
@@ -164,10 +164,10 @@ async fn main() {
             this_args.push("--id");
             this_args.push(&id_str);
             if id >= first_fail_id as usize {
-                this_args.push("--num_txn");
+                this_args.push("--num-txn");
                 this_args.push(&fail_after_txn_str);
             } else if !num_txn_str.is_empty() {
-                this_args.push("--num_txn");
+                this_args.push("--num-txn");
                 this_args.push(&num_txn_str);
             }
             (
@@ -268,11 +268,11 @@ mod test {
         let num_fail_nodes = &num_fail_nodes.to_string();
         let fail_after_txn = &fail_after_txn.to_string();
         let args = vec![
-            "--num_txn",
+            "--num-txn",
             num_txn,
-            "--num_fail_nodes",
+            "--num-fail-nodes",
             num_fail_nodes,
-            "--fail_after_txn",
+            "--fail-after-txn",
             fail_after_txn,
             "--verbose",
         ];
