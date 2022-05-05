@@ -26,10 +26,10 @@ use seahorse::txn_builder::TransactionInfo;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     hd::KeyTree,
-    loader::WalletLoader,
-    persistence::AtomicWalletStorage,
+    loader::KeystoreLoader,
+    persistence::AtomicKeystoreStorage,
     txn_builder::TransactionState,
-    BincodeSnafu, ClientConfigSnafu, CryptoSnafu, WalletBackend, WalletError, WalletState,
+    BincodeSnafu, ClientConfigSnafu, CryptoSnafu, KeystoreBackend, KeystoreError, KeystoreState,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;
@@ -44,7 +44,7 @@ pub struct NetworkBackend<'a, Meta: PartialEq + Serialize + DeserializeOwned + C
     query_client: surf::Client,
     bulletin_client: surf::Client,
     validator_client: surf::Client,
-    storage: Arc<Mutex<AtomicWalletStorage<'a, EspressoLedger, Meta>>>,
+    storage: Arc<Mutex<AtomicKeystoreStorage<'a, EspressoLedger, Meta>>>,
     key_stream: KeyTree,
 }
 
@@ -60,9 +60,9 @@ impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkB
         query_url: Url,
         bulletin_url: Url,
         validator_url: Url,
-        loader: &mut impl WalletLoader<EspressoLedger, Meta = Meta>,
-    ) -> Result<Self, WalletError<EspressoLedger>> {
-        let storage = AtomicWalletStorage::new(loader, 1024)?;
+        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = Meta>,
+    ) -> Result<Self, KeystoreError<EspressoLedger>> {
+        let storage = AtomicKeystoreStorage::new(loader, 1024)?;
         Ok(Self {
             query_client: Self::client(query_url)?,
             bulletin_client: Self::client(bulletin_url)?,
@@ -73,7 +73,7 @@ impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkB
         })
     }
 
-    fn client(base_url: Url) -> Result<surf::Client, WalletError<EspressoLedger>> {
+    fn client(base_url: Url) -> Result<surf::Client, KeystoreError<EspressoLedger>> {
         let client: surf::Client = surf::Config::new()
             .set_base_url(base_url)
             .try_into()
@@ -84,14 +84,14 @@ impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkB
     async fn get<T: for<'de> Deserialize<'de>>(
         &self,
         uri: impl AsRef<str>,
-    ) -> Result<T, WalletError<EspressoLedger>> {
+    ) -> Result<T, KeystoreError<EspressoLedger>> {
         let mut res = self
             .query_client
             .get(uri)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, WalletError<EspressoLedger>>(ClientError)?;
+            .context::<_, KeystoreError<EspressoLedger>>(ClientError)?;
         response_body(&mut res).await.context(ClientError)
     }
 
@@ -99,14 +99,14 @@ impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkB
         client: &surf::Client,
         uri: impl AsRef<str>,
         body: &T,
-    ) -> Result<(), WalletError<EspressoLedger>> {
+    ) -> Result<(), KeystoreError<EspressoLedger>> {
         client
             .post(uri)
             .body_bytes(bincode::serialize(body).context(BincodeSnafu)?)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, WalletError<EspressoLedger>>(ClientError)?;
+            .context::<_, KeystoreError<EspressoLedger>>(ClientError)?;
         Ok(())
     }
 
@@ -125,14 +125,14 @@ impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkB
 
 #[async_trait]
 impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
-    WalletBackend<'a, EspressoLedger> for NetworkBackend<'a, Meta>
+    KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a, Meta>
 {
     type EventStream = node::EventStream<(LedgerEvent<EspressoLedger>, EventSource)>;
-    type Storage = AtomicWalletStorage<'a, EspressoLedger, Meta>;
+    type Storage = AtomicKeystoreStorage<'a, EspressoLedger, Meta>;
 
     async fn create(
         &mut self,
-    ) -> Result<WalletState<'a, EspressoLedger>, WalletError<EspressoLedger>> {
+    ) -> Result<KeystoreState<'a, EspressoLedger>, KeystoreError<EspressoLedger>> {
         let LedgerSummary {
             num_blocks,
             num_events,
@@ -158,7 +158,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
                 .freeze
                 .iter()
                 .map(|k| {
-                    Ok::<FreezeProvingKey, WalletError<EspressoLedger>>(
+                    Ok::<FreezeProvingKey, KeystoreError<EspressoLedger>>(
                         jf_cap::proof::freeze::preprocess(
                             univ_param,
                             k.num_inputs(),
@@ -174,7 +174,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
                 .xfr
                 .iter()
                 .map(|k| {
-                    Ok::<TransferProvingKey, WalletError<EspressoLedger>>(
+                    Ok::<TransferProvingKey, KeystoreError<EspressoLedger>>(
                         jf_cap::proof::transfer::preprocess(
                             univ_param,
                             k.num_inputs(),
@@ -189,7 +189,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
         });
 
         // `records` should be _almost_ completely sparse. However, even a fully pruned Merkle tree
-        // contains the last leaf appended, but as a new wallet, we don't care about _any_ of the
+        // contains the last leaf appended, but as a new keystore, we don't care about _any_ of the
         // leaves, so make a note to forget the last one once more leaves have been appended.
         let merkle_leaf_to_forget = if records.0.num_leaves() > 0 {
             Some(records.0.num_leaves() - 1)
@@ -197,7 +197,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
             None
         };
 
-        let state = WalletState {
+        let state = KeystoreState {
             proving_keys,
             txn_state: TransactionState {
                 validator,
@@ -280,7 +280,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
     async fn get_public_key(
         &self,
         address: &UserAddress,
-    ) -> Result<UserPubKey, WalletError<EspressoLedger>> {
+    ) -> Result<UserPubKey, KeystoreError<EspressoLedger>> {
         self.get(format!("getuser/{}", api::UserAddress(address.clone())))
             .await
     }
@@ -289,7 +289,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
         &self,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
-    ) -> Result<(bool, SetMerkleProof), WalletError<EspressoLedger>> {
+    ) -> Result<(bool, SetMerkleProof), KeystoreError<EspressoLedger>> {
         if let Some(ret) = set.contains(nullifier) {
             Ok(ret)
         } else {
@@ -304,7 +304,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
     async fn register_user_key(
         &mut self,
         key_pair: &UserKeyPair,
-    ) -> Result<(), WalletError<EspressoLedger>> {
+    ) -> Result<(), KeystoreError<EspressoLedger>> {
         let pub_key_bytes = bincode::serialize(&key_pair.pub_key()).unwrap();
         let sig = key_pair.sign(&pub_key_bytes);
         let json_request = InsertPubKey { pub_key_bytes, sig };
@@ -317,7 +317,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
             .await
         {
             Ok(_) => Ok(()),
-            Err(err) => Err(WalletError::Failed {
+            Err(err) => Err(KeystoreError::Failed {
                 msg: format!("error inserting public key: {}", err),
             }),
         }
@@ -328,7 +328,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
         txn: ElaboratedTransaction,
         // TODO: do something with this?
         _txn_info: TransactionInfo<EspressoLedger>,
-    ) -> Result<(), WalletError<EspressoLedger>> {
+    ) -> Result<(), KeystoreError<EspressoLedger>> {
         Self::post(&self.validator_client, "/submit", &txn).await
     }
 
@@ -337,7 +337,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
         txn: PendingTransaction<EspressoLedger>,
         txid: Option<(u64, u64)>,
     ) {
-        // -> Result<(), WalletError<EspressoLedger>>
+        // -> Result<(), KeystoreError<EspressoLedger>>
 
         if let Some(txid) = txid {
             let body = api::PostMemos {
@@ -360,7 +360,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
     async fn get_initial_scan_state(
         &self,
         _from: EventIndex,
-    ) -> Result<(MerkleTree, EventIndex), WalletError<EspressoLedger>> {
+    ) -> Result<(MerkleTree, EventIndex), KeystoreError<EspressoLedger>> {
         // TODO: how should this initialize?
         let LedgerSnapshot { records, .. } = self.get("getsnapshot/0/true").await?;
         Ok((records.0, Default::default()))

@@ -23,7 +23,7 @@ members = ["."]
 opt-level = 3
 
 [[bin]]
-name = "multixfr_wallet"
-path = "fuzz_targets/multixfr_wallet.rs"
+name = "multixfr_keystore"
+path = "fuzz_targets/multixfr_keystore.rs"
 test = false
 doc = false
