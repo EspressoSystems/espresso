@@ -33,8 +33,8 @@ fn main() {
                     };
                     println!("  {} {}:{}", pid, v.hostname(), v.port());
                 }
-                println!("Wallets:");
-                for w in cli.wallets() {
+                println!("Keystores:");
+                for w in cli.keystores() {
                     let pid = match w.pid() {
                         Some(id) => id.to_string(),
                         None => String::from("not running"),
@@ -43,18 +43,18 @@ fn main() {
                 }
             }
 
-            "wallet" => {
-                let (wallet, command) = line.split_once(':').unwrap_or((line, ""));
+            "keystore" => {
+                let (keystore, command) = line.split_once(':').unwrap_or((line, ""));
                 let command = command.trim();
-                let wallet = match wallet.parse() {
+                let keystore = match keystore.parse() {
                     Ok(w) => w,
                     Err(e) => {
-                        println!("{}: wallet ID must be an integer ({})", line_num, e);
+                        println!("{}: keystore ID must be an integer ({})", line_num, e);
                         continue;
                     }
                 };
 
-                match wallet_command(&mut cli, wallet, command) {
+                match keystore_command(&mut cli, keystore, command) {
                     Ok(output) => {
                         for line in output {
                             if line != ">" {
@@ -64,8 +64,8 @@ fn main() {
                     }
                     Err(err) => {
                         println!(
-                            "{}: error in command to wallet {}: {}",
-                            line_num, wallet, err
+                            "{}: error in command to keystore {}: {}",
+                            line_num, keystore, err
                         );
                         continue;
                     }
@@ -118,22 +118,22 @@ fn main() {
     }
 }
 
-fn wallet_command(
+fn keystore_command(
     cli: &mut CliClient,
-    wallet: usize,
+    keystore: usize,
     command: &str,
 ) -> Result<Vec<String>, String> {
     match command {
         "open" => {
-            cli.open(wallet)?;
+            cli.open(keystore)?;
             Ok(cli.last_output().cloned().collect())
         }
         "close" => {
-            cli.close(wallet)?;
+            cli.close(keystore)?;
             Ok(Vec::new())
         }
         _ => {
-            cli.command(wallet, command)?;
+            cli.command(keystore, command)?;
             Ok(cli.last_output().cloned().collect())
         }
     }

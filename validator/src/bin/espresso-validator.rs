@@ -173,7 +173,7 @@ async fn generate_transactions(
         report_mem();
         info!("Commitment: {}", phaselock.current_state().await.commit());
 
-        // Generate a transaction if the node ID is 0 and if there isn't a wallet to generate it.
+        // Generate a transaction if the node ID is 0 and if there isn't a keystore to generate it.
         if own_id == 0 {
             if let Some(tx) = txn.as_ref() {
                 info!("  - Reproposing a transaction");
@@ -215,7 +215,7 @@ async fn generate_transactions(
                         let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                             .unwrap()
                             .to_string();
-                            println!("  - Round {} completed. Commitment: {}", round, commitment);
+                        println!("  - Round {} completed. Commitment: {}", round, commitment);
                         final_commitment = commitment;
                         break true;
                     }
@@ -236,7 +236,7 @@ async fn generate_transactions(
 
         if success {
             // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
-            // current node), and there is no attached wallet.
+            // current node), and there is no attached keystore.
             if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
                 info!("  - Adding the transaction");
                 let mut blk = ElaboratedBlock::default();
@@ -312,14 +312,6 @@ async fn main() -> Result<(), std::io::Error> {
 
     if options.gen_pk {
         generate_keys(&options, &config);
-    }
-
-    // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
-    let load_from_store = options.node_opt.load_from_store;
-    if load_from_store {
-        info!("restoring from persisted session");
-    } else {
-        info!("initializing new session");
     }
 
     if let Some(own_id) = options.id {

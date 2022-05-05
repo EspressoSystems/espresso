@@ -6,4 +6,4 @@
 
 #![doc = include_str!("../README.md")]
 pub mod faucet;
-pub mod faucet_wallet_test_setup;
+pub mod faucet_keystore_test_setup;

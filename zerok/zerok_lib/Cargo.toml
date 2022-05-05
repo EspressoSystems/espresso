@@ -28,12 +28,12 @@ generic-array = { version = "0.14.4", features = ["serde"] }
 hex = "0.4.3"
 hmac = "0.11.0"
 itertools = "0.10.1"
-jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git" }
+jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
-jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git" }
-jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git" }
-jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git" }
+jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.0" }
+jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.0" }
+jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.0" }
 key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 lazy_static = "1.4.0"
 mnemonic = "1.0.1"
@@ -43,7 +43,7 @@ phaselock-types = { git = "ssh://git@github.com/EspressoSystems/phaselock.git" }
 rand = "0.7.3"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 rayon = "*"
-reef = { git = "https://github.com/EspressoSystems/reef.git" }
+reef = { git = "https://github.com/EspressoSystems/reef.git", features = ["testing"] }
 rpassword = "5.0.1"
 rust-argon2 = "0.8.3"
 rustyline = "9.0.0"

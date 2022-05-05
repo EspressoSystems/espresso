@@ -80,8 +80,8 @@ async fn main() {
     // Construct arguments to pass to the multi-machine demo.
     let options = Options::from_args();
     let mut args = vec![];
-    if options.node_opt.load_from_store {
-        args.push("--load_from_store");
+    if options.node_opt.reset_store_state {
+        args.push("--reset_store_state");
     }
     if options.node_opt.full {
         args.push("--full");

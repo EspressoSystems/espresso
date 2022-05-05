@@ -16,9 +16,9 @@ use std::time::Duration;
 use surf::Url;
 use tempdir::TempDir;
 
-/// Set up and run a test of the wallet CLI.
+/// Set up and run a test of the keystore CLI.
 ///
-/// This function initializes a [CliClient] for a new network of wallets and passes it to the test
+/// This function initializes a [CliClient] for a new network of keystores and passes it to the test
 /// function. The result is converted to an error as if by unwrapping.
 ///
 /// It is important that CLI tests fail by returning an [Err] [Result], rather than by panicking,
@@ -33,7 +33,7 @@ pub fn cli_test(test: impl Fn(&mut CliClient) -> Result<(), String>) {
 
 pub struct CliClient {
     validators: Vec<Validator>,
-    wallets: Vec<Wallet>,
+    keystores: Vec<Keystore>,
     variables: HashMap<String, String>,
     prev_output: Vec<String>,
     server_port: u16,
@@ -42,11 +42,11 @@ pub struct CliClient {
 
 impl CliClient {
     pub fn new() -> Result<Self, String> {
-        // Generate keys for the primary wallet.
-        let tmp_dir = TempDir::new("test_wallet_cli").map_err(err)?;
+        // Generate keys for the primary keystore.
+        let tmp_dir = TempDir::new("test_keystore_cli").map_err(err)?;
         let mut key_path = PathBuf::from(tmp_dir.path());
         key_path.push("primary_key");
-        Wallet::key_gen(&key_path)?;
+        Keystore::key_gen(&key_path)?;
         let mut pub_key_path = key_path.clone();
         pub_key_path.set_extension("pub");
         let pub_key = bincode::deserialize(&fs::read(&pub_key_path).unwrap()).unwrap();
@@ -61,7 +61,7 @@ impl CliClient {
         }
 
         let mut state = Self {
-            wallets: Default::default(),
+            keystores: Default::default(),
             variables: Default::default(),
             prev_output: Default::default(),
             validators: Self::start_validators(tmp_dir.path(), pub_key, &ports)?,
@@ -72,34 +72,34 @@ impl CliClient {
         Ok(state)
     }
 
-    pub fn open(&mut self, wallet: usize) -> Result<&mut Self, String> {
-        self.open_with_args(wallet, [""; 0])
+    pub fn open(&mut self, keystore: usize) -> Result<&mut Self, String> {
+        self.open_with_args(keystore, [""; 0])
     }
 
-    pub fn open_with_args<I, S>(&mut self, wallet: usize, args: I) -> Result<&mut Self, String>
+    pub fn open_with_args<I, S>(&mut self, keystore: usize, args: I) -> Result<&mut Self, String>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        while wallet >= self.wallets.len() {
+        while keystore >= self.keystores.len() {
             self.load(None)?;
         }
-        self.prev_output = self.wallets[wallet].open(args)?;
+        self.prev_output = self.keystores[keystore].open(args)?;
         Ok(self)
     }
 
-    pub fn close(&mut self, wallet: usize) -> Result<&mut Self, String> {
-        if let Some(wallet) = self.wallets.get_mut(wallet) {
-            wallet.close();
+    pub fn close(&mut self, keystore: usize) -> Result<&mut Self, String> {
+        if let Some(keystore) = self.keystores.get_mut(keystore) {
+            keystore.close();
         }
         Ok(self)
     }
 
-    pub fn wallet_key_path(&mut self, wallet: usize) -> Result<PathBuf, String> {
-        while wallet >= self.wallets.len() {
+    pub fn keystore_key_path(&mut self, keystore: usize) -> Result<PathBuf, String> {
+        while keystore >= self.keystores.len() {
             self.load(None)?;
         }
-        Ok(self.wallets[wallet].key_path.clone())
+        Ok(self.keystores[keystore].key_path.clone())
     }
 
     pub fn open_validator(&mut self, v: usize) -> Result<&mut Self, String> {
@@ -120,24 +120,24 @@ impl CliClient {
         Ok(self)
     }
 
-    /// Issue a command to the wallet identified by `wallet`.
+    /// Issue a command to the keystore identified by `keystore`.
     ///
     /// The command string will be preprocessed by replacing each occurrence of `$var` in the
     /// command with the value of the variable `var`. See [output] for how variables can be bound to
     /// values using named capture groups in regexes.
     ///
-    /// If `wallet` refers to a wallet that has not yet been created, a new one will be created. The
-    /// [TestState] always starts off with one wallet, index 0, which gets an initial grant of 2^32
-    /// native tokens. So `command(0, "command")` will not load a new wallet. But the first time
-    /// `command(1, "command")` is called, it will block until wallet 1 is created.
+    /// If `keystore` refers to a keystore that has not yet been created, a new one will be created. The
+    /// [TestState] always starts off with one keystore, index 0, which gets an initial grant of 2^32
+    /// native tokens. So `command(0, "command")` will not load a new keystore. But the first time
+    /// `command(1, "command")` is called, it will block until keystore 1 is created.
     pub fn command(&mut self, id: usize, command: impl AsRef<str>) -> Result<&mut Self, String> {
         let command = self.substitute(command)?;
-        let wallet = self
-            .wallets
+        let keystore = self
+            .keystores
             .get_mut(id)
-            .ok_or_else(|| format!("wallet {} is not open", id))?;
+            .ok_or_else(|| format!("keystore {} is not open", id))?;
         println!("{}> {}", id, command);
-        self.prev_output = wallet.command(&command)?;
+        self.prev_output = keystore.command(&command)?;
         Ok(self)
     }
 
@@ -192,12 +192,12 @@ impl CliClient {
             .ok_or_else(|| format!("no such validator {}", validator))
     }
 
-    pub fn wallets(&self) -> impl Iterator<Item = &Wallet> {
-        self.wallets.iter()
+    pub fn keystores(&self) -> impl Iterator<Item = &Keystore> {
+        self.keystores.iter()
     }
 
     fn load(&mut self, key_path: Option<PathBuf>) -> Result<&mut Self, String> {
-        self.wallets.push(Wallet::new(
+        self.keystores.push(Keystore::new(
             format!("http://localhost:{}", self.server_port),
             key_path,
         )?);
@@ -271,20 +271,20 @@ impl CliClient {
     }
 }
 
-struct OpenWallet {
+struct OpenKeystore {
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     process: Child,
 }
 
-pub struct Wallet {
-    process: Option<OpenWallet>,
+pub struct Keystore {
+    process: Option<OpenKeystore>,
     key_path: PathBuf,
     storage: TempDir,
     server: String,
 }
 
-impl Wallet {
+impl Keystore {
     pub fn pid(&self) -> Option<u32> {
         self.process.as_ref().map(|p| p.process.id())
     }
@@ -314,7 +314,7 @@ impl Wallet {
     }
 
     fn new(server: String, key_path: Option<PathBuf>) -> Result<Self, String> {
-        let storage = TempDir::new("test_wallet").map_err(err)?;
+        let storage = TempDir::new("test_keystore").map_err(err)?;
         let key_path = match key_path {
             Some(path) => path,
             None => {
@@ -338,7 +338,7 @@ impl Wallet {
         S: AsRef<OsStr>,
     {
         if self.process.is_some() {
-            return Err(String::from("wallet is already open"));
+            return Err(String::from("keystore is already open"));
         }
         let mut child = cargo_run("zerok_client")?
             .args([
@@ -360,12 +360,12 @@ impl Wallet {
         let stdin = child
             .stdin
             .take()
-            .ok_or("failed to open stdin for wallet")?;
+            .ok_or("failed to open stdin for keystore")?;
         let stdout = child
             .stdout
             .take()
-            .ok_or("failed to open stdout for wallet")?;
-        self.process = Some(OpenWallet {
+            .ok_or("failed to open stdout for keystore")?;
+        self.process = Some(OpenKeystore {
             process: child,
             stdin,
             stdout: BufReader::new(stdout),
@@ -385,7 +385,7 @@ impl Wallet {
             writeln!(child.stdin, "{}", command).map_err(err)?;
             self.read_until_prompt()
         } else {
-            Err(String::from("wallet is not open"))
+            Err(String::from("keystore is not open"))
         }
     }
 
@@ -400,7 +400,7 @@ impl Wallet {
                 let line = std::mem::take(&mut line);
                 let line = line.trim();
                 println!("< {}", line);
-                if line.starts_with("Error loading wallet") {
+                if line.starts_with("Error loading keystore") {
                     return Err(String::from(line));
                 }
                 if !line.is_empty() {
@@ -419,12 +419,12 @@ impl Wallet {
             }
             Ok(lines)
         } else {
-            Err(String::from("wallet is not open"))
+            Err(String::from("keystore is not open"))
         }
     }
 }
 
-impl Drop for Wallet {
+impl Drop for Keystore {
     fn drop(&mut self) {
         self.close();
     }

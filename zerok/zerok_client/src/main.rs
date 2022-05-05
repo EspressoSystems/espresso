@@ -1,8 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
-// The Espresso Wallet Frontend
+// The Espresso Keystore Frontend
 //
 // For now, this "frontend" is simply a comand-line read-eval-print loop which
-// allows the user to enter commands for a wallet interactively.
+// allows the user to enter commands for a keystore interactively.
 //
 
 mod cli_client;
@@ -11,33 +11,33 @@ use jf_cap::proof::UniversalParam;
 use seahorse::{
     cli::*,
     io::SharedIO,
-    loader::{LoaderMetadata, WalletLoader},
-    WalletError,
+    loader::{KeystoreLoader, LoaderMetadata},
+    KeystoreError,
 };
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
 use zerok_lib::{
+    keystore::network::{NetworkBackend, Url},
     ledger::EspressoLedger,
-    wallet::network::{NetworkBackend, Url},
 };
 
 #[derive(StructOpt)]
 pub struct Args {
-    /// Generate keys for a wallet, do not run the REPL.
+    /// Generate keys for a keystore, do not run the REPL.
     ///
     /// The keys are stored in FILE and FILE.pub.
     #[structopt(short = "g", long)]
     pub key_gen: Option<PathBuf>,
 
-    /// Path to a saved wallet, or a new directory where this wallet will be saved.
+    /// Path to a saved keystore, or a new directory where this keystore will be saved.
     ///
-    /// If not given, the wallet will be stored in ~/.translucence/wallet. If a wallet already
-    /// exists there, it will be loaded. Otherwise, a new wallet will be created.
+    /// If not given, the keystore will be stored in ~/.translucence/keystore. If a keystore already
+    /// exists there, it will be loaded. Otherwise, a new keystore will be created.
     #[structopt(short, long)]
     pub storage: Option<PathBuf>,
 
-    /// Create a new wallet and store it an a temporary location which will be deleted on exit.
+    /// Create a new keystore and store it an a temporary location which will be deleted on exit.
     ///
     /// This option is mutually exclusive with --storage.
     #[structopt(long)]
@@ -88,9 +88,9 @@ impl<'a> CLI<'a> for EspressoCli {
     fn init_backend(
         univ_param: &'a UniversalParam,
         args: Self::Args,
-        loader: &mut impl WalletLoader<EspressoLedger, Meta = LoaderMetadata>,
-    ) -> Result<Self::Backend, WalletError<EspressoLedger>> {
-        let server = args.server.ok_or(WalletError::Failed {
+        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = LoaderMetadata>,
+    ) -> Result<Self::Backend, KeystoreError<EspressoLedger>> {
+        let server = args.server.ok_or(KeystoreError::Failed {
             msg: String::from("server is required"),
         })?;
         NetworkBackend::new(univ_param, server.clone(), server.clone(), server, loader)

@@ -5,29 +5,29 @@ use zerok_client::cli_client::cli_test;
 #[test]
 fn demo2() {
     cli_test(|t| {
-        let key_path0 = t.wallet_key_path(0)?;
+        let key_path0 = t.keystore_key_path(0)?;
         let key_path0 = key_path0.as_os_str().to_str().ok_or_else(|| {
             format!(
-                "failed to convert key path {:?} for wallet {} to string",
+                "failed to convert key path {:?} for keystore {} to string",
                 key_path0, 0
             )
         })?;
-        let key_path1 = t.wallet_key_path(1)?;
+        let key_path1 = t.keystore_key_path(1)?;
         let key_path1 = key_path1.as_os_str().to_str().ok_or_else(|| {
             format!(
-                "failed to convert key path {:?} for wallet {} to string",
+                "failed to convert key path {:?} for keystore {} to string",
                 key_path1, 1
             )
         })?;
-        //Get the wallet addresses and check balances of the native assets
+        //Get the keystore addresses and check balances of the native assets
         let balance = 1u64 << 32;
         t.open(0)?
-            .output("Welcome to the Espresso wallet, version 0.2.0")?
+            .output("Welcome to the Espresso keystore, version 0.2.0")?
             .output("\\(c\\) 2021 Espresso Systems, Inc.")?
-            .output("Your wallet will be identified by a secret mnemonic phrase. This phrase will allow you to recover your wallet if you lose access to it. Anyone who has access to this phrase will be able to view and spend your assets. Store this phrase in a safe, private place.")?
+            .output("Your keystore will be identified by a secret mnemonic phrase. This phrase will allow you to recover your keystore if you lose access to it. Anyone who has access to this phrase will be able to view and spend your assets. Store this phrase in a safe, private place.")?
             .output("Your mnemonic phrase will be:")?
             .output("^(?P<mnemonic>[a-zA-Z ]+)")?
-            .output("1\\) Accept phrase and create wallet")?
+            .output("1\\) Accept phrase and create keystore")?
             .output("2\\) Generate a new phrase")?
             .output("3\\) Manually enter a mnemonic")?
             .command(0, "1")?
@@ -43,12 +43,12 @@ fn demo2() {
             .output("immediately, use import_memo.")?
             .output("(?P<addr0>ADDR~.*)")?
             .open(1)?
-            .output("Welcome to the Espresso wallet, version 0.2.0")?
+            .output("Welcome to the Espresso keystore, version 0.2.0")?
             .output("\\(c\\) 2021 Espresso Systems, Inc.")?
-            .output("Your wallet will be identified by a secret mnemonic phrase. This phrase will allow you to recover your wallet if you lose access to it. Anyone who has access to this phrase will be able to view and spend your assets. Store this phrase in a safe, private place.")?
+            .output("Your keystore will be identified by a secret mnemonic phrase. This phrase will allow you to recover your keystore if you lose access to it. Anyone who has access to this phrase will be able to view and spend your assets. Store this phrase in a safe, private place.")?
             .output("Your mnemonic phrase will be:")?
             .output("^(?P<mnemonic>[a-zA-Z ]+)$")?
-            .output("1\\) Accept phrase and create wallet")?
+            .output("1\\) Accept phrase and create keystore")?
             .output("2\\) Generate a new phrase")?
             .output("3\\) Manually enter a mnemonic")?
             .command(1, "1")?
@@ -68,7 +68,7 @@ fn demo2() {
             .output(format!("${} (?P<balance>\\d+)", "addr0"))?
             .command(1, "balance 0")?
             .output(format!("${} (?P<balance>\\d+)", "addr1"))?
-            // Transfer some of the primary wallet's native tokens to the secondary
+            // Transfer some of the primary keystore's native tokens to the secondary
             .command(0, "transfer 0 $addr1 500 1")?
             .output("(?P<txn>TXN~.*)")?
             .command(0, "wait $txn")?
@@ -79,18 +79,18 @@ fn demo2() {
             .output(format!("$addr0 {}", balance - 501))?
             .command(1, "balance 0")?
             .output("$addr1 500")?
-            // Close and restart the wallets, showing that they retain their balances.
+            // Close and restart the keystores, showing that they retain their balances.
             .close(0)?
             .close(1)?
             .open(0)?
-            .output("Welcome to the Espresso wallet, version 0.2.0")?
+            .output("Welcome to the Espresso keystore, version 0.2.0")?
             .output("\\(c\\) 2021 Espresso Systems, Inc.")?
             .output("Forgot your password\\? Want to change it\\? \\[y/n\\]")?
             .command(0, "n")?
             .command(0, "test_password0")?
             .output("connecting...")?
             .open(1)?
-            .output("Welcome to the Espresso wallet, version 0.2.0")?
+            .output("Welcome to the Espresso keystore, version 0.2.0")?
             .output("\\(c\\) 2021 Espresso Systems, Inc.")?
             .output("Forgot your password\\? Want to change it\\? \\[y/n\\]")?
             .command(1, "n")?
@@ -105,7 +105,7 @@ fn demo2() {
             //  * show the public information about the committed block (/getblock, /gettransaction,
             //    /getunspentrecord)
             //
-            // Close a validator (not 0, that's the server for the wallets) and show that we can
+            // Close a validator (not 0, that's the server for the keystores) and show that we can
             // still complete transactions.
             .close_validator(1)?
             .command(0, "transfer 0 $addr1 200 2")?
