@@ -395,17 +395,16 @@ async fn init_phaselock(
 
     let storage = get_store_dir(options, node_id);
     let storage_path = Path::new(&storage);
-    let reset_store_state;
-    if storage_path.exists() {
+    let reset_store_state = if storage_path.exists() {
         if options.reset_store_state {
-            reset_store_state = true;
             reset_store_dir(storage.clone());
+            true
         } else {
-            reset_store_state = false;
+            false
         }
     } else {
-        reset_store_state = true;
-    }
+        true
+    };
     if reset_store_state {
         debug!("Initializing new session");
     } else {
