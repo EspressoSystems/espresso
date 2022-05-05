@@ -221,7 +221,7 @@ async fn generate_transactions(
                         // src/bin/multi_machine_automation.rs as well
                         println!(
                             // THINK TWICE BEFORE CHANGING THIS
-                            "  - Round {} completed. Commitment: {}",
+                            "  - Completed {} rounds. Commitment: {}",
                             succeeded_rounds, commitment
                         );
                         // !!!!!! END WARNING !!!!!!!
@@ -309,14 +309,6 @@ async fn main() -> Result<(), std::io::Error> {
 
     if options.gen_pk {
         generate_keys(&options, &config);
-    }
-
-    // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
-    let load_from_store = options.node_opt.load_from_store;
-    if load_from_store {
-        info!("restoring from persisted session");
-    } else {
-        info!("initializing new session");
     }
 
     if let Some(own_id) = options.id {

@@ -59,8 +59,8 @@ async fn main() {
     // Construct arguments to pass to the multi-machine demo.
     let options = Options::from_args();
     let mut args = vec![];
-    if options.node_opt.load_from_store {
-        args.push("--load_from_store");
+    if options.node_opt.reset_store_state {
+        args.push("--reset_store_state");
     }
     if options.node_opt.full {
         args.push("--full");
@@ -184,7 +184,7 @@ async fn main() {
         if let Some(num_txn) = options.num_txn {
             for line in output.await {
                 let trimmed_line = line.trim();
-                if trimmed_line.starts_with(&format!("- Round {} completed. Commitment:", num_txn))
+                if trimmed_line.starts_with(&format!("- Completed {} rounds. Commitment:", num_txn))
                 {
                     let strs: Vec<&str> = trimmed_line.split(' ').collect();
                     let comm = strs

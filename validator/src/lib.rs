@@ -23,10 +23,10 @@ use rand_chacha_02::{rand_core::SeedableRng as _, ChaChaRng as ChaChaRng02};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
-use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::{fs, fs::File};
 use structopt::StructOpt;
 use threshold_crypto as tc;
 use tide::StatusCode;
@@ -59,14 +59,16 @@ const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 
 #[derive(Debug, StructOpt)]
 pub struct NodeOpt {
-    /// Whether to load from persisted state.
+    /// Whether to reset the persisted state.
     ///
-    #[structopt(long = "load_from_store", short = "l")]
-    pub load_from_store: bool,
+    /// If the path to a node's persistence files doesn't exist, its persisted state will be reset
+    /// regardless of this argument.
+    #[structopt(long = "reset_store_state", short = "r")]
+    pub reset_store_state: bool,
 
-    /// Path to persistence files.
+    /// Path to persistence files for all nodes.
     ///
-    /// Persistence files will be nested under the specified directory
+    /// Persistence files will be nested under the specified directory.
     #[structopt(long = "store_path", short = "s")]
     pub store_path: Option<PathBuf>,
 
@@ -149,12 +151,21 @@ fn default_api_path() -> PathBuf {
     [&dir, Path::new(API_FILE)].iter().collect()
 }
 
-/// Gets the directory to public key files.
+/// Gets the directory to persistence files.
+///
+/// The returned path can be passed to `reset_store_dir` to remove the contents, if the
+/// `--reset_store_state` argument is true.
 fn get_store_dir(options: &NodeOpt, node_id: u64) -> PathBuf {
     options
         .store_path
         .clone()
         .unwrap_or_else(|| default_store_path(node_id))
+}
+
+/// Removes the contents in the persistence files.
+fn reset_store_dir(store_dir: PathBuf) {
+    let path = store_dir.as_path();
+    fs::remove_dir_all(path).expect("Failed to remove persistence files");
 }
 
 /// Gets IP address and port number of a node from node configuration file.
@@ -365,7 +376,6 @@ async fn init_phaselock(
     node_id: u64,
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
     full_node: bool,
-    load_from_store: bool,
     state: GenesisState,
 ) -> Node {
     // Create the initial phaselock
@@ -383,14 +393,30 @@ async fn init_phaselock(
     debug!(?config);
     let genesis = ElaboratedBlock::default();
 
-    let lw_persistence =
-        LWPersistence::new(Path::new(&get_store_dir(options, node_id)), "validator").unwrap();
-    let stored_state = if load_from_store {
+    let storage = get_store_dir(options, node_id);
+    let storage_path = Path::new(&storage);
+    let reset_store_state = if storage_path.exists() {
+        if options.reset_store_state {
+            reset_store_dir(storage.clone());
+            true
+        } else {
+            false
+        }
+    } else {
+        true
+    };
+    if reset_store_state {
+        debug!("Initializing new session");
+    } else {
+        debug!("Restoring from persisted session");
+    }
+    let lw_persistence = LWPersistence::new(storage_path, "validator").unwrap();
+    let stored_state = if reset_store_state {
+        state.validator.clone()
+    } else {
         lw_persistence
             .load_latest_state()
             .unwrap_or_else(|_| state.validator.clone())
-    } else {
-        state.validator.clone()
     };
 
     let univ_param = if full_node {
@@ -399,11 +425,10 @@ async fn init_phaselock(
         None
     };
 
-    let storage = get_store_dir(options, node_id);
-    let phaselock_persistence = [Path::new(&storage), Path::new("phaselock")]
+    let phaselock_persistence = [storage_path, Path::new("phaselock")]
         .iter()
         .collect::<PathBuf>();
-    let node_persistence = [Path::new(&storage), Path::new("node")]
+    let node_persistence = [storage_path, Path::new("node")]
         .iter()
         .collect::<PathBuf>();
     let phaselock = PhaseLock::init(
@@ -425,21 +450,21 @@ async fn init_phaselock(
     let validator = if full_node {
         let full_persisted = FullPersistence::new(&node_persistence, "full_node").unwrap();
 
-        let records = if load_from_store {
+        let records = if reset_store_state {
+            state.records
+        } else {
             let mut builder = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
             for leaf in full_persisted.rmt_leaf_iter() {
                 builder.push(leaf.unwrap().0);
             }
             builder.build()
-        } else {
-            state.records
         };
-        let nullifiers = if load_from_store {
+        let nullifiers = if reset_store_state {
+            state.nullifiers
+        } else {
             full_persisted
                 .get_latest_nullifier_set()
                 .unwrap_or_else(|_| Default::default())
-        } else {
-            state.nullifiers
         };
         let node = FullNode::new(
             phaselock,
@@ -797,14 +822,6 @@ pub async fn init_validator(
     genesis: GenesisState,
     own_id: usize,
 ) -> Node {
-    // TODO !nathan.yospe, jeb.bearer - add option to reload vs init
-    let load_from_store = options.load_from_store;
-    if load_from_store {
-        debug!("restoring from persisted session");
-    } else {
-        debug!("initializing new session");
-    }
-
     debug!("Current node: {}", own_id);
     let (threshold, secret_keys) = secret_keys(config);
     let secret_key_share = secret_keys.secret_key_share(own_id);
@@ -855,7 +872,6 @@ pub async fn init_validator(
         own_id as u64,
         own_network,
         options.full,
-        load_from_store,
         genesis,
     )
     .await
