@@ -34,8 +34,8 @@ futures = "0.3.0"
 hex = "0.4.3"
 
 jf-cap = { git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
-key-set = { git = "https://github.com/EspressoSystems/key-set.git", branch = "bfish-update-cap-termonology"}
-net = { git = "https://github.com/EspressoSystems/net.git", branch = "bfish-update-cap-termonology" }
+key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
+net = { git = "https://github.com/EspressoSystems/net.git" }
 num-bigint = "0.4"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
