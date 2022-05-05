@@ -133,20 +133,6 @@ dependencies = [
 [[package]]
 name = "arbitrary-wrappers"
 version = "0.2.1"
-source = "git+https://github.com/EspressoSystems/arbitrary-wrappers.git?branch=bfish-update-cap-termonology#07c6348f58b4fa5f09f778f6c4e0d054806c0190"
-dependencies = [
- "arbitrary",
- "ark-std",
- "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git?tag=0.1.0)",
- "itertools 0.10.3",
- "jf-cap 0.0.2",
- "rand_chacha 0.3.1",
- "serde",
-]
-
-[[package]]
-name = "arbitrary-wrappers"
-version = "0.2.1"
 source = "git+https://github.com/EspressoSystems/arbitrary-wrappers.git#d5595e71885c822e0417cb07d4696e05c64abb58"
 dependencies = [
  "arbitrary",
@@ -706,6 +692,19 @@ checksum = "065374052e7df7ee4047b1160cca5e1467a12351a40b3da123c870ba0b8eda2a"
 
 [[package]]
 name = "atomic_store"
+version = "0.1.0"
+source = "git+https://github.com/EspressoSystems/atomicstore?tag=0.1.0#a719ad0ec86831fb9b0cb9d9a4889e1bdf0f91e6"
+dependencies = [
+ "ark-serialize",
+ "bincode",
+ "chrono",
+ "glob",
+ "serde",
+ "snafu 0.6.10",
+]
+
+[[package]]
+name = "atomic_store"
 version = "0.1.1"
 source = "git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.1#e116cea2de934fd315f690d07d45b3bb7a213654"
 dependencies = [
@@ -727,7 +726,7 @@ dependencies = [
  "chrono",
  "glob",
  "serde",
- "snafu",
+ "snafu 0.7.0",
 ]
 
 [[package]]
@@ -739,7 +738,7 @@ dependencies = [
  "bincode",
  "glob",
  "serde",
- "snafu",
+ "snafu 0.7.0",
 ]
 
 [[package]]
@@ -1784,8 +1783,8 @@ dependencies = [
 name = "espresso-validation-event-api"
 version = "0.1.0"
 dependencies = [
- "jf-cap 0.0.1",
- "seahorse 0.3.0 (git+https://github.com/EspressoSystems/seahorse.git?branch=bfish-termonology)",
+ "jf-cap 0.0.2",
+ "seahorse",
  "zerok_lib",
 ]
 
@@ -1804,20 +1803,20 @@ dependencies = [
  "jf-plonk 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
  "jf-primitives 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
  "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
- "key-set 0.3.0 (git+https://github.com/EspressoSystems/key-set.git)",
+ "key-set",
  "markdown",
- "net 0.3.0 (git+https://github.com/EspressoSystems/net.git)",
- "phaselock",
+ "net",
+ "phaselock 0.0.6 (git+ssh://git@github.com/EspressoSystems/phaselock.git)",
  "portpicker",
  "procfs",
  "rand_chacha 0.2.2",
  "rand_chacha 0.3.1",
- "seahorse 0.3.0 (git+https://github.com/EspressoSystems/seahorse.git)",
+ "seahorse",
  "serde",
  "serde_derive",
  "serde_json",
  "shellexpand",
- "snafu",
+ "snafu 0.7.0",
  "structopt",
  "strum 0.24.0",
  "strum_macros",
@@ -1840,7 +1839,7 @@ name = "espresso-validator-status-api"
 version = "0.1.0"
 dependencies = [
  "jf-cap 0.0.1",
- "phaselock",
+ "phaselock 0.0.6 (git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c)",
  "zerok_lib",
 ]
 
@@ -1918,15 +1917,15 @@ dependencies = [
  "futures",
  "hex",
  "jf-cap 0.0.2",
- "key-set 0.3.0 (git+https://github.com/EspressoSystems/key-set.git)",
- "net 0.3.0 (git+https://github.com/EspressoSystems/net.git)",
+ "key-set",
+ "net",
  "num-bigint 0.4.3",
  "portpicker",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "serde",
  "serde_json",
- "snafu",
+ "snafu 0.7.0",
  "structopt",
  "surf",
  "tempdir",
@@ -2851,21 +2850,6 @@ checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
 [[package]]
 name = "key-set"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/key-set.git?branch=bfish-update-cap-termonology#4b563b805952d1562f61979d7427621fcf241df9"
-dependencies = [
- "ark-serialize",
- "bincode",
- "commit",
- "itertools 0.10.3",
- "jf-cap 0.0.2",
- "serde",
- "serde_with",
- "snafu 0.7.0",
-]
-
-[[package]]
-name = "key-set"
-version = "0.3.0"
 source = "git+https://github.com/EspressoSystems/key-set.git#63444d8ad69f8d910a7fa0f4c35b60904b3c7dcf"
 dependencies = [
  "ark-serialize",
@@ -2875,7 +2859,7 @@ dependencies = [
  "jf-cap 0.0.2",
  "serde",
  "serde_with",
- "snafu",
+ "snafu 0.7.0",
 ]
 
 [[package]]
@@ -3066,29 +3050,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
 dependencies = [
  "getrandom 0.2.6",
-]
-
-[[package]]
-name = "net"
-version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/net.git?branch=bfish-update-cap-termonology#565fac21da7e09c7cfb2660afc15786c5c289274"
-dependencies = [
- "ark-serialize",
- "ark-std",
- "bincode",
- "commit",
- "futures",
- "generic-array",
- "itertools 0.10.3",
- "jf-cap 0.0.2",
- "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
- "serde",
- "serde_json",
- "snafu",
- "surf",
- "tagged-base64 0.1.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.1.0)",
- "tide",
- "tracing",
 ]
 
 [[package]]
@@ -3419,6 +3380,38 @@ dependencies = [
 [[package]]
 name = "phaselock"
 version = "0.0.6"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c#60b85f7eba2f93704682ce697c109f10eb47894c"
+dependencies = [
+ "ark-ec",
+ "ark-ed-on-bls12-381",
+ "async-std",
+ "async-tungstenite 0.17.2",
+ "atomic_store 0.1.0",
+ "bincode",
+ "blake3 1.3.1",
+ "byteorder",
+ "custom_debug",
+ "dashmap 5.2.0",
+ "flume 0.10.12",
+ "futures",
+ "hex_fmt",
+ "phaselock-types 0.0.6 (git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c)",
+ "phaselock-utils 0.0.6 (git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c)",
+ "rand 0.7.3",
+ "rand_chacha 0.2.2",
+ "serde",
+ "serde_bytes",
+ "snafu 0.7.0",
+ "threshold_crypto",
+ "tracing",
+ "tracing-error",
+ "tracing-futures",
+ "tracing-unwrap",
+]
+
+[[package]]
+name = "phaselock"
+version = "0.0.6"
 source = "git+ssh://git@github.com/EspressoSystems/phaselock.git#6c8fed015a9fc5edf90eacc4f9f346b1c7ff361d"
 dependencies = [
  "ark-ec",
@@ -3435,18 +3428,38 @@ dependencies = [
  "flume 0.10.12",
  "futures",
  "hex_fmt",
- "phaselock-types",
- "phaselock-utils",
+ "phaselock-types 0.0.6 (git+ssh://git@github.com/EspressoSystems/phaselock.git)",
+ "phaselock-utils 0.0.6 (git+ssh://git@github.com/EspressoSystems/phaselock.git)",
  "rand 0.7.3",
  "rand_chacha 0.2.2",
  "serde",
  "serde_bytes",
- "snafu",
+ "snafu 0.7.0",
  "threshold_crypto",
  "tracing",
  "tracing-error",
  "tracing-futures",
  "tracing-unwrap",
+]
+
+[[package]]
+name = "phaselock-types"
+version = "0.0.6"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c#60b85f7eba2f93704682ce697c109f10eb47894c"
+dependencies = [
+ "async-std",
+ "async-tungstenite 0.17.2",
+ "bincode",
+ "blake3 1.3.1",
+ "custom_debug",
+ "futures",
+ "hex_fmt",
+ "rand 0.7.3",
+ "rand_chacha 0.2.2",
+ "serde",
+ "serde_bytes",
+ "snafu 0.7.0",
+ "threshold_crypto",
 ]
 
 [[package]]
@@ -3467,8 +3480,20 @@ dependencies = [
  "rand_chacha 0.2.2",
  "serde",
  "serde_bytes",
- "snafu",
+ "snafu 0.7.0",
  "threshold_crypto",
+]
+
+[[package]]
+name = "phaselock-utils"
+version = "0.0.6"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?rev=60b85f7eba2f93704682ce697c109f10eb47894c#60b85f7eba2f93704682ce697c109f10eb47894c"
+dependencies = [
+ "async-std",
+ "flume 0.10.12",
+ "futures",
+ "tracing",
+ "tracing-error",
 ]
 
 [[package]]
@@ -3947,10 +3972,10 @@ dependencies = [
 [[package]]
 name = "reef"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/reef.git?branch=bfish-update-cap-termonology#bea60b5721a9368a39680ed52273e832602f34b0"
+source = "git+https://github.com/EspressoSystems/reef.git#7b45d90bcf1894a4a542e1680ccdf8cb7e6df247"
 dependencies = [
  "arbitrary",
- "arbitrary-wrappers 0.2.1 (git+https://github.com/EspressoSystems/arbitrary-wrappers.git?branch=bfish-update-cap-termonology)",
+ "arbitrary-wrappers",
  "ark-serialize",
  "commit",
  "funty",
@@ -3960,25 +3985,6 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "snafu 0.7.0",
- "strum_macros",
-]
-
-[[package]]
-name = "reef"
-version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/reef.git#7b45d90bcf1894a4a542e1680ccdf8cb7e6df247"
-dependencies = [
- "arbitrary",
- "arbitrary-wrappers 0.2.1 (git+https://github.com/EspressoSystems/arbitrary-wrappers.git)",
- "ark-serialize",
- "commit",
- "funty",
- "itertools 0.10.3",
- "jf-cap 0.0.2",
- "lazy_static",
- "rand_chacha 0.3.1",
- "serde",
- "snafu",
  "strum_macros",
 ]
 
@@ -4234,60 +4240,10 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git?branch=bfish-termonology#3fcac2f95c2c823416a7679a624693b9f8fe4c14"
-dependencies = [
- "arbitrary",
- "arbitrary-wrappers 0.2.1 (git+https://github.com/EspressoSystems/arbitrary-wrappers.git?branch=bfish-update-cap-termonology)",
- "ark-serialize",
- "ark-std",
- "async-scoped",
- "async-std",
- "async-trait",
- "atomic_store 0.1.1 (git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.1)",
- "bincode",
- "bip0039",
- "chacha20",
- "chrono",
- "commit",
- "derivative",
- "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git?tag=0.1.0)",
- "futures",
- "generic-array",
- "hmac 0.11.0",
- "image",
- "itertools 0.10.3",
- "jf-cap 0.0.2",
- "jf-primitives 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
- "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
- "key-set 0.3.0 (git+https://github.com/EspressoSystems/key-set.git?branch=bfish-update-cap-termonology)",
- "lazy_static",
- "net 0.3.0 (git+https://github.com/EspressoSystems/net.git?branch=bfish-update-cap-termonology)",
- "pipe",
- "rand_chacha 0.3.1",
- "reef 0.3.0 (git+https://github.com/EspressoSystems/reef.git?branch=bfish-update-cap-termonology)",
- "regex",
- "rpassword",
- "rust-argon2 1.0.0",
- "rustyline",
- "serde",
- "sha3 0.9.1",
- "snafu",
- "structopt",
- "strum 0.24.0",
- "strum_macros",
- "surf",
- "tagged-base64 0.1.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.1.0)",
- "tempdir",
- "zeroize",
-]
-
-[[package]]
-name = "seahorse"
-version = "0.3.0"
 source = "git+https://github.com/EspressoSystems/seahorse.git#41e9a94a842c1a3387a4bd7ed09b6c1029b181c8"
 dependencies = [
  "arbitrary",
- "arbitrary-wrappers 0.2.1 (git+https://github.com/EspressoSystems/arbitrary-wrappers.git)",
+ "arbitrary-wrappers",
  "ark-serialize",
  "ark-std",
  "async-scoped",
@@ -4310,13 +4266,13 @@ dependencies = [
  "jf-cap 0.0.2",
  "jf-primitives 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
  "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
- "key-set 0.3.0 (git+https://github.com/EspressoSystems/key-set.git)",
+ "key-set",
  "lazy_static",
- "net 0.3.0 (git+https://github.com/EspressoSystems/net.git)",
+ "net",
  "pipe",
  "proptest",
  "rand_chacha 0.3.1",
- "reef 0.3.0 (git+https://github.com/EspressoSystems/reef.git)",
+ "reef",
  "regex",
  "rpassword",
  "rust-argon2 1.0.0",
@@ -4624,13 +4580,35 @@ checksum = "f2dd574626839106c320a323308629dcb1acfc96e32a8cba364ddc61ac23ee83"
 
 [[package]]
 name = "snafu"
+version = "0.6.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eab12d3c261b2308b0d80c26fffb58d17eba81a4be97890101f416b478c79ca7"
+dependencies = [
+ "backtrace",
+ "doc-comment",
+ "snafu-derive 0.6.10",
+]
+
+[[package]]
+name = "snafu"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2eba135d2c579aa65364522eb78590cdf703176ef71ad4c32b00f58f7afb2df5"
 dependencies = [
  "backtrace",
  "doc-comment",
- "snafu-derive",
+ "snafu-derive 0.7.0",
+]
+
+[[package]]
+name = "snafu-derive"
+version = "0.6.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1508efa03c362e23817f96cde18abed596a25219a8b2c66e8db33c03543d315b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -5848,11 +5826,11 @@ dependencies = [
  "rand_chacha 0.3.1",
  "regex",
  "rustyline",
- "seahorse 0.3.0 (git+https://github.com/EspressoSystems/seahorse.git)",
+ "seahorse",
  "serde",
  "serde_derive",
  "serde_json",
- "snafu",
+ "snafu 0.7.0",
  "structopt",
  "surf",
  "tagged-base64 0.1.0 (git+https://github.com/EspressoSystems/tagged-base64.git?branch=main)",
@@ -5868,7 +5846,7 @@ name = "zerok_lib"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
- "arbitrary-wrappers 0.2.1 (git+https://github.com/EspressoSystems/arbitrary-wrappers.git)",
+ "arbitrary-wrappers",
  "ark-ff",
  "ark-serialize",
  "ark-std",
@@ -5893,12 +5871,12 @@ dependencies = [
  "jf-plonk 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
  "jf-primitives 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
  "jf-utils 0.1.0 (git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.0)",
- "key-set 0.3.0 (git+https://github.com/EspressoSystems/key-set.git)",
+ "key-set",
  "lazy_static",
  "mnemonic",
- "net 0.3.0 (git+https://github.com/EspressoSystems/net.git)",
- "phaselock",
- "phaselock-types",
+ "net",
+ "phaselock 0.0.6 (git+ssh://git@github.com/EspressoSystems/phaselock.git)",
+ "phaselock-types 0.0.6 (git+ssh://git@github.com/EspressoSystems/phaselock.git)",
  "procfs",
  "proptest",
  "quickcheck",
@@ -5907,18 +5885,18 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rand_xoshiro",
  "rayon",
- "reef 0.3.0 (git+https://github.com/EspressoSystems/reef.git)",
+ "reef",
  "rpassword",
  "rust-argon2 0.8.3",
  "rustyline",
- "seahorse 0.3.0 (git+https://github.com/EspressoSystems/seahorse.git)",
+ "seahorse",
  "serde",
  "serde_cbor",
  "serde_derive",
  "serde_json",
  "serde_with",
  "sha3 0.9.1",
- "snafu",
+ "snafu 0.7.0",
  "strum 0.20.0",
  "strum_macros",
  "surf",

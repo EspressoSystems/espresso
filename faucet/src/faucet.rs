@@ -257,7 +257,7 @@ mod test {
     use std::time::Duration;
     use tempdir::TempDir;
     use tracing_test::traced_test;
-    use zerok_lib::wallet::hd::KeyTree;
+    use zerok_lib::keystore::hd::KeyTree;
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
         let mut backoff = Duration::from_millis(100);
@@ -279,18 +279,18 @@ mod test {
         // Create test network with a faucet key pair.
         let (key_stream, mnemonic) = KeyTree::random(&mut rng);
         let faucet_key_pair = key_stream
-            .derive_sub_tree("wallet".as_bytes())
+            .derive_sub_tree("keystore".as_bytes())
             .derive_sub_tree("user".as_bytes())
             .derive_user_key_pair(&0u64.to_le_bytes());
         let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key()).await;
 
         // Initiate a faucet server with the mnemonic associated with the faucet key pair.
-        let faucet_dir = TempDir::new("cape_wallet_faucet").unwrap();
+        let faucet_dir = TempDir::new("cape_keystore_faucet").unwrap();
         let faucet_port = pick_unused_port().unwrap();
         let grant_size = 5000;
         let opt = FaucetOptions {
             mnemonic: mnemonic.to_string(),
-            faucet_wallet_path: PathBuf::from(faucet_dir.path()),
+            faucet_keystore_path: PathBuf::from(faucet_dir.path()),
             faucet_password: "".to_string(),
             faucet_port: faucet_port.clone(),
             esqs_url: network.query_api.clone(),
@@ -301,8 +301,8 @@ mod test {
         init_web_server(&opt, Some(faucet_key_pair)).await.unwrap();
         println!("Faucet server initiated.");
 
-        // Create a receiver wallet.
-        let receiver_dir = TempDir::new("cape_wallet_receiver").unwrap();
+        // Create a receiver keystore.
+        let receiver_dir = TempDir::new("cape_keystore_receiver").unwrap();
         let mut receiver_loader = Loader::from_literal(
             Some(KeyTree::random(&mut rng).1.to_string().replace('-', " ")),
             Alphanumeric.sample_string(&mut rand::thread_rng(), 16),
@@ -316,13 +316,13 @@ mod test {
             &mut receiver_loader,
         )
         .unwrap();
-        let mut receiver = EspressoWallet::new(receiver_backend).await.unwrap();
+        let mut receiver = EspressoKeystore::new(receiver_backend).await.unwrap();
         let receiver_key = receiver
             .generate_user_key("receiver".into(), None)
             .await
             .unwrap();
         let receiver_key_bytes = bincode::serialize(&receiver_key).unwrap();
-        println!("Receiver wallet created.");
+        println!("Receiver keystore created.");
 
         // Request native asset for the receiver.
         surf::post(format!(
