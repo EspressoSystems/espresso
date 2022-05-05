@@ -59,11 +59,11 @@ const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 
 #[derive(Debug, StructOpt)]
 pub struct NodeOpt {
-    /// Whether to reset the persisted state.
+    /// Whether to reset the persisted state if the persistence files exist.
     #[structopt(long = "reset_store_state", short = "r")]
     pub reset_store_state: bool,
 
-    /// Path to persistence files.
+    /// Path to store persistence files.
     ///
     /// Persistence files will be nested under the specified directory
     #[structopt(long = "store_path", short = "s")]
@@ -149,16 +149,20 @@ fn default_api_path() -> PathBuf {
 }
 
 /// Gets the directory to persistence files.
+///
+/// The returned path can be passed to `reset_store_dir` to remove the contents, if the
+/// `--reset_store_state` argument is true.
 fn get_store_dir(options: &NodeOpt, node_id: u64) -> PathBuf {
-    let path_buf = options
+    options
         .store_path
         .clone()
-        .unwrap_or_else(|| default_store_path(node_id));
-    if options.reset_store_state {
-        let path = path_buf.as_path();
-        fs::remove_dir_all(path).expect("Failed to remove persistence files");
-    }
-    path_buf
+        .unwrap_or_else(|| default_store_path(node_id))
+}
+
+/// Removes the contents in the persistence files.
+fn reset_store_dir(store_dir: PathBuf) {
+    let path = store_dir.as_path();
+    fs::remove_dir_all(path).expect("Failed to remove persistence files");
 }
 
 /// Gets IP address and port number of a node from node configuration file.
@@ -388,7 +392,15 @@ async fn init_phaselock(
     let genesis = ElaboratedBlock::default();
 
     let storage = get_store_dir(options, node_id);
-    let lw_persistence = LWPersistence::new(Path::new(&storage), "validator").unwrap();
+    let storage_path = Path::new(&storage);
+    if storage_path.exists() {
+        if options.reset_store_state {
+            reset_store_dir(storage.clone());
+        }
+    } else if !options.reset_store_state {
+        debug!("Will create a new directory for persistence files.");
+    }
+    let lw_persistence = LWPersistence::new(storage_path, "validator").unwrap();
     let stored_state = if reset_store_state {
         state.validator.clone()
     } else {
@@ -403,10 +415,10 @@ async fn init_phaselock(
         None
     };
 
-    let phaselock_persistence = [Path::new(&storage), Path::new("phaselock")]
+    let phaselock_persistence = [storage_path, Path::new("phaselock")]
         .iter()
         .collect::<PathBuf>();
-    let node_persistence = [Path::new(&storage), Path::new("node")]
+    let node_persistence = [storage_path, Path::new("node")]
         .iter()
         .collect::<PathBuf>();
     let phaselock = PhaseLock::init(
