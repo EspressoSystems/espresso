@@ -1783,6 +1783,7 @@ dependencies = [
  "async-trait",
  "async-tungstenite 0.15.0",
  "bincode",
+ "escargot",
  "futures",
  "futures-util",
  "itertools 0.10.3",

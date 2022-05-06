@@ -1,4 +1,5 @@
 use async_std::task::spawn_blocking;
+use escargot::CargoBuild;
 use espresso_validator::{project_path, ConsensusConfig, NodeOpt};
 use jf_cap::keys::UserPubKey;
 use std::io::{BufRead, BufReader};
@@ -67,12 +68,14 @@ struct Options {
     fail_after_txn: Option<u64>,
 }
 
-pub fn exe_dir() -> String {
-    let project_path = project_path();
-    let exe_dir: PathBuf = [&project_path, Path::new("../target/release")]
-        .iter()
-        .collect();
-    exe_dir.to_str().unwrap().to_string()
+fn cargo_run(bin: impl AsRef<str>) -> Command {
+    CargoBuild::new()
+        .bin(bin.as_ref())
+        .current_release()
+        .current_target()
+        .run()
+        .expect("Failed to build.")
+        .command()
 }
 
 #[async_std::main]
@@ -172,7 +175,7 @@ async fn main() {
             }
             (
                 id,
-                Command::new(format!("{}/espresso-validator", exe_dir()))
+                cargo_run("espresso-validator")
                     .args(this_args)
                     .stdout(Stdio::piped())
                     .spawn()
@@ -252,13 +255,7 @@ mod test {
     use super::*;
     use std::time::Instant;
 
-    fn demo_exe() -> String {
-        let exe = format!("{}/multi_machine_automation", exe_dir());
-        println!("Demo exe: {}", exe);
-        exe
-    }
-
-    async fn run_demo_exe(
+    async fn automate(
         num_txn: u64,
         num_fail_nodes: u64,
         fail_after_txn: u64,
@@ -277,7 +274,7 @@ mod test {
             "--verbose",
         ];
         let now = Instant::now();
-        let status = Command::new(demo_exe())
+        let status = cargo_run("multi_machine_automation")
             .args(args)
             .status()
             .expect("Failed to execute the multi-machine automation");
@@ -291,32 +288,32 @@ mod test {
 
     #[async_std::test]
     async fn test_small_fail_none() {
-        run_demo_exe(5, 0, 0, true).await;
+        automate(5, 0, 0, true).await;
     }
 
     #[async_std::test]
     async fn test_large_fail_none() {
-        run_demo_exe(50, 0, 0, true).await;
+        automate(50, 0, 0, true).await;
     }
 
     #[async_std::test]
     async fn test_small_fail_one() {
-        run_demo_exe(5, 1, 3, true).await;
+        automate(5, 1, 3, true).await;
     }
 
     #[async_std::test]
     async fn test_small_fail_some() {
-        run_demo_exe(5, 2, 2, true).await;
+        automate(5, 2, 2, true).await;
     }
 
     #[async_std::test]
     async fn test_small_fail_many() {
-        run_demo_exe(5, 3, 1, false).await;
+        automate(5, 3, 1, false).await;
     }
 
     // #[async_std::test]
     // async fn test_large_fail_some() {
-    //     run_demo_exe(50, 1, 1, true).await;
-    //     // run_demo_exe(5, 2, 2, true).await;
+    //     automate(50, 1, 1, true).await;
+    //     // automate(5, 2, 2, true).await;
     // }
 }
