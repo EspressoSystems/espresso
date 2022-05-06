@@ -141,8 +141,15 @@ async fn main() {
         Some(num_txn) => num_txn.to_string(),
         None => "".to_string(),
     };
+
+    // Read node info from node configuration file.
+    let num_nodes = match &options.config {
+        None => 7,
+        Some(path) => ConsensusConfig::from_file(path).nodes.len(),
+    };
     let (num_fail_nodes, fail_after_txn_str) = match options.num_fail_nodes {
         Some(num_fail_nodes) => {
+            assert!(num_fail_nodes <= num_nodes as u64);
             let fail_after_txn_str = options
                 .fail_after_txn
                 .expect("`fail_after_txn` isn't specified when `num_failed_nodes` is.")
@@ -150,12 +157,6 @@ async fn main() {
             (num_fail_nodes, fail_after_txn_str)
         }
         None => (0, "".to_string()),
-    };
-
-    // Read node info from node configuration file.
-    let num_nodes = match &options.config {
-        None => 7,
-        Some(path) => ConsensusConfig::from_file(path).nodes.len(),
     };
 
     // Start the consensus for each node.
@@ -217,7 +218,7 @@ async fn main() {
     let mut commitment = "".to_string();
     let mut succeeded_nodes = 0;
     for ((id, mut p), output) in processes.into_iter().zip(outputs) {
-        println!("waiting for validator {}", id);
+        println!("Waiting for validator {}", id);
         let process: Result<ExitStatus, _> = p.wait();
         process.unwrap_or_else(|_| panic!("Failed to run the validator for node {}", id));
         // Check whether the commitments are the same.
@@ -271,6 +272,7 @@ mod test {
             num_fail_nodes,
             "--fail-after-txn",
             fail_after_txn,
+            "--reset-store-state",
             "--verbose",
         ];
         let now = Instant::now();
@@ -292,11 +294,6 @@ mod test {
     }
 
     #[async_std::test]
-    async fn test_large_fail_none() {
-        automate(50, 0, 0, true).await;
-    }
-
-    #[async_std::test]
     async fn test_small_fail_one() {
         automate(5, 1, 3, true).await;
     }
@@ -311,9 +308,13 @@ mod test {
         automate(5, 3, 1, false).await;
     }
 
-    // #[async_std::test]
-    // async fn test_large_fail_some() {
-    //     automate(50, 1, 1, true).await;
-    //     // automate(5, 2, 2, true).await;
-    // }
+    #[async_std::test]
+    async fn test_large_fail_none() {
+        automate(50, 0, 0, true).await;
+    }
+
+    #[async_std::test]
+    async fn test_large_fail_some() {
+        automate(50, 2, 10, true).await;
+    }
 }

@@ -169,7 +169,7 @@ async fn generate_transactions(
     let mut txn_proposed_round = 0;
     let mut final_commitment = "".to_string();
     while round < num_txn {
-        println!("Starting round {}", round + 1);
+        info!("Starting round {}", round + 1);
         report_mem();
         info!("Commitment: {}", phaselock.current_state().await.commit());
 
@@ -215,7 +215,7 @@ async fn generate_transactions(
                         let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                             .unwrap()
                             .to_string();
-                        println!("  - Round {} completed. Commitment: {}", round, commitment);
+                        info!("  - Round {} completed. Commitment: {}", round, commitment);
                         final_commitment = commitment;
                         break true;
                     }
