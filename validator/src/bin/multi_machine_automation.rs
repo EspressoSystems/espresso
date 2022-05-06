@@ -1,9 +1,9 @@
 use async_std::task::spawn_blocking;
 use escargot::CargoBuild;
-use espresso_validator::{project_path, ConsensusConfig, NodeOpt};
+use espresso_validator::{ConsensusConfig, NodeOpt};
 use jf_cap::keys::UserPubKey;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 use structopt::StructOpt;
 
