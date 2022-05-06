@@ -289,32 +289,11 @@ mod test {
     }
 
     #[async_std::test]
-    async fn test_small_fail_none() {
+    async fn test_automation() {
         automate(5, 0, 0, true).await;
-    }
-
-    #[async_std::test]
-    async fn test_small_fail_one() {
         automate(5, 1, 3, true).await;
-    }
-
-    #[async_std::test]
-    async fn test_small_fail_some() {
         automate(5, 2, 2, true).await;
-    }
-
-    #[async_std::test]
-    async fn test_small_fail_many() {
         automate(5, 3, 1, false).await;
-    }
-
-    #[async_std::test]
-    async fn test_large_fail_none() {
-        automate(50, 0, 0, true).await;
-    }
-
-    #[async_std::test]
-    async fn test_large_fail_some() {
         automate(50, 2, 10, true).await;
     }
 }
