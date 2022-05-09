@@ -27,12 +27,8 @@ struct Options {
     node_opt: NodeOpt,
 
     /// Path to the node configuration file.
-    #[structopt(long, short)]
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONFIG_PATH")]
     pub config: Option<PathBuf>,
-
-    /// Path to the universal parameter file.
-    #[structopt(long, short)]
-    pub universal_param_path: Option<String>,
 
     /// Whether to generate and store public keys for all nodes.
     ///
@@ -47,7 +43,7 @@ struct Options {
     ///
     /// Public keys will be stored under the specified directory, file names starting
     /// with `pk_`.
-    #[structopt(long, short)]
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_PUB_KEY_PATH")]
     pub pk_path: Option<PathBuf>,
 
     /// Id of the current node.
@@ -66,7 +62,7 @@ struct Options {
     ///
     /// This option may be passed multiple times to initialize the ledger with multiple native
     /// token records.
-    #[structopt(long)]
+    #[structopt(long, env = "ESPRESSO_FAUCET_PUB_KEY")]
     pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.
@@ -304,11 +300,6 @@ async fn main() -> Result<(), std::io::Error> {
     let options = Options::from_args();
     let config_path = options.config.clone().unwrap_or_else(default_config_path);
     let config = ConsensusConfig::from_file(&config_path);
-
-    // Override the path to the universal parameter file if it's specified
-    if let Some(dir) = options.universal_param_path.as_ref() {
-        std::env::set_var("UNIVERSAL_PARAM_PATH", dir);
-    }
 
     if options.gen_pk {
         generate_keys(&options, &config);

@@ -17,18 +17,14 @@ struct Options {
     node_opt: NodeOpt,
 
     /// Path to the node configuration file.
-    #[structopt(long, short)]
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONFIG_PATH")]
     pub config: Option<PathBuf>,
-
-    /// Path to the universal parameter file.
-    #[structopt(long, short)]
-    pub universal_param_path: Option<PathBuf>,
 
     /// Path to public keys.
     ///
     /// Public keys will be stored under the specified directory, file names starting
     /// with `pk_`.
-    #[structopt(long, short)]
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_PUB_KEY_PATH")]
     pub pk_path: Option<PathBuf>,
 
     /// Public key which should own a faucet record in the genesis block.
@@ -38,7 +34,7 @@ struct Options {
     ///
     /// This option may be passed multiple times to initialize the ledger with multiple native
     /// token records.
-    #[structopt(long)]
+    #[structopt(long, env = "ESPRESSO_FAUCET_PUB_KEY")]
     pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.
@@ -115,12 +111,6 @@ async fn main() {
         config_path = path.display().to_string();
         args.push("--config");
         args.push(&config_path);
-    }
-    let universal_param_path;
-    if let Some(path) = &options.universal_param_path {
-        universal_param_path = path.display().to_string();
-        args.push("--universal-param-path");
-        args.push(&universal_param_path);
     }
     let pk_path;
     if let Some(path) = &options.pk_path {

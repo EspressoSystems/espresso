@@ -69,7 +69,7 @@ pub struct NodeOpt {
     /// Path to persistence files for all nodes.
     ///
     /// Persistence files will be nested under the specified directory.
-    #[structopt(long, short)]
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_STORE_PATH")]
     pub store_path: Option<PathBuf>,
 
     /// Whether the current node should run a full node.
@@ -77,11 +77,11 @@ pub struct NodeOpt {
     pub full: bool,
 
     /// Path to assets including web server files.
-    #[structopt(long = "assets")]
+    #[structopt(long = "assets", env = "ESPRESSO_VALIDATOR_WEB_PATH")]
     pub web_path: Option<PathBuf>,
 
     /// Path to API specification and messages.
-    #[structopt(long = "api")]
+    #[structopt(long = "api", env = "ESPRESSO_VALIDATOR_API_PATH")]
     pub api_path: Option<PathBuf>,
 
     #[structopt(long, env = "ESPRESSO_VALIDATOR_PORT", default_value = "5000")]
