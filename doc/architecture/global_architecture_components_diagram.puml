@@ -41,7 +41,12 @@ package "Address Book API" #lightgray {
     get_enc_pub_key_from_addr --> AB
 }
 
-[Faucet] as F
+
+note top of F: The Faucet contains a Wallet instance.
+Component Faucet as F {
+    Component Wallet As W
+}
+
 package "Faucet API" #lightgray {
     get_cap_fee_record --> F
 }
