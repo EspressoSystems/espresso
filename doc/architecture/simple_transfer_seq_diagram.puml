@@ -6,25 +6,20 @@ Database EsQS
 
 EsQS --> Validator: subscribe_for_events(5)
 
-WalletAlice --> EsQS: subscribe_for_blocks(14)
-WalletBob --> EsQS: subscribe_for_blocks(20)
-
 WalletAlice --> Validator: latest_block_id()
 Validator --> WalletAlice: 78
-
 WalletAlice --> EsQS: get_cap_state(78)
 EsQS --> WalletAlice: cap_state_78
-
-
 WalletAlice -> WalletAlice: validate(cap_state_78)
+WalletAlice --> EsQS: subscribe_for_blocks(78)
+
 
 WalletBob --> Validator: latest_block_id()
 Validator --> WalletBob: 78
-
 WalletBob --> EsQS: get_cap_state(78)
 EsQS --> WalletBob: cap_state_78
 WalletBob -> WalletBob: validate(cap_state_78)
-
+WalletBob --> EsQS: subscribe_for_blocks(78)
 
 Alice --> WalletAlice: key_gen()
 WalletAlice --> Alice: (sk_a,pk_a,addr_a)
