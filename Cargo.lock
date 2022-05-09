@@ -1948,6 +1948,7 @@ dependencies = [
  "ark-std",
  "async-std",
  "bincode",
+ "dirs",
  "espresso-validator",
  "futures",
  "hex",
