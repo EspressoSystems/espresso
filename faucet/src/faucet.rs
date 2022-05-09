@@ -297,7 +297,7 @@ mod test {
         let grant_size = 5000;
         let opt = FaucetOptions {
             mnemonic: mnemonic.to_string(),
-            faucet_keystore_path: PathBuf::from(faucet_dir.path()),
+            faucet_keystore_path: Some(PathBuf::from(faucet_dir.path())),
             faucet_password: "".to_string(),
             faucet_port: faucet_port.clone(),
             esqs_url: network.query_api.clone(),
