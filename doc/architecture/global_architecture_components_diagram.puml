@@ -32,14 +32,6 @@ note top of BE: <<not_for_V1>>
 component NetworkStats as NS
 note top of NS: <<not_for_V1>>
 
-[Owner's memos store] as OMS
-note top of OMS: <<not_for_V1>>
-package "Memo store API" #lightgray {
-    interface fetch_memos
-    interface push_memo
-    fetch_memos --> OMS
-    push_memo --> OMS
-}
 
 [AddressBook] as AB
 package "Address Book API" #lightgray {
@@ -112,9 +104,7 @@ component Validator #white {
     get_events_since_first_count --> CAPLedger
 }
 
-Wallet --> fetch_memos
 Wallet --> submit_tx
-Wallet --> push_memo
 Wallet --> get_mt_proof_asset_record
 Wallet --> register_addr_and_enc_pub_key
 Wallet --> get_enc_pub_key_from_addr
