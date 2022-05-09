@@ -64,7 +64,7 @@ struct Options {
     /// killed.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
-    #[structopt(long)]
+    #[structopt(long, requires("num-fail-nodes"))]
     fail_after_txn: Option<u64>,
 }
 
@@ -150,11 +150,15 @@ async fn main() {
     let (num_fail_nodes, fail_after_txn_str) = match options.num_fail_nodes {
         Some(num_fail_nodes) => {
             assert!(num_fail_nodes <= num_nodes as u64);
-            let fail_after_txn_str = options
-                .fail_after_txn
-                .expect("`fail_after_txn` isn't specified when `num_failed_nodes` is.")
-                .to_string();
-            (num_fail_nodes, fail_after_txn_str)
+            if num_fail_nodes == 0 {
+                (0, "".to_string())
+            } else {
+                let fail_after_txn_str = options
+                    .fail_after_txn
+                    .expect("`fail_after_txn` isn't specified when `num_failed_nodes` is nonzero.")
+                    .to_string();
+                (num_fail_nodes, fail_after_txn_str)
+            }
         }
         None => (0, "".to_string()),
     };
@@ -215,7 +219,7 @@ async fn main() {
         .collect::<Vec<_>>();
 
     // Check each process.
-    let mut commitment = "".to_string();
+    let mut commitment = None;
     let mut succeeded_nodes = 0;
     for ((id, mut p), output) in processes.into_iter().zip(outputs) {
         println!("Waiting for validator {}", id);
@@ -228,14 +232,17 @@ async fn main() {
                 for line in lines {
                     if line.starts_with("Final commitment:") {
                         let strs: Vec<&str> = line.split(' ').collect();
-                        let comm = strs.last().unwrap_or_else(|| {
+                        let final_commitment = strs.last().unwrap_or_else(|| {
                             panic!("Failed to parse commitment for node {}", id)
                         });
-                        println!("Validator {} finished with commitment {}", id, comm);
-                        if commitment.is_empty() {
-                            commitment = comm.to_string();
+                        println!(
+                            "Validator {} finished with commitment {}",
+                            id, final_commitment
+                        );
+                        if let Some(comm) = commitment.clone() {
+                            assert_eq!(comm, final_commitment.to_string());
                         } else {
-                            assert_eq!(comm, &commitment);
+                            commitment = Some(final_commitment.to_string());
                         }
                         succeeded_nodes += 1;
                         break;

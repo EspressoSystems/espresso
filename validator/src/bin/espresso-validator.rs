@@ -167,7 +167,7 @@ async fn generate_transactions(
 
     let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
     let mut txn_proposed_round = 0;
-    let mut final_commitment = "".to_string();
+    let mut final_commitment = None;
     while round < num_txn {
         info!("Starting round {}", round + 1);
         report_mem();
@@ -216,7 +216,7 @@ async fn generate_transactions(
                             .unwrap()
                             .to_string();
                         info!("  - Round {} completed. Commitment: {}", round, commitment);
-                        final_commitment = commitment;
+                        final_commitment = Some(commitment);
                         break true;
                     }
                 }
@@ -283,11 +283,11 @@ async fn generate_transactions(
     // !!!!!!     WARNING !!!!!!!
     // If the output below is changed, update the message for main() in
     // src/bin/multi_machine_automation.rs as well
-    if !final_commitment.is_empty() {
+    if let Some(commitment) = final_commitment {
         println!(
             // THINK TWICE BEFORE CHANGING THIS
             "Final commitment: {}",
-            final_commitment
+            commitment
         );
     }
     // !!!!!! END WARNING !!!!!!!
