@@ -9,6 +9,23 @@ EsQS --> Validator: subscribe_for_events(5)
 WalletAlice --> EsQS: subscribe_for_blocks(14)
 WalletBob --> EsQS: subscribe_for_blocks(20)
 
+WalletAlice --> Validator: latest_block_id()
+Validator --> WalletAlice: 78
+
+WalletAlice --> EsQS: get_cap_state(78)
+EsQS --> WalletAlice: cap_state_78
+
+
+WalletAlice -> WalletAlice: validate(cap_state_78)
+
+WalletBob --> Validator: latest_block_id()
+Validator --> WalletBob: 78
+
+WalletBob --> EsQS: get_cap_state(78)
+EsQS --> WalletBob: cap_state_78
+WalletBob -> WalletBob: validate(cap_state_78)
+
+
 Alice --> WalletAlice: key_gen()
 WalletAlice --> Alice: (sk_a,pk_a,addr_a)
 
@@ -39,12 +56,22 @@ note right Alice
 For V1 fees will be 0.
 end note
 
+Validator -> EsQS: new_block_79
+
+EsQS -> WalletAlice: new_block_79
+note right WalletAlice
+Check in particular the Quorum Certificate.
+end note
+WalletAlice -> WalletAlice: validate_apply(new_block_79)
+
+EsQS -> WalletBob: new_block_79
+note right WalletBob
+Check in particular the Quorum Certificate.
+end note
+WalletBob -> WalletBob: validate_apply(new_block_79)
+
 Alice --> WalletAlice: transfer_asset(sk_a,USDC,15,pk_b,addr_b)
 
-WalletAlice --> Validator: latest_block_id()
-Validator --> WalletAlice: 78
-WalletAlice --> EsQS: get_cap_state(78)
-EsQS --> WalletAlice: cap_state_78
 
 note right WalletAlice
 Memo is part of the transaction and stored on chain
@@ -54,8 +81,11 @@ WalletAlice --> WalletAlice: tx = build_tx(sk_a,USDC,15,pk_b,addr_b,cap_state_78
 
 WalletAlice --> Validator: submit_tx(tx)
 
-Validator --> WalletAlice:new_block_79
-Validator --> WalletBob:new_block_79
+Validator --> EsQS :new_block_80
+EsQS --> WalletBob:new_block_80
+WalletBob -> WalletBob: validate_apply(new_block_80)
+EsQS --> WalletAlice:new_block_80
+WalletAlice -> WalletAlice: validate_apply(new_block_80)
 
 note right WalletBob
 Bob decrypts the memos from the new block.
