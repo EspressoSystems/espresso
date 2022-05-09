@@ -61,11 +61,11 @@ struct Options {
 
     /// Public key which should own a faucet record in the genesis block.
     ///
-    /// If this option is given, the ledger will be initialized with a record
-    /// of 2^32 native tokens, owned by the public key.
+    /// For each given public key, the ledger will be initialized with a record of 2^32 native
+    /// tokens, owned by the public key.
     ///
-    /// This option may be passed multiple times to initialize the ledger with
-    /// multiple native token records
+    /// This option may be passed multiple times to initialize the ledger with multiple native
+    /// token records.
     #[structopt(long)]
     pub faucet_pub_key: Vec<UserPubKey>,
 
@@ -164,11 +164,11 @@ async fn generate_transactions(
 
     // Start consensus for each transaction
     let mut round = 0;
-    let mut succeeded_rounds = 0;
 
     let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
     let mut txn_proposed_round = 0;
-    while succeeded_rounds < num_txn {
+    let mut final_commitment = None;
+    while round < num_txn {
         info!("Starting round {}", round + 1);
         report_mem();
         info!("Commitment: {}", phaselock.current_state().await.commit());
@@ -215,16 +215,8 @@ async fn generate_transactions(
                         let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                             .unwrap()
                             .to_string();
-                        succeeded_rounds += 1;
-                        // !!!!!!     WARNING !!!!!!!
-                        // If the output below is changed, update the message for main() in
-                        // src/bin/multi_machine_automation.rs as well
-                        println!(
-                            // THINK TWICE BEFORE CHANGING THIS
-                            "  - Completed {} rounds. Commitment: {}",
-                            succeeded_rounds, commitment
-                        );
-                        // !!!!!! END WARNING !!!!!!!
+                        info!("  - Round {} completed. Commitment: {}", round, commitment);
+                        final_commitment = Some(commitment);
                         break true;
                     }
                 }
@@ -287,7 +279,18 @@ async fn generate_transactions(
         round += 1;
     }
 
-    info!("All rounds completed");
+    info!("All rounds completed.");
+    // !!!!!!     WARNING !!!!!!!
+    // If the output below is changed, update the message for main() in
+    // src/bin/multi_machine_automation.rs as well
+    if let Some(commitment) = final_commitment {
+        println!(
+            // THINK TWICE BEFORE CHANGING THIS
+            "Final commitment: {}",
+            commitment
+        );
+    }
+    // !!!!!! END WARNING !!!!!!!
 }
 
 #[async_std::main]
