@@ -4,8 +4,10 @@ Actor Alice
 Actor Bob
 Database EsQS
 
-WalletAlice --> Validator: subscribe_for_events(14)
-WalletBob --> Validator: subscribe_for_events(20)
+EsQS --> Validator: subscribe_for_events(5)
+
+WalletAlice --> EsQS: subscribe_for_blocks(14)
+WalletBob --> EsQS: subscribe_for_blocks(20)
 
 Alice --> WalletAlice: key_gen()
 WalletAlice --> Alice: (sk_a,pk_a,addr_a)

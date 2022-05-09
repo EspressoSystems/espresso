@@ -57,6 +57,7 @@ package "Faucet API" #lightgray {
 package "Block queries" as BQ #lightgray {
     interface "getblock/:block_id" as get_block_block_id
     interface  "getblock/hash/:hash" as get_block_hash
+    interface "subscribe_for_blocks/:first" as sus_blocks_first
     interface  "gettransaction/:block_id/:txn_id" as get_transaction_block_id_tx_id
     interface "gettransaction/hash/:hash" as get_transaction_hash
     interface "getrecord/:block_id/:tx_id/:output_index" as get_record_block_id_tx_id_output_index
@@ -70,6 +71,7 @@ package "Block queries" as BQ #lightgray {
     get_transaction_hash --> EsQS
     get_record_block_id_tx_id_output_index --> EsQS
     get_record_uid --> EsQS
+    sus_blocks_first --> EsQS
     check_nullifier_block_id_nullifier --> EsQS
 
     get_cap_state_block_id --> EsQS
@@ -121,10 +123,12 @@ Wallet --> get_plonk_verif_keys
 Wallet --> get_cap_fee_record
 Wallet --> get_nullifiers
 Wallet --> get_block_block_id
+Wallet --> sus_blocks_first
 Wallet --> check_nullifier_block_id_nullifier
 Wallet --> latest_block_id
 
 BE --> get_block_block_id
+BE --> sus_blocks_first
 BE --> get_block_hash
 BE --> get_transaction_block_id_tx_id
 BE --> get_transaction_hash
