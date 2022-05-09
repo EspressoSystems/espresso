@@ -3,15 +3,26 @@
 component "Wallet" as Wallet
 left to right direction
 
-package "Wallet API" #lightgray {
-    issue_asset --> Wallet
-    transfer_asset --> Wallet
-    freeze_record --> Wallet
-    trace_asset --> Wallet
-    manage_keys_cap --> Wallet
-    view_balances_cap --> Wallet
-    view_txs_cap --> Wallet
-    manage_address_book_cap --> Wallet
+package "Wallet CLI" #lightgray {
+    address --> Wallet
+    pub_key --> Wallet
+    assets --> Wallet
+    asset --> Wallet
+    balance --> Wallet
+    transfer --> Wallet
+    transfer_from --> Wallet
+    create_asset --> Wallet
+    mint --> Wallet
+    freeze --> Wallet
+    unfreeze --> Wallet
+    transactions --> Wallet
+    transaction --> Wallet
+    gen_key --> Wallet
+    load_key --> Wallet
+    import_memo --> Wallet
+    info --> Wallet
+    view --> Wallet
+    import_asset --> Wallet
 }
 
 component "Espresso Query Service" as EsQS
