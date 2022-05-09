@@ -297,11 +297,11 @@ mod test {
 
     #[async_std::test]
     async fn test_automation() {
-        automate(5, 0, 0, true).await;
         automate(5, 1, 3, true).await;
 
         // TODO !keyao Investigate inconsistent automation failures
         // Issue: https://github.com/EspressoSystems/espresso/issues/270
+        // automate(5, 0, 0, true).await;
         // automate(5, 2, 2, true).await;
         // automate(5, 3, 1, false).await;
         // automate(50, 2, 10, true).await;
