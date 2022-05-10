@@ -31,15 +31,19 @@ use std::collections::{HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
 
+/// Height of the Merkle tree
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
-// TODO
+/// TODO Unused type wrapper
 pub struct LedgerRecordCommitment(pub RecordCommitment);
 
-// TODO
+/// TODO Unused type wrapper. Transaction is also defined in ledger.rs and
+/// imported from reef in wallet/testing/mocks.rs
 #[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq, Hash)]
 pub struct Transaction(pub TransactionNote);
 
+/// A transaction with proofs
+///
 /// Validation involves checking proofs that unspent records are unspent.
 /// The proofs are large and only needed during validation, so we don't
 /// carry them everywhere. The association between records in the transaction
@@ -68,8 +72,11 @@ impl ElaboratedTransaction {
     }
 }
 
-/// A user-visible commitment to an elaborated transaction. When you see
-/// TXN~b, where b is a base64 string, that's an ElaboratedTransactionHash.
+/// A user-visible notation for a transaction hash, like TXN~bbb
+///
+/// The tagged_blob pragma informs
+/// [TaggedBase64](https://github.com/EspressoSystems/tagged-base64/)
+/// to use TXN as the tag when serializing.
 #[ser_test(arbitrary)]
 #[tagged_blob("TXN")]
 #[derive(
@@ -77,6 +84,8 @@ impl ElaboratedTransaction {
 )]
 pub struct ElaboratedTransactionHash(pub(crate) Commitment<ElaboratedTransaction>);
 
+/// A collection of transactions
+///
 /// A Block is the collection of transactions to be validated. Usually,
 /// the entire block will be committed to the ledger or rejected, though
 /// it is possible to drop individual invalid transactions.
@@ -95,6 +104,8 @@ pub struct ElaboratedTransactionHash(pub(crate) Commitment<ElaboratedTransaction
 )]
 pub struct Block(pub Vec<TransactionNote>);
 
+/// A block of transactions with proofs
+///
 /// A block with nullifier set non-membership proofs. A nullifiers is
 /// zero knowledge proofs that a record has not been spent.
 #[ser_test]
@@ -117,8 +128,8 @@ pub struct ElaboratedBlock {
 
 /// Get a commitment to an elaborated block.
 ///
-/// The Committed trait allows us to designate the information to extract
-/// from a structure to hash into a cryptographic commitment.
+/// The Committable trait allows us to designate the information to
+/// extract from a structure to hash into a cryptographic commitment.
 impl Committable for ElaboratedBlock {
     fn commit(&self) -> Commitment<Self> {
         commit::RawCommitmentBuilder::new("ElaboratedBlock")
@@ -147,6 +158,9 @@ impl BlockContents<H_256> for ElaboratedBlock {
     ///
     /// Preventing double spending is essential. When adding a transaction
     /// to a block, an error is generated if a duplicate nullifier is used.
+    ///
+    /// # Errors
+    /// - [ValidationError::ConflictingNullifiers]
     fn add_transaction_raw(&self, txn: &ElaboratedTransaction) -> Result<Self, ValidationError> {
         let mut ret = self.clone();
 
@@ -169,10 +183,12 @@ impl BlockContents<H_256> for ElaboratedBlock {
         Ok(ret)
     }
 
+    /// A cryptographic hash of an elaborated block
     fn hash(&self) -> BlockHash<H_256> {
         BlockHash::<H_256>::from_array(self.commit().try_into().unwrap())
     }
 
+    /// A cryptographic hash of the given bytes
     fn hash_leaf(bytes: &[u8]) -> LeafHash<H_256> {
         // TODO: fix this hack, it is specifically working around the
         // misuse-preventing `T: Committable` on `RawCommitmentBuilder`
@@ -182,26 +198,36 @@ impl BlockContents<H_256> for ElaboratedBlock {
         LeafHash::<H_256>::from_array(ret.try_into().unwrap())
     }
 
+    /// A cryptographic hash of an elaborated transaction
     fn hash_transaction(txn: &ElaboratedTransaction) -> TransactionHash<H_256> {
         TransactionHash::<H_256>::from_array(txn.commit().try_into().unwrap())
     }
 }
 
-// TODO
+/// Validation errors. Note: Wraps [TxnApiError] because it cannot be serialized.
 #[derive(Debug, Snafu, Serialize, Deserialize)]
 #[snafu(visibility(pub(crate)))]
 pub enum ValidationError {
+    /// A record was already spent.
     NullifierAlreadyExists {
         nullifier: Nullifier,
     },
+    /// An invalid nullifier proof.
     BadNullifierProof {},
     MissingNullifierProof {},
+    /// A transaction or block of transactions cannot consume a record more than once.
     ConflictingNullifiers {},
+    /// A generic failure.
     Failed {},
+    /// An incorrect Merkle length.
     BadMerkleLength {},
+    /// An invalid Merkle leaf.
     BadMerkleLeaf {},
+    /// An incorrect Merkle root.
     BadMerkleRoot {},
+    /// An invalid Merkle path.
     BadMerklePath {},
+    /// An error from the Jellyfish library
     CryptoError {
         // TxnApiError cannot be serialized, and, since it depends on many foreign error types which
         // are not Serialize, it is infeasible to make it serializable. Instead, if we have to
@@ -211,10 +237,12 @@ pub enum ValidationError {
         #[serde(with = "ser_display")]
         err: Result<TxnApiError, String>,
     },
+    /// Only certain predefined numbers of inputs and outputs are supported.
     UnsupportedTransferSize {
         num_inputs: usize,
         num_outputs: usize,
     },
+    /// Only certain predefined numbers of inputs and outputs are supported.
     UnsupportedFreezeSize {
         num_inputs: usize,
     },
@@ -262,7 +290,7 @@ pub(crate) mod ser_debug {
     }
 }
 
-// TxnApiError doesn't implement Clone :/
+/// Adapter because [TxnApiError] doesn't implement Clone
 impl Clone for ValidationError {
     fn clone(&self) -> Self {
         use ValidationError::*;
@@ -293,6 +321,7 @@ impl Clone for ValidationError {
     }
 }
 
+/// A cryptographic commitment to a block
 #[ser_test(arbitrary)]
 #[tagged_blob("BLOCK")]
 #[derive(
@@ -300,7 +329,7 @@ impl Clone for ValidationError {
 )]
 pub struct BlockCommitment(pub commit::Commitment<Block>);
 
-/// Implements From<CanonicalBytes>. See serialize.rs in Jellyfish.
+// Implements From<CanonicalBytes>. See serialize.rs in Jellyfish.
 deserialize_canonical_bytes!(BlockCommitment);
 
 impl Committable for Block {
@@ -314,6 +343,8 @@ impl Committable for Block {
     }
 }
 
+/// Sliding window for transaction freshness
+///
 /// We keep several Jellyfish node values here to allow validation of
 /// transactions built against recent but not most recent ledger state
 /// commitments.
@@ -332,6 +363,7 @@ impl Committable for RecordMerkleHistory {
     }
 }
 
+/// A type wrapper for [MerkleCommitment]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecordMerkleCommitment(pub MerkleCommitment);
 
@@ -348,7 +380,7 @@ impl Committable for RecordMerkleCommitment {
     }
 }
 
-/// The Jellyfish MerkleFrontier enables efficient batch updates.
+/// Jellyfish [MerkleFrontier] enables efficient batch updates
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecordMerkleFrontier(pub MerkleFrontier);
 
@@ -373,6 +405,8 @@ impl Committable for RecordMerkleFrontier {
     }
 }
 
+/// The ledger state commitment
+///
 /// Fundamental to a distributed ledger is the notion of a state
 /// commitment which provides a succinct fingerprint of the entire
 /// history of the ledger and an indication of consensus. All
@@ -408,9 +442,10 @@ pub mod state_comm {
         }
     }
 
-    /// The essential state of the ledger. Note that many elements
-    /// of the state are represented succinctly as cryptographic
-    /// commitments.
+    /// The essential state of the ledger
+    ///
+    /// Note that many elements of the state are represented
+    /// succinctly as cryptographic commitments.
     #[derive(Debug)]
     pub struct LedgerCommitmentOpening {
         pub prev_commit_time: u64,
@@ -447,30 +482,31 @@ pub mod state_comm {
     }
 }
 
-/// The working state of the ledger. Only the previous state is represented
-/// as a commitment. Other values are present in full.
+/// The working state of the ledger
+///
+/// Only the previous state is represented as a commitment. Other
+/// values are present in full.
 #[ser_test(arbitrary, ark(false))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: Option<state_comm::LedgerStateCommitment>,
     pub verif_crs: VerifierKeySet,
-    // The current record Merkle commitment
+    /// The current record Merkle commitment
     pub record_merkle_commitment: MerkleCommitment,
-    // The current frontier of the record Merkle tree
+    /// The current frontier of the record Merkle tree
     pub record_merkle_frontier: MerkleFrontier,
-    // A list of recent record Merkle root hashes for validating slightly-out- of date transactions.
+    /// A list of recent record Merkle root hashes for validating slightly out-of-date transactions
     pub past_record_merkle_roots: RecordMerkleHistory,
     pub nullifiers_root: set_hash::Hash,
     pub prev_block: BlockCommitment,
 }
 
 impl ValidatorState {
-    /// How many previous record Merkle tree root hashes the validator should remember.
+    /// The number recent record Merkle tree root hashes the validator should remember
     ///
     /// Transactions can be validated without resubmitting or regenerating the ZKPs as long as they
-    /// were generated using a validator state that is at most RECORD_ROOT_HISTORY_SIZE states before
-    /// the current one.
+    /// were generated using a validator state that is in the last RECORD_ROOT_HISTORY_SIZE states.
     pub const RECORD_ROOT_HISTORY_SIZE: usize = 10;
 
     pub fn new(verif_crs: VerifierKeySet, record_merkle_frontier: MerkleTree) -> Self {
@@ -490,6 +526,7 @@ impl ValidatorState {
         }
     }
 
+    /// Cryptographic commitment to the validator state
     pub fn commit(&self) -> state_comm::LedgerStateCommitment {
         let inputs = state_comm::LedgerCommitmentOpening {
             prev_commit_time: self.prev_commit_time,
@@ -523,14 +560,24 @@ impl ValidatorState {
         inputs.commit().into()
     }
 
-    /// Validate a block of elaborated transactions as follows:
-    /// - Verify that none of the nullifiers are used more than once.
-    /// - Collect the keys needed to verify the transaction. There are
-    ///   predefined keys for various numbers of transaction inputs and
-    ///   outputs.
-    /// - Check the Merkle root in the transaction is recent enough.
-    /// - Batch verify the transactions.
+    /// Validate a block of elaborated transactions
+    ///
+    /// Checks the following
+    /// - None of the nullifiers are used more than once
+    /// - Keys are available for the  numbers of transaction inputs and
+    ///   outputs
+    /// - The Merkle roots are recent enough
+    /// - The batch of transactions verifies
+    ///
     /// If valid, return the input transactions and proofs, otherwise return a validation error.
+    ///
+    /// # Errors
+    /// - [ValidationError::BadMerkleRoot]
+    /// - [ValidationError::BadNullifierProof]
+    /// - [ValidationError::CryptoError]
+    /// - [ValidationError::NullifierAlreadyExists]
+    /// - [ValidationError::UnsupportedFreezeSize]
+    /// - [ValidationError::UnsupportedTransferSize]
     pub fn validate_block_check(
         &self,
         now: u64,
@@ -616,6 +663,12 @@ impl ValidatorState {
     ///
     /// For a given instance of ValidatorState, all calls to validate_and_apply must pass the
     /// same remember_commitments value. This identity holds for clones of the original as well.
+    ///
+    /// # Errors
+    /// - [ValidationError::BadNullifierProof]
+    /// - [ValidationError::BadMerklePath]
+    /// # Panics
+    /// Panics if the record Merkle commitment is inconsistent with the record Merkle frontier.
     pub fn validate_and_apply(
         &mut self,
         now: u64,
@@ -690,6 +743,7 @@ impl<'a> Arbitrary<'a> for ValidatorState {
     }
 }
 
+/// States are equivalent if their commitments match.
 impl PartialEq for ValidatorState {
     fn eq(&self, other: &ValidatorState) -> bool {
         self.commit() == other.commit()
@@ -713,6 +767,7 @@ impl State<H_256> for ValidatorState {
         Self::Block::default()
     }
 
+    /// Validate a block for consensus
     fn validate_block(&self, block: &Self::Block) -> bool {
         self.validate_block_check(
             self.prev_commit_time + 1,
@@ -722,6 +777,10 @@ impl State<H_256> for ValidatorState {
         .is_ok()
     }
 
+    /// Append a new block on successful validation
+    ///
+    /// # Errors
+    /// See validate_and_apply.
     fn append(&self, block: &Self::Block) -> Result<Self, Self::Error> {
         let mut state = self.clone();
         state.validate_and_apply(
