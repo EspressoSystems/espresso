@@ -285,6 +285,9 @@ mod test {
         assert_eq!(expect_success, status.success());
     }
 
+    // TODO !keyao Investigate inconsistent automation failures
+    // Issue: https://github.com/EspressoSystems/espresso/issues/270
+    #[ignore]
     #[async_std::test]
     async fn test_automation() {
         automate(5, 0, 0, true).await;

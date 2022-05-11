@@ -32,6 +32,8 @@
             cargo-edit
             cargo-udeps
             cargo-sort
+
+            plantuml
           ] ++ lib.optionals stdenv.isDarwin [
             # required to compile ethers-rs
             darwin.apple_sdk.frameworks.Security
