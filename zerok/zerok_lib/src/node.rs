@@ -17,7 +17,6 @@ pub use futures::stream::Stream;
 use futures::{channel::mpsc, future::RemoteHandle, select, task::SpawnExt};
 use itertools::izip;
 use jf_cap::{
-    keys::{UserAddress, UserPubKey},
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
     MerkleTree, Signature,
 };
@@ -245,12 +244,6 @@ pub trait QueryService {
             .flatten()
             .ok_or(QueryServiceError::InvalidTxnId {})
     }
-
-    /// Make your public key and address known to other nodes.
-    async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError>;
-
-    async fn get_users(&self) -> Result<HashMap<UserAddress, UserPubKey>, QueryServiceError>;
-    async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError>;
 }
 
 #[derive(Clone, Debug, Snafu, Serialize, Deserialize)]
@@ -655,32 +648,6 @@ impl FullState {
 
         Ok(())
     }
-
-    fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
-        let mut known_nodes = self
-            .full_persisted
-            .get_latest_known_nodes()
-            .map_err(|err| QueryServiceError::PersistenceError {
-                msg: err.to_string(),
-            })?;
-        known_nodes.insert(pub_key.address(), pub_key.clone());
-        self.full_persisted.update_known_nodes(&known_nodes);
-        self.full_persisted.commit_known_nodes();
-        Ok(())
-    }
-
-    fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {
-        let known_nodes = self
-            .full_persisted
-            .get_latest_known_nodes()
-            .map_err(|err| QueryServiceError::PersistenceError {
-                msg: err.to_string(),
-            })?;
-        known_nodes
-            .get(address)
-            .cloned()
-            .ok_or(QueryServiceError::InvalidAddress {})
-    }
 }
 
 /// A QueryService that aggregates the full ledger state by observing consensus.
@@ -871,25 +838,6 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
         let mut state = self.state.write().await;
         state.post_memos(block_id, txn_id, memos, sig)
     }
-
-    async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
-        self.state.write().await.introduce(pub_key)
-    }
-
-    async fn get_users(&self) -> Result<HashMap<UserAddress, UserPubKey>, QueryServiceError> {
-        self.state
-            .read()
-            .await
-            .full_persisted
-            .get_latest_known_nodes()
-            .map_err(|err| QueryServiceError::PersistenceError {
-                msg: err.to_string(),
-            })
-    }
-
-    async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {
-        self.state.read().await.get_user(address)
-    }
 }
 
 /// A full node is a QueryService running alongside a lightweight validator.
@@ -1010,18 +958,6 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
         self.as_query_service_mut()
             .post_memos(block_id, txn_id, memos, sig)
             .await
-    }
-
-    async fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
-        self.as_query_service_mut().introduce(pub_key).await
-    }
-
-    async fn get_users(&self) -> Result<HashMap<UserAddress, UserPubKey>, QueryServiceError> {
-        self.as_query_service().get_users().await
-    }
-
-    async fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {
-        self.as_query_service().get_user(address).await
     }
 }
 

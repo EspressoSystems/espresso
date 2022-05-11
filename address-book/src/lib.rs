@@ -139,8 +139,11 @@ pub fn address_book_temp_dir() -> TempDir {
     TempDir::new("espresso-address-book").expect("Failed to create temporary directory.")
 }
 
-pub fn address_book_port() -> String {
-    std::env::var("ESPRESSO_ADDRESS_BOOK_PORT").unwrap_or_else(|_| DEFAULT_PORT.to_string())
+pub fn address_book_port() -> u16 {
+    match std::env::var("ESPRESSO_ADDRESS_BOOK_PORT") {
+        Ok(port) => port.parse().unwrap(),
+        Err(_) => DEFAULT_PORT,
+    }
 }
 
 pub fn espresso_data_path() -> PathBuf {
@@ -159,6 +162,7 @@ pub fn address_book_store_path() -> PathBuf {
 }
 
 pub async fn init_web_server<T: Store + 'static>(
+    port: u16,
     store: T,
 ) -> std::io::Result<JoinHandle<std::io::Result<()>>> {
     let mut app = tide::with_state(ServerState {
@@ -174,15 +178,15 @@ pub async fn init_web_server<T: Store + 'static>(
     app.at("/insert_pubkey").post(insert_pubkey);
     app.at("/request_pubkey").post(request_pubkey);
     app.at("/healthcheck").get(healthcheck);
-    let address = format!("0.0.0.0:{}", address_book_port());
+    let address = format!("0.0.0.0:{}", port);
     Ok(spawn(app.listen(address)))
 }
 
-pub async fn wait_for_server() {
+pub async fn wait_for_server(port: u16) {
     // Wait for the server to come up and start serving.
     let mut backoff = Duration::from_millis(100);
     for _ in 0..ADDRESS_BOOK_STARTUP_RETRIES {
-        if surf::connect(format!("http://localhost:{}", address_book_port()))
+        if surf::connect(format!("http://localhost:{}", port))
             .send()
             .await
             .is_ok()

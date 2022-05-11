@@ -7,13 +7,8 @@ use atomic_store::{
     PersistenceError,
 };
 use core::fmt::Debug;
-use jf_cap::{
-    keys::{UserAddress, UserPubKey},
-    structs::ReceiverMemo,
-    MerkleLeaf, MerkleTree, Signature,
-};
+use jf_cap::{structs::ReceiverMemo, MerkleLeaf, MerkleTree, Signature};
 use seahorse::events::LedgerEvent;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 type OptionalMemoMap = Option<(Vec<ReceiverMemo>, Signature)>;
@@ -26,7 +21,6 @@ enum Resource {
     NullifierSnapshots,
     BlockUids,
     Memos,
-    KnownNodes,
     Events,
 }
 
@@ -41,9 +35,6 @@ pub struct FullPersistence {
     // also, are txn uids not a sequential series? Could this be stored as a list of start/len pairs?
     block_uids: AppendLog<BincodeLoadStore<Vec<Vec<u64>>>>,
     memos: AppendLog<BincodeLoadStore<Vec<OptionalMemoMap>>>,
-    // TODO: !jeb.bearer,nathan.yospe - turn this back into a RollingLog once we fix whatever is
-    // wrong with RollingLog; we don't need to store old versions of the known_nodes map
-    known_nodes: AppendLog<BincodeLoadStore<HashMap<UserAddress, UserPubKey>>>,
     events: AppendLog<BincodeLoadStore<LedgerEvent<EspressoLedger>>>,
 }
 
@@ -58,7 +49,6 @@ impl FullPersistence {
         let nullifier_set_tag = format!("{}_full_nullifier_snapshots", key_tag);
         let txn_uids_tag = format!("{}_txn_uids", key_tag);
         let memos_tag = format!("{}_memos", key_tag);
-        let known_nodes_tag = format!("{}_known_nodes", key_tag);
         let events_tag = format!("{}_events", key_tag);
         let state_history = AppendLog::load(&mut loader, Default::default(), &state_tag, 1024)?;
         let block_history = AppendLog::load(&mut loader, Default::default(), &block_tag, 1024)?;
@@ -68,7 +58,6 @@ impl FullPersistence {
             AppendLog::load(&mut loader, Default::default(), &nullifier_set_tag, 1024)?;
         let block_uids = AppendLog::load(&mut loader, Default::default(), &txn_uids_tag, 1024)?;
         let memos = AppendLog::load(&mut loader, Default::default(), &memos_tag, 1024)?;
-        let known_nodes = AppendLog::load(&mut loader, Default::default(), &known_nodes_tag, 1024)?;
         let events = AppendLog::load(&mut loader, Default::default(), &events_tag, 1024)?;
         let atomic_store = AtomicStore::open(loader)?;
         Ok(FullPersistence {
@@ -79,7 +68,6 @@ impl FullPersistence {
             nullifier_snapshots,
             block_uids,
             memos,
-            known_nodes,
             events,
         })
     }
@@ -99,11 +87,8 @@ impl FullPersistence {
                 .store_resource(&records.get_leaf(uid).expect_ok().unwrap().1.leaf)
                 .unwrap();
         }
-        self.known_nodes
-            .store_resource(&HashMap::default())
-            .unwrap();
 
-        self.commit(&[StateHistory, NullifierSnapshots, RmtLeavesFull, KnownNodes]);
+        self.commit(&[StateHistory, NullifierSnapshots, RmtLeavesFull]);
     }
 
     // clippy introduces a lint in 1.59.0 that incorrectly applies to this construction;
@@ -139,13 +124,6 @@ impl FullPersistence {
     #[allow(clippy::ptr_arg)]
     pub fn store_memos(&mut self, memos: &Vec<OptionalMemoMap>) {
         self.memos.store_resource(memos).unwrap();
-    }
-    pub fn update_known_nodes(&mut self, known_nodes: &HashMap<UserAddress, UserPubKey>) {
-        self.known_nodes.store_resource(known_nodes).unwrap();
-    }
-
-    pub fn commit_known_nodes(&mut self) {
-        self.commit(&[Resource::KnownNodes]);
     }
 
     pub fn commit_accepted(&mut self) {
@@ -200,11 +178,6 @@ impl FullPersistence {
         } else {
             self.memos.skip_version().unwrap();
         }
-        if dirty.contains(&KnownNodes) {
-            self.known_nodes.commit_version().unwrap();
-        } else {
-            self.known_nodes.skip_version().unwrap();
-        }
         if dirty.contains(&Events) {
             self.events.commit_version().unwrap();
         } else {
@@ -243,12 +216,6 @@ impl FullPersistence {
 
     pub fn events_iter(&self) -> Iter<BincodeLoadStore<LedgerEvent<EspressoLedger>>> {
         self.events.iter()
-    }
-
-    pub fn get_latest_known_nodes(
-        &self,
-    ) -> Result<HashMap<UserAddress, UserPubKey>, PersistenceError> {
-        self.known_nodes.load_latest()
     }
 }
 

@@ -78,6 +78,14 @@ pub struct FaucetOptions {
     )]
     pub esqs_url: Url,
 
+    /// URL for the Espresso address book.
+    #[structopt(
+        long,
+        env = "ESPRESSO_ADDRESS_BOOK_URL",
+        default_value = "http://localhost:50078"
+    )]
+    pub address_book_url: Url,
+
     /// URL for a validator to submit transactions to.
     #[structopt(
         long,
@@ -192,7 +200,7 @@ pub async fn init_web_server(
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
         opt.esqs_url.clone(),
-        opt.esqs_url.clone(),
+        opt.address_book_url.clone(),
         opt.submit_url.clone(),
         &mut loader,
     )
@@ -301,6 +309,7 @@ mod test {
             faucet_password: "".to_string(),
             faucet_port: faucet_port.clone(),
             esqs_url: network.query_api.clone(),
+            address_book_url: network.address_book_api.clone(),
             submit_url: network.submit_api.clone(),
             grant_size,
             fee_size: 100,
@@ -315,15 +324,7 @@ mod test {
             Alphanumeric.sample_string(&mut rand::thread_rng(), 16),
             PathBuf::from(receiver_dir.path()),
         );
-        let receiver_backend = NetworkBackend::new(
-            &*UNIVERSAL_PARAM,
-            opt.esqs_url.clone(),
-            opt.esqs_url.clone(),
-            opt.esqs_url.clone(),
-            &mut receiver_loader,
-        )
-        .unwrap();
-        let mut receiver = EspressoKeystore::new(receiver_backend).await.unwrap();
+        let mut receiver = network.create_wallet(&mut receiver_loader).await;
         let receiver_key = receiver
             .generate_user_key("receiver".into(), None)
             .await

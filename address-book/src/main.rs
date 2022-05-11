@@ -6,7 +6,9 @@
 
 use std::fs;
 
-use address_book::{address_book_store_path, init_web_server, signal::handle_signals, FileStore};
+use address_book::{
+    address_book_port, address_book_store_path, init_web_server, signal::handle_signals, FileStore,
+};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook_async_std::Signals;
 
@@ -27,7 +29,7 @@ async fn main() -> Result<(), std::io::Error> {
     fs::create_dir_all(&store_path)?;
     let store = FileStore::new(store_path);
 
-    init_web_server(store)
+    init_web_server(address_book_port(), store)
         .await
         .unwrap_or_else(|err| {
             panic!("Web server exited with an error: {}", err);

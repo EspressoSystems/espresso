@@ -39,7 +39,13 @@ fn main() {
                         Some(id) => id.to_string(),
                         None => String::from("not running"),
                     };
-                    println!("  {} {:?} {}", pid, w.storage(), w.server());
+                    println!(
+                        "  {} {:?} validator={} address-book={}",
+                        pid,
+                        w.storage(),
+                        w.validator(),
+                        w.address_book()
+                    );
                 }
             }
 
