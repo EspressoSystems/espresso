@@ -22,7 +22,7 @@ use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
 use phaselock::{
     data::{BlockHash, LeafHash, TransactionHash},
-    traits::{BlockContents, State},
+    traits::{BlockContents, State, Transaction as TransactionTrait},
     H_256,
 };
 use serde::{Deserialize, Serialize};
@@ -54,6 +54,13 @@ pub struct Transaction(pub TransactionNote);
 pub struct ElaboratedTransaction {
     pub txn: TransactionNote,
     pub proofs: Vec<SetMerkleProof>,
+}
+
+impl TransactionTrait<H_256> for ElaboratedTransaction {
+    fn hash(&self) -> TransactionHash<H_256> {
+        // This is not used in phaselock 0.0.7 and will be replaced in 0.0.8 with `id`
+        todo!()
+    }
 }
 
 impl ElaboratedTransaction {

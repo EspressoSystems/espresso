@@ -732,21 +732,8 @@ dependencies = [
 
 [[package]]
 name = "atomic_store"
-version = "0.1.1"
-source = "git+https://github.com/EspressoSystems/atomicstore.git#e116cea2de934fd315f690d07d45b3bb7a213654"
-dependencies = [
- "ark-serialize",
- "bincode",
- "chrono",
- "glob",
- "serde",
- "snafu",
-]
-
-[[package]]
-name = "atomic_store"
 version = "0.1.2"
-source = "git+https://github.com/EspressoSystems/atomicstore?tag=0.1.2#55d9753e1fcb35c61566b8e056426e85e9e7eeeb"
+source = "git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.2#55d9753e1fcb35c61566b8e056426e85e9e7eeeb"
 dependencies = [
  "ark-serialize",
  "bincode",
@@ -3473,8 +3460,8 @@ dependencies = [
 
 [[package]]
 name = "phaselock"
-version = "0.0.6"
-source = "git+ssh://git@github.com/EspressoSystems/phaselock.git#6c8fed015a9fc5edf90eacc4f9f346b1c7ff361d"
+version = "0.0.7"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?tag=v0.0.7#496d0c970dd02b4616601a0d493e6fecaf2717d4"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-381",
@@ -3506,8 +3493,8 @@ dependencies = [
 
 [[package]]
 name = "phaselock-types"
-version = "0.0.6"
-source = "git+ssh://git@github.com/EspressoSystems/phaselock.git#6c8fed015a9fc5edf90eacc4f9f346b1c7ff361d"
+version = "0.0.7"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?tag=v0.0.7#496d0c970dd02b4616601a0d493e6fecaf2717d4"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3528,8 +3515,8 @@ dependencies = [
 
 [[package]]
 name = "phaselock-utils"
-version = "0.0.6"
-source = "git+ssh://git@github.com/EspressoSystems/phaselock.git#6c8fed015a9fc5edf90eacc4f9f346b1c7ff361d"
+version = "0.0.7"
+source = "git+ssh://git@github.com/EspressoSystems/phaselock.git?tag=v0.0.7#496d0c970dd02b4616601a0d493e6fecaf2717d4"
 dependencies = [
  "async-std",
  "async-trait",
@@ -4279,7 +4266,7 @@ dependencies = [
  "async-scoped",
  "async-std",
  "async-trait",
- "atomic_store 0.1.1 (git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.1)",
+ "atomic_store 0.1.1",
  "bincode",
  "bip0039",
  "chacha20",
@@ -5162,9 +5149,9 @@ dependencies = [
 
 [[package]]
 name = "tracing"
-version = "0.1.32"
+version = "0.1.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a1bdf54a7c28a2bbf701e1d2233f6c77f473486b94bee4f9678da5a148dca7f"
+checksum = "5d0ecdcb44a79f0fe9844f0c4f33a342cbcbb5117de8001e6ba0dc2351327d09"
 dependencies = [
  "cfg-if 1.0.0",
  "log",
@@ -5875,7 +5862,7 @@ dependencies = [
  "async-trait",
  "async-tungstenite 0.15.0",
  "async_executors",
- "atomic_store 0.1.1 (git+https://github.com/EspressoSystems/atomicstore.git)",
+ "atomic_store 0.1.2",
  "bincode",
  "bitvec",
  "chacha20",
