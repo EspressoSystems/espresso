@@ -21,6 +21,11 @@
         sixtyStableToolchain = pkgs.rust-bin.stable."1.60.0".minimal.override {
           extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
         };
+        stableMuslRustToolchain =
+          pkgs.rust-bin.stable."1.59.0".minimal.override {
+            extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
+            targets = [ "x86_64-unknown-linux-musl" ];
+          };
         rustDeps = with pkgs;
           [
             pkgconfig
@@ -32,8 +37,6 @@
             cargo-edit
             cargo-udeps
             cargo-sort
-
-            plantuml
           ] ++ lib.optionals stdenv.isDarwin [
             # required to compile ethers-rs
             darwin.apple_sdk.frameworks.Security
@@ -72,6 +75,29 @@
             license = with licenses; [ mit asl20 ];
           };
         };
+        opensslMusl = muslPkgs.openssl.override { static = true; };
+        curlMusl = (muslPkgs.pkgsStatic.curl.override {
+          http2Support = false;
+          libssh2 = muslPkgs.pkgsStatic.libssh2.dev;
+          zstdSupport = false;
+          idnSupport = false;
+        }).overrideAttrs (oldAttrs:
+          let confFlags = oldAttrs.configureFlags;
+          in {
+            configureFlags = (muslPkgs.lib.take 13 confFlags)
+              ++ (muslPkgs.lib.drop 14 confFlags)
+              ++ [ (muslPkgs.lib.withFeature true "libssh2") ];
+          });
+        # MUSL pkgs
+        muslPkgs = import nixpkgs {
+          localSystem = "x86_64-linux";
+          crossSystem = { config = "x86_64-unknown-linux-musl"; };
+        };
+        muslRustDeps = with muslPkgs.pkgsStatic; [
+          pkgconfig
+          opensslMusl.dev
+          opensslMusl.out
+        ];
       in {
         devShell = pkgs.mkShell {
           buildInputs = with pkgs;
@@ -91,6 +117,23 @@
           perfShell = pkgs.mkShell {
             buildInputs = with pkgs;
               [ cargo-llvm-cov sixtyStableToolchain ] ++ rustDeps;
+          };
+          staticShell = pkgs.mkShell {
+            shellHook = ''
+              export PATH=${pkgs.xdot}/bin:$PATH
+            '';
+            DEP_CURL_STATIC = "y";
+            CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER =
+              "${muslPkgs.llvmPackages_latest.lld}/bin/lld";
+            RUSTFLAGS =
+              "-C target-feature=+crt-static -L${opensslMusl.out}/lib/ -L${curlMusl.out}/lib -L${muslPkgs.pkgsStatic.zstd.out}/lib -L${muslPkgs.pkgsStatic.libssh2}/lib -L${muslPkgs.pkgsStatic.openssl}/lib -lssh2";
+            OPENSSL_STATIC = "true";
+            OPENSSL_DIR = "-L${muslPkgs.pkgsStatic.openssl}";
+            OPENSSL_INCLUDE_DIR = "${opensslMusl.dev}/include/";
+            OPENSSL_LIB_DIR = "${opensslMusl.dev}/lib/";
+            CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
+            buildInputs = with pkgs;
+              [ stableMuslRustToolchain fd ] ++ muslRustDeps;
           };
         };
 
