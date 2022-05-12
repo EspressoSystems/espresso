@@ -47,8 +47,8 @@ pub struct FaucetOptions {
     pub mnemonic: String,
 
     /// path to the faucet keystore
-    #[structopt(long = "keystore-path", env = "ESPRESSO_FAUCET_WALLET_PATH")]
-    pub faucet_keystore_path: PathBuf,
+    #[structopt(long = "keystore-path", env = "ESPRESSO_FAUCET_WALLET_STORE_PATH")]
+    pub faucet_keystore_path: Option<PathBuf>,
 
     /// password on the faucet account keyfile
     #[structopt(
@@ -180,7 +180,14 @@ pub async fn init_web_server(
     let mut loader = Loader::recovery(
         opt.mnemonic.clone().replace('-', " "),
         password,
-        opt.faucet_keystore_path.clone(),
+        opt.faucet_keystore_path.clone().unwrap_or_else(|| {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("./")))
+                .join(".espresso")
+                .join("espresso")
+                .join("faucet")
+                .join("keystore")
+        }),
     );
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
@@ -290,7 +297,7 @@ mod test {
         let grant_size = 5000;
         let opt = FaucetOptions {
             mnemonic: mnemonic.to_string(),
-            faucet_keystore_path: PathBuf::from(faucet_dir.path()),
+            faucet_keystore_path: Some(PathBuf::from(faucet_dir.path())),
             faucet_password: "".to_string(),
             faucet_port: faucet_port.clone(),
             esqs_url: network.query_api.clone(),

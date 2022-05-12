@@ -53,20 +53,7 @@ async fn main() -> Result<(), std::io::Error> {
         net::UserAddress(pub_key.address())
     );
 
-    let enc_key_bytes: [u8; 32] = pub_key.enc_key().into();
-    let address = pub_key.address();
-    println!("export CAPE_FAUCET_MANAGER_MNEMONIC=\"{}\"", mnemonic);
-    println!(
-        "export CAPE_FAUCET_MANAGER_ENC_KEY=0x{}",
-        hex::encode(enc_key_bytes)
-    );
-    println!(
-        "export CAPE_FAUCET_MANAGER_ADDRESS_X=0x{}",
-        field_to_hex(address.internal().x)
-    );
-    println!(
-        "export CAPE_FAUCET_MANAGER_ADDRESS_Y=0x{}",
-        field_to_hex(address.internal().y)
-    );
+    println!("export ESPRESSO_FAUCET_MANAGER_MNEMONIC=\"{}\"", mnemonic);
+    println!("export ESPRESSO_FAUCET_PUB_KEY=\"{}\"", pub_key);
     Ok(())
 }
