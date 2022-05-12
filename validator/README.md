@@ -4,6 +4,18 @@
 * Run `cargo run --release --bin espresso-validator`.
 * Check that `espresso-validator` is generated under `target/release/`.
 
+### Statically linked binary
+
+It is possible to build a statically linked version of this executable (with a musl libc) on `x86_64-linux` using nix (with flakes enabled).
+This is useful because this executable may now be run on any recent linux distribution. Build commands:
+
+```
+nix develop .#staticShell -c cargo build --bin multi_machine_automation
+```
+
+The resulting binary is in `target/x86_64-unknown-linux-musl/release/multi_machine_automation`.
+
+
 ## Create a node config file
 * To demonstrate consensus among 7 nodes, use the default config file, `validator/src/node-config.toml`.
 * Otherwise, create a `.toml` file similar to the default file but with information of the desired number of nodes.
@@ -33,7 +45,7 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
                 * `Node 0` is going to propose all transactions, but not necessarily the leader in each round.
             * `num_txn` is the number of transactions to generate.
                 * If skipped, the consensus will keep running till the process is killed. For easier manual testing, do not skip it.
-            * Add `--full` to run a full node. 
+            * Add `--full` to run a full node.
     * After all processes are done:
         * Check that at least 5 windows display `Round {num_txn} completed` where `num_txn` is the number of transactions, and have the same commitment.
         * Note: Nodes that have completed all (i.e., 3) rounds or timed out will terminate their processes, which may lead to connection errors displayed in other windows. It is okay to ignore these errors as long as there are 5 identical commitments after the final round.
@@ -70,3 +82,4 @@ cd zerok/zerok_client
 cargo run -- localhost:$port
 ```
 where $port is the port number where the full node is serving (50000 + node id, by default). It will take a while to connect (actually, most of that time is deserializing the universal parameters and generating proving keys) and will prompt you when it is ready to process commands.
+
