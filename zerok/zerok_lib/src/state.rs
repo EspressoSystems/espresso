@@ -13,10 +13,8 @@ use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
 use jf_cap::{
-    errors::TxnApiError,
-    structs::{Nullifier, RecordCommitment},
-    txn_batch_verify, MerkleCommitment, MerkleFrontier, MerkleLeafProof, MerkleTree, NodeValue,
-    TransactionNote,
+    errors::TxnApiError, structs::Nullifier, txn_batch_verify, MerkleCommitment, MerkleFrontier,
+    MerkleLeafProof, MerkleTree, NodeValue, TransactionNote,
 };
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
@@ -31,16 +29,8 @@ use std::collections::{HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
 
-/// Height of the Merkle tree
+/// Height of the records Merkle tree
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
-
-/// TODO Unused type wrapper
-pub struct LedgerRecordCommitment(pub RecordCommitment);
-
-/// TODO Unused type wrapper. Transaction is also defined in ledger.rs and
-/// imported from reef in wallet/testing/mocks.rs
-#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq, Hash)]
-pub struct Transaction(pub TransactionNote);
 
 /// A transaction with proofs
 ///
@@ -49,6 +39,12 @@ pub struct Transaction(pub TransactionNote);
 /// carry them everywhere. The association between records in the transaction
 /// note and the proofs is based on parallel arrays; the first input record
 /// corresponds to the first proof, and so on.
+///
+/// A proof that a record is unspent is a Merkle path relative to the
+/// latest nullifier set root hash. The leaf of the path has a key
+/// equal to the hash of the record's nullifier and an empty value,
+/// which demonstrates that the unspent record is not in the nullifier
+/// set rooted at the path's root hash.
 #[derive(
     Debug,
     Clone,
@@ -65,18 +61,18 @@ pub struct ElaboratedTransaction {
     pub proofs: Vec<SetMerkleProof>,
 }
 
-/// Compute a cryptographic hash committing to an elaborated transaction.
 impl ElaboratedTransaction {
+    /// Compute a cryptographic hash committing to an elaborated
+    /// transaction.
     pub(crate) fn etxn_hash(&self) -> ElaboratedTransactionHash {
         ElaboratedTransactionHash(self.commit())
     }
 }
 
-/// A user-visible notation for a transaction hash, like TXN~bbb
-///
-/// The tagged_blob pragma informs
+/// When serialized using [serde_json] or formatted using [Display],
+/// [ElaboratedTransactionHash] is displayed as a
 /// [TaggedBase64](https://github.com/EspressoSystems/tagged-base64/)
-/// to use TXN as the tag when serializing.
+/// string with "TXN" as the tag.
 #[ser_test(arbitrary)]
 #[tagged_blob("TXN")]
 #[derive(
@@ -106,8 +102,11 @@ pub struct Block(pub Vec<TransactionNote>);
 
 /// A block of transactions with proofs
 ///
-/// A block with nullifier set non-membership proofs. A nullifiers is
-/// zero knowledge proofs that a record has not been spent.
+/// When a nullifier is present in the set, it indicates that the
+/// corresponding asset record was spent, and thus "nullfied". Only
+/// the owner or freezer of a record has the secret information to
+/// create a nullifier for the record, but validators can check
+/// nullifiers without the secret information.
 #[ser_test]
 #[derive(
     Default,
@@ -126,11 +125,11 @@ pub struct ElaboratedBlock {
     pub proofs: Vec<Vec<SetMerkleProof>>,
 }
 
-/// Get a commitment to an elaborated block.
-///
-/// The Committable trait allows us to designate the information to
-/// extract from a structure to hash into a cryptographic commitment.
 impl Committable for ElaboratedBlock {
+    /// Get a commitment to an elaborated block.
+    //
+    // The Committable trait allows us to designate the information to
+    // extract from a structure to hash into a cryptographic commitment.
     fn commit(&self) -> Commitment<Self> {
         commit::RawCommitmentBuilder::new("ElaboratedBlock")
             .field("Block contents", self.block.commit())
@@ -139,8 +138,8 @@ impl Committable for ElaboratedBlock {
     }
 }
 
-/// Get a commitment for an elaborated transaction.
 impl Committable for ElaboratedTransaction {
+    /// Get a commitment for an elaborated transaction.
     fn commit(&self) -> Commitment<Self> {
         commit::RawCommitmentBuilder::new("ElaboratedTransaction")
             .field("Txn contents", self.txn.commit())
@@ -149,7 +148,7 @@ impl Committable for ElaboratedTransaction {
     }
 }
 
-/// Allow an elaborated block to be used by our consensus protocol.
+/// Allow an elaborated block to be used by the [PhaseLock](https://phaselock.docs.goespresso.com/phaselock/) consensus protocol.
 impl BlockContents<H_256> for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
@@ -157,7 +156,9 @@ impl BlockContents<H_256> for ElaboratedBlock {
     /// Add an elaborated transaction to a block.
     ///
     /// Preventing double spending is essential. When adding a transaction
-    /// to a block, an error is generated if a duplicate nullifier is used.
+    /// to a block, an error is generated if a duplicate nullifier is
+    /// used. This is an internal consistency check, not a check
+    /// against nullifiers already committed to the ledger.
     ///
     /// # Errors
     /// - [ValidationError::ConflictingNullifiers]
@@ -204,7 +205,7 @@ impl BlockContents<H_256> for ElaboratedBlock {
     }
 }
 
-/// Validation errors. Note: Wraps [TxnApiError] because it cannot be serialized.
+/// Validation errors.
 #[derive(Debug, Snafu, Serialize, Deserialize)]
 #[snafu(visibility(pub(crate)))]
 pub enum ValidationError {
@@ -215,7 +216,8 @@ pub enum ValidationError {
     /// An invalid nullifier proof.
     BadNullifierProof {},
     MissingNullifierProof {},
-    /// A transaction or block of transactions cannot consume a record more than once.
+    /// The transaction being added to a block contains a nullifier
+    /// already present in another transaction in the block.
     ConflictingNullifiers {},
     /// A generic failure.
     Failed {},
@@ -227,22 +229,25 @@ pub enum ValidationError {
     BadMerkleRoot {},
     /// An invalid Merkle path.
     BadMerklePath {},
-    /// An error from the Jellyfish library
+    /// An error from the Jellyfish library Note: This is used to wrap
+    /// [TxnApiError] because it cannot be serialized.
     CryptoError {
-        // TxnApiError cannot be serialized, and, since it depends on many foreign error types which
-        // are not Serialize, it is infeasible to make it serializable. Instead, if we have to
-        // serialize this variant, we will serialize Ok(err) to Err(format(err)), and when we
-        // deserialize we will at least preserve the variant CryptoError and a String representation
-        // of the underlying error.
+        // TxnApiError cannot be serialized, and, since it depends on
+        // many foreign error types which are not Serialize, it is
+        // infeasible to make it serializable. Instead, if we have to
+        // serialize this variant, we will serialize Ok(err) to
+        // Err(format(err)), and when we deserialize we will at least
+        // preserve the variant CryptoError and a String
+        // representation of the underlying error.
         #[serde(with = "ser_display")]
         err: Result<TxnApiError, String>,
     },
-    /// Only certain predefined numbers of inputs and outputs are supported.
+    /// The transfer transaction has more inputs or outputs than supported.
     UnsupportedTransferSize {
         num_inputs: usize,
         num_outputs: usize,
     },
-    /// Only certain predefined numbers of inputs and outputs are supported.
+    /// The freeze transaction has more inputs or outputs than supported.
     UnsupportedFreezeSize {
         num_inputs: usize,
     },
@@ -292,6 +297,8 @@ pub(crate) mod ser_debug {
 
 /// Adapter because [TxnApiError] doesn't implement Clone
 impl Clone for ValidationError {
+    /// Clone all errors except CryptoError which gets mapped to a
+    /// generic Failed error
     fn clone(&self) -> Self {
         use ValidationError::*;
         match self {
@@ -345,9 +352,20 @@ impl Committable for Block {
 
 /// Sliding window for transaction freshness
 ///
-/// We keep several Jellyfish node values here to allow validation of
-/// transactions built against recent but not most recent ledger state
-/// commitments.
+/// We keep a fixed number of recent Merkle root hashes here to allow
+/// validation of transactions built against recent but not most
+/// recent ledger state commitments.
+///
+/// The Merkle root hash that a transaction was built against is
+/// listed in the transaction, so that validators can compare it with
+/// the current root hash. Since the records Merkle tree is append
+/// only, a proof that a record is included remains valid for any
+/// state after the one for which the proof was
+/// constructed. Therefore, validators only need to check that the
+/// transaction was built against some past Merkle root. By
+/// remembering a fixed number of recent Merkle roots, validators can
+/// validate slightly old transactions while maintaining constant
+/// space requirements for validation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecordMerkleHistory(pub VecDeque<NodeValue>);
 
@@ -453,6 +471,28 @@ pub mod state_comm {
         pub verif_crs: Commitment<VerifierKeySet>,
         pub record_merkle_commitment: Commitment<RecordMerkleCommitment>,
         pub record_merkle_frontier: Commitment<RecordMerkleFrontier>,
+        /// We need to include all the cached past record Merkle roots
+        /// in the state commitment, even though they are not part of
+        /// the current ledger state, because they affect validation:
+        /// two validators with different caches will be able to
+        /// validate different blocks.
+        ///
+        /// Note that this requires correct validators to agree on the
+        /// number of cached past root hashes, since all the cached
+        /// hashes are included in the state commitment and are thus
+        /// part of the observable state of the ledger. This prevents
+        /// heavyweight validators from caching extra past roots and
+        /// thereby making it easier to verify transactions, but
+        /// because root hashes are small, it should be possible to
+        /// find a value of RECORD_ROOT_HISTORY_SIZE which strikes a
+        /// balance between small space requirements (so that
+        /// lightweight validators can keep up with the cache) and
+        /// covering enough of history to make it easy for clients. If
+        /// this is not possible, lightweight validators could also
+        /// store a sparse history, and when they encounter a root
+        /// hash that they do not have cached, they could ask a full
+        /// validator for a proof that that hash was once the root of
+        /// the record Merkle tree.
         pub past_record_merkle_roots: Commitment<RecordMerkleHistory>,
         pub nullifiers: set_hash::Hash,
         pub prev_block: Commitment<Block>,
@@ -503,7 +543,8 @@ pub struct ValidatorState {
 }
 
 impl ValidatorState {
-    /// The number recent record Merkle tree root hashes the validator should remember
+    /// The number of recent record Merkle tree root hashes the
+    /// validator should remember
     ///
     /// Transactions can be validated without resubmitting or regenerating the ZKPs as long as they
     /// were generated using a validator state that is in the last RECORD_ROOT_HISTORY_SIZE states.
@@ -536,22 +577,6 @@ impl ValidatorState {
                 .commit(),
             record_merkle_frontier: RecordMerkleFrontier(self.record_merkle_frontier.clone())
                 .commit(),
-            /// We need to include all the cached past record Merkle roots in the state commitment,
-            /// even though they are not part of the current ledger state, because they affect
-            /// validation: two validators with different caches will be able to validate different
-            /// blocks.
-            ///
-            /// Note that this requires correct validators to agree on the number of cached past root
-            /// hashes, since all the cached hashes are included in the state commitment and are thus
-            /// part of the observable state of the ledger. This prevents heavyweight validators from
-            /// caching extra past roots and thereby making it easier to verify transactions, but
-            /// because root hashes are small, it should be possible to find a value of
-            /// RECORD_ROOT_HISTORY_SIZE which strikes a balance between small space requirements (so
-            /// that lightweight validators can keep up with the cache) and covering enough of
-            /// history to make it easy for clients. If this is not possible, lightweight validators
-            /// could also store a sparse history, and when they encounter a root hash that they do
-            /// not have cached, they could ask a full validator for a proof that that hash was once
-            /// the root of the record Merkle tree.
             past_record_merkle_roots: self.past_record_merkle_roots.commit(),
 
             nullifiers: self.nullifiers_root,
@@ -564,12 +589,14 @@ impl ValidatorState {
     ///
     /// Checks the following
     /// - None of the nullifiers are used more than once
-    /// - Keys are available for the  numbers of transaction inputs and
+    /// - Keys are available for the numbers of transaction inputs and
     ///   outputs
     /// - The Merkle roots are recent enough
-    /// - The batch of transactions verifies
+    /// - The zero knowledge proofs in each of the transactions verifies
     ///
-    /// If valid, return the input transactions and proofs, otherwise return a validation error.
+    /// If valid, return the input transactions and proofs, otherwise
+    /// return a validation error. A future implementation may return
+    /// only the valid transactions and proofs.
     ///
     /// # Errors
     /// - [ValidationError::BadMerkleRoot]
@@ -661,9 +688,6 @@ impl ValidatorState {
 
     /// Performs validation for a block, updating the ValidatorState.
     ///
-    /// For a given instance of ValidatorState, all calls to validate_and_apply must pass the
-    /// same remember_commitments value. This identity holds for clones of the original as well.
-    ///
     /// # Errors
     /// - [ValidationError::BadNullifierProof]
     /// - [ValidationError::BadMerklePath]
@@ -675,10 +699,12 @@ impl ValidatorState {
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
     ) -> Result<Vec<u64> /* new uids */, ValidationError> {
-        // If the block successfully validates, and the nullifier proofs apply correctly,
-        // the remaining (mutating) operations cannot fail, as this would result in an
-        // inconsistent state. No operations after the first assignement to a member
-        // of self have a possible error; this must remain true if code changes.
+        // If the block successfully validates, and the nullifier
+        // proofs apply correctly, the remaining (mutating) operations
+        // cannot fail, as this would result in an inconsistent
+        // state. No operations after the first assignement to a
+        // member of self have a possible error; this must remain true
+        // if code changes.
         let (txns, _null_pfs) = self.validate_block_check(now, txns, null_pfs.clone())?;
         let comm = self.commit();
         self.prev_commit_time = now;
