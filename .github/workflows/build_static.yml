@@ -1,4 +1,4 @@
-name: Nix
+name: Static Build
 
 on:
   push:
@@ -32,6 +32,7 @@ jobs:
       # sanity check that repository builds with nix
       - name: Build
         run: |
+          cat /etc/nix/nix.conf
           echo $(arch)
           echo $(uname -a)
           git config --global --add safe.directory "$PWD"
