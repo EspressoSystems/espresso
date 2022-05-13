@@ -1,0 +1,39 @@
+name: Static Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: self-hosted
+    container:
+      image: ghcr.io/espressosystems/nix:2.8.0
+      volumes:
+        - github_nix_280:/nix
+    timeout-minutes: 120
+    steps:
+      - name: Configure Git
+        run: |
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf git://github.com/
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf ssh://git@github.com/
+
+
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      # sanity check that repository builds with nix
+      - name: Build
+        run: |
+          cat /etc/nix/nix.conf
+          echo $(arch)
+          echo $(uname -a)
+          git config --global --add safe.directory "$PWD"
+          nix run "github:NixOS/nix?ref=780c7731cd3e6fac05c1a13b244b5f7925f0010b" -- develop .#staticShell --option sandbox relaxed -c cargo run --release --bin multi_machine_automation -- --num-txn 3 --verbose
