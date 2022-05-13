@@ -32,7 +32,7 @@ use std::io::Read;
 /// Height of the records Merkle tree
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
-/// A transaction with proofs
+/// A transaction with nullifier non-inclusion proofs
 ///
 /// Validation involves checking proofs that unspent records are unspent.
 /// The proofs are large and only needed during validation, so we don't
@@ -41,7 +41,9 @@ pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 /// corresponds to the first proof, and so on.
 ///
 /// A proof that a record is unspent is a Merkle path relative to the
-/// latest nullifier set root hash. The leaf of the path has a key
+/// latest nullifier set root hash. Informally, the proof says, if
+/// this record were spent, there would be a non-empty node 'here',
+/// but this path shows there isn't. The leaf of the path has a key
 /// equal to the hash of the record's nullifier and an empty value,
 /// which demonstrates that the unspent record is not in the nullifier
 /// set rooted at the path's root hash.
@@ -69,7 +71,10 @@ impl ElaboratedTransaction {
     }
 }
 
-/// When serialized using [serde_json] or formatted using [Display],
+/// A user-visible notation for a transaction hash, like TXN~bbb
+///
+/// When serialized using [serde_json] or formatted using
+/// [Display](https://doc.rust-lang.org/std/fmt/trait.Display.html),
 /// [ElaboratedTransactionHash] is displayed as a
 /// [TaggedBase64](https://github.com/EspressoSystems/tagged-base64/)
 /// string with "TXN" as the tag.
@@ -102,11 +107,14 @@ pub struct Block(pub Vec<TransactionNote>);
 
 /// A block of transactions with proofs
 ///
-/// When a nullifier is present in the set, it indicates that the
-/// corresponding asset record was spent, and thus "nullfied". Only
-/// the owner or freezer of a record has the secret information to
-/// create a nullifier for the record, but validators can check
-/// nullifiers without the secret information.
+/// The proofs demonstrate that the nullifiers for the transaction's
+/// input records were not present in the nullifier set when the
+/// transaction was built. When a nullifier is present in the set, it
+/// indicates that the corresponding asset record was spent, and thus
+/// "nullified". Only the owner or freezer of a record has the secret
+/// information to create a nullifier for the record, but validators
+/// can check nullifiers are not already present in the ledger without
+/// the secret information.
 #[ser_test]
 #[derive(
     Default,
@@ -139,7 +147,7 @@ impl Committable for ElaboratedBlock {
 }
 
 impl Committable for ElaboratedTransaction {
-    /// Get a commitment for an elaborated transaction.
+    /// Get a commitment to an elaborated transaction.
     fn commit(&self) -> Commitment<Self> {
         commit::RawCommitmentBuilder::new("ElaboratedTransaction")
             .field("Txn contents", self.txn.commit())
@@ -221,7 +229,7 @@ pub enum ValidationError {
     ConflictingNullifiers {},
     /// A generic failure.
     Failed {},
-    /// An incorrect Merkle length.
+    /// An incorrect Merkle path length.
     BadMerkleLength {},
     /// An invalid Merkle leaf.
     BadMerkleLeaf {},
@@ -229,25 +237,38 @@ pub enum ValidationError {
     BadMerkleRoot {},
     /// An invalid Merkle path.
     BadMerklePath {},
-    /// An error from the Jellyfish library Note: This is used to wrap
-    /// [TxnApiError] because it cannot be serialized.
+    /// An error from the Jellyfish library
+    ///
+    /// *Note*: This is used to wrap [TxnApiError] because it cannot
+    /// be serialized. TxnApiError cannot be serialized because it
+    /// depends on many foreign error types which do not implement the
+    /// Serialize trait. Instead, if we have to serialize this
+    /// variant, we will serialize Ok(err) to Err(format(err)), and
+    /// when we deserialize we will at least preserve the variant
+    /// CryptoError and a String representation of the underlying
+    /// error.
     CryptoError {
-        // TxnApiError cannot be serialized, and, since it depends on
-        // many foreign error types which are not Serialize, it is
-        // infeasible to make it serializable. Instead, if we have to
-        // serialize this variant, we will serialize Ok(err) to
-        // Err(format(err)), and when we deserialize we will at least
-        // preserve the variant CryptoError and a String
-        // representation of the underlying error.
         #[serde(with = "ser_display")]
         err: Result<TxnApiError, String>,
     },
-    /// The transfer transaction has more inputs or outputs than supported.
+    /// The transfer transaction has an unsupported number of inputs or outputs.
+    ///
+    /// *Note*: For transactions with fewer inputs or outputs than
+    /// supported, the transaction should be padded with dummy
+    /// transactions. If transactions with a greater number of inputs
+    /// or outputs are required, then the universal parameter set for
+    /// the ledger must be updated.
     UnsupportedTransferSize {
         num_inputs: usize,
         num_outputs: usize,
     },
-    /// The freeze transaction has more inputs or outputs than supported.
+    /// The freeze transaction has an unsupported number of inputs or outputs.
+    ///
+    /// *Note*: For transactions with fewer inputs or outputs than
+    /// supported, the transaction should be padded with dummy
+    /// transactions. If transactions with a greater number of inputs
+    /// or outputs are required, then the universal parameter set for
+    /// the ledger must be updated.
     UnsupportedFreezeSize {
         num_inputs: usize,
     },
@@ -477,22 +498,21 @@ pub mod state_comm {
         /// two validators with different caches will be able to
         /// validate different blocks.
         ///
-        /// Note that this requires correct validators to agree on the
-        /// number of cached past root hashes, since all the cached
-        /// hashes are included in the state commitment and are thus
-        /// part of the observable state of the ledger. This prevents
-        /// heavyweight validators from caching extra past roots and
-        /// thereby making it easier to verify transactions, but
-        /// because root hashes are small, it should be possible to
-        /// find a value of RECORD_ROOT_HISTORY_SIZE which strikes a
-        /// balance between small space requirements (so that
-        /// lightweight validators can keep up with the cache) and
-        /// covering enough of history to make it easy for clients. If
-        /// this is not possible, lightweight validators could also
-        /// store a sparse history, and when they encounter a root
-        /// hash that they do not have cached, they could ask a full
-        /// validator for a proof that that hash was once the root of
-        /// the record Merkle tree.
+        /// This requires correct validators to agree on the number of
+        /// cached past root hashes, since all the cached hashes are
+        /// included in the state commitment and are thus part of the
+        /// observable state of the ledger. This prevents heavyweight
+        /// validators from caching extra past roots and thereby
+        /// making it easier to verify transactions, but because root
+        /// hashes are small, it should be possible to find a value of
+        /// RECORD_ROOT_HISTORY_SIZE which strikes a balance between
+        /// small space requirements (so that lightweight validators
+        /// can keep up with the cache) and covering enough of history
+        /// to make it easy for clients. If this is not possible,
+        /// lightweight validators could also store a sparse history,
+        /// and when they encounter a root hash that they do not have
+        /// cached, they could ask a full validator for a proof that
+        /// that hash was once the root of the record Merkle tree.
         pub past_record_merkle_roots: Commitment<RecordMerkleHistory>,
         pub nullifiers: set_hash::Hash,
         pub prev_block: Commitment<Block>,
