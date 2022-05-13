@@ -124,7 +124,7 @@
             '';
             DEP_CURL_STATIC = "y";
             CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER =
-              "${muslPkgs.llvmPackages.lld}/bin/lld";
+              "${pkgs.llvmPackages_latest.lld}/bin/lld";
             RUSTFLAGS =
               "-C target-feature=+crt-static -L${opensslMusl.out}/lib/ -L${curlMusl.out}/lib -L${muslPkgs.pkgsStatic.zstd.out}/lib -L${muslPkgs.pkgsStatic.libssh2}/lib -L${muslPkgs.pkgsStatic.openssl}/lib -lssh2";
             OPENSSL_STATIC = "true";
