@@ -52,8 +52,29 @@ pub struct Args {
     /// followed by a newline, and the input will be read without an editor.
     pub non_interactive: bool,
 
-    /// URL of a server for interacting with the ledger
-    pub server: Option<Url>,
+    /// URL for the Espresso Query Service.
+    #[structopt(
+        long,
+        env = "ESPRESSO_ESQS_URL",
+        default_value = "http://localhost:50087"
+    )]
+    pub esqs_url: Url,
+
+    /// URL for the Espresso address book.
+    #[structopt(
+        long,
+        env = "ESPRESSO_ADDRESS_BOOK_URL",
+        default_value = "http://localhost:50078"
+    )]
+    pub address_book_url: Url,
+
+    /// URL for a validator to submit transactions to.
+    #[structopt(
+        long,
+        env = "ESPRESSO_SUBMIT_URL",
+        default_value = "http://localhost:50087"
+    )]
+    pub submit_url: Url,
 }
 
 impl CLIArgs for Args {
@@ -90,10 +111,13 @@ impl<'a> CLI<'a> for EspressoCli {
         args: Self::Args,
         loader: &mut impl KeystoreLoader<EspressoLedger, Meta = LoaderMetadata>,
     ) -> Result<Self::Backend, KeystoreError<EspressoLedger>> {
-        let server = args.server.ok_or(KeystoreError::Failed {
-            msg: String::from("server is required"),
-        })?;
-        NetworkBackend::new(univ_param, server.clone(), server.clone(), server, loader)
+        NetworkBackend::new(
+            univ_param,
+            args.esqs_url,
+            args.address_book_url,
+            args.submit_url,
+            loader,
+        )
     }
 }
 

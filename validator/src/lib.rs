@@ -530,33 +530,6 @@ async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respon
     Ok(tide::Response::new(StatusCode::Ok))
 }
 
-// TODO: factor this out
-#[derive(Debug, Deserialize, Serialize)]
-pub struct InsertPubKey {
-    pub pub_key_bytes: Vec<u8>,
-    pub sig: jf_cap::Signature,
-}
-
-/// Lookup a user public key from a signed public key address. Fail with
-/// tide::StatusCode::BadRequest if key deserialization or the signature check
-/// fail.
-fn verify_sig_and_get_pub_key(insert_request: InsertPubKey) -> Result<UserPubKey, tide::Error> {
-    let pub_key: UserPubKey = bincode::deserialize(&insert_request.pub_key_bytes)
-        .map_err(|e| tide::Error::new(tide::StatusCode::BadRequest, e))?;
-    pub_key
-        .verify_sig(&insert_request.pub_key_bytes, &insert_request.sig)
-        .map_err(|e| tide::Error::new(tide::StatusCode::BadRequest, e))?;
-    Ok(pub_key)
-}
-
-async fn users_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let insert_request: InsertPubKey = net::server::request_body(&mut req).await?;
-    let pub_key = verify_sig_and_get_pub_key(insert_request)?;
-    let mut bulletin = req.state().node.write().await;
-    bulletin.introduce(&pub_key).await.map_err(server_error)?;
-    Ok(tide::Response::new(StatusCode::Ok))
-}
-
 async fn form_demonstration(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
     let mut index_html: PathBuf = req.state().web_path.clone();
     index_html.push("index.html");
@@ -748,7 +721,6 @@ pub fn init_web_server(
     // we just handle them here in a pretty ad hoc fashion.
     web_server.at("/submit").post(submit_endpoint);
     web_server.at("/memos/:txid").post(memos_endpoint);
-    web_server.at("/users").post(users_endpoint);
 
     // Add routes from a configuration file.
     if let Some(api_map) = api["route"].as_table() {

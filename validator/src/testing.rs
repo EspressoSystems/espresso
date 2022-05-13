@@ -7,12 +7,22 @@ use futures::{channel::oneshot, future::join_all};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use rand_chacha::{rand_core::RngCore, ChaChaRng};
+use std::io;
 use std::iter;
 use std::mem::take;
 use std::time::Instant;
 use surf::Url;
 use tempdir::TempDir;
-use zerok_lib::node::Validator;
+use zerok_lib::{
+    keystore::{
+        loader::{KeystoreLoader, LoaderMetadata},
+        network::NetworkBackend,
+        EspressoKeystore,
+    },
+    ledger::EspressoLedger,
+    node::Validator,
+    universal_params::UNIVERSAL_PARAM,
+};
 
 pub struct TestNode {
     pub query_api: Option<Url>,
@@ -28,26 +38,79 @@ impl TestNode {
     }
 }
 
+pub struct AddressBook {
+    port: u16,
+    _store: TempDir,
+    _wait: JoinHandle<io::Result<()>>,
+}
+
+impl AddressBook {
+    pub async fn init() -> Self {
+        let dir = TempDir::new("address_book").unwrap();
+        let store = address_book::FileStore::new(dir.path().to_owned());
+        let port = pick_unused_port().unwrap();
+        let join = address_book::init_web_server(port, store).await.unwrap();
+        address_book::wait_for_server(port).await;
+        Self {
+            port,
+            _store: dir,
+            _wait: join,
+        }
+    }
+
+    pub fn url(&self) -> Url {
+        Url::parse(&format!("http://localhost:{}", self.port)).unwrap()
+    }
+
+    pub async fn kill(self) {
+        // There is unfortunately no way to kill the address book, since it is a Tide thread. We
+        // just leak the underlying thread.
+    }
+}
+
 pub struct TestNetwork {
     pub query_api: Url,
     pub submit_api: Url,
+    pub address_book_api: Url,
     pub nodes: Vec<TestNode>,
+    address_book: Option<AddressBook>,
     _store: TempDir,
 }
 
 impl TestNetwork {
-    pub async fn kill(mut self) {
-        Self::kill_impl(take(&mut self.nodes)).await
+    pub async fn create_wallet(
+        &self,
+        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = LoaderMetadata>,
+    ) -> EspressoKeystore<'static, NetworkBackend<'static, LoaderMetadata>> {
+        let backend = NetworkBackend::new(
+            &*UNIVERSAL_PARAM,
+            self.query_api.clone(),
+            self.address_book_api.clone(),
+            self.submit_api.clone(),
+            loader,
+        )
+        .unwrap();
+        EspressoKeystore::new(backend).await.unwrap()
     }
 
-    async fn kill_impl(nodes: Vec<TestNode>) {
+    pub async fn kill(mut self) {
+        Self::kill_impl(take(&mut self.nodes), take(&mut self.address_book)).await
+    }
+
+    async fn kill_impl(nodes: Vec<TestNode>, address_book: Option<AddressBook>) {
         join_all(nodes.into_iter().map(|node| node.kill())).await;
+        if let Some(address_book) = address_book {
+            address_book.kill().await;
+        }
     }
 }
 
 impl Drop for TestNetwork {
     fn drop(&mut self) {
-        block_on(Self::kill_impl(take(&mut self.nodes)));
+        block_on(Self::kill_impl(
+            take(&mut self.nodes),
+            take(&mut self.address_book),
+        ));
     }
 }
 
@@ -83,8 +146,10 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         let mut store_path = store.path().to_owned();
         store_path.push(i.to_string());
         async move {
-            let mut opt = NodeOpt::default();
-            opt.store_path = Some(store_path);
+            let mut opt = NodeOpt {
+                store_path: Some(store_path),
+                ..NodeOpt::default()
+            };
             if i == 0 {
                 opt.full = true;
                 opt.web_server_port = pick_unused_port().unwrap();
@@ -118,10 +183,15 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     }))
     .await;
 
+    let address_book = AddressBook::init().await;
+    let address_book_api = address_book.url();
+
     TestNetwork {
         query_api: nodes[0].query_api.clone().unwrap(),
         submit_api: nodes[0].submit_api.clone().unwrap(),
+        address_book_api,
         nodes,
+        address_book: Some(address_book),
         _store: store,
     }
 }

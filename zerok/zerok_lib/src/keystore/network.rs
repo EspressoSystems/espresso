@@ -6,6 +6,7 @@ use crate::{
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{ElaboratedTransaction, MERKLE_HEIGHT},
 };
+use address_book::InsertPubKey;
 use api::client::*;
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
@@ -17,7 +18,6 @@ use jf_cap::keys::{UserAddress, UserKeyPair, UserPubKey};
 use jf_cap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
-use jf_cap::Signature;
 use key_set::{ProverKeySet, SizedKey};
 use net::{BlockId, TransactionId};
 use node::{LedgerSnapshot, LedgerSummary};
@@ -42,30 +42,24 @@ pub use surf::Url;
 pub struct NetworkBackend<'a, Meta: PartialEq + Serialize + DeserializeOwned + Clone> {
     univ_param: &'a UniversalParam,
     query_client: surf::Client,
-    bulletin_client: surf::Client,
+    address_book_client: surf::Client,
     validator_client: surf::Client,
     storage: Arc<Mutex<AtomicKeystoreStorage<'a, EspressoLedger, Meta>>>,
     key_stream: KeyTree,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct InsertPubKey {
-    pub pub_key_bytes: Vec<u8>,
-    pub sig: Signature,
 }
 
 impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
     pub fn new(
         univ_param: &'a UniversalParam,
         query_url: Url,
-        bulletin_url: Url,
+        address_book_url: Url,
         validator_url: Url,
         loader: &mut impl KeystoreLoader<EspressoLedger, Meta = Meta>,
     ) -> Result<Self, KeystoreError<EspressoLedger>> {
         let storage = AtomicKeystoreStorage::new(loader, 1024)?;
         Ok(Self {
             query_client: Self::client(query_url)?,
-            bulletin_client: Self::client(bulletin_url)?,
+            address_book_client: Self::client(address_book_url)?,
             validator_client: Self::client(validator_url)?,
             univ_param,
             key_stream: storage.key_stream(),
@@ -230,10 +224,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
     }
 
     async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream {
-        // In the current setup, all events come from a single source, which we call the query
-        // service even though it has the responsibilties of query service and bulletin board. In
-        // the future, these should be split into different services and treated as different event
-        // sources.
+        // All events come from a single source, the EsQS, which aggregates blocks and memos.
         let from = from.index(EventSource::QueryService);
         let to = to.map(|to| to.index(EventSource::QueryService));
 
@@ -281,8 +272,16 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
         &self,
         address: &UserAddress,
     ) -> Result<UserPubKey, KeystoreError<EspressoLedger>> {
-        self.get(format!("getuser/{}", api::UserAddress(address.clone())))
+        let mut res = self
+            .address_book_client
+            .post("request_pubkey")
+            .content_type(mime::JSON)
+            .body_json(address)
+            .unwrap()
+            .send()
             .await
+            .context::<_, KeystoreError<EspressoLedger>>(ClientError)?;
+        response_body(&mut res).await.context(ClientError)
     }
 
     async fn get_nullifier_proof(
@@ -308,10 +307,11 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
         let pub_key_bytes = bincode::serialize(&key_pair.pub_key()).unwrap();
         let sig = key_pair.sign(&pub_key_bytes);
         let json_request = InsertPubKey { pub_key_bytes, sig };
+        dbg!(&self.address_book_client.config().base_url);
         match self
-            .bulletin_client
-            .post("users")
-            .content_type(surf::http::mime::JSON)
+            .address_book_client
+            .post("insert_pubkey")
+            .content_type(mime::JSON)
             .body_json(&json_request)
             .unwrap()
             .await
@@ -351,7 +351,8 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
             };
             let txid = TransactionId(BlockId(txid.0 as usize), txid.1 as usize);
             // TODO: fix the trait so we don't need this unwrap
-            Self::post(&self.bulletin_client, format!("/memos/{}", txid), &body)
+            // TODO: include memos in transactions so we don't have to do this
+            Self::post(&self.query_client, format!("/memos/{}", txid), &body)
                 .await
                 .unwrap()
         }

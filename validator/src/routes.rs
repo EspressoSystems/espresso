@@ -1,9 +1,7 @@
 // Copyright (c) 2022 Espresso Systems (espressosys.com)
 
 use crate::WebState;
-use api::{
-    server, BlockId, Hash, TaggedBlob, TransactionId, UnspentRecord, UserAddress, UserPubKey,
-};
+use api::{server, BlockId, Hash, TaggedBlob, TransactionId, UnspentRecord};
 use futures::prelude::*;
 use itertools::izip;
 use phaselock::traits::BlockContents;
@@ -129,8 +127,6 @@ pub enum ApiRouteKey {
     gettransaction,
     getunspentrecord,
     getunspentrecordsetinfo,
-    getuser,
-    getusers,
     subscribe,
 }
 
@@ -432,26 +428,6 @@ async fn get_state_comm(
     Ok(snapshot.state.commit())
 }
 
-async fn get_user(
-    bindings: &HashMap<String, RouteBinding>,
-    query_service: &impl QueryService,
-) -> Result<UserPubKey, tide::Error> {
-    query_service
-        .get_user(&bindings[":address"].value.to::<UserAddress>()?.0)
-        .await
-        .map_err(server_error)
-}
-
-async fn get_users(query_service: &impl QueryService) -> Result<Vec<UserPubKey>, tide::Error> {
-    Ok(query_service
-        .get_users()
-        .await
-        .map_err(server_error)?
-        .values()
-        .cloned()
-        .collect())
-}
-
 async fn get_nullifier(
     bindings: &HashMap<String, RouteBinding>,
     query_service: &impl QueryService,
@@ -529,8 +505,6 @@ pub async fn dispatch_url(
         }
         ApiRouteKey::getunspentrecordsetinfo => dummy_url_eval(route_pattern, bindings),
         ApiRouteKey::getsnapshot => response(&req, get_snapshot(bindings, query_service).await?),
-        ApiRouteKey::getuser => response(&req, get_user(bindings, query_service).await?),
-        ApiRouteKey::getusers => response(&req, get_users(query_service).await?),
         ApiRouteKey::getnullifier => response(&req, get_nullifier(bindings, query_service).await?),
         ApiRouteKey::getstatecomm => response(&req, get_state_comm(bindings, query_service).await?),
         _ => Err(tide::Error::from_str(

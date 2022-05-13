@@ -2,7 +2,7 @@
 
 use async_std::task::{block_on, sleep, spawn_blocking};
 use escargot::CargoBuild;
-use espresso_validator::{ConsensusConfig, NodeConfig};
+use espresso_validator::{testing::AddressBook, ConsensusConfig, NodeConfig};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use regex::Regex;
@@ -34,6 +34,7 @@ pub fn cli_test(test: impl Fn(&mut CliClient) -> Result<(), String>) {
 pub struct CliClient {
     validators: Vec<Validator>,
     keystores: Vec<Keystore>,
+    address_book: AddressBook,
     variables: HashMap<String, String>,
     prev_output: Vec<String>,
     server_port: u16,
@@ -65,6 +66,7 @@ impl CliClient {
             variables: Default::default(),
             prev_output: Default::default(),
             validators: Self::start_validators(tmp_dir.path(), pub_key, &ports)?,
+            address_book: block_on(AddressBook::init()),
             server_port: ports[0].1,
             _tmp_dir: tmp_dir,
         };
@@ -198,7 +200,10 @@ impl CliClient {
 
     fn load(&mut self, key_path: Option<PathBuf>) -> Result<&mut Self, String> {
         self.keystores.push(Keystore::new(
-            format!("http://localhost:{}", self.server_port),
+            format!("http://localhost:{}", self.server_port)
+                .parse()
+                .unwrap(),
+            self.address_book.url(),
             key_path,
         )?);
         Ok(self)
@@ -281,7 +286,8 @@ pub struct Keystore {
     process: Option<OpenKeystore>,
     key_path: PathBuf,
     storage: TempDir,
-    server: String,
+    validator: Url,
+    address_book: Url,
 }
 
 impl Keystore {
@@ -293,8 +299,12 @@ impl Keystore {
         PathBuf::from(self.storage.path())
     }
 
-    pub fn server(&self) -> String {
-        self.server.clone()
+    pub fn validator(&self) -> Url {
+        self.validator.clone()
+    }
+
+    pub fn address_book(&self) -> Url {
+        self.address_book.clone()
     }
 
     fn key_gen(key_path: &Path) -> Result<(), String> {
@@ -313,7 +323,7 @@ impl Keystore {
         Ok(())
     }
 
-    fn new(server: String, key_path: Option<PathBuf>) -> Result<Self, String> {
+    fn new(validator: Url, address_book: Url, key_path: Option<PathBuf>) -> Result<Self, String> {
         let storage = TempDir::new("test_keystore").map_err(err)?;
         let key_path = match key_path {
             Some(path) => path,
@@ -328,7 +338,8 @@ impl Keystore {
             process: None,
             key_path,
             storage,
-            server,
+            validator,
+            address_book,
         })
     }
 
@@ -352,7 +363,12 @@ impl Keystore {
             ])
             .arg("--non-interactive")
             .args(args)
-            .arg(&self.server)
+            .arg("--esqs-url")
+            .arg(&self.validator.to_string())
+            .arg("--submit-url")
+            .arg(&self.validator.to_string())
+            .arg("--address-book-url")
+            .arg(&self.address_book.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
