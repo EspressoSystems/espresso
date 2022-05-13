@@ -36,4 +36,4 @@ jobs:
           echo $(arch)
           echo $(uname -a)
           git config --global --add safe.directory "$PWD"
-          nix run "github:NixOS/nix?ref=780c7731cd3e6fac05c1a13b244b5f7925f0010b" -- develop .#staticShell -c cargo run --release --bin multi_machine_automation -- --num-txn 3 --verbose
+          nix run "github:NixOS/nix?ref=780c7731cd3e6fac05c1a13b244b5f7925f0010b" -- develop .#staticShell --option sandbox relaxed -c cargo run --release --bin multi_machine_automation -- --num-txn 3 --verbose
