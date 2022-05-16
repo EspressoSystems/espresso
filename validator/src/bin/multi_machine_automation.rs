@@ -291,6 +291,8 @@ mod test {
         automate(5, 1, 3, true).await;
         automate(5, 2, 2, true).await;
         automate(5, 3, 1, false).await;
-        automate(50, 2, 10, true).await;
+
+        // Disabling the following test case since it takes too long.
+        // automate(50, 2, 10, true).await;
     }
 }
