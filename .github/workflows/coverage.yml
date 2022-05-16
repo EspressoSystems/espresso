@@ -10,11 +10,11 @@ on:
 
 jobs:
   code-coverage:
-    runs-on: self-hosted
+    runs-on: [self-hosted, X64]
     container:
-      image: ghcr.io/espressosystems/nix:2.8.0
+      image: ghcr.io/espressosystems/nix:2.8.1
       volumes:
-        - github_nix_280:/nix
+        - github_nix_281:/nix
     timeout-minutes: 240
     steps:
       - name: Configure Git
