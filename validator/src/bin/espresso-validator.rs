@@ -160,11 +160,11 @@ async fn generate_transactions(
 
     // Start consensus for each transaction
     let mut round = 0;
-
+    let mut succeeded_round = 0;
     let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
     let mut txn_proposed_round = 0;
     let mut final_commitment = None;
-    while round < num_txn {
+    while succeeded_round < num_txn {
         info!("Starting round {}", round + 1);
         report_mem();
         info!("Commitment: {}", phaselock.current_state().await.commit());
@@ -211,8 +211,12 @@ async fn generate_transactions(
                         let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                             .unwrap()
                             .to_string();
-                        info!("  - Round {} completed. Commitment: {}", round, commitment);
+                        info!(
+                            "  - Round {} completed. Commitment: {}",
+                            succeeded_round, commitment
+                        );
                         final_commitment = Some(commitment);
+                        succeeded_round += 1;
                         break true;
                     }
                 }

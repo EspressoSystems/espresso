@@ -4,7 +4,7 @@ use espresso_validator::{ConsensusConfig, NodeOpt};
 use jf_cap::keys::UserPubKey;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Command, Stdio};
 use structopt::StructOpt;
 
 #[derive(StructOpt)]
@@ -181,7 +181,7 @@ async fn main() {
 
     // Collect output from each process as they run. If we don't do this eagerly, validators can
     // block when their output pipes fill up causing deadlock.
-    let outputs = processes
+    let mut outputs = processes
         .iter_mut()
         .map(|(id, p)| {
             let mut stdout = BufReader::new(p.stdout.take().unwrap());
@@ -211,39 +211,68 @@ async fn main() {
     // Check each process.
     let mut commitment = None;
     let mut succeeded_nodes = 0;
-    for ((id, mut p), output) in processes.into_iter().zip(outputs) {
-        println!("Waiting for validator {}", id);
-        let process: Result<ExitStatus, _> = p.wait();
-        process.unwrap_or_else(|_| panic!("Failed to run the validator for node {}", id));
-        // Check whether the commitments are the same.
-        if options.num_txn.is_some() {
-            let lines = output.await;
-            if id < first_fail_id as usize {
-                for line in lines {
-                    if line.starts_with("Final commitment:") {
-                        let strs: Vec<&str> = line.split(' ').collect();
-                        let final_commitment = strs.last().unwrap_or_else(|| {
-                            panic!("Failed to parse commitment for node {}", id)
-                        });
-                        println!(
-                            "Validator {} finished with commitment {}",
-                            id, final_commitment
-                        );
-                        if let Some(comm) = commitment.clone() {
-                            assert_eq!(comm, final_commitment.to_string());
+    let mut finished_nodes = 0;
+    let threshold = ((num_nodes * 2) / 3) + 1;
+    let expect_failure = num_fail_nodes as usize > num_nodes - threshold;
+    println!("Waiting for validators to finish");
+    while succeeded_nodes < threshold && finished_nodes < num_nodes {
+        // If the consensus is expected to fail, not all processes will complete.
+        if expect_failure && (finished_nodes >= num_fail_nodes as usize) {
+            break;
+        }
+        for ((id, mut p), output) in core::mem::take(&mut processes)
+            .into_iter()
+            .zip(core::mem::take(&mut outputs))
+        {
+            match p.try_wait() {
+                Ok(Some(_)) => {
+                    // Check whether the commitments are the same.
+                    if options.num_txn.is_some() {
+                        let lines = output.await;
+                        if id < first_fail_id as usize {
+                            for line in lines {
+                                if line.starts_with("Final commitment:") {
+                                    let strs: Vec<&str> = line.split(' ').collect();
+                                    let final_commitment = strs.last().unwrap_or_else(|| {
+                                        panic!("Failed to parse commitment for node {}", id)
+                                    });
+                                    println!(
+                                        "Validator {} finished with commitment {}",
+                                        id, final_commitment
+                                    );
+                                    if let Some(comm) = commitment.clone() {
+                                        assert_eq!(comm, final_commitment.to_string());
+                                    } else {
+                                        commitment = Some(final_commitment.to_string());
+                                    }
+                                    succeeded_nodes += 1;
+                                }
+                            }
                         } else {
-                            commitment = Some(final_commitment.to_string());
+                            println!("Validator {} finished", id);
                         }
-                        succeeded_nodes += 1;
-                        break;
                     }
+                    finished_nodes += 1;
+                }
+                Ok(None) => {
+                    processes.push((id, p));
+                    outputs.push(output);
+                }
+                Err(e) => {
+                    println!("Validator {} failed: {}", id, e);
+                    finished_nodes += 1;
                 }
             }
         }
     }
 
+    // Kill processes that are still running.
+    for (id, mut p) in processes {
+        p.kill()
+            .unwrap_or_else(|_| panic!("Failed to kill node {}", id));
+    }
+
     // Check whether the number of succeeded nodes meets the threshold.
-    let threshold = ((num_nodes * 2) / 3) + 1;
     assert!(succeeded_nodes >= threshold);
     println!("Consensus completed for all nodes")
 }
@@ -259,6 +288,10 @@ mod test {
         fail_after_txn: u64,
         expect_success: bool,
     ) {
+        println!(
+            "Testing {} txns with {}/7 nodes failed after txn {}",
+            num_txn, num_fail_nodes, fail_after_txn
+        );
         let num_txn = &num_txn.to_string();
         let num_fail_nodes = &num_fail_nodes.to_string();
         let fail_after_txn = &fail_after_txn.to_string();
