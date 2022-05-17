@@ -1815,6 +1815,8 @@ name = "espresso-validator"
 version = "0.1.0"
 dependencies = [
  "address-book",
+ "ark-serialize",
+ "ark-std",
  "async-std",
  "async-trait",
  "async-tungstenite 0.15.0",
@@ -5843,7 +5845,7 @@ dependencies = [
  "snafu",
  "structopt",
  "surf",
- "tagged-base64 0.1.0 (git+https://github.com/EspressoSystems/tagged-base64.git?branch=main)",
+ "tagged-base64 0.1.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.1.0)",
  "tempdir",
  "toml",
  "tracing",
@@ -5911,7 +5913,7 @@ dependencies = [
  "strum 0.20.0",
  "strum_macros",
  "surf",
- "tagged-base64 0.1.0 (git+https://github.com/EspressoSystems/tagged-base64.git?branch=main)",
+ "tagged-base64 0.1.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.1.0)",
  "tempdir",
  "threshold_crypto",
  "tide",
