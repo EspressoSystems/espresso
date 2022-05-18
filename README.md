@@ -106,3 +106,14 @@ target/release/faucet
 | ESPRESSO_FAUCET_FEE_SIZE   | u64  | faucet               | The fee to include with each transfer from the faucet
 | ESPRESSO_FAUCET_PORT       | u16  | faucet               | Port on which to serve the faucet service
 | ESPRESSO_FAUCET_URL        | Url  |                      | URL of the faucet service
+# Docker
+
+To build the docker images first build the static executables
+
+    nix develop .#staticShell -c cargo build --release
+
+Then build the docker images
+
+    docker build . -f docker/address-book.Dockerfile
+
+Note that most files are ignored by default via `.dockerignore`.
