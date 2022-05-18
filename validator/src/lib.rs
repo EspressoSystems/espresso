@@ -4,6 +4,7 @@
 use crate::routes::{
     dispatch_url, dispatch_web_socket, server_error, RouteBinding, UrlSegmentType, UrlSegmentValue,
 };
+use ark_serialize::*;
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
@@ -12,6 +13,7 @@ use jf_cap::{
     MerkleTree, TransactionVerifyingKey,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
+use jf_utils::tagged_blob;
 use key_set::{KeySet, VerifierKeySet};
 use phaselock::{
     traits::implementations::{AtomicStorage, WNetwork},
@@ -29,7 +31,7 @@ use std::str::FromStr;
 use std::{fs, fs::File};
 use structopt::StructOpt;
 use threshold_crypto as tc;
-use tide::StatusCode;
+use tide::{http::Url, StatusCode};
 use tide_websockets::{WebSocket, WebSocketConnection};
 use tracing::{debug, event, Level};
 use zerok_lib::{
@@ -84,6 +86,7 @@ pub struct NodeOpt {
     #[structopt(long = "api", env = "ESPRESSO_VALIDATOR_API_PATH")]
     pub api_path: Option<PathBuf>,
 
+    /// Port for the query service.
     #[structopt(long, env = "ESPRESSO_VALIDATOR_PORT", default_value = "5000")]
     pub web_server_port: u16,
 }
@@ -96,13 +99,101 @@ impl Default for NodeOpt {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NodeConfig {
-    pub ip: String,
+    pub url: Url,
+    pub host: String,
     pub port: u16,
 }
 
+impl From<Url> for NodeConfig {
+    fn from(url: Url) -> Self {
+        Self {
+            port: url.port_or_known_default().unwrap(),
+            host: url.host_str().unwrap().to_string(),
+            url,
+        }
+    }
+}
+
+/// The structure of a NodeConfig in a consensus config TOML file.
+///
+/// This struct exists to be deserialized and converted to [NodeConfig].
 #[derive(Clone, Debug, Serialize, Deserialize)]
+struct ConsensusConfigFileNode {
+    ip: String,
+    port: u16,
+}
+
+impl From<ConsensusConfigFileNode> for NodeConfig {
+    fn from(cfg: ConsensusConfigFileNode) -> Self {
+        Url::parse(&format!("http://{}:{}", cfg.ip, cfg.port))
+            .unwrap()
+            .into()
+    }
+}
+
+impl From<NodeConfig> for ConsensusConfigFileNode {
+    fn from(cfg: NodeConfig) -> Self {
+        Self {
+            ip: cfg.host,
+            port: cfg.port,
+        }
+    }
+}
+
+impl NodeConfig {
+    pub fn socket_addr(&self) -> (&str, u16) {
+        (&self.host, self.port)
+    }
+}
+
+#[tagged_blob("SEED")]
+#[derive(Clone, Copy, Debug)]
+pub struct SecretKeySeed(pub [u8; 32]);
+
+impl CanonicalSerialize for SecretKeySeed {
+    fn serialize<W: Write>(&self, mut w: W) -> Result<(), SerializationError> {
+        w.write_all(&self.0)?;
+        Ok(())
+    }
+
+    fn serialized_size(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl CanonicalDeserialize for SecretKeySeed {
+    fn deserialize<R: Read>(mut r: R) -> Result<Self, SerializationError> {
+        let mut bytes = [0; 32];
+        r.read_exact(&mut bytes)?;
+        Ok(bytes.into())
+    }
+}
+
+impl From<[u8; 32]> for SecretKeySeed {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<SecretKeySeed> for [u8; 32] {
+    fn from(seed: SecretKeySeed) -> [u8; 32] {
+        seed.0
+    }
+}
+
+/// The structure of a node-config.toml file.
+///
+/// This struct exists to be deserialized and converted to [ConsensusConfig].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ConsensusConfigFile {
+    seed: [u8; 32],
+    nodes: Vec<ConsensusConfigFileNode>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(from = "ConsensusConfigFile", into = "ConsensusConfigFile")]
 pub struct ConsensusConfig {
-    pub seed: [u8; 32],
+    pub seed: SecretKeySeed,
     pub nodes: Vec<NodeConfig>,
 }
 
@@ -116,6 +207,28 @@ impl ConsensusConfig {
             .read_to_string(&mut config_str)
             .unwrap_or_else(|err| panic!("Error while reading node config file: {}", err));
         toml::from_str(&config_str).expect("Error while reading node config file")
+    }
+}
+
+impl From<ConsensusConfigFile> for ConsensusConfig {
+    fn from(cfg: ConsensusConfigFile) -> Self {
+        Self {
+            seed: cfg.seed.into(),
+            nodes: cfg.nodes.into_iter().map(NodeConfig::from).collect(),
+        }
+    }
+}
+
+impl From<ConsensusConfig> for ConsensusConfigFile {
+    fn from(cfg: ConsensusConfig) -> Self {
+        Self {
+            seed: cfg.seed.into(),
+            nodes: cfg
+                .nodes
+                .into_iter()
+                .map(ConsensusConfigFileNode::from)
+                .collect(),
+        }
     }
 }
 
@@ -166,13 +279,6 @@ fn get_store_dir(options: &NodeOpt, node_id: u64) -> PathBuf {
 fn reset_store_dir(store_dir: PathBuf) {
     let path = store_dir.as_path();
     fs::remove_dir_all(path).expect("Failed to remove persistence files");
-}
-
-/// Gets IP address and port number of a node from node configuration file.
-fn get_host(node: &NodeConfig) -> (String, u16) {
-    let ip = node.ip.clone();
-    let port = node.port;
-    (ip, port)
 }
 
 /// Trys to get a networking implementation with the given id and port number.
@@ -770,7 +876,7 @@ fn secret_keys(config: &ConsensusConfig) -> (u64, tc::SecretKeySet) {
         threshold,
         tc::SecretKeySet::random(
             threshold as usize - 1,
-            &mut ChaChaRng02::from_seed(config.seed),
+            &mut ChaChaRng02::from_seed(config.seed.into()),
         ),
     )
 }
@@ -802,26 +908,20 @@ pub async fn init_validator(
     let own_network = get_networking(
         pub_keys[own_id].clone(),
         "0.0.0.0",
-        get_host(&config.nodes[own_id]).1,
+        config.nodes[own_id].port,
     )
     .await;
     #[allow(clippy::type_complexity)]
-    let mut other_nodes: Vec<(u64, &PubKey, String, u16)> = Vec::new();
+    let mut other_nodes = Vec::new();
     for (id, node) in config.nodes.iter().enumerate() {
         if id != own_id {
-            let (ip, port) = get_host(node);
-            other_nodes.push((id as u64, &pub_keys[id], ip, port));
+            other_nodes.push((id as u64, &pub_keys[id], node.socket_addr()));
         }
     }
 
     // Connect the networking implementations
-    for (id, pub_key, ip, port) in other_nodes {
-        let socket = format!("{}:{}", ip, port);
-        while own_network
-            .connect_to(pub_key.clone(), &socket)
-            .await
-            .is_err()
-        {
+    for (id, pub_key, addr) in other_nodes {
+        while own_network.connect_to(pub_key.clone(), addr).await.is_err() {
             debug!("  - Retrying");
             async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
         }

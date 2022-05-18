@@ -1,11 +1,13 @@
 use async_std::task::spawn_blocking;
 use escargot::CargoBuild;
-use espresso_validator::{ConsensusConfig, NodeOpt};
+use espresso_validator::{ConsensusConfig, NodeOpt, SecretKeySeed};
 use jf_cap::keys::UserPubKey;
+use std::env;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 use structopt::StructOpt;
+use tide::http::Url;
 
 #[derive(StructOpt)]
 #[structopt(
@@ -19,6 +21,14 @@ struct Options {
     /// Path to the node configuration file.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONFIG_PATH")]
     pub config: Option<PathBuf>,
+
+    /// Override `seed` from the node configuration file.
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
+    pub secret_key_seed: Option<SecretKeySeed>,
+
+    /// Override `nodes` from the node configuration file.
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_NODES", value_delimiter = ",")]
+    pub nodes: Option<Vec<Url>>,
 
     /// Path to public keys.
     ///
@@ -78,6 +88,21 @@ fn cargo_run(bin: impl AsRef<str>) -> Command {
 async fn main() {
     // Construct arguments to pass to the multi-machine demo.
     let options = Options::from_args();
+
+    // With StructOpt/CLAP, environment variables override command line arguments, but we are going
+    // to construct a command line for each child, so the child processes shouldn't get their
+    // options from the environment. Clear the environment variables corresponding to each option
+    // that we will set explicitly in the command line.
+    env::remove_var("ESPRESSO_VALIDATOR_CONFIG_PATH");
+    env::remove_var("ESPRESSO_VALIDATOR_SECRET_KEY_SEED");
+    env::remove_var("ESPRESSO_VALIDATOR_NODES");
+    env::remove_var("ESPRESSO_VALIDATOR_PUB_KEY_PATH");
+    env::remove_var("ESPRESSO_FAUCET_PUB_KEY");
+    env::remove_var("ESPRESSO_VALIDATOR_STORE_PATH");
+    env::remove_var("ESPRESSO_VALIDATOR_WEB_PATH");
+    env::remove_var("ESPRESSO_VALIDATOR_API_PATH");
+    env::remove_var("ESPRESSO_VALIDATOR_PORT");
+
     let mut args = vec![];
     if options.node_opt.reset_store_state {
         args.push("--reset-store-state");
@@ -112,6 +137,23 @@ async fn main() {
         args.push("--config");
         args.push(&config_path);
     }
+    let secret_key_seed;
+    if let Some(seed) = &options.secret_key_seed {
+        secret_key_seed = seed.to_string();
+        args.push("--secret-key-seed");
+        args.push(&secret_key_seed);
+    }
+    let nodes = options.nodes.as_ref().map(|nodes| {
+        nodes
+            .iter()
+            .map(|node| node.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    });
+    if let Some(nodes) = &nodes {
+        args.push("--nodes");
+        args.push(nodes);
+    }
     let pk_path;
     if let Some(path) = &options.pk_path {
         pk_path = path.display().to_string();
@@ -133,9 +175,12 @@ async fn main() {
     };
 
     // Read node info from node configuration file.
-    let num_nodes = match &options.config {
-        None => 7,
-        Some(path) => ConsensusConfig::from_file(path).nodes.len(),
+    let num_nodes = match &options.nodes {
+        Some(nodes) => nodes.len(),
+        None => match &options.config {
+            Some(path) => ConsensusConfig::from_file(path).nodes.len(),
+            None => 7,
+        },
     };
     let (num_fail_nodes, fail_after_txn_str) = match options.num_fail_nodes {
         Some(num_fail_nodes) => {
@@ -167,6 +212,9 @@ async fn main() {
             } else if !num_txn_str.is_empty() {
                 this_args.push("--num-txn");
                 this_args.push(&num_txn_str);
+            }
+            if options.verbose {
+                println!("espresso-validator {}", this_args.join(" "));
             }
             (
                 id,

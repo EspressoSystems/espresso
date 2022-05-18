@@ -10,6 +10,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
+use tide::http::Url;
 use tracing::info;
 use zerok_lib::{
     node::{QueryService, Validator},
@@ -29,6 +30,14 @@ struct Options {
     /// Path to the node configuration file.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONFIG_PATH")]
     pub config: Option<PathBuf>,
+
+    /// Override `seed` from the node configuration file.
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
+    pub secret_key_seed: Option<SecretKeySeed>,
+
+    /// Override `nodes` from the node configuration file.
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_NODES", value_delimiter = ",")]
+    pub nodes: Option<Vec<Url>>,
 
     /// Whether to generate and store public keys for all nodes.
     ///
@@ -299,7 +308,14 @@ async fn main() -> Result<(), std::io::Error> {
     // Get configuration
     let options = Options::from_args();
     let config_path = options.config.clone().unwrap_or_else(default_config_path);
-    let config = ConsensusConfig::from_file(&config_path);
+    let mut config = ConsensusConfig::from_file(&config_path);
+    // Update config if any parameters are overridden by options.
+    if let Some(secret_key_seed) = &options.secret_key_seed {
+        config.seed = *secret_key_seed;
+    }
+    if let Some(nodes) = &options.nodes {
+        config.nodes = nodes.iter().cloned().map(NodeConfig::from).collect();
+    }
 
     if options.gen_pk {
         generate_keys(&options, &config);

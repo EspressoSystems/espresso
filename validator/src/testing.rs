@@ -1,6 +1,6 @@
 use crate::{
-    gen_pub_keys, init_validator, init_web_server, ConsensusConfig, GenesisState, Node, NodeConfig,
-    NodeOpt, MINIMUM_NODES,
+    gen_pub_keys, init_validator, init_web_server, ConsensusConfig, GenesisState, Node, NodeOpt,
+    MINIMUM_NODES,
 };
 use async_std::task::{block_on, spawn, JoinHandle};
 use futures::{channel::oneshot, future::join_all};
@@ -123,14 +123,19 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
     let nodes = iter::from_fn(|| {
-        Some(NodeConfig {
-            ip: "localhost".into(),
-            port: pick_unused_port().unwrap(),
-        })
+        let port = pick_unused_port().unwrap();
+        Some(
+            Url::parse(&format!("http://localhost:{}", port))
+                .unwrap()
+                .into(),
+        )
     })
     .take(MINIMUM_NODES)
     .collect();
-    let config = ConsensusConfig { seed, nodes };
+    let config = ConsensusConfig {
+        seed: seed.into(),
+        nodes,
+    };
 
     println!("generating public keys");
     let start = Instant::now();
