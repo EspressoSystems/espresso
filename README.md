@@ -114,4 +114,4 @@ Then build the docker images
 
     docker build . -f docker/address-book.Dockerfile
 
-Note that files are ignored by default via `.dockerignore`.
+Note that most files are ignored by default via `.dockerignore`.
