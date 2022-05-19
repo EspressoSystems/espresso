@@ -20,8 +20,9 @@ ENV ESPRESSO_VALIDATOR_API_APTH=/api/api.toml
 ENV ESPRESSO_VALIDATOR_WEB_PATH=/public
 ENV ESPRESSO_VALIDATOR_STORE_PATH=/store
 
-# Run a query service at port 70000.
-ENV ESPRESSO_VALIDATOR_PORT=70000
+# Run a query service at port 50000.
+ENV ESPRESSO_VALIDATOR_PORT=50000
+EXPOSE $ESPRESSO_VALIDATOR_PORT
 
 # Additional configuration not specified here because it must be set per validator:
 # ESPRESSO_VALIDATOR_ID
