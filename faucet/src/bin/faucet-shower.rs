@@ -11,6 +11,7 @@
 //! mnemonics and public keys of the newly funded keystores.
 use futures::stream::{iter, StreamExt};
 use jf_cap::structs::AssetCode;
+use primitive_types::U256;
 use rand_chacha::{
     rand_core::{RngCore, SeedableRng},
     ChaChaRng,
@@ -128,12 +129,11 @@ async fn main() {
     // can discover a record to transfer from.
     parent.await_key_scan(&parent_key.address()).await.unwrap();
     let balance = parent.balance(&AssetCode::native()).await;
-    if balance < opt.record_size * (opt.num_records as u64) * (opt.num_keystores as u64) {
+    let total_per_keystore = U256::from(opt.record_size) * opt.num_records;
+    if balance < total_per_keystore * opt.num_keystores {
         eprintln!(
             "Insufficient balance for transferring {} units to {} keystores: {}",
-            opt.record_size * opt.num_records,
-            opt.num_keystores,
-            balance
+            total_per_keystore, opt.num_keystores, balance
         );
         exit(1);
     }
@@ -143,7 +143,7 @@ async fn main() {
     // already reported all of the mnemonics needed to recover the funds.
     println!(
         "Transferring {} units each to the following keystores:",
-        opt.record_size * opt.num_records
+        total_per_keystore
     );
     for (_, mnemonic, key) in &children {
         println!("{} {}", mnemonic, key);
@@ -156,7 +156,7 @@ async fn main() {
                 .transfer(
                     None,
                     &AssetCode::native(),
-                    &[(key.address(), opt.record_size)],
+                    &[(key.clone(), opt.record_size)],
                     0,
                 )
                 .await
@@ -178,11 +178,10 @@ async fn main() {
 
     // Wait for the children to report the new balances.
     for (keystore, _, key) in &children {
-        while keystore.balance(&AssetCode::native()).await < opt.record_size * opt.num_records {
+        while keystore.balance(&AssetCode::native()).await < total_per_keystore {
             eprintln!(
                 "Waiting for {} to receive {} tokens",
-                key,
-                opt.record_size * opt.num_records
+                key, total_per_keystore
             );
             async_std::task::sleep(Duration::from_secs(1)).await;
         }

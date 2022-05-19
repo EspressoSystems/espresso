@@ -165,7 +165,7 @@ async fn request_fee_assets(
         .transfer(
             Some(&faucet_addr),
             &AssetCode::native(),
-            &[(pub_key.address(), req.state().grant_size)],
+            &[(pub_key, req.state().grant_size)],
             req.state().fee_size,
         )
         .await
@@ -344,6 +344,6 @@ mod test {
         println!("Asset transferred.");
 
         // Check the balance.
-        retry(|| async { receiver.balance(&AssetCode::native()).await == grant_size }).await;
+        retry(|| async { receiver.balance(&AssetCode::native()).await == grant_size.into() }).await;
     }
 }

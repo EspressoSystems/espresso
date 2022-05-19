@@ -152,7 +152,7 @@ async fn main() {
     );
 
     // Wait for initial balance.
-    while keystore.balance(&AssetCode::native()).await == 0 {
+    while keystore.balance(&AssetCode::native()).await == 0u64.into() {
         event!(Level::INFO, "waiting for initial balance");
         retry_delay().await;
     }
@@ -186,11 +186,17 @@ async fn main() {
         }
     };
     // If we don't yet have a balance of our asset type, mint some.
-    if keystore.balance(&my_asset.code).await == 0 {
+    if keystore.balance(&my_asset.code).await == 0u64.into() {
         event!(Level::INFO, "minting my asset type {}", my_asset.code);
         loop {
             let txn = keystore
-                .mint(&address, 1, &my_asset.code, 1u64 << 32, address.clone())
+                .mint(
+                    Some(&address),
+                    1,
+                    &my_asset.code,
+                    1u64 << 32,
+                    pub_key.clone(),
+                )
                 .await
                 .expect("failed to generate mint transaction");
             let status = keystore
@@ -243,7 +249,7 @@ async fn main() {
         // Get a list of assets for which we have a non-zero balance.
         let mut asset_balances = vec![];
         for info in keystore.assets().await {
-            if keystore.balance(&info.definition.code).await > 0 {
+            if keystore.balance(&info.definition.code).await > 0u64.into() {
                 asset_balances.push(info.definition.code);
             }
         }
@@ -269,7 +275,7 @@ async fn main() {
             recipient,
         );
         let txn = match keystore
-            .transfer(Some(&address), asset, &[(recipient.address(), amount)], fee)
+            .transfer(Some(&address), asset, &[(recipient.clone(), amount)], fee)
             .await
         {
             Ok(txn) => txn,
