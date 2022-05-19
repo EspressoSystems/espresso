@@ -1,3 +1,14 @@
 FROM ubuntu:jammy
+
+RUN apt-get update \
+&&  apt-get install -y curl \
+&&  rm -rf /var/lib/apt/lists/*
+
 COPY target/x86_64-unknown-linux-musl/release/address-book /bin/address-book
+
+ENV ESPRESSO_ADDRESS_BOOK_PORT="50078"
+EXPOSE 50078
+
+HEALTHCHECK CMD curl -f 127.0.0.1:$ESPRESSO_ADDRESS_BOOK_PORT/healthcheck || exit 1
+
 CMD [ "/bin/address-book" ]
