@@ -28,7 +28,8 @@ fn create_keystore(t: &mut CliClient, keystore: usize) -> Result<&mut CliClient,
         .command(keystore, "test_password")?
         .output("connecting...")?
         .command(keystore, format!("load_key sending {}", key_path))?
-        .output(format!("(?P<default_addr{}>ADDR~.*)", keystore))
+        .output(format!("(?P<default_addr{}>ADDR~.*)", keystore))?
+        .output(format!("(?P<default_pubkey{}>USERPUBKEY~.*)", keystore))
 }
 
 fn wait_for_native_balance(
@@ -106,7 +107,7 @@ fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
         .command(1, "balance 0")?
         .output("Total 0")?
         // Transfer some native coins from the primary keystore to the secondary.
-        .command(0, "transfer 0 $default_addr1 500 1")?
+        .command(0, "transfer 0 $default_pubkey1 500 1")?
         .output("(?P<txn>TXN~.*)")?
         // Wait for the transaction to complete in both keystores (just because one keystore has
         // received and processed the completed transaction doesn't mean the other has).
@@ -119,7 +120,7 @@ fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
         .command(1, "balance 0")?
         .output("Total 500")?
         // Transfer part of the money back
-        .command(1, "transfer 0 $default_addr0 200 2")?
+        .command(1, "transfer 0 $default_pubkey0 200 2")?
         .output("(?P<txn>TXN~.*)")?
         .command(0, "wait $txn")?
         .output("accepted")?
@@ -143,7 +144,7 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         .output("Not viewable")?
         .output("Not freezeable")?
         .output("Minter: me")?
-        .command(0, "mint 1 $default_addr0 $default_addr1 100 1")?
+        .command(0, "mint 1 $default_pubkey1 100 1")?
         .output("(?P<txn>TXN~.*)")?
         .command(0, "wait $txn")?
         .output("accepted")?
@@ -176,7 +177,7 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         .output("Viewer: me")?
         .output("Freezer: $freezekey1")?
         .output("Minter: me")?
-        .command(0, "mint $asset2 $default_addr0 $default_addr1 200 1")?
+        .command(0, "mint $asset2 $default_pubkey1 200 1")?
         .output("(?P<txn>TXN~.*)")?
         .command(0, "wait $txn")?
         .output("accepted")?
@@ -257,14 +258,16 @@ fn recover_from_mnemonic() {
             .command(0, "password")?
             .output("connecting...")?
             .command(0, format!("load_key sending {}", key_path))?
-            .output("(?P<default_addr0>ADDR~.*)")?;
+            .output("(?P<default_addr0>ADDR~.*)")?
+            .output("(?P<default_pubkey0>USERPUBKEY~.*)")?;
         wait_for_starting_balance(t)?;
         t
             // Create a determinstic key
             .command(0, "gen_key sending")?
+            .output("(?P<pubkey>USERPUBKEY~.*)")?
             .output("(?P<addr>ADDR~.*)")?
             // Give the key some assets
-            .command(0, "transfer 0 $addr 100 1 wait=true")?
+            .command(0, "transfer 0 $pubkey 100 1 wait=true")?
             .command(0, "balance 0")?
             .output("$addr 100")?
             // Create a new keystore with the same mnemonic and check that we get the balance.
