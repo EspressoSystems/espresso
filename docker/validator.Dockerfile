@@ -1,5 +1,7 @@
 FROM ubuntu:jammy
 COPY target/x86_64-unknown-linux-musl/release/espresso-validator /bin/espresso-validator
+RUN chmod +x /bin/espresso-validator
+
 COPY validator/api /api
 COPY validator/public /public
 
