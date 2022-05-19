@@ -211,7 +211,7 @@ async fn generate_transactions(
                         let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                             .unwrap()
                             .to_string();
-                        info!(
+                        println!(
                             "  - Round {} completed. Commitment: {}",
                             succeeded_round, commitment
                         );

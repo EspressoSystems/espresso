@@ -1,10 +1,11 @@
-use async_std::task::spawn_blocking;
+use async_std::task::{sleep, spawn_blocking};
 use escargot::CargoBuild;
 use espresso_validator::{ConsensusConfig, NodeOpt};
 use jf_cap::keys::UserPubKey;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 use structopt::StructOpt;
 
 #[derive(StructOpt)]
@@ -220,6 +221,7 @@ async fn main() {
         if expect_failure && (finished_nodes >= num_fail_nodes as usize) {
             break;
         }
+        sleep(Duration::from_secs(10)).await;
         for ((id, mut p), output) in core::mem::take(&mut processes)
             .into_iter()
             .zip(core::mem::take(&mut outputs))
@@ -255,6 +257,7 @@ async fn main() {
                     finished_nodes += 1;
                 }
                 Ok(None) => {
+                    // Add back unfinished process and output.
                     processes.push((id, p));
                     outputs.push(output);
                 }
