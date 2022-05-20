@@ -1,5 +1,6 @@
 FROM ubuntu:jammy
 COPY target/x86_64-unknown-linux-musl/release/faucet /bin/faucet
+RUN chmod +x /bin/faucet
 
 # Set up with a test wallet by default.
 ENV ESPRESSO_FAUCET_WALLET_MNEMONIC="test test test test test test test test test test test junk"
