@@ -1,6 +1,7 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 #![deny(warnings)]
 
+use async_std::task::{sleep, spawn_blocking};
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
 use jf_cap::keys::UserPubKey;
@@ -8,6 +9,7 @@ use phaselock::{types::EventType, PubKey};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use tracing::info;
@@ -180,7 +182,7 @@ async fn generate_transactions(
                 }
             } else {
                 info!("  - Proposing a transaction");
-                let (new_state, mut transactions) = async_std::task::spawn_blocking(move || {
+                let (new_state, mut transactions) = spawn_blocking(move || {
                     let txs = state
                         .generate_transactions(
                             vec![(true, 0, 0, 0, 0, -2)],
@@ -291,6 +293,9 @@ async fn generate_transactions(
         );
     }
     // !!!!!! END WARNING !!!!!!!
+
+    // Wait for other nodes to catch up.
+    sleep(Duration::from_secs(10)).await;
 }
 
 #[async_std::main]
