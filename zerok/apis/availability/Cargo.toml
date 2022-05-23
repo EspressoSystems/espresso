@@ -6,5 +6,5 @@ edition = "2021"
 
 [dependencies]
 commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.1.0" }
-jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git" }
+jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 zerok_lib = { path = "../../zerok_lib/" }

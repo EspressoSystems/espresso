@@ -969,8 +969,7 @@ mod tests {
         universal_params::UNIVERSAL_PARAM,
     };
     use async_std::task::block_on;
-    use jf_cap::{sign_receiver_memos, MerkleLeafProof, MerkleTree};
-    use jf_primitives::schnorr_dsa::KeyPair;
+    use jf_cap::{sign_receiver_memos, KeyPair, MerkleLeafProof, MerkleTree};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
     use tempdir::TempDir;

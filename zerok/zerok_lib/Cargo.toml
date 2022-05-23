@@ -32,9 +32,9 @@ itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
-jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.0" }
-jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.0" }
-jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.0" }
+jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
+jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
+jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
 key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 lazy_static = "1.4.0"
 mnemonic = "1.0.1"
@@ -59,7 +59,7 @@ snafu = { version = "0.7", features = ["backtraces"] }
 strum = "0.20"
 strum_macros = "0.20.1"
 surf = "2.3.1"
-tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.1.0" }
+tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.2.0" }
 tempdir = "0.3.7"
 threshold_crypto = "0.4.0"
 tide = "0.16.0"

@@ -19,9 +19,9 @@ futures = "0.3.0"
 futures-util = "0.3.8"
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
-jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.0" }
-jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.0" }
-jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.0" }
+jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
+jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
+jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
 key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 markdown = "0.3"
 net = { git = "https://github.com/EspressoSystems/net.git" }
@@ -39,7 +39,7 @@ structopt = { version = "0.3", features = ["paw"] }
 strum = "0.24"
 strum_macros = "0.20.1"
 surf = "2.3.1"
-tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.1.0" }
+tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.2.0" }
 tempdir = "0.3.7"
 threshold_crypto = "0.4.0"
 tide = "0.16.0"

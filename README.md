@@ -115,5 +115,7 @@ To build the docker images first build the static executables
 Then build the docker images
 
     docker build . -f docker/address-book.Dockerfile
+    docker build . -f docker/faucet.Dockerfile
+    docker build . -f docker/validator.Dockerfile
 
 Note that most files are ignored by default via `.dockerignore`.
