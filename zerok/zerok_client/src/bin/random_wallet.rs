@@ -41,8 +41,11 @@ use zerok_lib::{
     ledger::EspressoLedger,
     universal_params::UNIVERSAL_PARAM,
 };
+use espresso_validator::testing::minimal_test_network;
+use tempdir::TempDir;
+use zerok_lib::keystore::EspressoKeystore;
 
-type Keystore = seahorse::Keystore<'static, NetworkBackend<'static, ()>, EspressoLedger>;
+// type Keystore = seahorse::Keystore<'static, NetworkBackend<'static, ()>, EspressoLedger>;
 
 #[derive(StructOpt)]
 struct Args {
@@ -53,14 +56,16 @@ struct Args {
     key_path: Option<PathBuf>,
 
     /// Seed for random number generation.
-    #[structopt(short, long)]
+    #[structopt(long)]
     seed: Option<u64>,
 
     /// Path to a saved keystore, or a new directory where this keystore will be saved.
-    storage: PathBuf,
+    #[structopt(long)]
+    storage: Option<PathBuf>,
 
     /// URL of a server for interacting with the ledger
-    server: Url,
+    #[structopt(short, long)]
+    server: Option<Url>,
 }
 
 struct TrivialKeystoreLoader {
@@ -90,25 +95,39 @@ async fn retry_delay() {
 
 #[async_std::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .compact()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    // tracing_subscriber::fmt()
+    //     .compact()
+    //     .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+    //     .init();
 
     let args = Args::from_args();
 
     let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
+    let tempdir = TempDir::new("keystore").unwrap();
+    let storage = args.storage.unwrap_or(PathBuf::from(tempdir.path()));
 
-    let mut loader = TrivialKeystoreLoader { dir: args.storage };
+    let mut loader = TrivialKeystoreLoader { dir: storage };
+    let (query_api, submit_api, address_book) = if args.server.is_some() {
+        let url = args.server.unwrap();
+        (url.clone(), url.clone(), url.clone())
+    } else {
+        let (key_stream, _mnemonic) = KeyTree::random(&mut rng);
+        let faucet_key_pair = key_stream
+            .derive_sub_tree("keystore".as_bytes())
+            .derive_sub_tree("user".as_bytes())
+            .derive_user_key_pair(&0u64.to_le_bytes());
+         let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key()).await;
+         (network.query_api.clone(), network.submit_api.clone(), network.address_book_api.clone()) 
+    };
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
-        args.server.clone(),
-        args.server.clone(),
-        args.server.clone(),
+        query_api.clone(),
+        address_book.clone(),
+        submit_api.clone(),
         &mut loader,
     )
     .expect("failed to connect to backend");
-    let mut keystore = Keystore::new(backend)
+    let mut keystore = EspressoKeystore::new(backend)
         .await
         .expect("error loading keystore");
     match args.key_path {
@@ -208,7 +227,7 @@ async fn main() {
     }
 
     let client: surf::Client = surf::Config::new()
-        .set_base_url(args.server)
+        .set_base_url(address_book)
         .try_into()
         .expect("failed to start HTTP client");
     let client = client.with(client::parse_error_body::<EspressoError>);
