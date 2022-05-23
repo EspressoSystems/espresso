@@ -1855,7 +1855,7 @@ dependencies = [
  "procfs",
  "rand_chacha 0.2.2",
  "rand_chacha 0.3.1",
- "seahorse 0.3.0 (git+https://github.com/EspressoSystems/seahorse.git)",
+ "seahorse",
  "serde",
  "serde_derive",
  "serde_json",
@@ -2716,35 +2716,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jf-primitives"
-version = "0.1.1"
-source = "git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.1#fbbe665698ae5d55c3c2f8ab66f8f3bd722f3a17"
-dependencies = [
- "ark-bls12-377",
- "ark-bls12-381",
- "ark-ec",
- "ark-ed-on-bls12-377",
- "ark-ed-on-bls12-381",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "crypto_box",
- "derivative",
- "digest 0.10.3",
- "displaydoc",
- "generic-array",
- "itertools 0.10.3",
- "jf-plonk 0.1.1",
- "jf-rescue 0.1.1",
- "jf-utils 0.1.1",
- "rand_chacha 0.3.1",
- "rayon",
- "serde",
- "sha2 0.10.2",
- "zeroize",
-]
-
-[[package]]
 name = "jf-rescue"
 version = "0.1.1"
 source = "git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.1#fbbe665698ae5d55c3c2f8ab66f8f3bd722f3a17"
@@ -2770,31 +2741,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jf-rescue"
-version = "0.1.1"
-source = "git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.1#fbbe665698ae5d55c3c2f8ab66f8f3bd722f3a17"
-dependencies = [
- "ark-bls12-377",
- "ark-bls12-381",
- "ark-bn254",
- "ark-bw6-761",
- "ark-ec",
- "ark-ed-on-bls12-377",
- "ark-ed-on-bls12-381",
- "ark-ed-on-bn254",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "derivative",
- "displaydoc",
- "generic-array",
- "jf-utils 0.1.1",
- "rayon",
- "serde",
- "zeroize",
-]
-
-[[package]]
 name = "jf-utils"
 version = "0.1.1"
 source = "git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.1#fbbe665698ae5d55c3c2f8ab66f8f3bd722f3a17"
@@ -2810,34 +2756,6 @@ dependencies = [
  "sha2 0.10.2",
  "snafu",
  "tagged-base64",
-]
-
-[[package]]
-name = "jf-utils"
-version = "0.1.1"
-source = "git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.1#fbbe665698ae5d55c3c2f8ab66f8f3bd722f3a17"
-dependencies = [
- "anyhow",
- "ark-ec",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "digest 0.10.3",
- "jf-utils-derive 0.1.1",
- "serde",
- "sha2 0.10.2",
- "snafu",
- "tagged-base64 0.2.0",
-]
-
-[[package]]
-name = "jf-utils-derive"
-version = "0.1.1"
-source = "git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.1#fbbe665698ae5d55c3c2f8ab66f8f3bd722f3a17"
-dependencies = [
- "ark-std",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -4268,7 +4186,6 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#2ec7866e97eeb3104f0de5fc56dfdc68aeb547ab"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -4865,22 +4782,6 @@ dependencies = [
  "quote",
  "syn",
  "unicode-xid",
-]
-
-[[package]]
-name = "tagged-base64"
-version = "0.2.0"
-source = "git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.2.0#c393e135a14a585707012fe2d7f9790f6c5f61d9"
-dependencies = [
- "base64 0.13.0",
- "console_error_panic_hook",
- "crc-any",
- "futures-channel",
- "js-sys",
- "structopt",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]
@@ -5874,7 +5775,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "regex",
  "rustyline",
- "seahorse 0.3.0",
+ "seahorse",
  "serde",
  "serde_derive",
  "serde_json",
@@ -5938,7 +5839,7 @@ dependencies = [
  "rpassword",
  "rust-argon2 0.8.3",
  "rustyline",
- "seahorse 0.3.0 (git+https://github.com/EspressoSystems/seahorse.git)",
+ "seahorse",
  "serde",
  "serde_cbor",
  "serde_derive",

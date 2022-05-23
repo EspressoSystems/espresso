@@ -127,11 +127,14 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
     async fn create(
         &mut self,
     ) -> Result<KeystoreState<'a, EspressoLedger>, KeystoreError<EspressoLedger>> {
+        println!("creating esspresso backend");
         let LedgerSummary {
             num_blocks,
             num_events,
             ..
         } = self.get("getinfo").await?;
+        println!("queried getinfo");
+
         let LedgerSnapshot {
             state: validator,
             nullifiers,
@@ -140,6 +143,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
         } = self
             .get(&format!("getsnapshot/{}/true", num_blocks))
             .await?;
+            println!("queried getsnapsot");
 
         // Construct proving keys of the same arities as the verifier keys from the validator.
         let univ_param = self.univ_param;
@@ -210,7 +214,9 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
             freezing_accounts: Default::default(),
             sending_accounts: Default::default(),
         };
+        println!("about to create storage");
         self.storage().await.create(&state).await?;
+        println!("created storage");
 
         Ok(state)
     }

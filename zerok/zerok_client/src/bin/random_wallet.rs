@@ -41,11 +41,12 @@ use zerok_lib::{
     ledger::EspressoLedger,
     universal_params::UNIVERSAL_PARAM,
 };
+use espresso_validator::testing::TestNetwork;
 use espresso_validator::testing::minimal_test_network;
 use tempdir::TempDir;
 use zerok_lib::keystore::EspressoKeystore;
 
-// type Keystore = seahorse::Keystore<'static, NetworkBackend<'static, ()>, EspressoLedger>;
+type Keystore = seahorse::Keystore<'static, NetworkBackend<'static, ()>, EspressoLedger>;
 
 #[derive(StructOpt)]
 struct Args {
@@ -90,15 +91,27 @@ impl KeystoreLoader<EspressoLedger> for TrivialKeystoreLoader {
 }
 
 async fn retry_delay() {
-    sleep(Duration::from_secs(1)).await
+    sleep(Duration::from_secs(2)).await
+}
+
+fn create_backend<'a>(storage: PathBuf, network: &TestNetwork) -> NetworkBackend<'a, ()> {
+    let mut loader = TrivialKeystoreLoader { dir: storage };
+    NetworkBackend::new(
+        &*UNIVERSAL_PARAM,
+        network.query_api.clone(),
+        network.address_book_api.clone(),
+        network.submit_api.clone(),
+        &mut loader,
+    )
+    .expect("failed to connect to backend")
 }
 
 #[async_std::main]
 async fn main() {
-    // tracing_subscriber::fmt()
-    //     .compact()
-    //     .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-    //     .init();
+    tracing_subscriber::fmt()
+        .compact()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
     let args = Args::from_args();
 
@@ -106,30 +119,17 @@ async fn main() {
     let tempdir = TempDir::new("keystore").unwrap();
     let storage = args.storage.unwrap_or(PathBuf::from(tempdir.path()));
 
-    let mut loader = TrivialKeystoreLoader { dir: storage };
-    let (query_api, submit_api, address_book) = if args.server.is_some() {
-        let url = args.server.unwrap();
-        (url.clone(), url.clone(), url.clone())
-    } else {
-        let (key_stream, _mnemonic) = KeyTree::random(&mut rng);
-        let faucet_key_pair = key_stream
-            .derive_sub_tree("keystore".as_bytes())
-            .derive_sub_tree("user".as_bytes())
-            .derive_user_key_pair(&0u64.to_le_bytes());
-         let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key()).await;
-         (network.query_api.clone(), network.submit_api.clone(), network.address_book_api.clone()) 
-    };
-    let backend = NetworkBackend::new(
-        &*UNIVERSAL_PARAM,
-        query_api.clone(),
-        address_book.clone(),
-        submit_api.clone(),
-        &mut loader,
-    )
-    .expect("failed to connect to backend");
-    let mut keystore = EspressoKeystore::new(backend)
+    let (key_stream, _mnemonic) = KeyTree::random(&mut rng);
+    let faucet_key_pair = key_stream
+        .derive_sub_tree("keystore".as_bytes())
+        .derive_sub_tree("user".as_bytes())
+        .derive_user_key_pair(&0u64.to_le_bytes());
+    let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key().clone()).await;
+    let backend = create_backend(storage.clone(), &network);
+    let mut keystore = Keystore::new(backend)
         .await
         .expect("error loading keystore");
+    println!("created keystore");
     match args.key_path {
         Some(path) => {
             let mut file = File::open(path).unwrap_or_else(|err| {
@@ -153,26 +153,19 @@ async fn main() {
                 });
         }
         None => {
-            keystore
-                .generate_user_key("Random keystore key".to_string(), None)
-                .await
-                .unwrap_or_else(|err| {
-                    panic!("error generating random key: {}", err);
-                });
+            println!("going to generate key");
+            keystore.add_user_key(faucet_key_pair.clone(), "faucet".into(), EventIndex::default()).await.unwrap()
         }
     }
+    println!("generated key");
+
     let pub_key = keystore.pub_keys().await.remove(0);
     let address = pub_key.address();
-    event!(
-        Level::INFO,
-        "initialized keystore\n  address: {}\n  pub key: {}",
-        address,
-        pub_key,
-    );
+    println!("got pub key");
 
     // Wait for initial balance.
     while keystore.balance(&AssetCode::native()).await == 0u64.into() {
-        event!(Level::INFO, "waiting for initial balance");
+        println!("waiting for initial balance");
         retry_delay().await;
     }
 
@@ -232,31 +225,23 @@ async fn main() {
         event!(Level::INFO, "minted custom asset");
     }
 
-    let client: surf::Client = surf::Config::new()
-        .set_base_url(address_book)
-        .try_into()
-        .expect("failed to start HTTP client");
-    let client = client.with(client::parse_error_body::<EspressoError>);
+    let mut peers: Vec<UserPubKey> = Vec::new();
+    let mut keystore2 = Keystore::new(
+        create_backend(storage.clone(), &network)
+    ).await.unwrap();
+
+    let pub_key = keystore2.generate_user_key("Random Key".to_string(), None).await.unwrap();
+    peers.push(pub_key.clone());
+    peers.push(faucet_key_pair.pub_key().clone());
+
     loop {
         // Get a list of all users in our group (this will include our own public key).
-        let peers: Vec<UserPubKey> = match client.get("getusers").recv_json().await {
-            Ok(peers) => peers,
-            Err(err) => {
-                event!(
-                    Level::ERROR,
-                    "error getting users from server: {}\nretrying...",
-                    err
-                );
-                retry_delay().await;
-                continue;
-            }
-        };
         // Filter out our own public key and randomly choose one of the other ones to transfer to.
         let recipient =
             match peers.choose_weighted(&mut rng, |pk| if *pk == pub_key { 0u64 } else { 1u64 }) {
                 Ok(recipient) => recipient,
                 Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
-                    event!(Level::WARN, "no peers yet, retrying...");
+                    println!("no peers yet, retrying...");
                     retry_delay().await;
                     continue;
                 }
@@ -280,8 +265,7 @@ async fn main() {
         let amount = 1;
         let fee = 1;
 
-        event!(
-            Level::INFO,
+        println!(
             "transferring {} units of {} to user {}",
             amount,
             if *asset == AssetCode::native() {
