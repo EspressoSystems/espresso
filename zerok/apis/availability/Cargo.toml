@@ -1,9 +1,10 @@
 [package]
-name = "espresso-nullifier-check-api"
+name = "espresso-availability-api"
 version = "0.1.0"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.1.0" }
 jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
-zerok_lib = { path = "../zerok_lib/" }
+zerok_lib = { path = "../../zerok_lib/" }

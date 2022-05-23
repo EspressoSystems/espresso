@@ -1783,11 +1783,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "espresso-archival-query-api"
+name = "espresso-availability-api"
 version = "0.1.0"
 dependencies = [
  "commit",
  "jf-cap",
+ "zerok_lib",
+]
+
+[[package]]
+name = "espresso-catchup-api"
+version = "0.1.0"
+dependencies = [
+ "jf-cap",
+ "seahorse",
  "zerok_lib",
 ]
 
@@ -1812,7 +1821,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "espresso-nullifier-check-api"
+name = "espresso-metastate-api"
 version = "0.1.0"
 dependencies = [
  "jf-cap",
@@ -1820,11 +1829,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "espresso-validation-event-api"
+name = "espresso-status-api"
 version = "0.1.0"
 dependencies = [
  "jf-cap",
- "seahorse",
+ "phaselock",
  "zerok_lib",
 ]
 
@@ -1875,15 +1884,6 @@ dependencies = [
  "tracing-distributed",
  "tracing-futures",
  "tracing-subscriber 0.2.25",
- "zerok_lib",
-]
-
-[[package]]
-name = "espresso-validator-status-api"
-version = "0.1.0"
-dependencies = [
- "jf-cap",
- "phaselock",
  "zerok_lib",
 ]
 

@@ -4,9 +4,7 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
+      - release-*
   schedule:
     - cron: '0 0 * * 1'
   workflow_dispatch:
@@ -25,13 +23,11 @@ jobs:
           git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf git://github.com/
           git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf ssh://git@github.com/
 
-
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # sanity check that repository builds with nix
-      - name: Build
-        run: |
-          ls -lah
-          pwd
-          nix-shell --run "cargo build --all-targets --release --workspace"
+      - name: "Sanity Check: nix environment loads"
+        run: nix-shell --run "echo Success"
+
+      - name: "Sanity Check: nix environment builds all targets"
+        run: nix-shell --run "cargo build --all-targets --release --workspace"
