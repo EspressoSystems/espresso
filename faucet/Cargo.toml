@@ -38,6 +38,7 @@ jf-cap = { git = "https://github.com/EspressoSystems/cap.git", branch = "testnet
 key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 net = { git = "https://github.com/EspressoSystems/net.git" }
 num-bigint = "0.4"
+primitive-types = "0.11"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
 serde = "1.0.136"

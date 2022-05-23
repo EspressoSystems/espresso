@@ -47,6 +47,7 @@ async fn main() -> Result<(), std::io::Error> {
         .sending_key(0)
         .pub_key();
 
+    eprintln!("Faucet manager mnemonic: {}", mnemonic);
     eprintln!("Faucet manager encryption key: {}", pub_key);
     eprintln!(
         "Faucet manager address: {}",

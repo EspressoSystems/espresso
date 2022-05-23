@@ -5,6 +5,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git" }
+jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 phaselock = { git = "ssh://git@github.com/EspressoSystems/phaselock.git", tag = "v0.0.7" }
 zerok_lib = { path = "../zerok_lib/" }

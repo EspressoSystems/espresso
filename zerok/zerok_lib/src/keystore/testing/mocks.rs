@@ -494,10 +494,13 @@ mod espresso_keystore_tests {
             ledger_time.add_from_source(EventSource::QueryService, 3),
         )
         .await;
-        assert_eq!(keystores[0].0.balance(&AssetCode::native()).await, 0);
+        assert_eq!(
+            keystores[0].0.balance(&AssetCode::native()).await,
+            0u64.into()
+        );
         assert_eq!(
             keystores[1].0.balance(&AssetCode::native()).await,
-            1 + (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64
+            (1 + ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1).into()
         );
 
         Ok(())

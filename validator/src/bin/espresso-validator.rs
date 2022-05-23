@@ -1,6 +1,7 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 #![deny(warnings)]
 
+use async_std::task::{sleep, spawn_blocking};
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
 use jf_cap::keys::UserPubKey;
@@ -8,8 +9,10 @@ use phaselock::{types::EventType, PubKey};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
+use tide::http::Url;
 use tracing::info;
 use zerok_lib::{
     node::{QueryService, Validator},
@@ -29,6 +32,14 @@ struct Options {
     /// Path to the node configuration file.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONFIG_PATH")]
     pub config: Option<PathBuf>,
+
+    /// Override `seed` from the node configuration file.
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
+    pub secret_key_seed: Option<SecretKeySeed>,
+
+    /// Override `nodes` from the node configuration file.
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_NODES", value_delimiter = ",")]
+    pub nodes: Option<Vec<Url>>,
 
     /// Whether to generate and store public keys for all nodes.
     ///
@@ -160,11 +171,11 @@ async fn generate_transactions(
 
     // Start consensus for each transaction
     let mut round = 0;
-
+    let mut succeeded_round = 0;
     let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
     let mut txn_proposed_round = 0;
     let mut final_commitment = None;
-    while round < num_txn {
+    while succeeded_round < num_txn {
         info!("Starting round {}", round + 1);
         report_mem();
         info!("Commitment: {}", phaselock.current_state().await.commit());
@@ -180,7 +191,7 @@ async fn generate_transactions(
                 }
             } else {
                 info!("  - Proposing a transaction");
-                let (new_state, mut transactions) = async_std::task::spawn_blocking(move || {
+                let (new_state, mut transactions) = spawn_blocking(move || {
                     let txs = state
                         .generate_transactions(
                             vec![(true, 0, 0, 0, 0, -2)],
@@ -211,8 +222,12 @@ async fn generate_transactions(
                         let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                             .unwrap()
                             .to_string();
-                        info!("  - Round {} completed. Commitment: {}", round, commitment);
+                        println!(
+                            "  - Round {} completed. Commitment: {}",
+                            succeeded_round, commitment
+                        );
                         final_commitment = Some(commitment);
+                        succeeded_round += 1;
                         break true;
                     }
                 }
@@ -287,6 +302,9 @@ async fn generate_transactions(
         );
     }
     // !!!!!! END WARNING !!!!!!!
+
+    // Wait for other nodes to catch up.
+    sleep(Duration::from_secs(10)).await;
 }
 
 #[async_std::main]
@@ -299,7 +317,14 @@ async fn main() -> Result<(), std::io::Error> {
     // Get configuration
     let options = Options::from_args();
     let config_path = options.config.clone().unwrap_or_else(default_config_path);
-    let config = ConsensusConfig::from_file(&config_path);
+    let mut config = ConsensusConfig::from_file(&config_path);
+    // Update config if any parameters are overridden by options.
+    if let Some(secret_key_seed) = &options.secret_key_seed {
+        config.seed = *secret_key_seed;
+    }
+    if let Some(nodes) = &options.nodes {
+        config.nodes = nodes.iter().cloned().map(NodeConfig::from).collect();
+    }
 
     if options.gen_pk {
         generate_keys(&options, &config);

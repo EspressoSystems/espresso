@@ -2,7 +2,7 @@
 
 use async_std::task::{block_on, sleep, spawn_blocking};
 use escargot::CargoBuild;
-use espresso_validator::{testing::AddressBook, ConsensusConfig, NodeConfig};
+use espresso_validator::{testing::AddressBook, ConsensusConfig};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use regex::Regex;
@@ -243,12 +243,14 @@ impl CliClient {
             seed: [
                 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4,
                 5, 6, 7, 8,
-            ],
+            ]
+            .into(),
             nodes: phaselock_ports
                 .into_iter()
-                .map(|port| NodeConfig {
-                    ip: "localhost".into(),
-                    port: port as u16,
+                .map(|port| {
+                    Url::parse(&format!("http://localhost:{}", port))
+                        .unwrap()
+                        .into()
                 })
                 .collect(),
         };

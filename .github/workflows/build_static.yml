@@ -8,11 +8,11 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: "0 0 * * 1"
   workflow_dispatch:
 
 jobs:
-  build:
+  static-build:
     runs-on: [self-hosted, X64]
     container:
       image: ghcr.io/espressosystems/nix:2.8.1
@@ -25,15 +25,119 @@ jobs:
           git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf git://github.com/
           git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf ssh://git@github.com/
 
-
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # sanity check that repository builds with nix
-      - name: Build
+      - name: Sanity check that repository builds with nix
         run: |
           cat /etc/nix/nix.conf
           echo $(arch)
           echo $(uname -a)
           git config --global --add safe.directory "$PWD"
           nix run "github:NixOS/nix?ref=780c7731cd3e6fac05c1a13b244b5f7925f0010b" -- develop .#staticShell --option sandbox relaxed -c cargo run --release --bin multi_machine_automation -- --num-txn 3 --verbose
+
+      - name: Compile all executables
+        run: |
+          nix run "github:NixOS/nix?ref=780c7731cd3e6fac05c1a13b244b5f7925f0010b" -- develop .#staticShell --option sandbox relaxed -c cargo build --release
+
+      - name: Upload address book artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: x86_64-unknown-linux-musl-address-book
+          path: target/x86_64-unknown-linux-musl/release/address-book
+
+      - name: Upload faucet artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: x86_64-unknown-linux-musl-faucet
+          path: target/x86_64-unknown-linux-musl/release/faucet
+
+      - name: Upload validator artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: x86_64-unknown-linux-musl-validator
+          path: target/x86_64-unknown-linux-musl/release/espresso-validator
+
+  static-dockers:
+    runs-on: ubuntu-latest
+    needs: static-build
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Download address-book executable
+        uses: actions/download-artifact@v3
+        with:
+          name: x86_64-unknown-linux-musl-address-book
+          path: target/x86_64-unknown-linux-musl/release/
+
+      - name: Download faucet executable
+        uses: actions/download-artifact@v3
+        with:
+          name: x86_64-unknown-linux-musl-faucet
+          path: target/x86_64-unknown-linux-musl/release/
+
+      - name: Download validator executable
+        uses: actions/download-artifact@v3
+        with:
+          name: x86_64-unknown-linux-musl-validator
+          path: target/x86_64-unknown-linux-musl/release/
+
+      - name: Setup Docker BuildKit (buildx)
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Github Container Repo
+        uses: docker/login-action@v2
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate address-book docker metadata
+        uses: docker/metadata-action@v3
+        id: ab
+        with:
+          images: ghcr.io/espressosystems/espresso/address-book
+
+      - name: Generate faucet docker metadata
+        uses: docker/metadata-action@v3
+        id: faucet
+        with:
+          images: ghcr.io/espressosystems/espresso/faucet
+
+      - name: Generate validator docker metadata
+        uses: docker/metadata-action@v3
+        id: validator
+        with:
+          images: ghcr.io/espressosystems/espresso/validator
+
+      - uses: docker/build-push-action@v3
+        name: Build and Push Docker
+        with:
+          context: ./
+          file: ./docker/address-book.Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.ab.outputs.tags }}
+          labels: ${{ steps.ab.outputs.labels }}
+
+      - uses: docker/build-push-action@v3
+        name: Build and Push Docker
+        with:
+          context: ./
+          file: ./docker/faucet.Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.faucet.outputs.tags }}
+          labels: ${{ steps.faucet.outputs.labels }}
+
+      - uses: docker/build-push-action@v3
+        name: Build and Push Docker
+        with:
+          context: ./
+          file: ./docker/validator.Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.validator.outputs.tags }}
+          labels: ${{ steps.validator.outputs.labels }}

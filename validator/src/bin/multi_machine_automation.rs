@@ -1,11 +1,14 @@
-use async_std::task::spawn_blocking;
+use async_std::task::{sleep, spawn_blocking};
 use escargot::CargoBuild;
-use espresso_validator::{ConsensusConfig, NodeOpt};
+use espresso_validator::{ConsensusConfig, NodeOpt, SecretKeySeed};
 use jf_cap::keys::UserPubKey;
+use std::env;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Command, Stdio};
+use std::time::Duration;
 use structopt::StructOpt;
+use tide::http::Url;
 
 #[derive(StructOpt)]
 #[structopt(
@@ -19,6 +22,14 @@ struct Options {
     /// Path to the node configuration file.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONFIG_PATH")]
     pub config: Option<PathBuf>,
+
+    /// Override `seed` from the node configuration file.
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
+    pub secret_key_seed: Option<SecretKeySeed>,
+
+    /// Override `nodes` from the node configuration file.
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_NODES", value_delimiter = ",")]
+    pub nodes: Option<Vec<Url>>,
 
     /// Path to public keys.
     ///
@@ -78,6 +89,21 @@ fn cargo_run(bin: impl AsRef<str>) -> Command {
 async fn main() {
     // Construct arguments to pass to the multi-machine demo.
     let options = Options::from_args();
+
+    // With StructOpt/CLAP, environment variables override command line arguments, but we are going
+    // to construct a command line for each child, so the child processes shouldn't get their
+    // options from the environment. Clear the environment variables corresponding to each option
+    // that we will set explicitly in the command line.
+    env::remove_var("ESPRESSO_VALIDATOR_CONFIG_PATH");
+    env::remove_var("ESPRESSO_VALIDATOR_SECRET_KEY_SEED");
+    env::remove_var("ESPRESSO_VALIDATOR_NODES");
+    env::remove_var("ESPRESSO_VALIDATOR_PUB_KEY_PATH");
+    env::remove_var("ESPRESSO_FAUCET_PUB_KEY");
+    env::remove_var("ESPRESSO_VALIDATOR_STORE_PATH");
+    env::remove_var("ESPRESSO_VALIDATOR_WEB_PATH");
+    env::remove_var("ESPRESSO_VALIDATOR_API_PATH");
+    env::remove_var("ESPRESSO_VALIDATOR_PORT");
+
     let mut args = vec![];
     if options.node_opt.reset_store_state {
         args.push("--reset-store-state");
@@ -112,6 +138,23 @@ async fn main() {
         args.push("--config");
         args.push(&config_path);
     }
+    let secret_key_seed;
+    if let Some(seed) = &options.secret_key_seed {
+        secret_key_seed = seed.to_string();
+        args.push("--secret-key-seed");
+        args.push(&secret_key_seed);
+    }
+    let nodes = options.nodes.as_ref().map(|nodes| {
+        nodes
+            .iter()
+            .map(|node| node.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    });
+    if let Some(nodes) = &nodes {
+        args.push("--nodes");
+        args.push(nodes);
+    }
     let pk_path;
     if let Some(path) = &options.pk_path {
         pk_path = path.display().to_string();
@@ -133,9 +176,12 @@ async fn main() {
     };
 
     // Read node info from node configuration file.
-    let num_nodes = match &options.config {
-        None => 7,
-        Some(path) => ConsensusConfig::from_file(path).nodes.len(),
+    let num_nodes = match &options.nodes {
+        Some(nodes) => nodes.len(),
+        None => match &options.config {
+            Some(path) => ConsensusConfig::from_file(path).nodes.len(),
+            None => 7,
+        },
     };
     let (num_fail_nodes, fail_after_txn_str) = match options.num_fail_nodes {
         Some(num_fail_nodes) => {
@@ -168,6 +214,9 @@ async fn main() {
                 this_args.push("--num-txn");
                 this_args.push(&num_txn_str);
             }
+            if options.verbose {
+                println!("espresso-validator {}", this_args.join(" "));
+            }
             (
                 id,
                 cargo_run("espresso-validator")
@@ -181,7 +230,7 @@ async fn main() {
 
     // Collect output from each process as they run. If we don't do this eagerly, validators can
     // block when their output pipes fill up causing deadlock.
-    let outputs = processes
+    let mut outputs = processes
         .iter_mut()
         .map(|(id, p)| {
             let mut stdout = BufReader::new(p.stdout.take().unwrap());
@@ -211,39 +260,71 @@ async fn main() {
     // Check each process.
     let mut commitment = None;
     let mut succeeded_nodes = 0;
-    for ((id, mut p), output) in processes.into_iter().zip(outputs) {
-        println!("Waiting for validator {}", id);
-        let process: Result<ExitStatus, _> = p.wait();
-        process.unwrap_or_else(|_| panic!("Failed to run the validator for node {}", id));
-        // Check whether the commitments are the same.
-        if options.num_txn.is_some() {
-            let lines = output.await;
-            if id < first_fail_id as usize {
-                for line in lines {
-                    if line.starts_with("Final commitment:") {
-                        let strs: Vec<&str> = line.split(' ').collect();
-                        let final_commitment = strs.last().unwrap_or_else(|| {
-                            panic!("Failed to parse commitment for node {}", id)
-                        });
-                        println!(
-                            "Validator {} finished with commitment {}",
-                            id, final_commitment
-                        );
-                        if let Some(comm) = commitment.clone() {
-                            assert_eq!(comm, final_commitment.to_string());
+    let mut finished_nodes = 0;
+    let threshold = ((num_nodes * 2) / 3) + 1;
+    let expect_failure = num_fail_nodes as usize > num_nodes - threshold;
+    println!("Waiting for validators to finish");
+    while succeeded_nodes < threshold && finished_nodes < num_nodes {
+        // If the consensus is expected to fail, not all processes will complete.
+        if expect_failure && (finished_nodes >= num_fail_nodes as usize) {
+            break;
+        }
+        // Pause before checking the exit status.
+        sleep(Duration::from_secs(10)).await;
+        for ((id, mut p), output) in core::mem::take(&mut processes)
+            .into_iter()
+            .zip(core::mem::take(&mut outputs))
+        {
+            match p.try_wait() {
+                Ok(Some(_)) => {
+                    // Check whether the commitments are the same.
+                    if options.num_txn.is_some() {
+                        let lines = output.await;
+                        if id < first_fail_id as usize {
+                            for line in lines {
+                                if line.starts_with("Final commitment:") {
+                                    let strs: Vec<&str> = line.split(' ').collect();
+                                    let final_commitment = strs.last().unwrap_or_else(|| {
+                                        panic!("Failed to parse commitment for node {}", id)
+                                    });
+                                    println!(
+                                        "Validator {} finished with commitment {}",
+                                        id, final_commitment
+                                    );
+                                    if let Some(comm) = commitment.clone() {
+                                        assert_eq!(comm, final_commitment.to_string());
+                                    } else {
+                                        commitment = Some(final_commitment.to_string());
+                                    }
+                                    succeeded_nodes += 1;
+                                }
+                            }
                         } else {
-                            commitment = Some(final_commitment.to_string());
+                            println!("Validator {} finished", id);
                         }
-                        succeeded_nodes += 1;
-                        break;
                     }
+                    finished_nodes += 1;
+                }
+                Ok(None) => {
+                    // Add back unfinished process and output.
+                    processes.push((id, p));
+                    outputs.push(output);
+                }
+                Err(e) => {
+                    println!("Validator {} failed: {}", id, e);
+                    finished_nodes += 1;
                 }
             }
         }
     }
 
+    // Kill processes that are still running.
+    for (id, mut p) in processes {
+        p.kill()
+            .unwrap_or_else(|_| panic!("Failed to kill node {}", id));
+    }
+
     // Check whether the number of succeeded nodes meets the threshold.
-    let threshold = ((num_nodes * 2) / 3) + 1;
     assert!(succeeded_nodes >= threshold);
     println!("Consensus completed for all nodes")
 }
@@ -259,6 +340,10 @@ mod test {
         fail_after_txn: u64,
         expect_success: bool,
     ) {
+        println!(
+            "Testing {} txns with {}/7 nodes failed after txn {}",
+            num_txn, num_fail_nodes, fail_after_txn
+        );
         let num_txn = &num_txn.to_string();
         let num_fail_nodes = &num_fail_nodes.to_string();
         let fail_after_txn = &fail_after_txn.to_string();
@@ -285,15 +370,14 @@ mod test {
         assert_eq!(expect_success, status.success());
     }
 
-    // TODO !keyao Investigate inconsistent automation failures
-    // Issue: https://github.com/EspressoSystems/espresso/issues/270
-    #[ignore]
     #[async_std::test]
     async fn test_automation() {
-        automate(5, 0, 0, true).await;
         automate(5, 1, 3, true).await;
-        automate(5, 2, 2, true).await;
         automate(5, 3, 1, false).await;
-        automate(50, 2, 10, true).await;
+
+        // Disabling the following test cases to avoid exceeding the time limit.
+        // automate(5, 0, 0, true).await;
+        // automate(5, 2, 2, true).await;
+        // automate(50, 2, 10, true).await;
     }
 }

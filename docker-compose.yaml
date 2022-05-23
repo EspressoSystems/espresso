@@ -1,0 +1,89 @@
+# Many environment variables are shared between services. Such environment variables are set
+# globally in the .env file, and merely passed through here.
+
+version: '2'
+services:
+  # Configure the validators. Each validator exposes 2 ports: the validation port that other
+  # validators use to connect to it during consensus, and a port where it hosts a query service.
+  # The validation ports are numbered 4000x while the query service ports are numbered 6000x.
+  validator0:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - 40000:40000/tcp
+      - 60000:50000/tcp
+    environment:
+      - ESPRESSO_VALIDATOR_ID=0
+      - ESPRESSO_VALIDATOR_NODES
+      - ESPRESSO_FAUCET_PUB_KEY
+  validator1:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - 40001:40001/tcp
+      - 60001:50000/tcp
+    environment:
+      - ESPRESSO_VALIDATOR_ID=1
+      - ESPRESSO_VALIDATOR_NODES
+      - ESPRESSO_FAUCET_PUB_KEY
+  validator2:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - 40002:40002/tcp
+      - 60002:50000/tcp
+    environment:
+      - ESPRESSO_VALIDATOR_ID=2
+      - ESPRESSO_VALIDATOR_NODES
+      - ESPRESSO_FAUCET_PUB_KEY
+  validator3:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - 40003:40003/tcp
+      - 60003:50000/tcp
+    environment:
+      - ESPRESSO_VALIDATOR_ID=3
+      - ESPRESSO_VALIDATOR_NODES
+      - ESPRESSO_FAUCET_PUB_KEY
+  validator4:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - 40004:40004/tcp
+      - 60004:50000/tcp
+    environment:
+      - ESPRESSO_VALIDATOR_ID=4
+      - ESPRESSO_VALIDATOR_NODES
+      - ESPRESSO_FAUCET_PUB_KEY
+  validator5:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - 40005:40005/tcp
+      - 60005:50000/tcp
+    environment:
+      - ESPRESSO_VALIDATOR_ID=5
+      - ESPRESSO_VALIDATOR_NODES
+      - ESPRESSO_FAUCET_PUB_KEY
+  validator6:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - 40006:40006/tcp
+      - 60006:50000/tcp
+    environment:
+      - ESPRESSO_VALIDATOR_ID=6
+      - ESPRESSO_VALIDATOR_NODES
+      - ESPRESSO_FAUCET_PUB_KEY
+
+  # Configure services. Services run at ports starting at 50000.
+  faucet:
+    image: ghcr.io/espressosystems/espresso/faucet:main
+    ports:
+      - $ESPRESSO_FAUCET_PORT:$ESPRESSO_FAUCET_PORT/tcp
+    environment:
+      - ESPRESSO_FAUCET_PORT
+      - ESPRESSO_FAUCET_WALLET_MNEMONIC
+      - ESPRESSO_SUBMIT_URL
+      - ESPRESSO_ESQS_URL
+      - ESPRESSO_ADDRESS_BOOK_URL
+  address-book:
+    image: ghcr.io/espressosystems/espresso/address-book:main
+    ports:
+      - $ESPRESSO_ADDRESS_BOOK_PORT:$ESPRESSO_ADDRESS_BOOK_PORT/tcp
+    environment:
+      - ESPRESSO_ADDRESS_BOOK_PORT
