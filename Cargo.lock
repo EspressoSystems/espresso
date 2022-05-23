@@ -1795,7 +1795,7 @@ dependencies = [
 name = "espresso-catchup-api"
 version = "0.1.0"
 dependencies = [
- "jf-cap 0.0.2 (git+https://github.com/EspressoSystems/cap.git?branch=testnet-v1)",
+ "jf-cap",
  "seahorse",
  "zerok_lib",
 ]
@@ -1832,13 +1832,8 @@ dependencies = [
 name = "espresso-status-api"
 version = "0.1.0"
 dependencies = [
-<<<<<<< HEAD
- "jf-cap 0.0.1",
- "phaselock",
-=======
  "jf-cap",
- "seahorse",
->>>>>>> main
+ "phaselock",
  "zerok_lib",
 ]
 
@@ -1893,18 +1888,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
-name = "espresso-validator-status-api"
-version = "0.1.0"
-dependencies = [
- "jf-cap",
- "phaselock",
- "zerok_lib",
-]
-
-[[package]]
->>>>>>> main
 name = "event-listener"
 version = "2.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
