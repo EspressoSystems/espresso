@@ -1,5 +1,5 @@
 [package]
-name = "espresso-validation-event-api"
+name = "espresso-catchup-api"
 version = "0.1.0"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -7,4 +7,4 @@ edition = "2021"
 [dependencies]
 jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
-zerok_lib = { path = "../zerok_lib/" }
+zerok_lib = { path = "../../zerok_lib/" }
