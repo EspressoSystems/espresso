@@ -78,7 +78,8 @@ async fn create_keystore(
         opt.esqs_url.clone(),
         opt.esqs_url.clone(),
         &mut loader,
-    )?;
+    )
+    .await?;
     EspressoKeystore::new(backend).await
 }
 
