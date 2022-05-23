@@ -2,6 +2,13 @@ name: Build
 
 on:
   push:
+    branches:
+      - main
+      - release-*
+  pull_request:
+    branches:
+      - main
+      - release-*
   workflow_dispatch:
 
 jobs:
@@ -53,16 +60,16 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: x86_64-unknown-linux-gnu-address-book
-          path: target/x86_64-unknown-linux-gnu/release/address-book
+          path: target/release/address-book
 
       - name: Upload faucet artifact
         uses: actions/upload-artifact@v3
         with:
           name: x86_64-unknown-linux-gnu-faucet
-          path: target/x86_64-unknown-linux-gnu/release/faucet
+          path: target/release/faucet
 
       - name: Upload validator artifact
         uses: actions/upload-artifact@v3
         with:
           name: x86_64-unknown-linux-gnu-validator
-          path: target/x86_64-unknown-linux-gnu/release/espresso-validator
+          path: target/release/espresso-validator
