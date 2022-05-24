@@ -89,6 +89,7 @@ impl TestNetwork {
             self.submit_api.clone(),
             loader,
         )
+        .await
         .unwrap();
         EspressoKeystore::new(backend).await.unwrap()
     }

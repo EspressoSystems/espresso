@@ -62,7 +62,7 @@ struct Options {
     /// If the node ID is 0, it will propose and try to add transactions.
     ///
     /// Skip this option if only want to generate public key files.
-    #[structopt(long, short)]
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_ID")]
     #[structopt(conflicts_with("gen-pk"))]
     pub id: Option<u64>,
 
@@ -73,7 +73,7 @@ struct Options {
     ///
     /// This option may be passed multiple times to initialize the ledger with multiple native
     /// token records.
-    #[structopt(long, env = "ESPRESSO_FAUCET_PUB_KEY")]
+    #[structopt(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ",")]
     pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.

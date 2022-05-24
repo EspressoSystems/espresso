@@ -15,6 +15,7 @@ services:
       - ESPRESSO_VALIDATOR_ID=0
       - ESPRESSO_VALIDATOR_NODES
       - ESPRESSO_FAUCET_PUB_KEY
+      - RUST_LOG
   validator1:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
@@ -24,6 +25,7 @@ services:
       - ESPRESSO_VALIDATOR_ID=1
       - ESPRESSO_VALIDATOR_NODES
       - ESPRESSO_FAUCET_PUB_KEY
+      - RUST_LOG
   validator2:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
@@ -33,6 +35,7 @@ services:
       - ESPRESSO_VALIDATOR_ID=2
       - ESPRESSO_VALIDATOR_NODES
       - ESPRESSO_FAUCET_PUB_KEY
+      - RUST_LOG
   validator3:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
@@ -42,6 +45,7 @@ services:
       - ESPRESSO_VALIDATOR_ID=3
       - ESPRESSO_VALIDATOR_NODES
       - ESPRESSO_FAUCET_PUB_KEY
+      - RUST_LOG
   validator4:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
@@ -51,6 +55,7 @@ services:
       - ESPRESSO_VALIDATOR_ID=4
       - ESPRESSO_VALIDATOR_NODES
       - ESPRESSO_FAUCET_PUB_KEY
+      - RUST_LOG
   validator5:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
@@ -60,6 +65,7 @@ services:
       - ESPRESSO_VALIDATOR_ID=5
       - ESPRESSO_VALIDATOR_NODES
       - ESPRESSO_FAUCET_PUB_KEY
+      - RUST_LOG
   validator6:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
@@ -69,6 +75,7 @@ services:
       - ESPRESSO_VALIDATOR_ID=6
       - ESPRESSO_VALIDATOR_NODES
       - ESPRESSO_FAUCET_PUB_KEY
+      - RUST_LOG
 
   # Configure services. Services run at ports starting at 50000.
   faucet:
@@ -81,9 +88,11 @@ services:
       - ESPRESSO_SUBMIT_URL
       - ESPRESSO_ESQS_URL
       - ESPRESSO_ADDRESS_BOOK_URL
+      - RUST_LOG
   address-book:
     image: ghcr.io/espressosystems/espresso/address-book:main
     ports:
       - $ESPRESSO_ADDRESS_BOOK_PORT:$ESPRESSO_ADDRESS_BOOK_PORT/tcp
     environment:
       - ESPRESSO_ADDRESS_BOOK_PORT
+      - RUST_LOG

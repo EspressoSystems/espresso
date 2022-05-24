@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - release-*
   pull_request:
     branches:
       - main
+      - release-*
   schedule:
     - cron: "0 0 * * 1"
   workflow_dispatch:
@@ -18,7 +20,6 @@ jobs:
       image: ghcr.io/espressosystems/nix:2.8.1
       volumes:
         - github_nix_281:/nix
-    timeout-minutes: 120
     steps:
       - name: Configure Git
         run: |
@@ -28,15 +29,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Sanity check that repository builds with nix
+      - name: Fix Git Security Issue
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Quick Test Static Build
+        timeout-minutes: 60
         run: |
-          cat /etc/nix/nix.conf
-          echo $(arch)
-          echo $(uname -a)
-          git config --global --add safe.directory "$PWD"
           nix run "github:NixOS/nix?ref=780c7731cd3e6fac05c1a13b244b5f7925f0010b" -- develop .#staticShell --option sandbox relaxed -c cargo run --release --bin multi_machine_automation -- --num-txn 3 --verbose
 
       - name: Compile all executables
+        timeout-minutes: 60
         run: |
           nix run "github:NixOS/nix?ref=780c7731cd3e6fac05c1a13b244b5f7925f0010b" -- develop .#staticShell --option sandbox relaxed -c cargo build --release
 
@@ -112,8 +114,8 @@ jobs:
         with:
           images: ghcr.io/espressosystems/espresso/validator
 
-      - uses: docker/build-push-action@v3
-        name: Build and Push Docker
+      - name: Build and push address book docker
+        uses: docker/build-push-action@v3
         with:
           context: ./
           file: ./docker/address-book.Dockerfile
@@ -122,8 +124,8 @@ jobs:
           tags: ${{ steps.ab.outputs.tags }}
           labels: ${{ steps.ab.outputs.labels }}
 
-      - uses: docker/build-push-action@v3
-        name: Build and Push Docker
+      - name: Build and push faucet docker
+        uses: docker/build-push-action@v3
         with:
           context: ./
           file: ./docker/faucet.Dockerfile
@@ -132,8 +134,8 @@ jobs:
           tags: ${{ steps.faucet.outputs.tags }}
           labels: ${{ steps.faucet.outputs.labels }}
 
-      - uses: docker/build-push-action@v3
-        name: Build and Push Docker
+      - name: Build and push validator docker
+        uses: docker/build-push-action@v3
         with:
           context: ./
           file: ./docker/validator.Dockerfile

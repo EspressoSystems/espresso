@@ -119,6 +119,7 @@ async fn main() {
     let tempdir = TempDir::new("keystore").unwrap();
     let storage = args.storage.unwrap_or(PathBuf::from(tempdir.path()));
 
+<<<<<<< HEAD
     let (key_stream, _mnemonic) = KeyTree::random(&mut rng);
     let faucet_key_pair = key_stream
         .derive_sub_tree("keystore".as_bytes())
@@ -126,6 +127,18 @@ async fn main() {
         .derive_user_key_pair(&0u64.to_le_bytes());
     let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key().clone()).await;
     let backend = create_backend(storage.clone(), &network);
+=======
+    let mut loader = TrivialKeystoreLoader { dir: args.storage };
+    let backend = NetworkBackend::new(
+        &*UNIVERSAL_PARAM,
+        args.server.clone(),
+        args.server.clone(),
+        args.server.clone(),
+        &mut loader,
+    )
+    .await
+    .expect("failed to connect to backend");
+>>>>>>> origin/main
     let mut keystore = Keystore::new(backend)
         .await
         .expect("error loading keystore");

@@ -6,6 +6,7 @@ use futures::prelude::*;
 use itertools::izip;
 use phaselock::traits::BlockContents;
 use seahorse::events::LedgerEvent;
+use serde::{Deserialize, Serialize};
 use server::{best_response_type, response};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -127,6 +128,7 @@ pub enum ApiRouteKey {
     gettransaction,
     getunspentrecord,
     getunspentrecordsetinfo,
+    healthcheck,
     subscribe,
 }
 
@@ -211,6 +213,23 @@ pub fn dummy_url_eval(
 // serializing the endpoint responses according to the requested content type
 // and building a Response object.
 //
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HealthStatus {
+    Available,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct HealthCheck {
+    pub status: HealthStatus,
+}
+
+async fn healthcheck() -> Result<HealthCheck, tide::Error> {
+    Ok(HealthCheck {
+        status: HealthStatus::Available,
+    })
+}
 
 async fn get_info(
     query_service: &(impl QueryService + Sync),
@@ -507,6 +526,7 @@ pub async fn dispatch_url(
         ApiRouteKey::getsnapshot => response(&req, get_snapshot(bindings, query_service).await?),
         ApiRouteKey::getnullifier => response(&req, get_nullifier(bindings, query_service).await?),
         ApiRouteKey::getstatecomm => response(&req, get_state_comm(bindings, query_service).await?),
+        ApiRouteKey::healthcheck => response(&req, healthcheck().await?),
         _ => Err(tide::Error::from_str(
             StatusCode::InternalServerError,
             "server called dispatch_url with an unsupported route; perhaps the route has not \

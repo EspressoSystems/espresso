@@ -45,7 +45,7 @@ struct Options {
     ///
     /// This option may be passed multiple times to initialize the ledger with multiple native
     /// token records.
-    #[structopt(long, env = "ESPRESSO_FAUCET_PUB_KEY")]
+    #[structopt(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ",")]
     pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.

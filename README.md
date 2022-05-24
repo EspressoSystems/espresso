@@ -30,7 +30,7 @@ Then run `target/release/faucet-keystore-test-setup` and copy the output into yo
 export the necessary environment variables. It should look something like:
 ```bash
 export ESPRESSO_FAUCET_MANAGER_MNEMONIC="test test test test test test test test test test test junk"
-export ESPRESSO_FAUCET_PUB_KEY="USERPUBKEY~oJtD62L-jgPwz2MtdSgBYhgkHXz30l8Qlh3_6Ggi6RsgAAAAAAAAAKbNFtKP1zaRURIPxpVelnYcsE26aDyP0wezQxLW8FNTxw"
+export ESPRESSO_FAUCET_PUB_KEYS="USERPUBKEY~oJtD62L-jgPwz2MtdSgBYhgkHXz30l8Qlh3_6Ggi6RsgAAAAAAAAAKbNFtKP1zaRURIPxpVelnYcsE26aDyP0wezQxLW8FNTxw"
 ```
 
 Now, we need to configure all of the services to find each other when we run them on `localhost`.
@@ -98,7 +98,7 @@ target/release/faucet
 | ESPRESSO_ESQS_URL          | Url  | zerok-client, faucet | URL of the EsQS
 | ESPRESSO_SUBMIT_URL        | Url  | zerok-client, faucet | URL of the validator to submit transactions to
 | ESPRESSO_FAUCET_MANAGER_MNEMONIC | String | faucet-keystore-test-setup | Mnemonic phrase to generate the master faucet public key
-| ESPRESSO_FAUCET_PUB_KEY | UserPubKey | espresso-validator | The public key of the genesis record created by validators
+| ESPRESSO_FAUCET_PUB_KEYS | Vec<UserPubKey> | espresso-validator | Comma-separated list of public keys owning records in the genesis block
 | ESPRESSO_FAUCET_WALLET_MNEMONIC | String | faucet        | Mnemonic phrase to generate the faucet public key
 | ESPRESSO_FAUCET_WALLET_STORE_PATH | Path | faucet              | Path to persistence files for faucet wallet (default `$LOCAL/.espresso/espresso/faucet/keystore`)
 | ESPRESSO_FAUCET_WALLET_PASSWORD | String | faucet        | Password to use for persisted faucet files (random by default)
