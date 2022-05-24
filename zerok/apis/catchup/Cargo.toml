@@ -7,4 +7,4 @@ edition = "2021"
 [dependencies]
 jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 seahorse = { path = "/home/brendon/code/seahorse" }
-zerok_lib = { path = "../zerok_lib/" }
+zerok_lib = { path = "../../zerok_lib/" }

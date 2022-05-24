@@ -20,6 +20,8 @@
 // `-w KEY_FILE.pub` and pass the key pair to `random_keystore` with `-k KEY_FILE`.
 
 use async_std::task::sleep;
+use espresso_validator::testing::minimal_test_network;
+use espresso_validator::testing::TestNetwork;
 use jf_cap::keys::UserPubKey;
 use jf_cap::structs::{AssetCode, AssetPolicy};
 use rand::distributions::weighted::WeightedError;
@@ -27,24 +29,20 @@ use rand::seq::SliceRandom;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use seahorse::{events::EventIndex, hd::KeyTree, loader::KeystoreLoader, KeySnafu, KeystoreError};
 use snafu::ResultExt;
-use std::convert::TryInto;
 use std::fs::File;
 use std::io::Read;
+use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use structopt::StructOpt;
+use tempdir::TempDir;
 use tracing::{event, Level};
 use zerok_lib::{
-    api::client,
-    api::EspressoError,
     keystore::network::{NetworkBackend, Url},
     ledger::EspressoLedger,
     universal_params::UNIVERSAL_PARAM,
 };
-use espresso_validator::testing::TestNetwork;
-use espresso_validator::testing::minimal_test_network;
-use tempdir::TempDir;
-use zerok_lib::keystore::EspressoKeystore;
 
 type Keystore = seahorse::Keystore<'static, NetworkBackend<'static, ()>, EspressoLedger>;
 
@@ -64,9 +62,23 @@ struct Args {
     #[structopt(long)]
     storage: Option<PathBuf>,
 
+    #[structopt(long)]
+    address_storage: PathBuf,
+
+    /// URL of a server for querying with the ledger
+    #[structopt(short, long, env = "ESPRESSO_ESQS_URL")]
+    esqs_url: Url,
+
     /// URL of a server for interacting with the ledger
-    #[structopt(short, long)]
-    server: Option<Url>,
+    #[structopt(short, long, env = "ESPRESSO_SUBMIT_URL")]
+    validator_url: Url,
+
+    /// URL of a server for address book
+    #[structopt(short, long, env = "ESPRESSO_ADDRESS_BOOK_URL")]
+    address_book_url: Url,
+
+    #[structopt(short, long, env = "ESPRESSO_FAUCET_PORT")]
+    faucet_port: u16,
 }
 
 struct TrivialKeystoreLoader {
@@ -91,10 +103,39 @@ impl KeystoreLoader<EspressoLedger> for TrivialKeystoreLoader {
 }
 
 async fn retry_delay() {
-    sleep(Duration::from_secs(2)).await
+    sleep(Duration::from_secs(1)).await
 }
 
-fn create_backend<'a>(storage: PathBuf, network: &TestNetwork) -> NetworkBackend<'a, ()> {
+async fn write_pub_key(key: &UserPubKey, path: &Path) {
+    let mut keys: Vec<UserPubKey> = if path.exists() {
+        get_pub_keys_from_file(path).await
+    } else {
+        vec![]
+    };
+    keys.push(key.clone());
+    let mut file = File::create(path).unwrap_or_else(|err| {
+        panic!("cannot open private key file: {}", err);
+    });
+    file.write_all(&bincode::serialize(&keys).unwrap()).unwrap();
+}
+
+async fn get_pub_keys_from_file(path: &Path) -> Vec<UserPubKey> {
+    let mut file = File::open(path).unwrap_or_else(|err| {
+        panic!("cannot open pub keys file: {}", err);
+    });
+    let mut bytes = Vec::new();
+    let num_bytes = file.read_to_end(&mut bytes).unwrap_or_else(|err| {
+        panic!("error reading pub keys file: {}", err);
+    });
+    if num_bytes == 0 {
+        return vec![];
+    }
+    bincode::deserialize(&bytes).unwrap_or_else(|err| {
+        panic!("invalid private key file: {}", err);
+    })
+}
+
+async fn create_backend<'a>(storage: PathBuf, network: &TestNetwork) -> NetworkBackend<'a, ()> {
     let mut loader = TrivialKeystoreLoader { dir: storage };
     NetworkBackend::new(
         &*UNIVERSAL_PARAM,
@@ -103,6 +144,7 @@ fn create_backend<'a>(storage: PathBuf, network: &TestNetwork) -> NetworkBackend
         network.submit_api.clone(),
         &mut loader,
     )
+    .await
     .expect("failed to connect to backend")
 }
 
@@ -115,34 +157,32 @@ async fn main() {
 
     let args = Args::from_args();
 
+    let address_path = args.address_storage;
+
     let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
     let tempdir = TempDir::new("keystore").unwrap();
     let storage = args.storage.unwrap_or(PathBuf::from(tempdir.path()));
 
-<<<<<<< HEAD
     let (key_stream, _mnemonic) = KeyTree::random(&mut rng);
     let faucet_key_pair = key_stream
         .derive_sub_tree("keystore".as_bytes())
         .derive_sub_tree("user".as_bytes())
         .derive_user_key_pair(&0u64.to_le_bytes());
     let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key().clone()).await;
-    let backend = create_backend(storage.clone(), &network);
-=======
-    let mut loader = TrivialKeystoreLoader { dir: args.storage };
+    // let backend = create_backend(storage.clone(), &network);
+    let mut loader = TrivialKeystoreLoader { dir: storage };
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
-        args.server.clone(),
-        args.server.clone(),
-        args.server.clone(),
+        args.esqs_url.clone(),
+        args.address_book_url.clone(),
+        args.validator_url.clone(),
         &mut loader,
     )
     .await
     .expect("failed to connect to backend");
->>>>>>> origin/main
     let mut keystore = Keystore::new(backend)
         .await
         .expect("error loading keystore");
-    println!("created keystore");
     match args.key_path {
         Some(path) => {
             let mut file = File::open(path).unwrap_or_else(|err| {
@@ -166,15 +206,26 @@ async fn main() {
                 });
         }
         None => {
-            println!("going to generate key");
-            keystore.add_user_key(faucet_key_pair.clone(), "faucet".into(), EventIndex::default()).await.unwrap()
+            keystore
+                .generate_user_key("Random Key".to_string(), None)
+                .await
+                .unwrap();
         }
     }
-    println!("generated key");
 
     let pub_key = keystore.pub_keys().await.remove(0);
+    write_pub_key(&pub_key, &address_path).await;
     let address = pub_key.address();
-    println!("got pub key");
+    let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
+
+    // Request native asset for the keystore.
+    surf::post(format!(
+        "http://localhost:{}/request_fee_assets",
+        args.faucet_port
+    ))
+    .content_type(surf::http::mime::BYTE_STREAM)
+    .body_bytes(&receiver_key_bytes)
+    .await;
 
     // Wait for initial balance.
     while keystore.balance(&AssetCode::native()).await == 0u64.into() {
@@ -239,29 +290,43 @@ async fn main() {
     }
 
     let mut peers: Vec<UserPubKey> = Vec::new();
-    let mut keystore2 = Keystore::new(
-        create_backend(storage.clone(), &network)
-    ).await.unwrap();
+    // let temp2 = TempDir::new("keystore2").unwrap();
+    // let mut loader = TrivialKeystoreLoader { dir: PathBuf::from(temp2.path()) };
+    // let backend2 = NetworkBackend::new(
+    //     &*UNIVERSAL_PARAM,
+    //     args.esqs_url.clone(),
+    //     args.address_book_url.clone(),
+    //     args.validator_url.clone(),
+    //     &mut loader,
+    // ).await.expect("failed to connect to backend");
+    // let mut keystore2 = Keystore::new(backend2).await.unwrap();
 
-    let pub_key = keystore2.generate_user_key("Random Key".to_string(), None).await.unwrap();
-    peers.push(pub_key.clone());
-    peers.push(faucet_key_pair.pub_key().clone());
+    // let pub_key = keystore2.generate_user_key("Random Key".to_string(), None).await.unwrap();
+
+    // println!("Wallet 2 Native balance {}", keystore2.balance(&AssetCode::native()).await);
+    // println!("Wallet 2 Custom Asset balance {}", keystore2.balance(&my_asset.code).await);
 
     loop {
         // Get a list of all users in our group (this will include our own public key).
         // Filter out our own public key and randomly choose one of the other ones to transfer to.
-        let recipient =
-            match peers.choose_weighted(&mut rng, |pk| if *pk == pub_key { 0u64 } else { 1u64 }) {
-                Ok(recipient) => recipient,
-                Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
-                    println!("no peers yet, retrying...");
-                    retry_delay().await;
-                    continue;
-                }
-                Err(err) => {
-                    panic!("error in weighted choice of peer: {}", err);
-                }
-            };
+        let peers = get_pub_keys_from_file(&address_path).await;
+        let recipient = match peers.choose_weighted(&mut rng, |pk| {
+            if *pk == faucet_key_pair.pub_key().clone() {
+                0u64
+            } else {
+                1u64
+            }
+        }) {
+            Ok(recipient) => recipient,
+            Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
+                println!("no peers yet, retrying...");
+                retry_delay().await;
+                continue;
+            }
+            Err(err) => {
+                panic!("error in weighted choice of peer: {}", err);
+            }
+        };
 
         // Get a list of assets for which we have a non-zero balance.
         let mut asset_balances = vec![];
@@ -306,12 +371,22 @@ async fn main() {
                     // Transfers are allowed to fail. It can happen, for instance, if we get starved
                     // out until our transfer becomes too old for the validators. Thus we make this
                     // a warning, not an error.
-                    event!(Level::WARN, "transfer failed!");
+                    println!("transfer failed!");
                 }
             }
             Err(err) => {
-                event!(Level::ERROR, "error while waiting for transaction: {}", err);
+                println!("error while waiting for transaction: {}", err);
             }
         }
+        println!(
+            "Wallet Native balance {}",
+            keystore.balance(&AssetCode::native()).await
+        );
+        println!(
+            "Wallet Custom Asset balance {}",
+            keystore.balance(&my_asset.code).await
+        );
+        // println!("Wallet 2 Native balance {}", keystore2.balance(&AssetCode::native()).await);
+        // println!("Wallet 2 Custom Asset balance {}", keystore2.balance(&my_asset.code).await);
     }
 }
