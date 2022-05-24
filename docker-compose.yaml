@@ -14,7 +14,7 @@ services:
     environment:
       - ESPRESSO_VALIDATOR_ID=0
       - ESPRESSO_VALIDATOR_NODES
-      - ESPRESSO_FAUCET_PUB_KEY
+      - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
   validator1:
     image: ghcr.io/espressosystems/espresso/validator:main
@@ -24,7 +24,7 @@ services:
     environment:
       - ESPRESSO_VALIDATOR_ID=1
       - ESPRESSO_VALIDATOR_NODES
-      - ESPRESSO_FAUCET_PUB_KEY
+      - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
   validator2:
     image: ghcr.io/espressosystems/espresso/validator:main
@@ -34,7 +34,7 @@ services:
     environment:
       - ESPRESSO_VALIDATOR_ID=2
       - ESPRESSO_VALIDATOR_NODES
-      - ESPRESSO_FAUCET_PUB_KEY
+      - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
   validator3:
     image: ghcr.io/espressosystems/espresso/validator:main
@@ -44,7 +44,7 @@ services:
     environment:
       - ESPRESSO_VALIDATOR_ID=3
       - ESPRESSO_VALIDATOR_NODES
-      - ESPRESSO_FAUCET_PUB_KEY
+      - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
   validator4:
     image: ghcr.io/espressosystems/espresso/validator:main
@@ -54,7 +54,7 @@ services:
     environment:
       - ESPRESSO_VALIDATOR_ID=4
       - ESPRESSO_VALIDATOR_NODES
-      - ESPRESSO_FAUCET_PUB_KEY
+      - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
   validator5:
     image: ghcr.io/espressosystems/espresso/validator:main
@@ -64,7 +64,7 @@ services:
     environment:
       - ESPRESSO_VALIDATOR_ID=5
       - ESPRESSO_VALIDATOR_NODES
-      - ESPRESSO_FAUCET_PUB_KEY
+      - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
   validator6:
     image: ghcr.io/espressosystems/espresso/validator:main
@@ -74,7 +74,7 @@ services:
     environment:
       - ESPRESSO_VALIDATOR_ID=6
       - ESPRESSO_VALIDATOR_NODES
-      - ESPRESSO_FAUCET_PUB_KEY
+      - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
 
   # Configure services. Services run at ports starting at 50000.
