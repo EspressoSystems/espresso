@@ -1,7 +1,7 @@
 FROM ubuntu:jammy
 
 RUN apt-get update \
-&&  apt-get install -y curl \
+&&  apt-get install -y curl wait-for-it \
 &&  rm -rf /var/lib/apt/lists/*
 
 COPY target/x86_64-unknown-linux-musl/release/espresso-validator /bin/espresso-validator
@@ -25,7 +25,7 @@ ENV ESPRESSO_VALIDATOR_CONFIG_PATH=/config/node-config.toml
 ENV ESPRESSO_VALIDATOR_PUB_KEY_PATH=/config
 ENV ESPRESSO_VALIDATOR_API_PATH=/api/api.toml
 ENV ESPRESSO_VALIDATOR_WEB_PATH=/public
-ENV ESPRESSO_VALIDATOR_STORE_PATH=/store
+ENV ESPRESSO_VALIDATOR_STORE_PATH=/store/atomicstore
 
 # Run a query service at port 50000.
 ENV ESPRESSO_VALIDATOR_PORT=50000

@@ -1,11 +1,13 @@
 FROM ubuntu:jammy
 
 RUN apt-get update \
-&&  apt-get install -y curl \
+&&  apt-get install -y curl wait-for-it \
 &&  rm -rf /var/lib/apt/lists/*
 
 COPY target/x86_64-unknown-linux-musl/release/address-book /bin/address-book
 RUN chmod +x /bin/address-book
+
+ENV ESPRESSO_ADDRESS_BOOK_STORE_PATH=/store
 
 ENV ESPRESSO_ADDRESS_BOOK_PORT=50002
 EXPOSE $ESPRESSO_ADDRESS_BOOK_PORT
