@@ -35,6 +35,10 @@ HEADING_ROUTES = "Routes"
 HEADING_PARAMETERS = "Parameters"
 HEADING_DESCRIPTION = "Description"
 
+[route.healthcheck]
+PATH = [ "healthcheck" ]
+DOC = "Responds with JSON {\"status\": \"available\"}."
+
 [route.getinfo]
 PATH = [ "getinfo" ]
 DOC = """

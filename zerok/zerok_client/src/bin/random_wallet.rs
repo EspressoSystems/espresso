@@ -107,6 +107,7 @@ async fn main() {
         args.server.clone(),
         &mut loader,
     )
+    .await
     .expect("failed to connect to backend");
     let mut keystore = Keystore::new(backend)
         .await

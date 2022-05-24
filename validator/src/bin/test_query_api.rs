@@ -269,6 +269,7 @@ async fn main() {
             url,
             &mut loader,
         )
+        .await
         .unwrap(),
     );
 }

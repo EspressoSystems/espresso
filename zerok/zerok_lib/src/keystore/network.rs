@@ -8,7 +8,10 @@ use crate::{
 };
 use address_book::InsertPubKey;
 use api::client::*;
-use async_std::sync::{Arc, Mutex, MutexGuard};
+use async_std::{
+    sync::{Arc, Mutex, MutexGuard},
+    task::sleep,
+};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
@@ -35,6 +38,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use snafu::ResultExt;
 use std::convert::TryInto;
 use std::pin::Pin;
+use std::time::Duration;
 use surf::http::content::{Accept, MediaTypeProposal};
 use surf::http::{headers, mime};
 pub use surf::Url;
@@ -49,22 +53,24 @@ pub struct NetworkBackend<'a, Meta: PartialEq + Serialize + DeserializeOwned + C
 }
 
 impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
-    pub fn new(
+    pub async fn new(
         univ_param: &'a UniversalParam,
         query_url: Url,
         address_book_url: Url,
         validator_url: Url,
         loader: &mut impl KeystoreLoader<EspressoLedger, Meta = Meta>,
-    ) -> Result<Self, KeystoreError<EspressoLedger>> {
+    ) -> Result<NetworkBackend<'a, Meta>, KeystoreError<EspressoLedger>> {
         let storage = AtomicKeystoreStorage::new(loader, 1024)?;
-        Ok(Self {
+        let backend = Self {
             query_client: Self::client(query_url)?,
             address_book_client: Self::client(address_book_url)?,
             validator_client: Self::client(validator_url)?,
             univ_param,
             key_stream: storage.key_stream(),
             storage: Arc::new(Mutex::new(storage)),
-        })
+        };
+        backend.wait_for_esqs().await?;
+        Ok(backend)
     }
 
     fn client(base_url: Url) -> Result<surf::Client, KeystoreError<EspressoLedger>> {
@@ -114,6 +120,36 @@ impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkB
         accept.push(MediaTypeProposal::new(mime::BYTE_STREAM, Some(1.0)).unwrap());
         accept.set_wildcard(true);
         accept
+    }
+
+    async fn wait_for_esqs(&self) -> Result<(), KeystoreError<EspressoLedger>> {
+        let mut backoff = Duration::from_millis(500);
+        for _ in 0..8 {
+            // We use a direct `surf::connect` instead of
+            // `self.query_client.connect` because the client middleware isn't
+            // set up to handle connect requests, only API requests.
+            if surf::connect(
+                &self
+                    .query_client
+                    .config()
+                    .base_url
+                    .as_ref()
+                    .expect("esqs config has no base url"),
+            )
+            .send()
+            .await
+            .is_ok()
+            {
+                return Ok(());
+            }
+            tracing::warn!("unable to connect to EsQS; sleeping for {:?}", backoff);
+            sleep(backoff).await;
+            backoff *= 2;
+        }
+
+        let msg = format!("failed to connect to EQS after {:?}", backoff);
+        tracing::error!("{}", msg);
+        Err(KeystoreError::Failed { msg })
     }
 }
 

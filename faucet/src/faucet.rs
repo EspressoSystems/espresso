@@ -204,6 +204,7 @@ pub async fn init_web_server(
         opt.submit_url.clone(),
         &mut loader,
     )
+    .await
     .unwrap();
     let mut keystore = EspressoKeystore::new(backend).await.unwrap();
 
