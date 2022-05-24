@@ -20,8 +20,6 @@
 // `-w KEY_FILE.pub` and pass the key pair to `random_keystore` with `-k KEY_FILE`.
 
 use async_std::task::sleep;
-use espresso_validator::testing::minimal_test_network;
-use espresso_validator::testing::TestNetwork;
 use jf_cap::keys::UserPubKey;
 use jf_cap::structs::{AssetCode, AssetPolicy};
 use rand::distributions::weighted::WeightedError;
@@ -62,6 +60,7 @@ struct Args {
     #[structopt(long)]
     storage: Option<PathBuf>,
 
+    /// Path to file which will hold all the pub keys of all random wallets running.
     #[structopt(long)]
     address_storage: PathBuf,
 
@@ -135,19 +134,6 @@ async fn get_pub_keys_from_file(path: &Path) -> Vec<UserPubKey> {
     })
 }
 
-async fn create_backend<'a>(storage: PathBuf, network: &TestNetwork) -> NetworkBackend<'a, ()> {
-    let mut loader = TrivialKeystoreLoader { dir: storage };
-    NetworkBackend::new(
-        &*UNIVERSAL_PARAM,
-        network.query_api.clone(),
-        network.address_book_api.clone(),
-        network.submit_api.clone(),
-        &mut loader,
-    )
-    .await
-    .expect("failed to connect to backend")
-}
-
 #[async_std::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -168,8 +154,6 @@ async fn main() {
         .derive_sub_tree("keystore".as_bytes())
         .derive_sub_tree("user".as_bytes())
         .derive_user_key_pair(&0u64.to_le_bytes());
-    let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key().clone()).await;
-    // let backend = create_backend(storage.clone(), &network);
     let mut loader = TrivialKeystoreLoader { dir: storage };
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
@@ -225,7 +209,7 @@ async fn main() {
     ))
     .content_type(surf::http::mime::BYTE_STREAM)
     .body_bytes(&receiver_key_bytes)
-    .await;
+    .await.unwrap();
 
     // Wait for initial balance.
     while keystore.balance(&AssetCode::native()).await == 0u64.into() {
@@ -289,29 +273,12 @@ async fn main() {
         event!(Level::INFO, "minted custom asset");
     }
 
-    let mut peers: Vec<UserPubKey> = Vec::new();
-    // let temp2 = TempDir::new("keystore2").unwrap();
-    // let mut loader = TrivialKeystoreLoader { dir: PathBuf::from(temp2.path()) };
-    // let backend2 = NetworkBackend::new(
-    //     &*UNIVERSAL_PARAM,
-    //     args.esqs_url.clone(),
-    //     args.address_book_url.clone(),
-    //     args.validator_url.clone(),
-    //     &mut loader,
-    // ).await.expect("failed to connect to backend");
-    // let mut keystore2 = Keystore::new(backend2).await.unwrap();
-
-    // let pub_key = keystore2.generate_user_key("Random Key".to_string(), None).await.unwrap();
-
-    // println!("Wallet 2 Native balance {}", keystore2.balance(&AssetCode::native()).await);
-    // println!("Wallet 2 Custom Asset balance {}", keystore2.balance(&my_asset.code).await);
-
     loop {
         // Get a list of all users in our group (this will include our own public key).
         // Filter out our own public key and randomly choose one of the other ones to transfer to.
         let peers = get_pub_keys_from_file(&address_path).await;
         let recipient = match peers.choose_weighted(&mut rng, |pk| {
-            if *pk == faucet_key_pair.pub_key().clone() {
+            if *pk == pub_key.clone() {
                 0u64
             } else {
                 1u64
@@ -386,7 +353,6 @@ async fn main() {
             "Wallet Custom Asset balance {}",
             keystore.balance(&my_asset.code).await
         );
-        // println!("Wallet 2 Native balance {}", keystore2.balance(&AssetCode::native()).await);
-        // println!("Wallet 2 Custom Asset balance {}", keystore2.balance(&my_asset.code).await);
+        retry_delay().await;
     }
 }
