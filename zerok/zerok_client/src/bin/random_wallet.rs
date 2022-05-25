@@ -57,6 +57,7 @@ struct Args {
     seed: Option<u64>,
 
     /// Path to a saved keystore, or a new directory where this keystore will be saved.
+    /// Will use a TempDir if not provided
     #[structopt(long)]
     storage: Option<PathBuf>,
 
@@ -138,7 +139,9 @@ async fn get_pub_keys_from_file(path: &Path) -> Vec<UserPubKey> {
 async fn main() {
     tracing_subscriber::fmt()
         .compact()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env().add_directive(Level::INFO.into()),
+        )
         .init();
 
     let args = Args::from_args();
@@ -149,11 +152,6 @@ async fn main() {
     let tempdir = TempDir::new("keystore").unwrap();
     let storage = args.storage.unwrap_or(PathBuf::from(tempdir.path()));
 
-    let (key_stream, _mnemonic) = KeyTree::random(&mut rng);
-    let faucet_key_pair = key_stream
-        .derive_sub_tree("keystore".as_bytes())
-        .derive_sub_tree("user".as_bytes())
-        .derive_user_key_pair(&0u64.to_le_bytes());
     let mut loader = TrivialKeystoreLoader { dir: storage };
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
@@ -209,11 +207,12 @@ async fn main() {
     ))
     .content_type(surf::http::mime::BYTE_STREAM)
     .body_bytes(&receiver_key_bytes)
-    .await.unwrap();
+    .await
+    .unwrap();
 
     // Wait for initial balance.
     while keystore.balance(&AssetCode::native()).await == 0u64.into() {
-        println!("waiting for initial balance");
+        event!(Level::INFO, "waiting for initial balance");
         retry_delay().await;
     }
 
@@ -277,23 +276,27 @@ async fn main() {
         // Get a list of all users in our group (this will include our own public key).
         // Filter out our own public key and randomly choose one of the other ones to transfer to.
         let peers = get_pub_keys_from_file(&address_path).await;
-        let recipient = match peers.choose_weighted(&mut rng, |pk| {
-            if *pk == pub_key.clone() {
-                0u64
-            } else {
-                1u64
-            }
-        }) {
-            Ok(recipient) => recipient,
-            Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
-                println!("no peers yet, retrying...");
-                retry_delay().await;
-                continue;
-            }
-            Err(err) => {
-                panic!("error in weighted choice of peer: {}", err);
-            }
-        };
+        let recipient =
+            match peers.choose_weighted(
+                &mut rng,
+                |pk| {
+                    if *pk == pub_key.clone() {
+                        0u64
+                    } else {
+                        1u64
+                    }
+                },
+            ) {
+                Ok(recipient) => recipient,
+                Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
+                    event!(Level::INFO, "no peers yet, retrying...");
+                    retry_delay().await;
+                    continue;
+                }
+                Err(err) => {
+                    panic!("error in weighted choice of peer: {}", err);
+                }
+            };
 
         // Get a list of assets for which we have a non-zero balance.
         let mut asset_balances = vec![];
@@ -310,7 +313,8 @@ async fn main() {
         let amount = 1;
         let fee = 1;
 
-        println!(
+        event!(
+            Level::INFO,
             "transferring {} units of {} to user {}",
             amount,
             if *asset == AssetCode::native() {
@@ -338,18 +342,20 @@ async fn main() {
                     // Transfers are allowed to fail. It can happen, for instance, if we get starved
                     // out until our transfer becomes too old for the validators. Thus we make this
                     // a warning, not an error.
-                    println!("transfer failed!");
+                    event!(Level::WARN, "transfer failed!");
                 }
             }
             Err(err) => {
-                println!("error while waiting for transaction: {}", err);
+                event!(Level::ERROR, "error while waiting for transaction: {}", err);
             }
         }
-        println!(
+        event!(
+            Level::INFO,
             "Wallet Native balance {}",
             keystore.balance(&AssetCode::native()).await
         );
-        println!(
+        event!(
+            Level::INFO,
             "Wallet Custom Asset balance {}",
             keystore.balance(&my_asset.code).await
         );

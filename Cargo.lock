@@ -1796,7 +1796,7 @@ name = "espresso-catchup-api"
 version = "0.1.0"
 dependencies = [
  "jf-cap",
- "seahorse 0.3.0 (git+https://github.com/EspressoSystems/seahorse.git)",
+ "seahorse",
  "zerok_lib",
 ]
 
@@ -1864,7 +1864,7 @@ dependencies = [
  "procfs",
  "rand_chacha 0.2.2",
  "rand_chacha 0.3.1",
- "seahorse 0.3.0 (git+https://github.com/EspressoSystems/seahorse.git)",
+ "seahorse",
  "serde",
  "serde_derive",
  "serde_json",
@@ -4186,58 +4186,6 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.3.0"
-dependencies = [
- "arbitrary",
- "arbitrary-wrappers",
- "ark-serialize",
- "ark-std",
- "async-scoped",
- "async-std",
- "async-trait",
- "atomic_store 0.1.1",
- "bincode",
- "bip0039",
- "chacha20",
- "chrono",
- "commit",
- "derivative",
- "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git?tag=0.1.0)",
- "futures",
- "generic-array",
- "hmac 0.11.0",
- "image",
- "itertools 0.10.3",
- "jf-cap",
- "jf-primitives",
- "jf-utils",
- "key-set",
- "lazy_static",
- "net",
- "num-bigint 0.4.3",
- "num-traits",
- "pipe",
- "primitive-types",
- "rand_chacha 0.3.1",
- "reef",
- "regex",
- "rpassword",
- "rust-argon2 1.0.0",
- "rustyline",
- "serde",
- "sha3 0.9.1",
- "snafu",
- "structopt",
- "strum 0.24.0",
- "strum_macros",
- "surf",
- "tagged-base64",
- "tempdir",
- "zeroize",
-]
-
-[[package]]
-name = "seahorse"
-version = "0.3.0"
 source = "git+https://github.com/EspressoSystems/seahorse.git#485c8b90cfa31a86828f8dc5209b09570290d20b"
 dependencies = [
  "arbitrary",
@@ -5828,7 +5776,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "regex",
  "rustyline",
- "seahorse 0.3.0",
+ "seahorse",
  "serde",
  "serde_derive",
  "serde_json",
@@ -5892,7 +5840,7 @@ dependencies = [
  "rpassword",
  "rust-argon2 0.8.3",
  "rustyline",
- "seahorse 0.3.0 (git+https://github.com/EspressoSystems/seahorse.git)",
+ "seahorse",
  "serde",
  "serde_cbor",
  "serde_derive",

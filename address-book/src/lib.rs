@@ -208,7 +208,6 @@ fn verify_sig_and_get_pub_key(insert_request: InsertPubKey) -> Result<UserPubKey
     pub_key
         .verify_sig(&insert_request.pub_key_bytes, &insert_request.sig)
         .map_err(|e| tide::Error::new(tide::StatusCode::BadRequest, e))?;
-    println!("verified sig");
     Ok(pub_key)
 }
 
@@ -216,7 +215,6 @@ fn verify_sig_and_get_pub_key(insert_request: InsertPubKey) -> Result<UserPubKey
 async fn insert_pubkey<T: Store>(
     mut req: tide::Request<ServerState<T>>,
 ) -> Result<tide::Response, tide::Error> {
-    println!("insert pub key");
     let insert_request: InsertPubKey = net::server::request_body(&mut req).await?;
     let pub_key = verify_sig_and_get_pub_key(insert_request)?;
     req.state().store.save(&pub_key.address(), &pub_key)?;
