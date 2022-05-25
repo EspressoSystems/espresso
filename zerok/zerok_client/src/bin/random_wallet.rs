@@ -58,11 +58,11 @@ struct Args {
 
     /// Path to a saved keystore, or a new directory where this keystore will be saved.
     /// Will use a TempDir if not provided
-    #[structopt(long)]
+    #[structopt(long, env = "ESPRESSO_RANDOM_WALLET_PATH")]
     storage: Option<PathBuf>,
 
     /// Path to file which will hold all the pub keys of all random wallets running.
-    #[structopt(long)]
+    #[structopt(long, env = "ESPRESSO_RANDOM_WALLET_ADDRESSES_FILE")]
     address_storage: PathBuf,
 
     /// URL of a server for querying with the ledger
@@ -77,8 +77,8 @@ struct Args {
     #[structopt(short, long, env = "ESPRESSO_ADDRESS_BOOK_URL")]
     address_book_url: Url,
 
-    #[structopt(short, long, env = "ESPRESSO_FAUCET_PORT")]
-    faucet_port: u16,
+    #[structopt(short, long, env = "ESPRESSO_FAUCET_URL")]
+    faucet_url: Url,
 }
 
 struct TrivialKeystoreLoader {
@@ -114,7 +114,7 @@ async fn write_pub_key(key: &UserPubKey, path: &Path) {
     };
     keys.push(key.clone());
     let mut file = File::create(path).unwrap_or_else(|err| {
-        panic!("cannot open private key file: {}", err);
+        panic!("cannot open public key file: {}", err);
     });
     file.write_all(&bincode::serialize(&keys).unwrap()).unwrap();
 }
@@ -131,7 +131,7 @@ async fn get_pub_keys_from_file(path: &Path) -> Vec<UserPubKey> {
         return vec![];
     }
     bincode::deserialize(&bytes).unwrap_or_else(|err| {
-        panic!("invalid private key file: {}", err);
+        panic!("invalid pub key file: {}", err);
     })
 }
 
@@ -204,8 +204,8 @@ async fn main() {
 
     // Request native asset for the keystore.
     surf::post(format!(
-        "http://localhost:{}/request_fee_assets",
-        args.faucet_port
+        "{}/request_fee_assets",
+        args.faucet_url
     ))
     .content_type(surf::http::mime::BYTE_STREAM)
     .body_bytes(&receiver_key_bytes)
