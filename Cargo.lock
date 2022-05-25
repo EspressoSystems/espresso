@@ -4186,7 +4186,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#485c8b90cfa31a86828f8dc5209b09570290d20b"
+source = "git+https://github.com/EspressoSystems/seahorse.git#2ec7866e97eeb3104f0de5fc56dfdc68aeb547ab"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",

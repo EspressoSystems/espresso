@@ -73,8 +73,8 @@ pub struct TestNetwork {
     pub submit_api: Url,
     pub address_book_api: Url,
     pub nodes: Vec<TestNode>,
-    pub address_book: Option<AddressBook>,
-    pub _store: TempDir,
+    address_book: Option<AddressBook>,
+    _store: TempDir,
 }
 
 impl TestNetwork {
