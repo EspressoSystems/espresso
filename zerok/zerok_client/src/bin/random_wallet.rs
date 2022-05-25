@@ -150,7 +150,7 @@ async fn main() {
 
     let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
     let tempdir = TempDir::new("keystore").unwrap();
-    let storage = args.storage.unwrap_or(PathBuf::from(tempdir.path()));
+    let storage = args.storage.unwrap_or_else(|| PathBuf::from(tempdir.path()));
 
     let mut loader = TrivialKeystoreLoader { dir: storage };
     let backend = NetworkBackend::new(
