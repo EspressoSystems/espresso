@@ -26,6 +26,7 @@ use phaselock::{
     types::{EventType, PhaseLockHandle},
     PhaseLockError, H_256,
 };
+use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -597,6 +598,11 @@ impl FullState {
             return Err(QueryServiceError::InvalidTxnId {});
         }
         let txn = &block.block.0[txn_id];
+        let hash = ElaboratedTransaction {
+            txn: txn.clone(),
+            proofs: block.proofs[txn_id].clone(),
+        }
+        .hash();
         let uids = &uids[txn_id];
 
         // Validate the new memos.
@@ -638,11 +644,7 @@ impl FullState {
                 merkle_paths
             )
             .collect(),
-            transaction: Some((
-                block_id as u64,
-                txn_id as u64,
-                reef::cap::TransactionKind::Unknown,
-            )),
+            transaction: Some((block_id as u64, txn_id as u64, hash, txn.kind())),
         };
         self.send_event(event);
 
