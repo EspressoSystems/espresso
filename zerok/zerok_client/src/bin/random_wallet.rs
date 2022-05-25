@@ -203,14 +203,11 @@ async fn main() {
     let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
 
     // Request native asset for the keystore.
-    surf::post(format!(
-        "{}/request_fee_assets",
-        args.faucet_url
-    ))
-    .content_type(surf::http::mime::BYTE_STREAM)
-    .body_bytes(&receiver_key_bytes)
-    .await
-    .unwrap();
+    surf::post(format!("{}/request_fee_assets", args.faucet_url))
+        .content_type(surf::http::mime::BYTE_STREAM)
+        .body_bytes(&receiver_key_bytes)
+        .await
+        .unwrap();
 
     // Wait for initial balance.
     while keystore.balance(&AssetCode::native()).await == 0u64.into() {
