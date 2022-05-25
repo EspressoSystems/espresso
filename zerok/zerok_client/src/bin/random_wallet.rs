@@ -27,16 +27,16 @@ use rand::seq::SliceRandom;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use seahorse::{events::EventIndex, hd::KeyTree, loader::KeystoreLoader, KeySnafu, KeystoreError};
 use snafu::ResultExt;
-use std::convert::TryInto;
 use std::fs::File;
 use std::io::Read;
+use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use structopt::StructOpt;
+use tempdir::TempDir;
 use tracing::{event, Level};
 use zerok_lib::{
-    api::client,
-    api::EspressoError,
     keystore::network::{NetworkBackend, Url},
     ledger::EspressoLedger,
     universal_params::UNIVERSAL_PARAM,
@@ -53,14 +53,32 @@ struct Args {
     key_path: Option<PathBuf>,
 
     /// Seed for random number generation.
-    #[structopt(short, long)]
+    #[structopt(long)]
     seed: Option<u64>,
 
     /// Path to a saved keystore, or a new directory where this keystore will be saved.
-    storage: PathBuf,
+    /// Will use a TempDir if not provided
+    #[structopt(long, env = "ESPRESSO_RANDOM_WALLET_PATH")]
+    storage: Option<PathBuf>,
+
+    /// Path to file which will hold all the pub keys of all random wallets running.
+    #[structopt(long, env = "ESPRESSO_RANDOM_WALLET_ADDRESSES_FILE")]
+    address_storage: PathBuf,
+
+    /// URL of a server for querying with the ledger
+    #[structopt(short, long, env = "ESPRESSO_ESQS_URL")]
+    esqs_url: Url,
 
     /// URL of a server for interacting with the ledger
-    server: Url,
+    #[structopt(short, long, env = "ESPRESSO_SUBMIT_URL")]
+    validator_url: Url,
+
+    /// URL of a server for address book
+    #[structopt(short, long, env = "ESPRESSO_ADDRESS_BOOK_URL")]
+    address_book_url: Url,
+
+    #[structopt(short, long, env = "ESPRESSO_FAUCET_URL")]
+    faucet_url: Url,
 }
 
 struct TrivialKeystoreLoader {
@@ -88,23 +106,60 @@ async fn retry_delay() {
     sleep(Duration::from_secs(1)).await
 }
 
+async fn write_pub_key(key: &UserPubKey, path: &Path) {
+    let mut keys: Vec<UserPubKey> = if path.exists() {
+        get_pub_keys_from_file(path).await
+    } else {
+        vec![]
+    };
+    keys.push(key.clone());
+    let mut file = File::create(path).unwrap_or_else(|err| {
+        panic!("cannot open public key file: {}", err);
+    });
+    file.write_all(&bincode::serialize(&keys).unwrap()).unwrap();
+}
+
+async fn get_pub_keys_from_file(path: &Path) -> Vec<UserPubKey> {
+    let mut file = File::open(path).unwrap_or_else(|err| {
+        panic!("cannot open pub keys file: {}", err);
+    });
+    let mut bytes = Vec::new();
+    let num_bytes = file.read_to_end(&mut bytes).unwrap_or_else(|err| {
+        panic!("error reading pub keys file: {}", err);
+    });
+    if num_bytes == 0 {
+        return vec![];
+    }
+    bincode::deserialize(&bytes).unwrap_or_else(|err| {
+        panic!("invalid pub key file: {}", err);
+    })
+}
+
 #[async_std::main]
 async fn main() {
     tracing_subscriber::fmt()
         .compact()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env().add_directive(Level::INFO.into()),
+        )
         .init();
 
     let args = Args::from_args();
 
-    let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
+    let address_path = args.address_storage;
 
-    let mut loader = TrivialKeystoreLoader { dir: args.storage };
+    let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
+    let tempdir = TempDir::new("keystore").unwrap();
+    let storage = args
+        .storage
+        .unwrap_or_else(|| PathBuf::from(tempdir.path()));
+
+    let mut loader = TrivialKeystoreLoader { dir: storage };
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
-        args.server.clone(),
-        args.server.clone(),
-        args.server.clone(),
+        args.esqs_url.clone(),
+        args.address_book_url.clone(),
+        args.validator_url.clone(),
         &mut loader,
     )
     .await
@@ -136,21 +191,23 @@ async fn main() {
         }
         None => {
             keystore
-                .generate_user_key("Random keystore key".to_string(), None)
+                .generate_user_key("Random Key".to_string(), None)
                 .await
-                .unwrap_or_else(|err| {
-                    panic!("error generating random key: {}", err);
-                });
+                .unwrap();
         }
     }
+
     let pub_key = keystore.pub_keys().await.remove(0);
+    write_pub_key(&pub_key, &address_path).await;
     let address = pub_key.address();
-    event!(
-        Level::INFO,
-        "initialized keystore\n  address: {}\n  pub key: {}",
-        address,
-        pub_key,
-    );
+    let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
+
+    // Request native asset for the keystore.
+    surf::post(format!("{}/request_fee_assets", args.faucet_url))
+        .content_type(surf::http::mime::BYTE_STREAM)
+        .body_bytes(&receiver_key_bytes)
+        .await
+        .unwrap();
 
     // Wait for initial balance.
     while keystore.balance(&AssetCode::native()).await == 0u64.into() {
@@ -214,31 +271,24 @@ async fn main() {
         event!(Level::INFO, "minted custom asset");
     }
 
-    let client: surf::Client = surf::Config::new()
-        .set_base_url(args.server)
-        .try_into()
-        .expect("failed to start HTTP client");
-    let client = client.with(client::parse_error_body::<EspressoError>);
     loop {
         // Get a list of all users in our group (this will include our own public key).
-        let peers: Vec<UserPubKey> = match client.get("getusers").recv_json().await {
-            Ok(peers) => peers,
-            Err(err) => {
-                event!(
-                    Level::ERROR,
-                    "error getting users from server: {}\nretrying...",
-                    err
-                );
-                retry_delay().await;
-                continue;
-            }
-        };
         // Filter out our own public key and randomly choose one of the other ones to transfer to.
+        let peers = get_pub_keys_from_file(&address_path).await;
         let recipient =
-            match peers.choose_weighted(&mut rng, |pk| if *pk == pub_key { 0u64 } else { 1u64 }) {
+            match peers.choose_weighted(
+                &mut rng,
+                |pk| {
+                    if *pk == pub_key.clone() {
+                        0u64
+                    } else {
+                        1u64
+                    }
+                },
+            ) {
                 Ok(recipient) => recipient,
                 Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
-                    event!(Level::WARN, "no peers yet, retrying...");
+                    event!(Level::INFO, "no peers yet, retrying...");
                     retry_delay().await;
                     continue;
                 }
@@ -298,5 +348,16 @@ async fn main() {
                 event!(Level::ERROR, "error while waiting for transaction: {}", err);
             }
         }
+        event!(
+            Level::INFO,
+            "Wallet Native balance {}",
+            keystore.balance(&AssetCode::native()).await
+        );
+        event!(
+            Level::INFO,
+            "Wallet Custom Asset balance {}",
+            keystore.balance(&my_asset.code).await
+        );
+        retry_delay().await;
     }
 }

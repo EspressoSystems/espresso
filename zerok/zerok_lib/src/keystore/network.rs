@@ -168,6 +168,7 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
             num_events,
             ..
         } = self.get("getinfo").await?;
+
         let LedgerSnapshot {
             state: validator,
             nullifiers,
