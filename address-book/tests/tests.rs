@@ -11,6 +11,7 @@ use address_book::{
 use jf_cap::keys::{UserKeyPair, UserPubKey};
 use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
+use std::collections::HashSet;
 
 const ROUND_TRIP_COUNT: u64 = 100;
 const NOT_FOUND_COUNT: u64 = 100;
@@ -29,11 +30,13 @@ async fn round_trip<T: Store + 'static>(store: T) {
 
     let mut rng = rand_chacha::ChaChaRng::from_seed([0u8; 32]);
     let mut rng2 = rand_chacha::ChaChaRng::from_seed([0u8; 32]);
+    let mut inserted = HashSet::new();
 
     // Insert and lookup a bunch of address/key pairs.
     for _ in 0..ROUND_TRIP_COUNT {
         let user_key = UserKeyPair::generate(&mut rng);
         let pub_key = user_key.pub_key();
+        inserted.insert(pub_key.clone());
         let pub_key_bytes = bincode::serialize(&pub_key).unwrap();
         let sig = user_key.sign(&pub_key_bytes);
         let json_request = InsertPubKey { pub_key_bytes, sig };
@@ -52,6 +55,13 @@ async fn round_trip<T: Store + 'static>(store: T) {
         let bytes = response.body_bytes().await.unwrap();
         let gotten_pub_key: UserPubKey = bincode::deserialize(&bytes).unwrap();
         assert_eq!(gotten_pub_key, pub_key);
+        let mut response = surf::get(format!("http://127.0.0.1:{}/request_peers", port))
+            .await
+            .unwrap();
+        let bytes = response.body_bytes().await.unwrap();
+        let gotten_pub_keys: Vec<UserPubKey> = bincode::deserialize(&bytes).unwrap();
+        let gotten_set: HashSet<UserPubKey> = gotten_pub_keys.into_iter().collect();
+        assert_eq!(gotten_set, inserted);
     }
     // Lookup the addresses just inserted to demonstrate that all the keys
     // are still present after the lookups.

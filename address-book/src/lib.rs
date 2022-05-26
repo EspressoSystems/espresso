@@ -31,6 +31,7 @@ const ADDRESS_BOOK_STARTUP_RETRIES: usize = 8;
 pub trait Store: Clone + Send + Sync {
     fn save(&self, address: &UserAddress, pub_key: &UserPubKey) -> Result<(), std::io::Error>;
     fn load(&self, address: &UserAddress) -> Result<Option<UserPubKey>, std::io::Error>;
+    fn list(&self) -> Result<Vec<UserPubKey>, std::io::Error>;
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +89,32 @@ impl Store for FileStore {
             },
         }
     }
+
+    fn list(&self) -> Result<Vec<UserPubKey>, std::io::Error> {
+        let paths = fs::read_dir(&self.dir)?;
+        let mut keys = vec![];
+        for path in paths {
+            let p = path?;
+            match fs::read(&p.path()) {
+                Ok(bytes) => {
+                    let pk = bincode::deserialize(&bytes);
+                    match pk {
+                        Ok(pub_key) => keys.push(pub_key),
+                        Err(err) => tracing::error!(
+                            "Attempt to deserialize path {:?} failed: {}",
+                            p.path(),
+                            err
+                        ),
+                    }
+                }
+                Err(err) => {
+                    tracing::error!("Attempt to read path {:?} failed: {}", p.path(), err);
+                    return Err(err);
+                }
+            }
+        }
+        Ok(keys)
+    }
 }
 
 /// Non-persistent store. Suitable for testing only.
@@ -121,6 +148,9 @@ impl Store for TransientFileStore {
 
     fn load(&self, address: &UserAddress) -> Result<Option<UserPubKey>, std::io::Error> {
         self.store.load(address)
+    }
+    fn list(&self) -> Result<Vec<UserPubKey>, std::io::Error> {
+        self.store.list()
     }
 }
 
@@ -177,6 +207,7 @@ pub async fn init_web_server<T: Store + 'static>(
     );
     app.at("/insert_pubkey").post(insert_pubkey);
     app.at("/request_pubkey").post(request_pubkey);
+    app.at("/request_peers").get(request_peers);
     app.at("/healthcheck").get(healthcheck);
     let address = format!("0.0.0.0:{}", port);
     Ok(spawn(app.listen(address)))
@@ -239,6 +270,23 @@ async fn request_pubkey<T: Store>(
             }
             _ => Ok(tide::Response::new(StatusCode::NotFound)),
         },
+        Err(_) => Ok(tide::Response::new(StatusCode::InternalServerError)),
+    }
+}
+
+/// Fetch all the public key bundles for all peers.
+async fn request_peers<T: Store>(
+    req: tide::Request<ServerState<T>>,
+) -> Result<tide::Response, tide::Error> {
+    match req.state().store.list() {
+        Ok(pk_list) => {
+            let bytes = bincode::serialize(&pk_list).unwrap();
+            let response = tide::Response::builder(StatusCode::Ok)
+                .body(bytes)
+                .content_type(tide::http::mime::BYTE_STREAM)
+                .build();
+            Ok(response)
+        }
         Err(_) => Ok(tide::Response::new(StatusCode::InternalServerError)),
     }
 }

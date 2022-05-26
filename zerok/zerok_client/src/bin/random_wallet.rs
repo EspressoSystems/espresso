@@ -29,8 +29,6 @@ use seahorse::{events::EventIndex, hd::KeyTree, loader::KeystoreLoader, KeySnafu
 use snafu::ResultExt;
 use std::fs::File;
 use std::io::Read;
-use std::io::Write;
-use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use structopt::StructOpt;
@@ -60,10 +58,6 @@ struct Args {
     /// Will use a TempDir if not provided
     #[structopt(long, env = "ESPRESSO_RANDOM_WALLET_PATH")]
     storage: Option<PathBuf>,
-
-    /// Path to file which will hold all the pub keys of all random wallets running.
-    #[structopt(long, env = "ESPRESSO_RANDOM_WALLET_ADDRESSES_FILE")]
-    address_storage: PathBuf,
 
     /// URL of a server for querying with the ledger
     #[structopt(short, long, env = "ESPRESSO_ESQS_URL")]
@@ -106,33 +100,13 @@ async fn retry_delay() {
     sleep(Duration::from_secs(1)).await
 }
 
-async fn write_pub_key(key: &UserPubKey, path: &Path) {
-    let mut keys: Vec<UserPubKey> = if path.exists() {
-        get_pub_keys_from_file(path).await
-    } else {
-        vec![]
-    };
-    keys.push(key.clone());
-    let mut file = File::create(path).unwrap_or_else(|err| {
-        panic!("cannot open public key file: {}", err);
-    });
-    file.write_all(&bincode::serialize(&keys).unwrap()).unwrap();
-}
-
-async fn get_pub_keys_from_file(path: &Path) -> Vec<UserPubKey> {
-    let mut file = File::open(path).unwrap_or_else(|err| {
-        panic!("cannot open pub keys file: {}", err);
-    });
-    let mut bytes = Vec::new();
-    let num_bytes = file.read_to_end(&mut bytes).unwrap_or_else(|err| {
-        panic!("error reading pub keys file: {}", err);
-    });
-    if num_bytes == 0 {
-        return vec![];
-    }
-    bincode::deserialize(&bytes).unwrap_or_else(|err| {
-        panic!("invalid pub key file: {}", err);
-    })
+async fn get_peers(url: &Url) -> Result<Vec<UserPubKey>, surf::Error> {
+    let mut response = surf::get(format!("{}/request_fee_assets", url))
+        .content_type(surf::http::mime::JSON)
+        .await?;
+    let bytes = response.body_bytes().await.unwrap();
+    let pub_keys: Vec<UserPubKey> = bincode::deserialize(&bytes)?;
+    Ok(pub_keys)
 }
 
 #[async_std::main]
@@ -145,8 +119,6 @@ async fn main() {
         .init();
 
     let args = Args::from_args();
-
-    let address_path = args.address_storage;
 
     let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
     let tempdir = TempDir::new("keystore").unwrap();
@@ -198,7 +170,6 @@ async fn main() {
     }
 
     let pub_key = keystore.pub_keys().await.remove(0);
-    write_pub_key(&pub_key, &address_path).await;
     let address = pub_key.address();
     let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
 
@@ -271,10 +242,18 @@ async fn main() {
         event!(Level::INFO, "minted custom asset");
     }
 
+    let mut peers = vec![];
+
     loop {
         // Get a list of all users in our group (this will include our own public key).
         // Filter out our own public key and randomly choose one of the other ones to transfer to.
-        let peers = get_pub_keys_from_file(&address_path).await;
+        peers = match get_peers(&args.address_book_url).await {
+            Ok(results) => results,
+            Err(_) => {
+                event!(Level::ERROR, "Failed to refresh peers from address book");
+                peers
+            }
+        };
         let recipient =
             match peers.choose_weighted(
                 &mut rng,
