@@ -7,7 +7,7 @@
 
 mod cli_client;
 
-use async_std::task::block_on;
+use async_trait::async_trait;
 use jf_cap::proof::UniversalParam;
 use seahorse::{
     cli::*,
@@ -102,23 +102,25 @@ impl CLIArgs for Args {
 
 struct EspressoCli;
 
+#[async_trait]
 impl<'a> CLI<'a> for EspressoCli {
     type Ledger = EspressoLedger;
     type Backend = NetworkBackend<'a, LoaderMetadata>;
     type Args = Args;
 
-    fn init_backend(
+    async fn init_backend(
         univ_param: &'a UniversalParam,
         args: Self::Args,
-        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = LoaderMetadata>,
+        loader: &mut (impl KeystoreLoader<EspressoLedger, Meta = LoaderMetadata> + Send),
     ) -> Result<Self::Backend, KeystoreError<EspressoLedger>> {
-        block_on(NetworkBackend::new(
+        NetworkBackend::new(
             univ_param,
             args.esqs_url,
             args.address_book_url,
             args.submit_url,
             loader,
-        ))
+        )
+        .await
     }
 }
 

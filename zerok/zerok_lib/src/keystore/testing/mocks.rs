@@ -109,6 +109,11 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
         let comms = txn.output_commitments();
         let uids = block_uids[txn_id as usize].clone();
         let kind = txn.kind();
+        let hash = ElaboratedTransaction {
+            txn: txn.clone(),
+            proofs: block.proofs[txn_id as usize].clone(),
+        }
+        .hash();
 
         txn.verify_receiver_memos_signature(&memos, &sig)
             .context(CryptoSnafu)?;
@@ -126,7 +131,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
             .collect::<Vec<_>>();
         self.generate_event(LedgerEvent::<EspressoLedger>::Memos {
             outputs: izip!(memos, comms, uids, merkle_paths).collect(),
-            transaction: Some((block_id, txn_id, kind)),
+            transaction: Some((block_id, txn_id, hash, kind)),
         });
 
         Ok(())
