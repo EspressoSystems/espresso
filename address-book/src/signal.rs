@@ -5,8 +5,8 @@
 // You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 use async_std::prelude::*;
-use signal_hook_async_std::Signals;
 use std::process;
+use signal_hook_async_std::Signals;
 
 /// Spawn a thread that waits for SIGTERM. If SIGTERM is received,
 /// the application exits with exit status 1.

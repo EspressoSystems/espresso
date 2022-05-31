@@ -1,0 +1,38 @@
+name: Windows build
+
+on:
+  push:
+    branches:
+      - main
+      - release-*
+      - ci-windows-*
+  pull_request:
+    branches:
+      - main
+      - release-*
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022 
+    timeout-minutes: 60
+    steps:
+      - name: Configure Git
+        run: |
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf git://github.com/
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf ssh://git@github.com/
+
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - uses: Swatinem/rust-cache@v1
+        name: Enable Rust Caching
+
+      - name: Build
+        run: |
+          cargo build --workspace --release --all-targets
+
+      - name: Test
+        run: |
+          cargo test --workspace --release --verbose -- -Zunstable-options --report-time --test-threads 2
+        timeout-minutes: 30
