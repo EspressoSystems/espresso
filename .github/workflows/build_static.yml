@@ -80,7 +80,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: x86_64-unknown-linux-musl-random-wallet
-          path: target/x86_64-unknown-linux-musl/release/random-wallet
+          path: target/x86_64-unknown-linux-musl/release/random_wallet
 
   static-dockers:
     runs-on: ubuntu-latest
