@@ -128,3 +128,6 @@ This will tag the local images with the tags used in docker compose and
 subsequently running `docker compose up` will use the locally built images.
 
 To go back to using the images from the registry run `docker compose pull`.
+
+The static dev shell is currently not supported on `aarch64` (for example M1
+Macs).
