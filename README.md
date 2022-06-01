@@ -2,7 +2,7 @@ EspressoSystems > espresso is built on the Jellyfish cryptographic library.
 
 # Running locally
 
-The Espresso system is a combination of a number of interacting services, including: 
+The Espresso system is a combination of a number of interacting services, including:
 * Validators (at least 5 are required, but you can have as many as you want)
 * An Espresso Query Service (EsQS) (can run alongside a validator)
 * A faucet service (testnet only)
@@ -106,16 +106,25 @@ target/release/faucet
 | ESPRESSO_FAUCET_FEE_SIZE   | u64  | faucet               | The fee to include with each transfer from the faucet
 | ESPRESSO_FAUCET_PORT       | u16  | faucet               | Port on which to serve the faucet service
 | ESPRESSO_FAUCET_URL        | Url  |                      | URL of the faucet service
+
 # Docker
 
-To build the docker images first build the static executables
+To run the system locally run
 
-    nix develop .#staticShell -c cargo build --release
+    docker compose up
 
-Then build the docker images
+This will also download the docker images from the github container registry if
+necessary.
 
-    docker build . -f docker/address-book.Dockerfile
-    docker build . -f docker/faucet.Dockerfile
-    docker build . -f docker/validator.Dockerfile
+To update the local images run
 
-Note that most files are ignored by default via `.dockerignore`.
+    docker compose pull
+
+To build the static executables and docker images locally run
+
+    docker/build-images
+
+This will tag the local images with the tags used in docker compose and
+subsequently running `docker compose up` will use the locally built images.
+
+To go back to using the images from the registry run `docker compose pull`.
