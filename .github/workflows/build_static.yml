@@ -129,6 +129,12 @@ jobs:
         id: validator
         with:
           images: ghcr.io/espressosystems/espresso/validator
+        
+      - name: Generate random wallet docker metadata
+        uses: docker/metadata-action@v3
+        id: random-wallet
+        with:
+          images: ghcr.io/espressosystems/espresso/random-wallet
 
       - name: Build and push address book docker
         uses: docker/build-push-action@v3
@@ -159,3 +165,14 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.validator.outputs.tags }}
           labels: ${{ steps.validator.outputs.labels }}
+
+      - name: Build and push random wallet docker
+        uses: docker/build-push-action@v3
+        with:
+          context: ./
+          file: ./docker/random-wallet.Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.validator.outputs.tags }}
+          labels: ${{ steps.validator.outputs.labels }}
+

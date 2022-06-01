@@ -116,6 +116,18 @@ services:
     volumes:
       - address-book-store:/store
 
+  # Configure random wallet
+  random-wallet:
+    image: ghcr.io/espressosystems/espresso/random-wallet:main
+    environment:
+      - ESPRESSO_FAUCET_PORT
+      - ESPRESSO_SUBMIT_URL
+      - ESPRESSO_ESQS_URL
+      - ESPRESSO_ADDRESS_BOOK_URL
+      - RUST_LOG
+    volumes:
+      - random-wallet-store:/store
+
 volumes:
   validator0-store:
   validator1-store:
@@ -126,3 +138,4 @@ volumes:
   validator6-store:
   faucet-store:
   address-book-store:
+  random-wallet-store:
