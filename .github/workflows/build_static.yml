@@ -76,6 +76,12 @@ jobs:
           name: x86_64-unknown-linux-musl-validator
           path: target/x86_64-unknown-linux-musl/release/espresso-validator
 
+      - name: Upload random wallet artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: x86_64-unknown-linux-musl-validator
+          path: target/x86_64-unknown-linux-musl/release/random-wallet
+
   static-dockers:
     runs-on: ubuntu-latest
     needs: static-build
