@@ -17,9 +17,9 @@ jobs:
   static-build:
     runs-on: [self-hosted, X64]
     container:
-      image: ghcr.io/espressosystems/nix:2.8.1
+      image: ghcr.io/espressosystems/nix:main
       volumes:
-        - github_nix_281:/nix
+        - github_nix:/nix
     steps:
       - name: Configure Git
         run: |
