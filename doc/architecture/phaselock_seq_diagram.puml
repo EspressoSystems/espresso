@@ -1,0 +1,43 @@
+@startuml
+!pragma teoz true
+'autonumber
+Actor Alice
+Database Replica1 as R1
+Database Replica2 as R2
+Database Replica3 as R3
+Database Replica4 as R4
+Database Replica5 as R5
+Database Replica6 as R6
+Database Replica7 as R7
+
+group Broadcast transaction
+note right Alice
+Alice sends a transaction
+which is broadcasted
+to all replicas and stored in the mempool.
+end note
+Alice -> R1: tx
+Alice -> R3: tx
+R1 -> R2: tx
+R2 -> R4: tx
+R2 -> R7: tx
+R7 -> R6: tx
+R7 -> R5: tx
+end group
+
+group Phaselock view 1 & 2
+note right R3
+Replica3 is the leader.
+Transaction tx is included in the proposal.
+end note
+
+R3 -> R1: Prop v1
+R3 -> R2: Prop v1
+R3 -> R4: Prop v1
+R3 -> R5: Prop v1
+R3 -> R6: Prop v1
+R3 -> R7: Prop v1
+
+end group
+
+@enduml
