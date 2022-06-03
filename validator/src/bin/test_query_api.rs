@@ -267,9 +267,10 @@ async fn main() {
             url.clone(),
             url.clone(),
             url,
-            &mut loader,
+            // &mut loader,
         )
         .await
         .unwrap(),
+        &mut loader,
     );
 }

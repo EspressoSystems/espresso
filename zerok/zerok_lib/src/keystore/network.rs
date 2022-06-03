@@ -9,7 +9,7 @@ use crate::{
 use address_book::InsertPubKey;
 use api::client::*;
 use async_std::{
-    sync::{Arc, Mutex, MutexGuard},
+    sync::Arc,
     task::sleep,
 };
 use async_trait::async_trait;
@@ -29,12 +29,12 @@ use seahorse::txn_builder::TransactionInfo;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     hd::KeyTree,
-    loader::KeystoreLoader,
-    persistence::AtomicKeystoreStorage,
+    // loader::KeystoreLoader,
+    // persistence::AtomicKeystoreStorage,
     txn_builder::TransactionState,
     BincodeSnafu, ClientConfigSnafu, CryptoSnafu, KeystoreBackend, KeystoreError, KeystoreState,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::convert::TryInto;
 use std::pin::Pin;
@@ -43,31 +43,30 @@ use surf::http::content::{Accept, MediaTypeProposal};
 use surf::http::{headers, mime};
 pub use surf::Url;
 
-pub struct NetworkBackend<'a, Meta: PartialEq + Serialize + DeserializeOwned + Clone> {
+pub struct NetworkBackend<'a> {
     univ_param: &'a UniversalParam,
     query_client: surf::Client,
     address_book_client: surf::Client,
     validator_client: surf::Client,
-    storage: Arc<Mutex<AtomicKeystoreStorage<'a, EspressoLedger, Meta>>>,
-    key_stream: KeyTree,
+    // storage: Arc<Mutex<AtomicKeystoreStorage<'a, EspressoLedger, Meta>>>,
+    // key_stream: KeyTree,
 }
 
-impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkBackend<'a, Meta> {
+impl<'a> NetworkBackend<'a> {
     pub async fn new(
         univ_param: &'a UniversalParam,
         query_url: Url,
         address_book_url: Url,
         validator_url: Url,
-        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = Meta>,
-    ) -> Result<NetworkBackend<'a, Meta>, KeystoreError<EspressoLedger>> {
-        let storage = AtomicKeystoreStorage::new(loader, 1024)?;
+        // loader: &mut impl KeystoreLoader<EspressoLedger, Meta = Meta>,
+    ) -> Result<NetworkBackend<'a>, KeystoreError<EspressoLedger>> {
+        // let storage = AtomicKeystoreStorage::new(loader, 1024)?;
         let backend = Self {
             query_client: Self::client(query_url)?,
             address_book_client: Self::client(address_book_url)?,
             validator_client: Self::client(validator_url)?,
             univ_param,
-            key_stream: storage.key_stream(),
-            storage: Arc::new(Mutex::new(storage)),
+            // key_stream: storage.key_stream(),
         };
         backend.wait_for_esqs().await?;
         Ok(backend)
@@ -154,11 +153,10 @@ impl<'a, Meta: Clone + PartialEq + Send + Serialize + DeserializeOwned> NetworkB
 }
 
 #[async_trait]
-impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
-    KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a, Meta>
+impl<'a>
+    KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a>
 {
     type EventStream = node::EventStream<(LedgerEvent<EspressoLedger>, EventSource)>;
-    type Storage = AtomicKeystoreStorage<'a, EspressoLedger, Meta>;
 
     async fn create(
         &mut self,
@@ -247,17 +245,18 @@ impl<'a, Meta: PartialEq + Clone + Send + Serialize + DeserializeOwned>
             freezing_accounts: Default::default(),
             sending_accounts: Default::default(),
         };
-        self.storage().await.create(&state).await?;
+        // self.storage().await.create(&state).await?;
 
         Ok(state)
     }
 
-    async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
-        self.storage.lock().await
-    }
+    // async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
+    //     self.storage.lock().await
+    // }
 
     fn key_stream(&self) -> KeyTree {
-        self.key_stream.clone()
+        // self.key_stream.clone()
+        KeyTree::from_password_and_salt(&[], &[0; 32]).unwrap()
     }
 
     async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream {

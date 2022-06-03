@@ -8,7 +8,7 @@ use jf_cap::{
     mint::MintNote,
     sign_receiver_memos,
     structs::{
-        AssetCode, AssetCodeSeed, AssetDefinition, FeeInput, FreezeFlag, ReceiverMemo,
+        Amount, AssetCode, AssetCodeSeed, AssetDefinition, FeeInput, FreezeFlag, ReceiverMemo,
         RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
@@ -210,7 +210,7 @@ impl MultiXfrTestState {
         let mut fee_records = vec![];
 
         for key in 0..keys.len() as u8 {
-            let amt = 1u64 << 32;
+            let amt = Amount::from(1u64 << 32);
             fee_records.push(t.num_leaves());
             let def = &asset_defs[0];
             let key = key as usize % keys.len();
@@ -308,7 +308,7 @@ impl MultiXfrTestState {
             let txns = this_block
                 .into_par_iter()
                 .map(|((def_ix, key, amt), mut prng)| {
-                    let amt = if amt < 2 { 2 } else { amt };
+                    let amt = Amount::from(if amt < 2 { 2 } else { amt });
                     let def_ix = def_ix as usize % ret.asset_defs.len();
                     // We can't mint native tokens
                     let def_ix = if def_ix < 1 { 1 } else { def_ix };
@@ -380,7 +380,7 @@ impl MultiXfrTestState {
                         },
                     };
 
-                    let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut prng, fee_input, 1).unwrap();
+                    let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut prng, fee_input, Amount::from(1u64)).unwrap();
 
                     let memos = vec![
                         ReceiverMemo::from_ro(&mut prng, &fee_out_rec, &[]).unwrap(),
@@ -671,21 +671,21 @@ impl MultiXfrTestState {
 
                     let (out_amt1, out_amt2) = {
                         if out_def1 == out_def2 {
-                            let total = rec1.amount + rec2.amount;
+                            let total : u128 = (rec1.amount + rec2.amount).into();
                             let offset = (amt_diff as i64) / 2;
                             let midval = (total / 2) as i64;
-                            let amt1 = midval + offset;
-                            let amt1 = if amt1 < 1 {
-                                1
-                            } else if amt1 as u64 >= total {
-                                total - 1
+                            let amt1  = (midval + offset) as u128;
+                            let amt1 = if amt1 < 1u128 {
+                                1u128
+                            } else if amt1 as u128 >= total {
+                                (total - 1u128) as u128
                             } else {
-                                amt1 as u64
+                                amt1 as u128
                             };
                             let amt2 = total - amt1;
-                            (amt1, amt2)
+                            (amt1,amt2)
                         } else {
-                            (rec1.amount, rec2.amount)
+                            (rec1.amount.into(), rec2.amount.into())
                         }
                     };
 
@@ -695,7 +695,7 @@ impl MultiXfrTestState {
 
                     let out_rec1 = RecordOpening::new(
                         &mut prng,
-                        out_amt1,
+                        Amount::from(out_amt1),
                         out_def1,
                         k1.pub_key(),
                         FreezeFlag::Unfrozen,
@@ -703,7 +703,7 @@ impl MultiXfrTestState {
 
                     let out_rec2 = RecordOpening::new(
                         &mut prng,
-                        out_amt2,
+                        Amount::from(out_amt2),
                         out_def2,
                         k2.pub_key(),
                         FreezeFlag::Unfrozen,
@@ -780,7 +780,7 @@ impl MultiXfrTestState {
                     );
                     let now = Instant::now();
 
-                    let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut prng, fee_input, 1).unwrap();
+                    let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut prng, fee_input, Amount::from(1u64)).unwrap();
 
                     let owner_memos = vec![&fee_out_rec, &out_rec1, &out_rec2]
                         .into_iter()
@@ -885,7 +885,7 @@ impl MultiXfrTestState {
         let out_key_ix = out_key_ix as usize % self.keys.len();
         let out_key = &self.keys[out_key_ix];
 
-        assert_ne!(rec.amount, 0);
+        assert_ne!(rec.amount, Amount::from(0u64));
         let out_rec1 = RecordOpening::new(
             prng,
             rec.amount,
@@ -945,7 +945,7 @@ impl MultiXfrTestState {
         );
         let now = Instant::now();
 
-        let (fee_info, fee_out_rec) = TxnFeeInfo::new(prng, fee_input, 1).unwrap();
+        let (fee_info, fee_out_rec) = TxnFeeInfo::new(prng, fee_input, Amount::from(1u64)).unwrap();
 
         let owner_memos = vec![&fee_out_rec, &out_rec1]
             .into_iter()
@@ -1451,7 +1451,7 @@ mod tests {
 
         let alice_rec_builder = RecordOpening::new(
             &mut prng,
-            2,
+            Amount::from(2u64),
             coin.clone(),
             alice_key.pub_key(),
             FreezeFlag::Unfrozen,
@@ -1525,7 +1525,8 @@ mod tests {
         let ((txn1, _, _), bob_rec) = {
             let bob_rec = RecordOpening::new(
                 &mut prng,
-                1, /* 1 less, for the transaction fee */
+                 /* 1 less, for the transaction fee */
+                Amount::from(1u64),
                 coin,
                 bob_key.pub_key(),
                 FreezeFlag::Unfrozen,
@@ -1535,7 +1536,7 @@ mod tests {
                 &mut prng,
                 /* inputs:         */ vec![alice_rec_final],
                 /* outputs:        */ &[bob_rec.clone()],
-                /* fee:            */ 1,
+                /* fee:            */ Amount::from(1u64),
                 /* valid_until:    */ 2,
                 /* proving_key:    */ prove_keys.xfr.key_for_size(1, 2).unwrap(),
             )

@@ -6,7 +6,7 @@ use crate::{
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
 };
-use async_std::sync::{Arc, Mutex, MutexGuard};
+use async_std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::stream::Stream;
 use itertools::izip;
@@ -27,7 +27,7 @@ use seahorse::{
 use snafu::ResultExt;
 use std::collections::HashMap;
 use std::pin::Pin;
-use testing::{mocks::MockStorage, MockNetwork};
+use testing::MockNetwork;
 
 pub struct MockEspressoNetwork<'a> {
     validator: ValidatorState,
@@ -164,23 +164,16 @@ pub struct MockEspressoBackend<'a> {
                 'a,
                 EspressoLedger,
                 MockEspressoNetwork<'a>,
-                MockStorage<'a, EspressoLedger>,
             >,
         >,
     >,
     initial_grants: Vec<(RecordOpening, u64)>,
-    storage: Arc<Mutex<MockStorage<'a, EspressoLedger>>>,
 }
 
 #[async_trait]
 impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
     type EventStream =
         Pin<Box<dyn Stream<Item = (LedgerEvent<EspressoLedger>, EventSource)> + Send>>;
-    type Storage = MockStorage<'a, EspressoLedger>;
-
-    async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
-        self.storage.lock().await
-    }
 
     async fn create(
         &mut self,
@@ -232,8 +225,8 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         };
 
         // Persist the initial state.
-        let mut storage = self.storage().await;
-        storage.initialize(state.clone(), state.clone()).unwrap();
+        // let mut storage = self.storage().await;
+        // storage.initialize(state.clone(), state.clone()).unwrap();
 
         Ok(state)
     }
@@ -333,7 +326,6 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
     type Ledger = EspressoLedger;
     type MockBackend = MockEspressoBackend<'a>;
     type MockNetwork = MockEspressoNetwork<'a>;
-    type MockStorage = MockStorage<'a, EspressoLedger>;
 
     async fn create_network(
         &mut self,
@@ -386,21 +378,15 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
         ret
     }
 
-    async fn create_storage(&mut self) -> Self::MockStorage {
-        Default::default()
-    }
-
     async fn create_backend(
         &mut self,
-        ledger: Arc<Mutex<MockLedger<'a, Self::Ledger, Self::MockNetwork, Self::MockStorage>>>,
+        ledger: Arc<Mutex<MockLedger<'a, Self::Ledger, Self::MockNetwork>>>,
         initial_grants: Vec<(RecordOpening, u64)>,
         key_stream: hd::KeyTree,
-        storage: Arc<Mutex<Self::MockStorage>>,
     ) -> Self::MockBackend {
         MockEspressoBackend {
             ledger,
             initial_grants,
-            storage,
             key_stream,
         }
     }

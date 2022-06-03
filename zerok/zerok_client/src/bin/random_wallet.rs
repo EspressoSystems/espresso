@@ -40,7 +40,7 @@ use zerok_lib::{
     universal_params::UNIVERSAL_PARAM,
 };
 
-type Keystore = seahorse::Keystore<'static, NetworkBackend<'static, ()>, EspressoLedger>;
+type Keystore = seahorse::Keystore<'static, NetworkBackend<'static>, EspressoLedger, ()>;
 
 #[derive(StructOpt)]
 struct Args {
@@ -132,11 +132,11 @@ async fn main() {
         args.esqs_url.clone(),
         args.address_book_url.clone(),
         args.validator_url.clone(),
-        &mut loader,
+        // &mut loader,
     )
     .await
     .expect("failed to connect to backend");
-    let mut keystore = Keystore::new(backend)
+    let mut keystore = Keystore::new(backend, &mut loader)
         .await
         .expect("error loading keystore");
     match args.key_path {

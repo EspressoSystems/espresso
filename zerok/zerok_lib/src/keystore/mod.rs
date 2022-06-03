@@ -6,5 +6,5 @@ use crate::ledger::EspressoLedger;
 
 pub use seahorse::*;
 
-pub type EspressoKeystore<'a, Backend> = Keystore<'a, Backend, EspressoLedger>;
+pub type EspressoKeystore<'a, Backend, Meta> = Keystore<'a, Backend, EspressoLedger, Meta>;
 pub type EspressoKeystoreError = KeystoreError<EspressoLedger>;

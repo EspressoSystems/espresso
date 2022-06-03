@@ -9,7 +9,7 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use jf_cap::{
-    structs::{AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
+    structs::{Amount, AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
     MerkleTree, TransactionVerifyingKey,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
@@ -382,7 +382,7 @@ impl GenesisState {
             );
             let ro = RecordOpening::new(
                 &mut rng,
-                1u64 << 32,
+                Amount::from(1u64 << 32),
                 AssetDefinition::native(),
                 pub_key,
                 FreezeFlag::Unfrozen,
