@@ -139,7 +139,7 @@ A proof of inclusion for `elem` in `S` is a sequence of `Digest`s
 
 Conceptually, if we walk down the ideal tree to where `elem` would get
 inserted, we will hit many `ITBranch(l,r)` nodes. If we write down the hashes
-of the oubtrees we don't go into (ie, if insertion goes into r, write down
+of the subtrees we don't go into (ie, if insertion goes into r, write down
 `hash(l)`, and vice versa), this will be `sib_{N-1},...,sib_0`.
 
 A proof of exclusion for `elem` is similar, except it is
