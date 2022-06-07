@@ -85,6 +85,10 @@ struct Options {
     /// Wait for web server to exit after transactions complete.
     #[structopt(long)]
     pub wait: bool,
+
+    /// Whether to color log output with ANSI color codes.
+    #[structopt(long, env = "ESPRESSO_COLORED_LOGS")]
+    pub colored_logs: bool,
 }
 
 /// Returns the default path to the node configuration file.
@@ -309,13 +313,14 @@ async fn generate_transactions(
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
+    let options = Options::from_args();
     tracing_subscriber::fmt()
         .compact()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_ansi(options.colored_logs)
         .init();
 
     // Get configuration
-    let options = Options::from_args();
     let config_path = options.config.clone().unwrap_or_else(default_config_path);
     let mut config = ConsensusConfig::from_file(&config_path);
     // Update config if any parameters are overridden by options.
