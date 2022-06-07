@@ -73,6 +73,10 @@ struct Args {
 
     #[structopt(short, long, env = "ESPRESSO_FAUCET_URL")]
     faucet_url: Url,
+
+    /// Whether to color log output with ANSI color codes.
+    #[structopt(long, env = "ESPRESSO_COLORED_LOGS")]
+    colored_logs: bool,
 }
 
 struct TrivialKeystoreLoader {
@@ -111,14 +115,15 @@ async fn get_peers(url: &Url) -> Result<Vec<UserPubKey>, surf::Error> {
 
 #[async_std::main]
 async fn main() {
+    let args = Args::from_args();
+
     tracing_subscriber::fmt()
         .compact()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env().add_directive(Level::INFO.into()),
         )
+        .with_ansi(args.colored_logs)
         .init();
-
-    let args = Args::from_args();
 
     let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
     let tempdir = TempDir::new("keystore").unwrap();
