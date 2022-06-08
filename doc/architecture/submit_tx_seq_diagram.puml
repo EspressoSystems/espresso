@@ -1,0 +1,111 @@
+@startuml
+autonumber
+
+participant Wallet as W
+participant EsQS
+participant "Validator 1" as V1
+participant "Validator 2" as V2
+participant "Validator 3" as V3
+participant "Validator 4" as V4
+participant "Validator 5" as V5
+participant "Validator 6" as V6
+participant "Validator 7" as V7
+
+group Gossip the transaction
+
+W -> V2: tx
+V2 -> V1: tx
+V2 -> V6: tx
+V2 -> V5: tx
+V2 -> V3: tx
+
+par
+V1 -> V7: tx
+V6 -> V7: tx
+else
+V6 -> V5: tx
+V5 -> V3: tx
+V5 -> V4: tx
+else
+V3 -> V4: tx
+end par
+
+end group
+
+group View n: PROPOSE
+
+note right W
+Validator 3 is the leader,
+Validators 4,5 and 7 form the committee.
+end note
+
+par
+V4 -> V3: vote_{n,4}
+else
+V5 -> V3: vote_{n,5}
+else
+V7 -> V3: vote_{n,7}
+end par
+
+note right V3
+   V3 is the leader and gossips the proposal <i>prop_n</i> for view <i>n</i>.
+   The proposal <i>prop_n<i> includes transaction <i>tx</i>.
+end note
+
+V3 -> V5: prop_n
+V3 -> V4: prop_n
+V3 -> V2: prop_n
+
+par
+V4 -> V5: prop_n
+else
+V2 -> V6: prop_n
+V2 -> V1: prop_n
+V2 -> V5: prop_n
+end par
+
+par
+V1 -> V7: prop_n
+V1 -> V6: prop_n
+else
+V6 -> V7: prop_n
+V6 -> V5
+V6 -> V7
+end par
+
+note right W
+   All validators update their local state.
+end note
+
+end group
+
+group View n+1: PREPARE
+
+note right W
+   Similar to view <i>n</i> except that V5 is the leader and
+   validators 1,2,4 form the committee.
+   Details omitted.
+end note
+
+
+end group
+
+group View n+2: COMMIT
+
+note right W
+   Similar to view <i>n+1</i> except that V7 is the leader and
+   validators 1,5,6 form the committee.
+   Details omitted.
+end note
+
+end group
+
+group EsQS updates local state
+
+EsQS -> V2: get_last_state
+V2 -> EsQS: (n+2,state_{n+2},qc_array_{n+2})
+
+end group
+
+
+@enduml

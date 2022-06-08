@@ -10,11 +10,6 @@ concise "Replica 5" as R5
 concise "Replica 6" as R6
 concise "Replica 7" as R7
 
-highlight 20 to 40 #Gold;line:DimGrey : R3 is the Leader
-highlight 40 to 90 #lightblue;line:DimGrey : R5 is the Leader
-highlight 90 to 150 #Gold;line:DimGrey : R2 is the Leader
-highlight 150 to 220 #lightblue;line:DimGrey : R7 is the Leader
-
 @PL
 0 is "..."
 20 is View1
@@ -87,7 +82,11 @@ R7 -[#red]> R5@+8: Prop v4
 R7 -[#red]> R6@+9: Prop v4
 R7 -[#red]> R3@+10: Prop v4
 
-
+' TODO plantuml (nix-shell) crashes here
+'highlight 20 to 40 #Gold: R3 is the Leader
+'highlight 40 to 90 #lightblue : R5 is the Leader
+'highlight 90 to 150 #Gold : R2 is the Leader
+'highlight 150 to 220 #lightblue : R7 is the Leader
 
 @enduml
 
