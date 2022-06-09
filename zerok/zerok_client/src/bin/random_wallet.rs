@@ -137,7 +137,6 @@ async fn main() {
         args.esqs_url.clone(),
         args.address_book_url.clone(),
         args.validator_url.clone(),
-        // &mut loader,
     )
     .await
     .expect("failed to connect to backend");

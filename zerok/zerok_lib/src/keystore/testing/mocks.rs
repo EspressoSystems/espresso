@@ -192,11 +192,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                 viewing_accounts: Default::default(),
             }
         };
-
-        // Persist the initial state.
-        // let mut storage = self.storage().await;
-        // storage.initialize(state.clone(), state.clone()).unwrap();
-
         Ok(state)
     }
 

@@ -15,14 +15,14 @@ use jf_cap::{
     AccMemberWitness, MerkleTree, Signature, TransactionNote, TransactionVerifyingKey,
 };
 use key_set::{KeySet, ProverKeySet, VerifierKeySet};
+use num_bigint::BigInt;
 use phaselock::traits::{BlockContents, State};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
+use seahorse::txn_builder::RecordAmount;
 use std::collections::HashSet;
 use std::time::Instant;
-use seahorse::txn_builder::RecordAmount;
-use num_bigint::BigInt;
 
 #[derive(Debug)]
 pub struct MultiXfrTestState {
@@ -674,7 +674,8 @@ impl MultiXfrTestState {
 
                     let (out_amt1, out_amt2) = {
                         if out_def1 == out_def2 {
-                            let total = BigInt::from(u128::from(rec1.amount)) + BigInt::from(u128::from(rec2.amount));
+                            let total = BigInt::from(u128::from(rec1.amount))
+                                + BigInt::from(u128::from(rec2.amount));
                             let offset = BigInt::from(amt_diff) / BigInt::from(2u64);
                             let midval = total.clone() / BigInt::from(2u64);
                             let amt1 = midval + offset;
@@ -688,7 +689,10 @@ impl MultiXfrTestState {
                             let amt2 = total - amt1.clone();
                             (amt1, amt2)
                         } else {
-                            (BigInt::from(u128::from(rec1.amount)), BigInt::from(u128::from(rec2.amount)))
+                            (
+                                BigInt::from(u128::from(rec1.amount)),
+                                BigInt::from(u128::from(rec2.amount)),
+                            )
                         }
                     };
 
