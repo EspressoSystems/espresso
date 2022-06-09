@@ -202,7 +202,6 @@ pub async fn init_web_server(
         opt.esqs_url.clone(),
         opt.address_book_url.clone(),
         opt.submit_url.clone(),
-        // &mut loader,
     )
     .await
     .unwrap();

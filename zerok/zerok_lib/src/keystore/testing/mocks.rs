@@ -19,9 +19,9 @@ use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
 use reef::traits::Transaction as _;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
-    hd, testing,
+    testing,
     testing::MockEventSource,
-    txn_builder::{PendingTransaction, RecordDatabase, TransactionInfo, TransactionState},
+    txn_builder::{PendingTransaction, TransactionInfo, TransactionState},
     CryptoSnafu, KeystoreBackend, KeystoreError, KeystoreState,
 };
 use snafu::ResultExt;
@@ -157,7 +157,6 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
 
 #[derive(Clone)]
 pub struct MockEspressoBackend<'a> {
-    key_stream: hd::KeyTree,
     ledger: Arc<
         Mutex<
             MockLedger<
@@ -186,29 +185,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                 txn_state: TransactionState {
                     validator: ledger.network().validator.clone(),
 
-                    records: {
-                        let mut db: RecordDatabase = Default::default();
-                        for (ro, uid) in self.initial_grants.iter() {
-                            let key_pair = {
-                                let mut ret = None;
-                                let key_stream = self.key_stream.derive_sub_tree("user".as_bytes());
-
-                                for i in 0u64..5 {
-                                    let key_pair =
-                                        key_stream.derive_user_key_pair(&i.to_le_bytes());
-                                    if key_pair.pub_key() == ro.pub_key {
-                                        ret = Some(key_pair);
-                                        break;
-                                    }
-                                }
-
-                                ret.unwrap()
-                            };
-
-                            db.insert(ro.clone(), *uid, &key_pair);
-                        }
-                        db
-                    },
+                    records: Default::default(),
                     nullifiers: ledger.network().nullifiers.clone(),
                     record_mt: ledger.network().records.clone(),
                     merkle_leaf_to_forget: None,
@@ -229,10 +206,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         // storage.initialize(state.clone(), state.clone()).unwrap();
 
         Ok(state)
-    }
-
-    fn key_stream(&self) -> hd::KeyTree {
-        self.key_stream.clone()
     }
 
     async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream {
@@ -382,12 +355,10 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
         &mut self,
         ledger: Arc<Mutex<MockLedger<'a, Self::Ledger, Self::MockNetwork>>>,
         initial_grants: Vec<(RecordOpening, u64)>,
-        key_stream: hd::KeyTree,
     ) -> Self::MockBackend {
         MockEspressoBackend {
             ledger,
             initial_grants,
-            key_stream,
         }
     }
 }

@@ -267,7 +267,6 @@ async fn main() {
             url.clone(),
             url.clone(),
             url,
-            // &mut loader,
         )
         .await
         .unwrap(),

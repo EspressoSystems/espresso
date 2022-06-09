@@ -12,7 +12,6 @@ use jf_cap::proof::UniversalParam;
 use seahorse::{
     cli::*,
     io::SharedIO,
-    loader::{KeystoreLoader, LoaderMetadata},
     KeystoreError,
 };
 use std::path::PathBuf;
@@ -111,14 +110,12 @@ impl<'a> CLI<'a> for EspressoCli {
     async fn init_backend(
         univ_param: &'a UniversalParam,
         args: Self::Args,
-        // loader: &mut (impl KeystoreLoader<EspressoLedger, Meta = LoaderMetadata> + Send),
     ) -> Result<Self::Backend, KeystoreError<EspressoLedger>> {
         NetworkBackend::new(
             univ_param,
             args.esqs_url,
             args.address_book_url,
             args.submit_url,
-            // loader,
         )
         .await
     }
