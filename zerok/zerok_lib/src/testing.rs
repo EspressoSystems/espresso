@@ -380,7 +380,8 @@ impl MultiXfrTestState {
                         },
                     };
 
-                    let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut prng, fee_input, Amount::from(1u64)).unwrap();
+                    let (fee_info, fee_out_rec) =
+                        TxnFeeInfo::new(&mut prng, fee_input, Amount::from(1u64)).unwrap();
 
                     let memos = vec![
                         ReceiverMemo::from_ro(&mut prng, &fee_out_rec, &[]).unwrap(),
@@ -671,10 +672,10 @@ impl MultiXfrTestState {
 
                     let (out_amt1, out_amt2) = {
                         if out_def1 == out_def2 {
-                            let total : u128 = (rec1.amount + rec2.amount).into();
+                            let total: u128 = (rec1.amount + rec2.amount).into();
                             let offset = (amt_diff as i64) / 2;
                             let midval = (total / 2) as i64;
-                            let amt1  = (midval + offset) as u128;
+                            let amt1 = (midval + offset) as u128;
                             let amt1 = if amt1 < 1u128 {
                                 1u128
                             } else if amt1 as u128 >= total {
@@ -683,7 +684,7 @@ impl MultiXfrTestState {
                                 amt1 as u128
                             };
                             let amt2 = total - amt1;
-                            (amt1,amt2)
+                            (amt1, amt2)
                         } else {
                             (rec1.amount.into(), rec2.amount.into())
                         }
@@ -780,7 +781,8 @@ impl MultiXfrTestState {
                     );
                     let now = Instant::now();
 
-                    let (fee_info, fee_out_rec) = TxnFeeInfo::new(&mut prng, fee_input, Amount::from(1u64)).unwrap();
+                    let (fee_info, fee_out_rec) =
+                        TxnFeeInfo::new(&mut prng, fee_input, Amount::from(1u64)).unwrap();
 
                     let owner_memos = vec![&fee_out_rec, &out_rec1, &out_rec2]
                         .into_iter()
@@ -1525,7 +1527,7 @@ mod tests {
         let ((txn1, _, _), bob_rec) = {
             let bob_rec = RecordOpening::new(
                 &mut prng,
-                 /* 1 less, for the transaction fee */
+                /* 1 less, for the transaction fee */
                 Amount::from(1u64),
                 coin,
                 bob_key.pub_key(),

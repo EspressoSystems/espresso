@@ -8,10 +8,7 @@ use crate::{
 };
 use address_book::InsertPubKey;
 use api::client::*;
-use async_std::{
-    sync::Arc,
-    task::sleep,
-};
+use async_std::{sync::Arc, task::sleep};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use async_tungstenite::tungstenite::Message;
@@ -145,9 +142,7 @@ impl<'a> NetworkBackend<'a> {
 }
 
 #[async_trait]
-impl<'a>
-    KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a>
-{
+impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
     type EventStream = node::EventStream<(LedgerEvent<EspressoLedger>, EventSource)>;
 
     async fn create(

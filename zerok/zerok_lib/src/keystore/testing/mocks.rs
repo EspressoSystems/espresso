@@ -157,15 +157,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
 
 #[derive(Clone)]
 pub struct MockEspressoBackend<'a> {
-    ledger: Arc<
-        Mutex<
-            MockLedger<
-                'a,
-                EspressoLedger,
-                MockEspressoNetwork<'a>,
-            >,
-        >,
-    >,
+    ledger: Arc<Mutex<MockLedger<'a, EspressoLedger, MockEspressoNetwork<'a>>>>,
     initial_grants: Vec<(RecordOpening, u64)>,
 }
 

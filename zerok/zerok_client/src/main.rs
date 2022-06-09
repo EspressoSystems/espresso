@@ -9,11 +9,7 @@ mod cli_client;
 
 use async_trait::async_trait;
 use jf_cap::proof::UniversalParam;
-use seahorse::{
-    cli::*,
-    io::SharedIO,
-    KeystoreError,
-};
+use seahorse::{cli::*, io::SharedIO, KeystoreError};
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
