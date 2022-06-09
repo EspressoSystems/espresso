@@ -681,18 +681,18 @@ impl MultiXfrTestState {
                             let amt1 = midval + offset;
                             let amt1 = if amt1 < BigInt::from(1u64) {
                                 BigInt::from(1u64)
-                            } else if amt1 >= total.clone() {
+                            } else if amt1 >= total {
                                 total.clone() - BigInt::from(1u64)
                             } else {
                                 amt1
                             };
                             let amt2 = total - amt1.clone();
-                            (amt1, amt2)
-                        } else {
                             (
-                                BigInt::from(u128::from(rec1.amount)),
-                                BigInt::from(u128::from(rec2.amount)),
+                                RecordAmount::try_from(amt1).unwrap().into(),
+                                RecordAmount::try_from(amt2).unwrap().into(),
                             )
+                        } else {
+                            (rec1.amount, rec2.amount)
                         }
                     };
 
@@ -702,7 +702,7 @@ impl MultiXfrTestState {
 
                     let out_rec1 = RecordOpening::new(
                         &mut prng,
-                        RecordAmount::try_from(out_amt1).unwrap().into(),
+                        out_amt1,
                         out_def1,
                         k1.pub_key(),
                         FreezeFlag::Unfrozen,
@@ -710,7 +710,7 @@ impl MultiXfrTestState {
 
                     let out_rec2 = RecordOpening::new(
                         &mut prng,
-                        RecordAmount::try_from(out_amt2).unwrap().into(),
+                        out_amt2,
                         out_def2,
                         k2.pub_key(),
                         FreezeFlag::Unfrozen,
