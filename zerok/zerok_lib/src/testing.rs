@@ -21,6 +21,8 @@ use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::time::Instant;
+use seahorse::txn_builder::RecordAmount;
+use num_bigint::BigInt;
 
 #[derive(Debug)]
 pub struct MultiXfrTestState {
@@ -672,21 +674,21 @@ impl MultiXfrTestState {
 
                     let (out_amt1, out_amt2) = {
                         if out_def1 == out_def2 {
-                            let total: u128 = (rec1.amount + rec2.amount).into();
-                            let offset = (amt_diff as i64) / 2;
-                            let midval = (total / 2) as i64;
-                            let amt1 = (midval + offset) as u128;
-                            let amt1 = if amt1 < 1u128 {
-                                1u128
-                            } else if amt1 as u128 >= total {
-                                (total - 1u128) as u128
+                            let total = BigInt::from(u128::from(rec1.amount)) + BigInt::from(u128::from(rec2.amount));
+                            let offset = BigInt::from(amt_diff) / BigInt::from(2u64);
+                            let midval = total.clone() / BigInt::from(2u64);
+                            let amt1 = midval + offset;
+                            let amt1 = if amt1 < BigInt::from(1u64) {
+                                BigInt::from(1u64)
+                            } else if amt1 >= total.clone() {
+                                total.clone() - BigInt::from(1u64)
                             } else {
-                                amt1 as u128
+                                amt1
                             };
-                            let amt2 = total - amt1;
+                            let amt2 = total - amt1.clone();
                             (amt1, amt2)
                         } else {
-                            (rec1.amount.into(), rec2.amount.into())
+                            (BigInt::from(u128::from(rec1.amount)), BigInt::from(u128::from(rec2.amount)))
                         }
                     };
 
@@ -696,7 +698,7 @@ impl MultiXfrTestState {
 
                     let out_rec1 = RecordOpening::new(
                         &mut prng,
-                        Amount::from(out_amt1),
+                        RecordAmount::try_from(out_amt1).unwrap().into(),
                         out_def1,
                         k1.pub_key(),
                         FreezeFlag::Unfrozen,
@@ -704,7 +706,7 @@ impl MultiXfrTestState {
 
                     let out_rec2 = RecordOpening::new(
                         &mut prng,
-                        Amount::from(out_amt2),
+                        RecordAmount::try_from(out_amt2).unwrap().into(),
                         out_def2,
                         k2.pub_key(),
                         FreezeFlag::Unfrozen,

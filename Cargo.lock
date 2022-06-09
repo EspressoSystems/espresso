@@ -5922,6 +5922,7 @@ dependencies = [
  "lazy_static",
  "mnemonic",
  "net",
+ "num-bigint 0.4.3",
  "phaselock",
  "phaselock-types",
  "procfs",
