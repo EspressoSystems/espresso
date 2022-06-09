@@ -343,7 +343,6 @@ impl<'a>
         let pub_key_bytes = bincode::serialize(&key_pair.pub_key()).unwrap();
         let sig = key_pair.sign(&pub_key_bytes);
         let json_request = InsertPubKey { pub_key_bytes, sig };
-        dbg!(&self.address_book_client.config().base_url);
         match self
             .address_book_client
             .post("insert_pubkey")
