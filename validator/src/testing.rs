@@ -81,17 +81,16 @@ impl TestNetwork {
     pub async fn create_wallet(
         &self,
         loader: &mut impl KeystoreLoader<EspressoLedger, Meta = LoaderMetadata>,
-    ) -> EspressoKeystore<'static, NetworkBackend<'static, LoaderMetadata>> {
+    ) -> EspressoKeystore<'static, NetworkBackend<'static>, LoaderMetadata> {
         let backend = NetworkBackend::new(
             &*UNIVERSAL_PARAM,
             self.query_api.clone(),
             self.address_book_api.clone(),
             self.submit_api.clone(),
-            loader,
         )
         .await
         .unwrap();
-        EspressoKeystore::new(backend).await.unwrap()
+        EspressoKeystore::new(backend, loader).await.unwrap()
     }
 
     pub async fn kill(mut self) {

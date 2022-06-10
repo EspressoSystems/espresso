@@ -6,7 +6,7 @@ use crate::{
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
 };
-use async_std::sync::{Arc, Mutex, MutexGuard};
+use async_std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::stream::Stream;
 use itertools::izip;
@@ -19,15 +19,15 @@ use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
 use reef::traits::Transaction as _;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
-    hd, testing,
+    testing,
     testing::MockEventSource,
-    txn_builder::{PendingTransaction, RecordDatabase, TransactionInfo, TransactionState},
+    txn_builder::{PendingTransaction, TransactionInfo, TransactionState},
     CryptoSnafu, KeystoreBackend, KeystoreError, KeystoreState,
 };
 use snafu::ResultExt;
 use std::collections::HashMap;
 use std::pin::Pin;
-use testing::{mocks::MockStorage, MockNetwork};
+use testing::MockNetwork;
 
 pub struct MockEspressoNetwork<'a> {
     validator: ValidatorState,
@@ -157,30 +157,14 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
 
 #[derive(Clone)]
 pub struct MockEspressoBackend<'a> {
-    key_stream: hd::KeyTree,
-    ledger: Arc<
-        Mutex<
-            MockLedger<
-                'a,
-                EspressoLedger,
-                MockEspressoNetwork<'a>,
-                MockStorage<'a, EspressoLedger>,
-            >,
-        >,
-    >,
+    ledger: Arc<Mutex<MockLedger<'a, EspressoLedger, MockEspressoNetwork<'a>>>>,
     initial_grants: Vec<(RecordOpening, u64)>,
-    storage: Arc<Mutex<MockStorage<'a, EspressoLedger>>>,
 }
 
 #[async_trait]
 impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
     type EventStream =
         Pin<Box<dyn Stream<Item = (LedgerEvent<EspressoLedger>, EventSource)> + Send>>;
-    type Storage = MockStorage<'a, EspressoLedger>;
-
-    async fn storage<'l>(&'l mut self) -> MutexGuard<'l, Self::Storage> {
-        self.storage.lock().await
-    }
 
     async fn create(
         &mut self,
@@ -193,29 +177,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                 txn_state: TransactionState {
                     validator: ledger.network().validator.clone(),
 
-                    records: {
-                        let mut db: RecordDatabase = Default::default();
-                        for (ro, uid) in self.initial_grants.iter() {
-                            let key_pair = {
-                                let mut ret = None;
-                                let key_stream = self.key_stream.derive_sub_tree("user".as_bytes());
-
-                                for i in 0u64..5 {
-                                    let key_pair =
-                                        key_stream.derive_user_key_pair(&i.to_le_bytes());
-                                    if key_pair.pub_key() == ro.pub_key {
-                                        ret = Some(key_pair);
-                                        break;
-                                    }
-                                }
-
-                                ret.unwrap()
-                            };
-
-                            db.insert(ro.clone(), *uid, &key_pair);
-                        }
-                        db
-                    },
+                    records: Default::default(),
                     nullifiers: ledger.network().nullifiers.clone(),
                     record_mt: ledger.network().records.clone(),
                     merkle_leaf_to_forget: None,
@@ -230,16 +192,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                 viewing_accounts: Default::default(),
             }
         };
-
-        // Persist the initial state.
-        let mut storage = self.storage().await;
-        storage.initialize(state.clone(), state.clone()).unwrap();
-
         Ok(state)
-    }
-
-    fn key_stream(&self) -> hd::KeyTree {
-        self.key_stream.clone()
     }
 
     async fn subscribe(&self, from: EventIndex, to: Option<EventIndex>) -> Self::EventStream {
@@ -333,7 +286,6 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
     type Ledger = EspressoLedger;
     type MockBackend = MockEspressoBackend<'a>;
     type MockNetwork = MockEspressoNetwork<'a>;
-    type MockStorage = MockStorage<'a, EspressoLedger>;
 
     async fn create_network(
         &mut self,
@@ -386,22 +338,14 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
         ret
     }
 
-    async fn create_storage(&mut self) -> Self::MockStorage {
-        Default::default()
-    }
-
     async fn create_backend(
         &mut self,
-        ledger: Arc<Mutex<MockLedger<'a, Self::Ledger, Self::MockNetwork, Self::MockStorage>>>,
+        ledger: Arc<Mutex<MockLedger<'a, Self::Ledger, Self::MockNetwork>>>,
         initial_grants: Vec<(RecordOpening, u64)>,
-        key_stream: hd::KeyTree,
-        storage: Arc<Mutex<Self::MockStorage>>,
     ) -> Self::MockBackend {
         MockEspressoBackend {
             ledger,
             initial_grants,
-            storage,
-            key_stream,
         }
     }
 }

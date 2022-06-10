@@ -39,6 +39,7 @@ key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 lazy_static = "1.4.0"
 mnemonic = "1.0.1"
 net = { git = "https://github.com/EspressoSystems/net.git" }
+num-bigint = "0.4"
 phaselock = { git = "ssh://git@github.com/EspressoSystems/phaselock.git", tag = "v0.0.7" }
 phaselock-types = { git = "ssh://git@github.com/EspressoSystems/phaselock.git", tag = "v0.0.7" }
 rand = "0.7.3"

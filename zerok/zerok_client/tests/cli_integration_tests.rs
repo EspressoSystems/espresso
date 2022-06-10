@@ -26,7 +26,7 @@ fn create_keystore(t: &mut CliClient, keystore: usize) -> Result<&mut CliClient,
         .command(keystore, "test_password")?
         .output("Retype password:")?
         .command(keystore, "test_password")?
-        .output("connecting...")?
+        .output("Type 'help' for a list of commands.")?
         .command(keystore, format!("load_key sending {}", key_path))?
         .output(format!("(?P<default_addr{}>ADDR~.*)", keystore))?
         .output(format!("(?P<default_pubkey{}>USERPUBKEY~.*)", keystore))
@@ -207,7 +207,7 @@ fn cli_login(t: &mut CliClient) -> Result<(), String> {
         .command(0, "n")?
         .output("Enter password:")?
         .command(0, "test_password")?
-        .output("connecting...")?;
+        .output("Type 'help' for a list of commands.")?;
 
     // Check that the keystore is functional.
     cli_basic_info(t)
@@ -256,7 +256,7 @@ fn recover_from_mnemonic() {
             .command(0, "password")?
             .output("Retype password")?
             .command(0, "password")?
-            .output("connecting...")?
+            .output("Type 'help' for a list of commands.")?
             .command(0, format!("load_key sending {}", key_path))?
             .output("(?P<default_addr0>ADDR~.*)")?
             .output("(?P<default_pubkey0>USERPUBKEY~.*)")?;
@@ -280,7 +280,7 @@ fn recover_from_mnemonic() {
             .command(1, "password")?
             .output("Retype password")?
             .command(1, "password")?
-            .output("connecting...")?
+            .output("Type 'help' for a list of commands.")?
             .command(1, "gen_key spend scan_from=0")?;
         let balance = wait_for_native_balance(t, 0, "addr")?;
         if balance != 100 {
