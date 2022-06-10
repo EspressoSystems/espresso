@@ -87,7 +87,6 @@ impl TestNetwork {
             self.query_api.clone(),
             self.address_book_api.clone(),
             self.submit_api.clone(),
-            // loader,
         )
         .await
         .unwrap();
