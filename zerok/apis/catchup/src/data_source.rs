@@ -6,3 +6,12 @@ pub trait CatchUpDataSource {
 
     fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType;
 }
+
+pub trait UpdateCatchUpData {
+    type Error;
+
+    fn append_events(
+        &mut self,
+        events: &mut Vec<LedgerEvent<EspressoLedger>>,
+    ) -> Result<(), Self::Error>;
+}

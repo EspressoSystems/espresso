@@ -1,17 +1,21 @@
 use std::collections::{BTreeMap, HashMap};
+use std::convert::From;
 
-use espresso_availability_api::data_source::AvailabilityDataSource;
+use espresso_availability_api::data_source::{AvailabilityDataSource, UpdateAvailabilityData};
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
-use espresso_catchup_api::data_source::CatchUpDataSource;
-use espresso_metastate_api::data_source::MetaStateDataSource;
-use espresso_status_api::data_source::StatusDataSource;
+use espresso_catchup_api::data_source::{CatchUpDataSource, UpdateCatchUpData};
+use espresso_metastate_api::data_source::{MetaStateDataSource, UpdateMetaStateData};
+use espresso_status_api::data_source::{StatusDataSource, UpdateStatusData};
 use espresso_status_api::query_data::ValidatorStatus;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use seahorse::events::LedgerEvent;
+use zerok_lib::api::EspressoError;
 use zerok_lib::ledger::EspressoLedger;
+use zerok_lib::node::QueryServiceError;
 use zerok_lib::state::{BlockCommitment, ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree};
 
+#[derive(Default)]
 struct QueryData {
     blocks: Vec<BlockQueryData>,
     states: Vec<StateQueryData>,
@@ -80,6 +84,37 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
     }
 }
 
+impl UpdateAvailabilityData for QueryData {
+    type Error = EspressoError;
+
+    fn append_blocks(
+        &mut self,
+        blocks: &mut Vec<BlockQueryData>,
+        states: &mut Vec<StateQueryData>,
+    ) -> Result<(), Self::Error> {
+        if blocks.len() != states.len() {
+            // this isn't really supposed to be possible; the calling code for this impl will be
+            // in FullState::update, which currently invokes panic! if these lengths differ.
+            return Err(EspressoError::from(
+                QueryServiceError::InvalidHistoricalIndex {},
+            ));
+        }
+        let start_index = self.blocks.len();
+        for (index, block) in blocks.iter().enumerate() {
+            let block_index = (index + start_index) as u64;
+            self.index_by_block_hash
+                .insert(block.block_hash, block_index);
+            for (index, txn_hash) in block.txn_hashes.iter().enumerate() {
+                self.index_by_txn_hash
+                    .insert(txn_hash.clone(), (block_index, index as u64));
+            }
+        }
+        self.blocks.append(blocks);
+        self.states.append(states);
+        Ok(())
+    }
+}
+
 impl<'a> CatchUpDataSource for &'a QueryData {
     type EventIterType = &'a [LedgerEvent<EspressoLedger>];
     fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType {
@@ -87,19 +122,30 @@ impl<'a> CatchUpDataSource for &'a QueryData {
     }
 }
 
-impl<'a> MetaStateDataSource for &'a QueryData {
-    fn get_nullifier_proof_for(
-        self,
+impl UpdateCatchUpData for QueryData {
+    type Error = EspressoError;
+    fn append_events(
+        &mut self,
+        events: &mut Vec<LedgerEvent<EspressoLedger>>,
+    ) -> Result<(), Self::Error> {
+        self.events.append(events);
+        Ok(())
+    }
+}
+
+impl QueryData {
+    fn with_nullifier_set_at_block<U>(
+        &self,
         block_id: u64,
-        nullifier: Nullifier,
-    ) -> Option<(bool, SetMerkleProof)> {
+        op: impl FnOnce(&SetMerkleTree) -> U,
+    ) -> Result<U, EspressoError> {
         if block_id as usize > self.blocks.len() {
             tracing::error!(
                 "Max block index exceeded; max: {}, queried for {}",
                 self.blocks.len(),
                 block_id
             );
-            return None;
+            return Err(QueryServiceError::InvalidHistoricalIndex {}.into());
         }
         let default_nullifier_set = SetMerkleTree::default();
         let prev_cached_set = self.cached_nullifier_sets.range(..block_id + 1).next_back();
@@ -109,7 +155,7 @@ impl<'a> MetaStateDataSource for &'a QueryData {
             (&0, &default_nullifier_set)
         };
         if *index == block_id {
-            nullifier_set.contains(nullifier)
+            Ok(op(nullifier_set))
         } else {
             let mut adjusted_nullifier_set = nullifier_set.clone();
             let index = *index as usize;
@@ -121,13 +167,64 @@ impl<'a> MetaStateDataSource for &'a QueryData {
                     }
                 }
             }
-            adjusted_nullifier_set.contains(nullifier)
+            Ok(op(&adjusted_nullifier_set))
         }
+    }
+}
+
+impl<'a> MetaStateDataSource for &'a QueryData {
+    fn get_nullifier_proof_for(
+        self,
+        block_id: u64,
+        nullifier: Nullifier,
+    ) -> Option<(bool, SetMerkleProof)> {
+        if let Ok(proof) = self.with_nullifier_set_at_block(block_id, |ns| ns.contains(nullifier)) {
+            proof
+        } else {
+            None
+        }
+    }
+}
+
+impl UpdateMetaStateData for QueryData {
+    type Error = EspressoError;
+    fn append_block_nullifiers(
+        &mut self,
+        block_id: u64,
+        nullifiers: Vec<Nullifier>,
+    ) -> Result<(), Self::Error> {
+        let nullifier_set = self.with_nullifier_set_at_block(block_id - 1, |ns| {
+            let mut nullifier_set = ns.clone();
+            for nullifier in nullifiers.iter() {
+                nullifier_set.insert(*nullifier);
+            }
+            nullifier_set
+        })?;
+        self.cached_nullifier_sets.insert(block_id, nullifier_set);
+        // TODO: thin out older entries (every other, geometric) when the total gets too large
+        Ok(())
     }
 }
 
 impl<'a> StatusDataSource<'a> for &'a QueryData {
     fn get_validator_status(self) -> &'a ValidatorStatus {
         &self.node_status
+    }
+}
+
+impl UpdateStatusData for QueryData {
+    type Error = EspressoError;
+
+    fn set_status(&mut self, status: ValidatorStatus) -> Result<(), Self::Error> {
+        self.node_status = status;
+        Ok(())
+    }
+    fn edit_status<U, F>(&mut self, op: F) -> Result<(), Self::Error>
+    where
+        F: FnOnce(&mut ValidatorStatus) -> Result<(), U>,
+        Self::Error: From<U>,
+    {
+        op(&mut self.node_status).map_err(EspressoError::from)?;
+        Ok(())
     }
 }

@@ -8,3 +8,13 @@ pub trait MetaStateDataSource {
         nullifier: Nullifier,
     ) -> Option<(bool, SetMerkleProof)>;
 }
+
+pub trait UpdateMetaStateData {
+    type Error;
+
+    fn append_block_nullifiers(
+        &mut self,
+        block_id: u64,
+        nullifiers: Vec<Nullifier>,
+    ) -> Result<(), Self::Error>;
+}

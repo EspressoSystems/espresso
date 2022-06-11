@@ -15,3 +15,12 @@ pub trait AvailabilityDataSource {
                                                                            // leaving more compact and/or performant solutions as optional
     fn get_record_merkle_tree_at_block_index(self, n: usize) -> Option<MerkleTree>;
 }
+
+pub trait UpdateAvailabilityData {
+    type Error;
+    fn append_blocks(
+        &mut self,
+        blocks: &mut Vec<BlockQueryData>,
+        states: &mut Vec<StateQueryData>,
+    ) -> Result<(), Self::Error>;
+}
