@@ -73,3 +73,9 @@ jobs:
         with:
           name: x86_64-unknown-linux-gnu-validator
           path: target/release/espresso-validator
+
+      - name: Upload random-wallet artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: x86_64-unknown-linux-gnu-random-wallet
+          path: target/release/random-wallet

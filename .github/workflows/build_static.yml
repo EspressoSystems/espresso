@@ -17,9 +17,9 @@ jobs:
   static-build:
     runs-on: [self-hosted, X64]
     container:
-      image: ghcr.io/espressosystems/nix:2.8.1
+      image: ghcr.io/espressosystems/nix:main
       volumes:
-        - github_nix_281:/nix
+        - github_nix:/nix
     steps:
       - name: Configure Git
         run: |
@@ -76,6 +76,12 @@ jobs:
           name: x86_64-unknown-linux-musl-validator
           path: target/x86_64-unknown-linux-musl/release/espresso-validator
 
+      - name: Upload random wallet artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: x86_64-unknown-linux-musl-random-wallet
+          path: target/x86_64-unknown-linux-musl/release/random_wallet
+
   static-dockers:
     runs-on: ubuntu-latest
     needs: static-build
@@ -99,6 +105,12 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: x86_64-unknown-linux-musl-validator
+          path: target/x86_64-unknown-linux-musl/release/
+
+      - name: Download random wallet executable
+        uses: actions/download-artifact@v3
+        with:
+          name: x86_64-unknown-linux-musl-random-wallet
           path: target/x86_64-unknown-linux-musl/release/
 
       - name: Setup Docker BuildKit (buildx)
@@ -129,6 +141,12 @@ jobs:
         id: validator
         with:
           images: ghcr.io/espressosystems/espresso/validator
+        
+      - name: Generate random wallet docker metadata
+        uses: docker/metadata-action@v3
+        id: random-wallet
+        with:
+          images: ghcr.io/espressosystems/espresso/random-wallet
 
       - name: Build and push address book docker
         uses: docker/build-push-action@v3
@@ -159,3 +177,14 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.validator.outputs.tags }}
           labels: ${{ steps.validator.outputs.labels }}
+
+      - name: Build and push random wallet docker
+        uses: docker/build-push-action@v3
+        with:
+          context: ./
+          file: ./docker/random-wallet.Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.validator.outputs.tags }}
+          labels: ${{ steps.validator.outputs.labels }}
+

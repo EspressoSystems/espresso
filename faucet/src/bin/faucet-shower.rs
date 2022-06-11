@@ -65,7 +65,7 @@ async fn create_keystore(
     rng: &mut ChaChaRng,
     mnemonic: String,
     dir: PathBuf,
-) -> Result<EspressoKeystore<'static, NetworkBackend<'static, LoaderMetadata>>, EspressoKeystoreError>
+) -> Result<EspressoKeystore<'static, NetworkBackend<'static>, LoaderMetadata>, EspressoKeystoreError>
 {
     // We are never going to re-open this keystore once it's created, so we don't really need a
     // password. Just make it random bytes.
@@ -77,10 +77,9 @@ async fn create_keystore(
         opt.esqs_url.clone(),
         opt.esqs_url.clone(),
         opt.esqs_url.clone(),
-        &mut loader,
     )
     .await?;
-    EspressoKeystore::new(backend).await
+    EspressoKeystore::new(backend, &mut loader).await
 }
 
 #[async_std::main]

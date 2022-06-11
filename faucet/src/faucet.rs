@@ -97,7 +97,7 @@ pub struct FaucetOptions {
 
 #[derive(Clone)]
 struct FaucetState {
-    keystore: Arc<Mutex<EspressoKeystore<'static, NetworkBackend<'static, LoaderMetadata>>>>,
+    keystore: Arc<Mutex<EspressoKeystore<'static, NetworkBackend<'static>, LoaderMetadata>>>,
     grant_size: u64,
     fee_size: u64,
 }
@@ -202,11 +202,10 @@ pub async fn init_web_server(
         opt.esqs_url.clone(),
         opt.address_book_url.clone(),
         opt.submit_url.clone(),
-        &mut loader,
     )
     .await
     .unwrap();
-    let mut keystore = EspressoKeystore::new(backend).await.unwrap();
+    let mut keystore = EspressoKeystore::new(backend, &mut loader).await.unwrap();
 
     // If a faucet key pair is provided, add it to the keystore. Otherwise, if we're initializing
     // for the first time, we need to generate a key. The faucet should be set up so that the

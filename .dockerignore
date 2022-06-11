@@ -1,8 +1,3 @@
-*
-!docker/
+target/
 !target/x86_64-unknown-linux-musl/release/
-
-!validator/api
-!validator/public
-!validator/src/pk_*
-!validator/src/node-config.toml
+target/x86_64-unknown-linux-musl/release/deps/
