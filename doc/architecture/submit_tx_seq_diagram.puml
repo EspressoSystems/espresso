@@ -39,12 +39,20 @@ Validator 3 is the leader,
 Validators 4,5 and 7 form the committee.
 end note
 
+
+note right V3
+   The replicas which are part of the committee during view <i>n-1</i>
+   submit their vote to the leader of view <i>n</i>.
+   The vote contains the proposal from the leader of view <i>n-1</i>,
+   some result/proof related to the stake (using the VRF).
+end note
+
 par
-V4 -> V3: vote_{n,4}
+V4 -> V3: vote_{n-1,4}
 else
-V5 -> V3: vote_{n,5}
+V5 -> V3: vote_{n-1,5}
 else
-V7 -> V3: vote_{n,7}
+V7 -> V3: vote_{n-1,7}
 end par
 
 note right V3
