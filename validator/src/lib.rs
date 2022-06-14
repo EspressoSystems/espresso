@@ -49,6 +49,7 @@ use zerok_lib::{
 };
 
 mod disco;
+mod full_node_mem_data_source;
 mod ip;
 mod routes;
 

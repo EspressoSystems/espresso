@@ -7,6 +7,8 @@ pub struct BlockQueryData {
     pub raw_block: ElaboratedBlock,
     pub block_hash: BlockCommitment,
     pub block_id: u64,
+    pub records_from: u64,
+    pub record_count: u64,
     pub txn_hashes: Vec<ElaboratedTransactionHash>,
 }
 
