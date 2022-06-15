@@ -10,39 +10,41 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use phaselock::{committee::DynamicCommittee, data::StateHash, PrivKey, PubKey, H_256};
+use phaselock::H_256;
+use phaselock::data::{Stage, StateHash};
+use phaselock::committee::DynamicCommittee;
+use phaselock_types::data::ViewNumber;
 use phaselock_types::traits::election::Election;
+use phaselock_types::traits::signature_key::EncodedSignature;
+use phaselock_types::traits::signature_key::ed25519::{Ed25519Priv, Ed25519Pub};
 use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
-
-use threshold_crypto as tc;
 
 /// A structure for committee election.
 pub struct Committee<S, const N: usize> {
     /// A table mapping public keys with their associated stake.
-    stake_table: BTreeMap<PubKey, u64>,
+    stake_table: BTreeMap<Ed25519Pub, u64>,
 
-    /// Inner structure for committee election.
-    _election: PhantomData<DynamicCommittee<S, N>>,
-
+    // /// Inner structure for committee election.
+    // _election: PhantomData<DynamicCommittee<S, N>>,
     /// State phantom.
     _state_phantom: PhantomData<S>,
 }
 
 impl<S, const N: usize> Committee<S, N> {
     /// Creates a new committee.
-    pub fn new(stake_table: BTreeMap<PubKey, u64>) -> Self {
+    pub fn new(stake_table: BTreeMap<Ed25519Pub, u64>) -> Self {
         Self {
             stake_table,
-            _election: PhantomData,
+            // _election: PhantomData,
             _state_phantom: PhantomData,
         }
     }
 }
 
-impl<S: Send + Sync + Default, const N: usize> Election<N> for Committee<S, N> {
+impl<S: Send + Sync + Default, const N: usize> Election<Ed25519Pub, N> for Committee<S, N> {
     /// A table mapping public keys with their associated stake.
-    type StakeTable = BTreeMap<PubKey, u64>;
+    type StakeTable = BTreeMap<Ed25519Pub, u64>;
 
     /// Constructed by `p * pow(2, 256)`, where `p` is the predetermined probability of a stake
     /// being selected. A stake will be selected iff `H(vrf_output | stake)` is smaller than the
@@ -53,10 +55,10 @@ impl<S: Send + Sync + Default, const N: usize> Election<N> for Committee<S, N> {
     type State = S;
 
     /// A membership proof.
-    type VoteToken = tc::SignatureShare;
+    type VoteToken = EncodedSignature;
 
     /// A tuple of a validated vote token and the associated selected stake.
-    type ValidatedVoteToken = (PubKey, tc::SignatureShare, HashSet<u64>);
+    type ValidatedVoteToken = (Ed25519Pub, EncodedSignature, HashSet<u64>);
 
     /// The stake table is stateless for now.
     fn get_stake_table(&self, _state: &Self::State) -> Self::StakeTable {
@@ -64,7 +66,12 @@ impl<S: Send + Sync + Default, const N: usize> Election<N> for Committee<S, N> {
     }
 
     /// Determines the leader.
-    fn get_leader(&self, table: &Self::StakeTable, view_number: u64) -> PubKey {
+    fn get_leader(
+        &self,
+        table: &Self::StakeTable,
+        view_number: ViewNumber,
+        _stage: Stage,
+    ) -> Ed25519Pub {
         DynamicCommittee::<S, N>::get_leader(table, view_number)
     }
 
@@ -73,8 +80,8 @@ impl<S: Send + Sync + Default, const N: usize> Election<N> for Committee<S, N> {
         &self,
         table: &Self::StakeTable,
         selection_threshold: Self::SelectionThreshold,
-        view_number: u64,
-        pub_key: PubKey,
+        view_number: ViewNumber,
+        pub_key: Ed25519Pub,
         token: Self::VoteToken,
         next_state: StateHash<N>,
     ) -> Option<Self::ValidatedVoteToken> {
@@ -100,8 +107,8 @@ impl<S: Send + Sync + Default, const N: usize> Election<N> for Committee<S, N> {
         &self,
         table: &Self::StakeTable,
         selection_threshold: Self::SelectionThreshold,
-        view_number: u64,
-        private_key: &PrivKey,
+        view_number: ViewNumber,
+        private_key: &Ed25519Priv,
         next_state: StateHash<N>,
     ) -> Option<Self::VoteToken> {
         DynamicCommittee::<S, N>::make_vote_token(

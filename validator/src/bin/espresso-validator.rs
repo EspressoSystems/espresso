@@ -17,7 +17,7 @@ use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
 use jf_cap::keys::UserPubKey;
-use phaselock::{types::EventType, PubKey};
+use phaselock::types::{ed25519::Ed25519Pub, EventType};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -143,7 +143,7 @@ fn generate_keys(options: &Options, config: &ConsensusConfig) {
 }
 
 /// Gets public key of a node from its public key file.
-fn get_public_key(options: &Options, node_id: u64) -> PubKey {
+fn get_public_key(options: &Options, node_id: u64) -> Ed25519Pub {
     let path = [&get_pk_dir(options), Path::new(&format!("pk_{}", node_id))]
         .iter()
         .collect::<PathBuf>();
@@ -194,7 +194,10 @@ async fn generate_transactions(
     while succeeded_round < num_txn {
         info!("Starting round {}", round + 1);
         report_mem();
-        info!("Commitment: {}", phaselock.current_state().await.commit());
+        info!(
+            "Commitment: {}",
+            phaselock.current_state().await.unwrap().unwrap().commit()
+        );
 
         // Generate a transaction if the node ID is 0 and if there isn't a keystore to generate it.
         if own_id == 0 {
@@ -232,7 +235,11 @@ async fn generate_transactions(
             let event = events.next().await.expect("PhaseLock unexpectedly closed");
 
             match event.event {
-                EventType::Decide { block: _, state } => {
+                EventType::Decide {
+                    block: _,
+                    state,
+                    qcs: _,
+                } => {
                     if !state.is_empty() {
                         let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                             .unwrap()

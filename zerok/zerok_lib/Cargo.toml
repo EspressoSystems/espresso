@@ -40,9 +40,9 @@ lazy_static = "1.4.0"
 mnemonic = "1.0.1"
 net = { git = "https://github.com/EspressoSystems/net.git" }
 num-bigint = "0.4"
-phaselock = { git = "ssh://git@github.com/EspressoSystems/phaselock.git", tag = "v0.0.7" }
-phaselock-types = { git = "ssh://git@github.com/EspressoSystems/phaselock.git", tag = "v0.0.7" }
-rand = "0.7.3"
+phaselock = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
+phaselock-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
+rand = "0.8.5"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 rayon = "*"
 reef = { git = "https://github.com/EspressoSystems/reef.git", features = ["testing"] }
@@ -62,7 +62,6 @@ strum_macros = "0.20.1"
 surf = "2.3.1"
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.2.0" }
 tempdir = "0.3.7"
-threshold_crypto = "0.4.0"
 tide = "0.16.0"
 tracing = "0.1.35"
 zeroize = "1.3"

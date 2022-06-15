@@ -74,12 +74,7 @@ pub struct ElaboratedTransaction {
     pub proofs: Vec<SetMerkleProof>,
 }
 
-impl TransactionTrait<H_256> for ElaboratedTransaction {
-    fn hash(&self) -> TransactionHash<H_256> {
-        // This is not used in phaselock 0.0.7 and will be replaced in 0.0.8 with `id`
-        todo!()
-    }
-}
+impl TransactionTrait<H_256> for ElaboratedTransaction {}
 
 impl ElaboratedTransaction {
     /// Compute a cryptographic hash committing to an elaborated

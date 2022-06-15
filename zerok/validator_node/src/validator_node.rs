@@ -18,14 +18,17 @@ use phaselock::{
     types::Message,
     H_256,
 };
+use phaselock_types::traits::signature_key::ed25519::Ed25519Pub;
 
 use core::fmt::Debug;
 use core::marker::PhantomData;
 
 /// A lightweight node that handles validation for consensus, and nothing more.
 pub trait PLNet:
-    NetworkingImplementation<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>
-    + Clone
+    NetworkingImplementation<
+        Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
+        Ed25519Pub,
+    > + Clone
     + Debug
     + 'static
 {
@@ -33,7 +36,8 @@ pub trait PLNet:
 
 impl<
         T: NetworkingImplementation<
-                Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>,
+                Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
+                Ed25519Pub,
             > + Clone
             + Debug
             + 'static,
@@ -75,4 +79,6 @@ impl<NET: PLNet, STORE: PLStore> NodeImplementation<H_256> for ValidatorNodeImpl
     type StatefulHandler = LWPersistence;
 
     type Election = Committee<(), H_256>;
+
+    type SignatureKey = Ed25519Pub;
 }

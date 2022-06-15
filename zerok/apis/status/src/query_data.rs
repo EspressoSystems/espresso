@@ -11,12 +11,12 @@
 // see <https://www.gnu.org/licenses/>.
 
 use core::time::Duration;
-use phaselock::{data::QuorumCertificate, PubKey, H_256};
+use phaselock::{data::QuorumCertificate, types::ed25519::Ed25519Pub, H_256};
 use std::collections::HashMap;
 use zerok_lib::state::{ElaboratedBlock, ValidatorState};
 
 pub struct PeerInfo {
-    pub peer_id: PubKey,
+    pub peer_id: Ed25519Pub,
 }
 
 #[derive(Default)]

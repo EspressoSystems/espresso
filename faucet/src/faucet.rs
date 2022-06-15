@@ -321,7 +321,7 @@ mod test {
             mnemonic,
             faucet_keystore_path: Some(PathBuf::from(faucet_dir.path())),
             faucet_password: "".to_string(),
-            faucet_port: faucet_port.clone(),
+            faucet_port,
             esqs_url: network.query_api.clone(),
             address_book_url: network.address_book_api.clone(),
             submit_url: network.submit_api.clone(),

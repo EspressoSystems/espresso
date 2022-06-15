@@ -16,22 +16,23 @@ use jf_cap::{
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
 use key_set::{KeySet, VerifierKeySet};
+use phaselock::types::ed25519::Ed25519Priv;
 use phaselock::{
     traits::implementations::{AtomicStorage, WNetwork},
-    types::Message,
-    PhaseLock, PhaseLockConfig, PhaseLockError, PubKey, H_256,
+    types::{ed25519::Ed25519Pub, Message, SignatureKey},
+    PhaseLock, PhaseLockConfig, PhaseLockError, H_256,
 };
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
-use rand_chacha_02::{rand_core::SeedableRng as _, ChaChaRng as ChaChaRng02};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
 use std::io::Read;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::Duration;
 use std::{fs, fs::File};
 use structopt::StructOpt;
-use threshold_crypto as tc;
 use tide::{http::Url, StatusCode};
 use tide_websockets::{WebSocket, WebSocketConnection};
 use tracing::{debug, event, Level};
@@ -291,10 +292,10 @@ fn reset_store_dir(store_dir: PathBuf) {
 async fn get_networking<
     T: Clone + Serialize + DeserializeOwned + Send + Sync + std::fmt::Debug + 'static,
 >(
-    pub_key: PubKey,
+    pub_key: Ed25519Pub,
     listen_addr: &str,
     port: u16,
-) -> WNetwork<T> {
+) -> WNetwork<T, Ed25519Pub> {
     debug!(?pub_key);
     let network = WNetwork::new(pub_key, listen_addr, port, None).await;
     if let Ok(n) = network {
@@ -315,7 +316,10 @@ async fn get_networking<
     panic!("Failed to open a port");
 }
 
-type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>;
+type PLNetwork = WNetwork<
+    Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
+    Ed25519Pub,
+>;
 type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
@@ -344,7 +348,7 @@ impl Validator for Node {
         }
     }
 
-    async fn current_state(&self) -> Arc<ValidatorState> {
+    async fn current_state(&self) -> Result<Option<ValidatorState>, PhaseLockError> {
         match self {
             Node::Light(n) => n.current_state().await,
             Node::Full(n) => n.read().await.current_state().await,
@@ -479,12 +483,13 @@ impl GenesisState {
 #[allow(clippy::too_many_arguments)]
 async fn init_phaselock(
     options: &NodeOpt,
-    public_keys: tc::PublicKeySet,
-    secret_key_share: tc::SecretKeyShare,
-    known_nodes: Vec<PubKey>,
+    known_nodes: Vec<Ed25519Pub>,
     threshold: u64,
     node_id: u64,
-    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
+    networking: WNetwork<
+        Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
+        Ed25519Pub,
+    >,
     full_node: bool,
     state: GenesisState,
     data_source: Arc<RwLock<QueryData>>,
@@ -492,14 +497,16 @@ async fn init_phaselock(
     // Create the initial phaselock
     let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
     let config = PhaseLockConfig {
-        total_nodes: known_nodes.len() as u32,
-        threshold: threshold as u32,
-        max_transactions: 100,
+        total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
+        threshold: NonZeroUsize::new(threshold as usize).unwrap(),
+        max_transactions: NonZeroUsize::new(100).unwrap(),
         known_nodes,
         next_view_timeout: 10_000,
         timeout_ratio: (11, 10),
         round_start_delay: 1,
         start_delay: 1,
+        propose_min_round_time: Duration::from_secs(1),
+        propose_max_round_time: Duration::from_secs(10),
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
@@ -542,10 +549,15 @@ async fn init_phaselock(
     let node_persistence = [storage_path, Path::new("node")]
         .iter()
         .collect::<PathBuf>();
+
+    let private_key = Ed25519Priv::generated_from_seed_indexed([0_u8; 32], node_id);
+    let public_key = Ed25519Pub::from_private(&private_key);
+
     let phaselock = PhaseLock::init(
         genesis,
-        public_keys,
-        secret_key_share,
+        Vec::new(),
+        public_key,
+        private_key,
         node_id,
         config,
         state.validator,
@@ -877,41 +889,29 @@ pub fn init_web_server(
     Ok(join_handle)
 }
 
-fn secret_keys(config: &ConsensusConfig) -> (u64, tc::SecretKeySet) {
-    // Generate key sets
-    let threshold = ((config.nodes.len() as u64 * 2) / 3) + 1;
-    (
-        threshold,
-        tc::SecretKeySet::random(
-            threshold as usize - 1,
-            &mut ChaChaRng02::from_seed(config.seed.into()),
-        ),
-    )
-}
-
-pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<PubKey> {
-    let (_, secret_keys) = secret_keys(config);
-
-    // Generate public key for each node
+pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<Ed25519Pub> {
     config
         .nodes
         .iter()
         .enumerate()
-        .map(|(node_id, _)| PubKey::from_secret_key_set_escape_hatch(&secret_keys, node_id as u64))
+        .map(|(node_id, _)| {
+            let privkey = Ed25519Priv::generated_from_seed_indexed([0u8; 32], node_id as u64);
+            Ed25519Pub::from_private(&privkey)
+        })
         .collect()
 }
 
 pub async fn init_validator(
     options: &NodeOpt,
     config: &ConsensusConfig,
-    pub_keys: Vec<PubKey>,
+    pub_keys: Vec<Ed25519Pub>,
     genesis: GenesisState,
     own_id: usize,
     data_source: Arc<RwLock<QueryData>>,
 ) -> Node {
     debug!("Current node: {}", own_id);
-    let (threshold, secret_keys) = secret_keys(config);
-    let secret_key_share = secret_keys.secret_key_share(own_id);
+
+    let threshold = ((config.nodes.len() as u64 * 2) / 3) + 1;
 
     // Get networking information
     let own_network = get_networking(
@@ -927,6 +927,11 @@ pub async fn init_validator(
             other_nodes.push((id as u64, &pub_keys[id], node.socket_addr()));
         }
     }
+    let known_nodes: Vec<Ed25519Pub> = other_nodes
+        .iter()
+        .map(|(_, pubkey, _)| *pubkey)
+        .cloned()
+        .collect();
 
     // Connect the networking implementations
     for (id, pub_key, addr) in other_nodes {
@@ -946,9 +951,7 @@ pub async fn init_validator(
     // Initialize the state and phaselock
     init_phaselock(
         options,
-        secret_keys.public_keys(),
-        secret_key_share,
-        pub_keys,
+        known_nodes,
         threshold,
         own_id as u64,
         own_network,

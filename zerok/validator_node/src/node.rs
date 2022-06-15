@@ -69,7 +69,7 @@ pub trait Validator {
     type Event: ConsensusEvent;
     async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError>;
     async fn start_consensus(&self);
-    async fn current_state(&self) -> Arc<ValidatorState>;
+    async fn current_state(&self) -> Result<Option<ValidatorState>, PhaseLockError>;
     fn subscribe(&self) -> EventStream<Self::Event>;
 
     async fn run<F: Send + Future>(self, kill: F)
@@ -92,13 +92,13 @@ pub trait Validator {
                         return;
                     }
                     Some(event) => match event.into_event() {
-                        EventType::Decide { block: _, state } => {
+                        EventType::Decide { state, block: _, qcs: _ } => {
                             if let Some(state) = state.last() {
                                 debug!(". - Committed state {}", state.commit());
                             }
                         }
                         EventType::ViewTimeout { view_number } => {
-                            debug!("  - Round {} timed out.", view_number);
+                            debug!("  - Round {:?} timed out.", view_number);
                         }
                         EventType::Error { error } => {
                             error!("  - Phaselock error: {}", error);
@@ -119,7 +119,7 @@ pub type LightWeightNode<NET, STORE> = PhaseLockHandle<ValidatorNodeImpl<NET, ST
 impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
     type Event = PhaseLockEvent;
 
-    async fn current_state(&self) -> Arc<ValidatorState> {
+    async fn current_state(&self) -> Result<Option<ValidatorState>, PhaseLockError> {
         self.get_state().await
     }
 
@@ -181,7 +181,7 @@ pub struct LedgerTransition {
 /// A QueryService accumulates the full state of the ledger, making it available for consumption by
 /// network APIs and such.
 #[async_trait]
-pub trait QueryService {
+pub trait QueryService: Send + Sync {
     async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError>;
 
     async fn num_blocks(&self) -> Result<usize, QueryServiceError> {
@@ -377,7 +377,11 @@ impl FullState {
                 self.proposed = (*block).clone();
             }
 
-            Decide { block, state } => {
+            Decide {
+                block,
+                state,
+                qcs: _,
+            } => {
                 for (block, state) in block.iter().zip(state.iter()).rev() {
                     // A block has been committed. Update our mirror of the ValidatorState by applying
                     // the new block, and generate a Commit event.
@@ -946,7 +950,7 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
 impl<'a, NET: PLNet, STORE: PLStore> Validator for FullNode<'a, NET, STORE> {
     type Event = <LightWeightNode<NET, STORE> as Validator>::Event;
 
-    async fn current_state(&self) -> Arc<ValidatorState> {
+    async fn current_state(&self) -> Result<Option<ValidatorState>, PhaseLockError> {
         self.validator.get_state().await
     }
 
@@ -1020,6 +1024,7 @@ mod tests {
     use async_std::task::block_on;
     use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
     use jf_cap::{sign_receiver_memos, KeyPair, MerkleLeafProof, MerkleTree};
+    use phaselock::data::VecQuorumCertificate;
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
     use tempdir::TempDir;
@@ -1058,6 +1063,7 @@ mod tests {
             ElaboratedBlock,
             Vec<(Vec<ReceiverMemo>, Signature)>,
             ValidatorState,
+            VecQuorumCertificate,
         )>,
     ) {
         let mut state = MultiXfrTestState::initialize(
@@ -1155,7 +1161,14 @@ mod tests {
                     TxnPrintInfo::new_no_time(i, num_txs),
                 )
                 .unwrap();
-            history.push((prev_state, blk, signed_memos, state.validator.clone()));
+            history.push((
+                prev_state,
+                blk,
+                signed_memos,
+                state.validator.clone(),
+                // TODO(vko): How do we generate a QC from the given transactions again?
+                VecQuorumCertificate::dummy::<H_256>(),
+            ));
         }
 
         (initial_state, history)
@@ -1220,10 +1233,11 @@ mod tests {
             let initial_uid = initial_state.0.record_merkle_commitment.num_leaves;
             assert_eq!(initial_state.0.commit(), history[0].0.commit());
             let events = Box::pin(stream::iter(history.clone().into_iter().map(
-                |(_, block, _, state)| MockConsensusEvent {
+                |(_, block, _, state, qcs)| MockConsensusEvent {
                     event: EventType::Decide {
                         block: Arc::new(vec![block]),
                         state: Arc::new(vec![state]),
+                        qcs: Arc::new(vec![qcs]),
                     },
                 },
             )));
@@ -1247,7 +1261,7 @@ mod tests {
             // The first event gives receiver memos for the records in the initial state of the
             // ledger. We can skip that to get to the real events starting at index 1.
             let mut events = qs.subscribe(1).await;
-            for (_, hist_block, _, hist_state) in history.iter() {
+            for (_, hist_block, _, hist_state, _) in history.iter() {
                 match events.next().await.unwrap() {
                     LedgerEvent::Commit { block, .. } => {
                         assert_eq!(block, *hist_block);
@@ -1274,7 +1288,7 @@ mod tests {
 
             // We should now be able to submit receiver memos for the blocks that just got committed.
             let mut expected_uid = initial_uid;
-            for (block_id, (_, block, memos, _)) in history.iter().enumerate() {
+            for (block_id, (_, block, memos, _, _)) in history.iter().enumerate() {
                 for (txn_id, (txn, (memos, sig))) in block.block.0.iter().zip(memos).enumerate() {
                     // Posting memos with an invalid signature should fail.
                     let dummy_signature = sign_receiver_memos(&dummy_key_pair, memos).unwrap();
@@ -1353,7 +1367,7 @@ mod tests {
                 }
             }
 
-            for (block_id, (state, block, _, _)) in history.into_iter().enumerate() {
+            for (block_id, (state, block, _, _, _)) in history.into_iter().enumerate() {
                 // We should be able to query the block and state at each time step in the history
                 // of the ledger.
                 let LedgerTransition {
