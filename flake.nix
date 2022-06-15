@@ -134,6 +134,7 @@
             CARGO_BUILD_TARGET = "${arch}-unknown-${os}-musl";
             buildInputs = with pkgs;
               [ stableMuslRustToolchain fd cmake ];
+            meta.broken = if "${os}" == "darwin" then true else false;
           };
         };
 
