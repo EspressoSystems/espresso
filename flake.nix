@@ -13,6 +13,9 @@
   outputs = { self, nixpkgs, flake-utils, flake-compat, rust-overlay, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
+        info = builtins.split "\([a-zA-Z0-9_]+\)" system;
+        arch = (builtins.elemAt (builtins.elemAt info 1) 0);
+        os = (builtins.elemAt (builtins.elemAt info 3) 0);
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
         stableToolchain = pkgs.rust-bin.stable."1.59.0".minimal.override {
@@ -24,7 +27,7 @@
         stableMuslRustToolchain =
           pkgs.rust-bin.stable."1.59.0".minimal.override {
             extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
-            targets = [ "x86_64-unknown-linux-musl" ];
+            targets = [ "${arch}-unknown-${os}-musl" ];
           };
         rustDeps = with pkgs;
           [
@@ -37,6 +40,7 @@
             cargo-edit
             cargo-udeps
             cargo-sort
+            cmake
           ] ++ lib.optionals stdenv.isDarwin [
             # required to compile ethers-rs
             darwin.apple_sdk.frameworks.Security
@@ -90,14 +94,9 @@
           });
         # MUSL pkgs
         muslPkgs = import nixpkgs {
-          localSystem = "x86_64-linux";
-          crossSystem = { config = "x86_64-unknown-linux-musl"; };
+          localSystem = system;
+          crossSystem = { config = "${arch}-unknown-${os}-musl"; };
         };
-        muslRustDeps = with muslPkgs.pkgsStatic; [
-          pkgconfig
-          opensslMusl.dev
-          opensslMusl.out
-        ];
       in {
         devShell = pkgs.mkShell {
           buildInputs = with pkgs;
@@ -118,12 +117,13 @@
             buildInputs = with pkgs;
               [ cargo-llvm-cov sixtyStableToolchain ] ++ rustDeps;
           };
+
           staticShell = pkgs.mkShell {
             shellHook = ''
               export PATH=${pkgs.xdot}/bin:$PATH
             '';
             DEP_CURL_STATIC = "y";
-            CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER =
+            "CARGO_TARGET_${pkgs.lib.toUpper arch}_UNKNOWN_${pkgs.lib.toUpper os}_MUSL_LINKER" =
               "${pkgs.llvmPackages_latest.lld}/bin/lld";
             RUSTFLAGS =
               "-C target-feature=+crt-static -L${opensslMusl.out}/lib/ -L${curlMusl.out}/lib -L${muslPkgs.pkgsStatic.zstd.out}/lib -L${muslPkgs.pkgsStatic.libssh2}/lib -L${muslPkgs.pkgsStatic.openssl}/lib -lssh2";
@@ -131,9 +131,10 @@
             OPENSSL_DIR = "-L${muslPkgs.pkgsStatic.openssl}";
             OPENSSL_INCLUDE_DIR = "${opensslMusl.dev}/include/";
             OPENSSL_LIB_DIR = "${opensslMusl.dev}/lib/";
-            CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
+            CARGO_BUILD_TARGET = "${arch}-unknown-${os}-musl";
             buildInputs = with pkgs;
-              [ stableMuslRustToolchain fd ] ++ muslRustDeps;
+              [ stableMuslRustToolchain fd cmake ];
+            meta.broken = if "${os}" == "darwin" then true else false;
           };
         };
 
