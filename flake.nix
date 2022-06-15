@@ -40,6 +40,7 @@
             cargo-edit
             cargo-udeps
             cargo-sort
+            cmake
           ] ++ lib.optionals stdenv.isDarwin [
             # required to compile ethers-rs
             darwin.apple_sdk.frameworks.Security
@@ -96,11 +97,6 @@
           localSystem = system;
           crossSystem = { config = "${arch}-unknown-${os}-musl"; };
         };
-        muslRustDeps = with muslPkgs.pkgsStatic; [
-          pkgconfig
-          opensslMusl.dev
-          opensslMusl.out
-        ];
       in {
         devShell = pkgs.mkShell {
           buildInputs = with pkgs;
@@ -121,6 +117,7 @@
             buildInputs = with pkgs;
               [ cargo-llvm-cov sixtyStableToolchain ] ++ rustDeps;
           };
+
           staticShell = pkgs.mkShell {
             shellHook = ''
               export PATH=${pkgs.xdot}/bin:$PATH
@@ -136,7 +133,7 @@
             OPENSSL_LIB_DIR = "${opensslMusl.dev}/lib/";
             CARGO_BUILD_TARGET = "${arch}-unknown-${os}-musl";
             buildInputs = with pkgs;
-              [ stableMuslRustToolchain fd ] ++ muslRustDeps;
+              [ stableMuslRustToolchain fd cmake ];
           };
         };
 
