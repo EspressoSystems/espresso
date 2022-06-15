@@ -185,6 +185,5 @@ jobs:
           file: ./docker/random-wallet.Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.validator.outputs.tags }}
-          labels: ${{ steps.validator.outputs.labels }}
-
+          tags: ${{ steps.random-wallet.outputs.tags }}
+          labels: ${{ steps.random-wallet.outputs.labels }}
