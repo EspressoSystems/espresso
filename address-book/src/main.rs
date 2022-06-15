@@ -4,19 +4,12 @@
 // This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 // You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+use address_book::{address_book_port, address_book_store_path, init_web_server, FileStore};
 use std::fs;
-
-use address_book::{
-    address_book_port, address_book_store_path, init_web_server, signal::handle_signals, FileStore,
-};
-use signal_hook::consts::{SIGINT, SIGTERM};
-use signal_hook_async_std::Signals;
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
-    let signals = Signals::new(&[SIGINT, SIGTERM]).expect("Failed to create signals.");
-    let handle = signals.handle();
-    let signals_task = async_std::task::spawn(handle_signals(signals));
+    let cleanup_signals = register_interrupt_signals();
 
     tracing_subscriber::fmt()
         .compact()
@@ -36,8 +29,28 @@ async fn main() -> Result<(), std::io::Error> {
         })
         .await?;
 
-    handle.close();
-    signals_task.await;
+    cleanup_signals.await;
 
     Ok(())
+}
+
+#[cfg(windows)]
+async fn register_interrupt_signals() {
+    // Signals aren't properly supported on windows so we'll just exit
+}
+
+#[cfg(not(windows))]
+fn register_interrupt_signals() -> impl std::future::Future<Output = ()> {
+    use address_book::signal::handle_signals;
+    use signal_hook::consts::{SIGINT, SIGTERM};
+    use signal_hook_async_std::Signals;
+
+    let signals = Signals::new(&[SIGINT, SIGTERM]).expect("Failed to create signals.");
+    let handle = signals.handle();
+    let signals_task = async_std::task::spawn(handle_signals(signals));
+
+    async move {
+        handle.close();
+        signals_task.await;
+    }
 }
