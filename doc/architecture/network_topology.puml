@@ -1,0 +1,24 @@
+@startuml
+
+node "Validator 1" as V1
+node "Validator 2" as V2
+node "Validator 3" as V3
+node "Validator 4" as V4
+node "Validator 5" as V5
+node "Validator 6" as V6
+node "Validator 7" as V7
+
+V1 -- V2
+V1 -- V7
+V7 -- V6
+V6 -- V1
+V6 -- V5
+V5 -- V2
+V2 -- V3
+V3 -- V4
+V4 -- V5
+V7 -- V5
+V2 -- V6
+V5 -- V3
+
+@enduml
