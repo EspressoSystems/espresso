@@ -5957,6 +5957,7 @@ dependencies = [
  "threshold_crypto",
  "tide",
  "tracing",
+ "typenum",
  "zeroize",
 ]
 
