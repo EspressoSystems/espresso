@@ -135,6 +135,7 @@ struct Args {
 
 struct TrivialKeystoreLoader {
     dir: PathBuf,
+    rng: ChaChaRng,
 }
 
 impl KeystoreLoader<EspressoLedger> for TrivialKeystoreLoader {
@@ -145,12 +146,12 @@ impl KeystoreLoader<EspressoLedger> for TrivialKeystoreLoader {
     }
 
     fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
-        let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
+        let key = KeyTree::random(&mut self.rng).0;
         Ok(((), key))
     }
 
     fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
-        KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
+        Ok(KeyTree::random(&mut self.rng).0)
     }
 }
 
@@ -159,11 +160,12 @@ async fn retry_delay() {
 }
 
 async fn get_peers(url: &Url) -> Result<Vec<UserPubKey>, surf::Error> {
-    let mut response = surf::get(format!("{}/request_fee_assets", url))
+    let mut response = surf::get(format!("{}request_peers", url))
         .content_type(surf::http::mime::JSON)
         .await?;
     let bytes = response.body_bytes().await.unwrap();
     let pub_keys: Vec<UserPubKey> = bincode::deserialize(&bytes)?;
+    event!(Level::INFO, "peers {} ", pub_keys.len());
     Ok(pub_keys)
 }
 
@@ -185,7 +187,7 @@ async fn main() {
         .storage
         .unwrap_or_else(|| PathBuf::from(tempdir.path()));
 
-    let mut loader = TrivialKeystoreLoader { dir: storage };
+    let mut loader = TrivialKeystoreLoader { dir: storage, rng: ChaChaRng::from_rng(&mut rng).unwrap() };
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
         args.esqs_url.clone(),
@@ -229,14 +231,25 @@ async fn main() {
 
     let pub_key = keystore.pub_keys().await.remove(0);
     let address = pub_key.address();
+    event!(Level::INFO, "address = {:?}", address);
     let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
 
     // Request native asset for the keystore.
-    surf::post(format!("{}/request_fee_assets", args.faucet_url))
+    loop{
+        match surf::post(format!("{}request_fee_assets", args.faucet_url))
         .content_type(surf::http::mime::BYTE_STREAM)
         .body_bytes(&receiver_key_bytes)
-        .await
-        .unwrap();
+        .await {
+            Ok(res) => {
+                println!("{:?}", res);
+                break;
+            },
+            Err(err) => {
+                println!("Retrying faucet because of {:?}", err);
+                retry_delay().await;
+            },
+        }
+    }
 
     // Wait for initial balance.
     while keystore.balance(&AssetCode::native()).await == 0u64.into() {
@@ -316,7 +329,8 @@ async fn main() {
             match peers.choose_weighted(
                 &mut rng,
                 |pk| {
-                    if *pk == pub_key.clone() {
+                    if pk.clone() == pub_key.clone() {
+                        event!(Level::INFO, "address = {:?}", pk.address());
                         0u64
                     } else {
                         1u64
