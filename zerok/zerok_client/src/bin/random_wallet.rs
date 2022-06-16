@@ -238,8 +238,7 @@ async fn main() {
             .body_bytes(&receiver_key_bytes)
             .await
         {
-            Ok(res) => {
-                println!("{:?}", res);
+            Ok(_) => {
                 break;
             }
             Err(err) => {
@@ -325,7 +324,6 @@ async fn main() {
         };
         let recipient = match peers.choose_weighted(&mut rng, |pk| {
             if pk.clone() == pub_key.clone() {
-                event!(Level::INFO, "address = {:?}", pk.address());
                 0u64
             } else {
                 1u64
