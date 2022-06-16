@@ -20,18 +20,18 @@
 // `-w KEY_FILE.pub` and pass the key pair to `random_keystore` with `-k KEY_FILE`.
 
 use async_std::task::sleep;
-use jf_cap::keys::{UserPubKey, FreezerPubKey};
+use jf_cap::keys::{FreezerPubKey, UserPubKey};
 use jf_cap::structs::{AssetCode, AssetPolicy, FreezeFlag};
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
-use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use rand::{
     distributions::{Distribution, Standard},
     Rng,
 };
-use seahorse::{events::EventIndex, hd::KeyTree, loader::KeystoreLoader, KeySnafu, KeystoreError};
+use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use seahorse::txn_builder::RecordInfo;
-use snafu::ResultExt;
+use seahorse::{events::EventIndex, hd::KeyTree, loader::KeystoreLoader, KeystoreError};
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
@@ -44,7 +44,6 @@ use zerok_lib::{
     ledger::EspressoLedger,
     universal_params::UNIVERSAL_PARAM,
 };
-use std::collections::HashSet;
 
 #[derive(Debug)]
 pub enum OperationType {
@@ -66,16 +65,11 @@ impl Distribution<OperationType> for Standard {
     }
 }
 
-
-
 type Keystore = seahorse::Keystore<'static, NetworkBackend<'static>, EspressoLedger, ()>;
 
 /// Return records the freezer has access to freeze or unfreeze but does not own.
 /// Will only return records with freeze_flag the same as the frozen arg.
-pub async fn find_freezable_records<'a>(
-    freezer: &Keystore,
-    frozen: FreezeFlag,
-) -> Vec<RecordInfo> {
+pub async fn find_freezable_records<'a>(freezer: &Keystore, frozen: FreezeFlag) -> Vec<RecordInfo> {
     let pks: HashSet<UserPubKey> = freezer.pub_keys().await.into_iter().collect();
     let freeze_keys: HashSet<FreezerPubKey> =
         freezer.freezer_pub_keys().await.into_iter().collect();
@@ -187,7 +181,10 @@ async fn main() {
         .storage
         .unwrap_or_else(|| PathBuf::from(tempdir.path()));
 
-    let mut loader = TrivialKeystoreLoader { dir: storage, rng: ChaChaRng::from_rng(&mut rng).unwrap() };
+    let mut loader = TrivialKeystoreLoader {
+        dir: storage,
+        rng: ChaChaRng::from_rng(&mut rng).unwrap(),
+    };
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
         args.esqs_url.clone(),
@@ -235,19 +232,20 @@ async fn main() {
     let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
 
     // Request native asset for the keystore.
-    loop{
+    loop {
         match surf::post(format!("{}request_fee_assets", args.faucet_url))
-        .content_type(surf::http::mime::BYTE_STREAM)
-        .body_bytes(&receiver_key_bytes)
-        .await {
+            .content_type(surf::http::mime::BYTE_STREAM)
+            .body_bytes(&receiver_key_bytes)
+            .await
+        {
             Ok(res) => {
                 println!("{:?}", res);
                 break;
-            },
+            }
             Err(err) => {
                 println!("Retrying faucet because of {:?}", err);
                 retry_delay().await;
-            },
+            }
         }
     }
 
@@ -325,28 +323,24 @@ async fn main() {
                 peers
             }
         };
-        let recipient =
-            match peers.choose_weighted(
-                &mut rng,
-                |pk| {
-                    if pk.clone() == pub_key.clone() {
-                        event!(Level::INFO, "address = {:?}", pk.address());
-                        0u64
-                    } else {
-                        1u64
-                    }
-                },
-            ) {
-                Ok(recipient) => recipient,
-                Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
-                    event!(Level::INFO, "no peers yet, retrying...");
-                    retry_delay().await;
-                    continue;
-                }
-                Err(err) => {
-                    panic!("error in weighted choice of peer: {}", err);
-                }
-            };
+        let recipient = match peers.choose_weighted(&mut rng, |pk| {
+            if pk.clone() == pub_key.clone() {
+                event!(Level::INFO, "address = {:?}", pk.address());
+                0u64
+            } else {
+                1u64
+            }
+        }) {
+            Ok(recipient) => recipient,
+            Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
+                event!(Level::INFO, "no peers yet, retrying...");
+                retry_delay().await;
+                continue;
+            }
+            Err(err) => {
+                panic!("error in weighted choice of peer: {}", err);
+            }
+        };
 
         // Get a list of assets for which we have a non-zero balance.
         let mut asset_balances = vec![];
@@ -402,16 +396,16 @@ async fn main() {
                         event!(Level::ERROR, "error while waiting for transaction: {}", err);
                     }
                 }
-            },
+            }
             OperationType::Mint => {
                 let new_asset = keystore
-                .define_asset(
-                    "Random keystore asset".to_string(),
-                    &[],
-                    AssetPolicy::default(),
-                )
-                .await
-                .expect("failed to define asset");
+                    .define_asset(
+                        "Random keystore asset".to_string(),
+                        &[],
+                        AssetPolicy::default(),
+                    )
+                    .await
+                    .expect("failed to define asset");
 
                 event!(Level::INFO, "defined a new asset type: {}", new_asset.code);
 
@@ -439,7 +433,7 @@ async fn main() {
                     retry_delay().await;
                 }
                 event!(Level::INFO, "minted custom asset");
-            },
+            }
             OperationType::Freeze => {
                 let freezable_records: Vec<RecordInfo> =
                     find_freezable_records(&keystore, FreezeFlag::Unfrozen).await;
@@ -459,10 +453,17 @@ async fn main() {
                 );
                 let freeze_address = keystore.pub_keys().await[0].address();
 
-                keystore.freeze(Some(&freeze_address), fee, &asset_def.code, record.amount(), owner_address)
+                keystore
+                    .freeze(
+                        Some(&freeze_address),
+                        fee,
+                        &asset_def.code,
+                        record.amount(),
+                        owner_address,
+                    )
                     .await
                     .ok();
-            },
+            }
             OperationType::Unfreeze => {
                 event!(Level::INFO, "Unfreezing");
                 let freezable_records: Vec<RecordInfo> =
@@ -482,13 +483,19 @@ async fn main() {
                     owner_address
                 );
                 let freeze_address = keystore.pub_keys().await[0].address();
-                keystore.unfreeze(Some(&freeze_address), fee, &asset_def.code, record.amount(), owner_address)
+                keystore
+                    .unfreeze(
+                        Some(&freeze_address),
+                        fee,
+                        &asset_def.code,
+                        record.amount(),
+                        owner_address,
+                    )
                     .await
                     .ok();
-            },
+            }
         }
 
-        
         event!(
             Level::INFO,
             "Wallet Native balance {}",
