@@ -242,66 +242,86 @@ pub mod committable_hash {
     use core::marker::PhantomData;
     use typenum::Unsigned;
 
-    pub struct CommitableHash<K, V>
+    pub trait CommitableHashTag {
+        fn commitment_diversifier() -> &'static str;
+    }
+
+    pub struct CommitableHash<K, V, T>
     where
         K: Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
         V: Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        T: CommitableHashTag,
     {
-        _data: PhantomData<(K, V)>,
+        _data: PhantomData<(K, V, T)>,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub enum CommitableHashNode<K, V>
+    pub enum CommitableHashNode<K, V, T>
     where
         K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
         V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        T: CommitableHashTag,
     {
         Empty,
         KeyDigest {
             key: K,
+            _t: PhantomData<T>,
         },
         Leaf {
             key: K,
             val: V,
+            _t: PhantomData<T>,
         },
         Branch {
-            l: Commitment<CommitableHashNode<K, V>>,
-            r: Commitment<CommitableHashNode<K, V>>,
+            l: Commitment<CommitableHashNode<K, V, T>>,
+            r: Commitment<CommitableHashNode<K, V, T>>,
+            _t: PhantomData<T>,
         },
     }
 
-    impl<K, V> commit::Committable for CommitableHashNode<K, V>
+    impl<K, V, T> commit::Committable for CommitableHashNode<K, V, T>
     where
         K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
         V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        T: CommitableHashTag,
     {
         fn commit(&self) -> commit::Commitment<Self> {
             use commit::RawCommitmentBuilder;
             use CommitableHashNode::*;
             match self {
-                Empty => RawCommitmentBuilder::new("CAPKV Empty").finalize(),
-                KeyDigest { key } => RawCommitmentBuilder::new("CAPKV Key")
-                    .var_size_bytes(&canonical::serialize(key).unwrap())
-                    .finalize(),
-                Leaf { key, val } => RawCommitmentBuilder::new("CAPKV Leaf")
-                    .var_size_bytes(&canonical::serialize(key).unwrap())
-                    .var_size_bytes(&canonical::serialize(val).unwrap())
-                    .finalize(),
+                Empty => {
+                    RawCommitmentBuilder::new(&format!("{} Empty", T::commitment_diversifier()))
+                        .finalize()
+                }
+                KeyDigest { key, _t } => {
+                    RawCommitmentBuilder::new(&format!("{} Key", T::commitment_diversifier()))
+                        .var_size_bytes(&canonical::serialize(key).unwrap())
+                        .finalize()
+                }
+                Leaf { key, val, _t } => {
+                    RawCommitmentBuilder::new(&format!("{} Leaf", T::commitment_diversifier()))
+                        .var_size_bytes(&canonical::serialize(key).unwrap())
+                        .var_size_bytes(&canonical::serialize(val).unwrap())
+                        .finalize()
+                }
 
-                Branch { l, r } => RawCommitmentBuilder::new("CAPKV Branch")
-                    .field("l", *l)
-                    .field("r", *r)
-                    .finalize(),
+                Branch { l, r, _t } => {
+                    RawCommitmentBuilder::new(&format!("{} Branch", T::commitment_diversifier()))
+                        .field("l", *l)
+                        .field("r", *r)
+                        .finalize()
+                }
             }
         }
     }
 
-    impl<K, V> KVTreeHash for CommitableHash<K, V>
+    impl<K, V, T> KVTreeHash for CommitableHash<K, V, T>
     where
         K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
         V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        T: CommitableHashTag,
     {
-        type Digest = Commitment<CommitableHashNode<K, V>>;
+        type Digest = Commitment<CommitableHashNode<K, V, T>>;
         type Key = K;
         type Value = V;
 
@@ -337,17 +357,27 @@ pub mod committable_hash {
         }
 
         fn hash_leaf(key: Self::Key, val: Self::Value) -> Self::Digest {
-            CommitableHashNode::Leaf { key, val }.commit()
+            CommitableHashNode::Leaf {
+                key,
+                val,
+                _t: Default::default(),
+            }
+            .commit()
         }
 
         fn hash_key(key: Self::Key) -> Self::Digest {
-            CommitableHashNode::KeyDigest { key }.commit()
+            CommitableHashNode::KeyDigest {
+                key,
+                _t: Default::default(),
+            }
+            .commit()
         }
 
         fn hash_branch(children: GenericArray<Self::Digest, typenum::U2>) -> Self::Digest {
             CommitableHashNode::Branch {
                 l: children[0],
                 r: children[1],
+                _t: Default::default(),
             }
             .commit()
         }
@@ -401,11 +431,38 @@ pub mod kv_treehash_tests {
         }
     }
 
+    struct TestEntryTag();
+
+    impl CommitableHashTag for TestEntryTag {
+        fn commitment_diversifier() -> &'static str {
+            "CAP TestEntry"
+        }
+    }
+
+    struct TestEntryTag2();
+
+    impl CommitableHashTag for TestEntryTag2 {
+        fn commitment_diversifier() -> &'static str {
+            "CaP TestEntry"
+        }
+    }
+
     // type TheTreeHashNode = CommitableHashNode<TestEntry, TestEntry>;
-    type TheTreeHash = CommitableHash<TestEntry, TestEntry>;
+    type TheTreeHash = CommitableHash<TestEntry, TestEntry, TestEntryTag>;
+    type TheTreeHash2 = CommitableHash<TestEntry, TestEntry, TestEntryTag2>;
 
     #[test]
     fn treehash_basic_checks() {
+        assert_ne!(
+            crate::util::canonical::serialize(&<TheTreeHash as KVTreeHash>::empty_digest())
+                .unwrap(),
+            crate::util::canonical::serialize(&<TheTreeHash2 as KVTreeHash>::empty_digest())
+                .unwrap()
+        );
+        assert_ne!(
+            <TheTreeHash as KVTreeHash>::empty_digest().into_bits(),
+            <TheTreeHash2 as KVTreeHash>::empty_digest().into_bits(),
+        );
         treehash_tests::treehash_basic_checks::<TheTreeHash>()
     }
 
@@ -424,6 +481,25 @@ pub mod kv_treehash_tests {
 
     #[quickcheck]
     fn treehash_check_leaf_key_domain_separation(k: TestEntry, v: TestEntry) {
+        assert_ne!(
+            <TheTreeHash as KVTreeHash>::hash_key(k).into_bits(),
+            <TheTreeHash2 as KVTreeHash>::hash_key(k).into_bits()
+        );
+        assert_ne!(
+            <TheTreeHash as KVTreeHash>::hash_leaf(k, v).into_bits(),
+            <TheTreeHash2 as KVTreeHash>::hash_leaf(k, v).into_bits()
+        );
+
+        assert_ne!(
+            crate::util::canonical::serialize(&<TheTreeHash as KVTreeHash>::hash_key(k)).unwrap(),
+            crate::util::canonical::serialize(&<TheTreeHash2 as KVTreeHash>::hash_key(k)).unwrap()
+        );
+        assert_ne!(
+            crate::util::canonical::serialize(&<TheTreeHash as KVTreeHash>::hash_leaf(k, v))
+                .unwrap(),
+            crate::util::canonical::serialize(&<TheTreeHash2 as KVTreeHash>::hash_leaf(k, v))
+                .unwrap()
+        );
         treehash_tests::treehash_check_leaf_key_domain_separation::<TheTreeHash>(k, v);
     }
 
@@ -453,6 +529,22 @@ pub mod kv_treehash_tests {
         > = GenericArray::from_iter(digests.into_iter().chain(std::iter::repeat(
             <TheTreeHash as KVTreeHash>::empty_digest(),
         )));
+
+        let digests2: GenericArray<
+            <TheTreeHash2 as KVTreeHash>::Digest,
+            <TheTreeHash2 as KVTreeHash>::BranchArity,
+        > = GenericArray::from_iter(digests.iter().map(|x| {
+            crate::util::canonical::deserialize(&crate::util::canonical::serialize(x).unwrap())
+                .unwrap()
+        }));
+
+        assert_ne!(
+            crate::util::canonical::serialize(&<TheTreeHash as KVTreeHash>::hash_branch(digests))
+                .unwrap(),
+            crate::util::canonical::serialize(&<TheTreeHash2 as KVTreeHash>::hash_branch(digests2))
+                .unwrap()
+        );
+
         treehash_tests::treehash_collision_sanity_checks2::<TheTreeHash>(key, val, digests);
     }
 
