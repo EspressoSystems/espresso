@@ -103,6 +103,7 @@
             [
               nixWithFlakes
               nixpkgs-fmt
+              addlicense
               git
               mdbook # make-doc, documentation generation
               stableToolchain

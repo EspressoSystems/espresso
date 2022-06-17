@@ -131,3 +131,9 @@ To go back to using the images from the registry run `docker compose pull`.
 
 The static dev shell is currently not supported on `aarch64` (for example M1
 Macs).
+
+# License headers
+To insert or check license headers run
+
+    addlicense -f .license-header.txt -ignore "target/**" .
+    addlicense -check -f .license-header.txt -ignore "target/**" .
