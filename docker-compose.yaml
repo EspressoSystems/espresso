@@ -119,7 +119,7 @@ services:
   # Configure random wallet
   random-wallet0:
     image: ghcr.io/espressosystems/espresso/random-wallet:main
-    command: wait-for-it validator0:$ESPRESSO_VALIDATOR_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- random-wallet --seed 0
+    command: wait-for-it validator0:$ESPRESSO_VALIDATOR_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- wait-for-it faucet:$ESPRESSO_FAUCET_PORT -- random-wallet --seed 0
     environment:
       - ESPRESSO_FAUCET_URL
       - ESPRESSO_SUBMIT_URL
