@@ -128,8 +128,8 @@ struct Args {
 }
 
 struct TrivialKeystoreLoader {
-    dir: PathBuf,
-    rng: ChaChaRng,
+    pub dir: PathBuf,
+    pub key_tree: KeyTree,
 }
 
 impl KeystoreLoader<EspressoLedger> for TrivialKeystoreLoader {
@@ -139,13 +139,12 @@ impl KeystoreLoader<EspressoLedger> for TrivialKeystoreLoader {
         self.dir.clone()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
-        let key = KeyTree::random(&mut self.rng).0;
-        Ok(((), key))
+    fn create(&mut self) -> Result<((), KeyTree), KeystoreError<EspressoLedger>> {
+        Ok(((), self.key_tree.clone()))
     }
 
-    fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
-        Ok(KeyTree::random(&mut self.rng).0)
+    fn load(&mut self, _meta: &mut ()) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
+        Ok(self.key_tree.clone())
     }
 }
 
@@ -183,7 +182,7 @@ async fn main() {
 
     let mut loader = TrivialKeystoreLoader {
         dir: storage,
-        rng: ChaChaRng::from_rng(&mut rng).unwrap(),
+        key_tree: KeyTree::random(&mut rng).0,
     };
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
