@@ -130,7 +130,7 @@ services:
       - random-wallet0-store:/store
   random-wallet1:
     image: ghcr.io/espressosystems/espresso/random-wallet:main
-    command: wait-for-it validator0:$ESPRESSO_VALIDATOR_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- random-wallet --seed 1
+    command: wait-for-it validator0:$ESPRESSO_VALIDATOR_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- wait-for-it faucet:$ESPRESSO_FAUCET_PORT -- random-wallet --seed 1
     environment:
       - ESPRESSO_FAUCET_URL
       - ESPRESSO_SUBMIT_URL

@@ -274,7 +274,9 @@ async fn main() {
                 .define_asset(
                     "Random keystore asset".to_string(),
                     &[],
-                    AssetPolicy::default(),
+                    AssetPolicy::default()
+                        .set_viewer_pub_key(keystore.viewer_pub_keys().await[0].clone())
+                        .set_freezer_pub_key(keystore.freezer_pub_keys().await[0].clone()),
                 )
                 .await
                 .expect("failed to define asset");
@@ -322,23 +324,18 @@ async fn main() {
                 peers
             }
         };
-        let recipient = match peers.choose_weighted(&mut rng, |pk| {
-            if pk.clone() == pub_key.clone() {
-                0u64
-            } else {
-                1u64
-            }
-        }) {
-            Ok(recipient) => recipient,
-            Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
-                event!(Level::INFO, "no peers yet, retrying...");
-                retry_delay().await;
-                continue;
-            }
-            Err(err) => {
-                panic!("error in weighted choice of peer: {}", err);
-            }
-        };
+        let recipient =
+            match peers.choose_weighted(&mut rng, |pk| if *pk == pub_key { 0u64 } else { 1u64 }) {
+                Ok(recipient) => recipient,
+                Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
+                    event!(Level::INFO, "no peers yet, retrying...");
+                    retry_delay().await;
+                    continue;
+                }
+                Err(err) => {
+                    panic!("error in weighted choice of peer: {}", err);
+                }
+            };
 
         // Get a list of assets for which we have a non-zero balance.
         let mut asset_balances = vec![];
@@ -400,7 +397,9 @@ async fn main() {
                     .define_asset(
                         "Random keystore asset".to_string(),
                         &[],
-                        AssetPolicy::default(),
+                        AssetPolicy::default()
+                            .set_viewer_pub_key(keystore.viewer_pub_keys().await[0].clone())
+                            .set_freezer_pub_key(keystore.freezer_pub_keys().await[0].clone()),
                     )
                     .await
                     .expect("failed to define asset");
