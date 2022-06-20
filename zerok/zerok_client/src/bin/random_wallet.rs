@@ -276,7 +276,9 @@ async fn main() {
                     &[],
                     AssetPolicy::default()
                         .set_viewer_pub_key(keystore.viewer_pub_keys().await[0].clone())
-                        .set_freezer_pub_key(keystore.freezer_pub_keys().await[0].clone()),
+                        .set_freezer_pub_key(keystore.freezer_pub_keys().await[0].clone())
+                        .reveal_record_opening()
+                        .unwrap(),
                 )
                 .await
                 .expect("failed to define asset");
@@ -399,7 +401,9 @@ async fn main() {
                         &[],
                         AssetPolicy::default()
                             .set_viewer_pub_key(keystore.viewer_pub_keys().await[0].clone())
-                            .set_freezer_pub_key(keystore.freezer_pub_keys().await[0].clone()),
+                            .set_freezer_pub_key(keystore.freezer_pub_keys().await[0].clone())
+                            .reveal_record_opening()
+                            .unwrap(),
                     )
                     .await
                     .expect("failed to define asset");
