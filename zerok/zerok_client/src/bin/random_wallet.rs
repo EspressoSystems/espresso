@@ -102,7 +102,7 @@ pub async fn find_freezable_records<'a>(freezer: &Keystore, frozen: FreezeFlag) 
         .collect()
 }
 
-#[derive(StructOpt)]
+#[derive(StructOpt, Debug)]
 struct Args {
     /// Path to a private key file to use for the keystore.
     ///
@@ -185,6 +185,7 @@ async fn main() {
         )
         .with_ansi(args.colored_logs)
         .init();
+    event!(Level::INFO, "args = {:?}", args);
 
     let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
     let tempdir = TempDir::new("keystore").unwrap();
@@ -232,6 +233,14 @@ async fn main() {
         None => {
             keystore
                 .generate_user_key("Random Key".to_string(), None)
+                .await
+                .unwrap();
+            keystore
+                .generate_viewing_key("view key".to_string())
+                .await
+                .unwrap();
+            keystore
+                .generate_freeze_key("freeze key".to_string())
                 .await
                 .unwrap();
         }
