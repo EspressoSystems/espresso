@@ -3,8 +3,6 @@ resolver = "2"
 
 members = [
 	"address-book",
-    "examples/asynctide",
-    "examples/tideui",
     "faucet",
     "validator",
     "zerok/apis/availability",
