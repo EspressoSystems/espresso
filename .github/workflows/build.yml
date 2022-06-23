@@ -62,6 +62,10 @@ jobs:
         run: |
           cargo build --workspace --release
 
+      - name: Build Slow Tests
+        # Make sure the slow tests build, but don't run them (we have another workflow for that).
+        run: cargo test --release --features=slow-tests --no-run
+
       - name: Test
         run: |
           cargo test --workspace --release --no-run

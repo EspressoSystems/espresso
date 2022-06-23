@@ -57,6 +57,7 @@ zerok_lib = { path = "../zerok/zerok_lib/" }
 
 
 [features]
+slow-tests = []
 testing = ["portpicker"]
 
 [dev-dependencies]

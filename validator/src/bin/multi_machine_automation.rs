@@ -341,7 +341,7 @@ async fn main() {
     println!("Consensus completed for all nodes")
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "slow-tests"))]
 mod test {
     use super::*;
     use std::time::Instant;

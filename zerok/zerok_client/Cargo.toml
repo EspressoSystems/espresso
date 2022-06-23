@@ -6,6 +6,9 @@ edition = "2018"
 default-run = "zerok_client"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+slow-tests = []
+
 [dependencies]
 async-std = { version = "1.10.0", features = ["unstable", "attributes"] }
 async-trait = "0.1.51"
