@@ -38,7 +38,7 @@ use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand::{
     distributions::{Distribution, Standard},
-    Rng,
+    Rng, RngCore,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use seahorse::txn_builder::RecordInfo;
@@ -186,8 +186,11 @@ async fn main() {
         .with_ansi(args.colored_logs)
         .init();
     event!(Level::INFO, "args = {:?}", args);
-
-    let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
+    let seed = args
+        .seed
+        .unwrap_or_else(|| ChaChaRng::from_entropy().next_u64());
+    event!(Level::INFO, "Using Seed {}", seed);
+    let mut rng = ChaChaRng::seed_from_u64(seed);
     let tempdir = TempDir::new("keystore").unwrap();
     let storage = args
         .storage
