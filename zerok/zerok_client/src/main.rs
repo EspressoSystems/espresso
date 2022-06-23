@@ -72,7 +72,7 @@ pub struct Args {
     #[structopt(
         long,
         env = "ESPRESSO_ADDRESS_BOOK_URL",
-        default_value = "http://localhost:50078"
+        default_value = "http://localhost:50088"
     )]
     pub address_book_url: Url,
 
@@ -80,7 +80,7 @@ pub struct Args {
     #[structopt(
         long,
         env = "ESPRESSO_SUBMIT_URL",
-        default_value = "http://localhost:50087"
+        default_value = "http://localhost:50089"
     )]
     pub submit_url: Url,
 }
