@@ -28,7 +28,7 @@
 // Note that the ledger must be initialized with a balance of native assets for each random keystore
 // by passing the public key of each keystore that should receive funds to each validator with
 // `--keystore`. This requires having the public key before starting `random_keystore`. You can generate
-// a key pair using `zerok_client -g KEY_FILE`, and then pass the public key to the validators with
+// a key pair using `wallet-cli -g KEY_FILE`, and then pass the public key to the validators with
 // `-w KEY_FILE.pub` and pass the key pair to `random_keystore` with `-k KEY_FILE`.
 
 use async_std::task::sleep;
