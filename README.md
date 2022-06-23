@@ -6,6 +6,34 @@ protocol.
 **DISCLAIMER:** This software is provided "as is" and its security has not been externally audited.
 Use at your own risk.
 
+---
+
+<!-- run `md-toc` inside the nix-shell to generate the table of contents -->
+
+**Table of Contents**
+
+- [Espresso](#espresso)
+  - [Obtaining the source code](#obtaining-the-source-code)
+- [Documentation](#documentation)
+  - [CAP protocol specification](#cap-protocol-specification)
+- [Environment](#environment)
+  - [Nix](#nix)
+    - [1. Install nix](#1-install-nix)
+    - [2. Activate the nix environment](#2-activate-the-nix-environment)
+    - [3. Verify installation](#3-verify-installation)
+    - [4. direnv (Optional, but recommended for development)](#4-direnv-optional-but-recommended-for-development)
+  - [Python tools](#python-tools)
+- [Build](#build)
+  - [Static build](#static-build)
+  - [Docker images](#docker-images)
+- [Test](#test)
+  - [Unit tests](#unit-tests)
+  - [Random wallet test](#random-wallet-test)
+- [Running locally](#running-locally)
+  - [Running with docker-compose](#running-with-docker-compose)
+  - [Running the services manually](#running-the-services-manually)
+- [License headers](#license-headers)
+
 ## Obtaining the source code
 
     git clone git@github.com:EspressoSystems/cape.git
@@ -18,10 +46,12 @@ A formal specification of the Configurable Asset Policy protocol can be found at
 
 # Environment
 
+## Nix
+
 This project can be built using only `cargo`, but we recommend using the
 [nix](https://nixos.org) package manager to manage dependencies.
 
-## 1. Install nix
+### 1. Install nix
 
 Installation instructions can be found [here](https://nixos.org/download.html).
 If in a rush, running the following command and following the on-screen
@@ -45,7 +75,7 @@ Some linux distros (ubuntu, arch, ...) have packaged `nix`. See the section
 [Alternative nix installation methods](#alternative-nix-installation-methods)
 for more information.
 
-## 2. Activate the nix environment
+### 2. Activate the nix environment
 
 To activate a shell with the development environment run
 
@@ -56,9 +86,10 @@ from within the top-level directory of the repo.
 Note: for the remainder of this README it is necessary that this environment is
 active.
 
-Once the `nix-shell` is activated the dependencies will be in the `PATH`.
+Once the `nix-shell` is activated the dependencies as well as the scripts in the
+`./bin` directory will be in the `PATH`.
 
-## 3. Verify installation
+### 3. Verify installation
 
 Try running some tests to verify the installation
 
@@ -67,7 +98,7 @@ Try running some tests to verify the installation
 If this fails with errors that don't point to obvious problems please open an
 issue on github. M1 Macs need to have node@16 installed to avoid memory allocation errors.
 
-## 4. direnv (Optional, but recommended for development)
+### 4. direnv (Optional, but recommended for development)
 
 To avoid manually activating the nix shell each time the
 [direnv](https://direnv.net/) shell extension can be used to activate the
@@ -87,6 +118,13 @@ run
 
     direnv deny
     nix-shell
+
+## Python tools
+
+We are using `poetry` for python dependencies and `poetry2nix` to integrate them
+in the nix-shell development environment.
+
+Use any poetry command e. g. `poetry add --dev ipython` to add packages.
 
 # Build
 

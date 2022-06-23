@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+exec md_toc github README.md
