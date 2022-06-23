@@ -321,7 +321,7 @@ impl Keystore {
     }
 
     fn key_gen(key_path: &Path) -> Result<(), String> {
-        cargo_run("zerok_client")?
+        cargo_run("zerok_client", "wallet-cli")?
             .args([
                 "-g",
                 key_path
@@ -364,7 +364,7 @@ impl Keystore {
         if self.process.is_some() {
             return Err(String::from("keystore is already open"));
         }
-        let mut child = cargo_run("zerok_client")?
+        let mut child = cargo_run("zerok_client", "wallet-cli")?
             .args([
                 "--storage",
                 self.storage.path().as_os_str().to_str().ok_or_else(|| {
@@ -512,7 +512,7 @@ impl Validator {
         let id = self.id;
         let port = self.port;
         let mut child = spawn_blocking(move || {
-            cargo_run("espresso-validator")
+            cargo_run("espresso-validator", "espresso-validator")
                 .map_err(err)?
                 .args([
                     "--config",
@@ -573,9 +573,9 @@ fn err(err: impl std::fmt::Display) -> String {
     err.to_string()
 }
 
-fn cargo_run(bin: impl AsRef<str>) -> Result<Command, String> {
+fn cargo_run(package: impl AsRef<str>, bin: impl AsRef<str>) -> Result<Command, String> {
     Ok(CargoBuild::new()
-        .package(bin.as_ref())
+        .package(package.as_ref())
         .bin(bin.as_ref())
         .current_release()
         .current_target()

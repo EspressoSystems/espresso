@@ -13,7 +13,6 @@ members = [
     "zerok/apis/status",
     "zerok/zerok_client",
     "zerok/zerok_lib",
-    "zerok/zerok_validator",
     ]
 [profile.dev]
 opt-level = 1

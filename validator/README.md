@@ -1,5 +1,8 @@
 # Espresso Validator
 
+`espresso-validator` is the executable which actually runs a validator and participates in the
+Espresso protocol.
+
 ## Build code
 * Run `cargo run --release --bin espresso-validator`.
 * Check that `espresso-validator` is generated under `target/release/`.
@@ -69,11 +72,23 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
 * API file
     * By default, API and messages are specified in `validator/api/api.toml`. Use `--api` to change the file.
 
+## Running a query service
+
+Since the validator has access to all of the information about the state of the ledger, it can be
+configured to run an Espresso Query Service as well. This is a REST service which provides
+information about the current and historical state of the ledger. It is used by clients to keep up
+with on-chain events and build transactions. At least one validator must be running a query service
+in order for an Espresso network to be useful.
+
+Use the command line flag `--full` to run a query service. This turns the validator into a full
+node, which means it stores the entire state of the ledger, including history, which gives it the
+information it needs to provide in order to run the query service.
+
 ## Running with a keystore
 By default, one of the validator nodes in the demo will automatically generate transactions to propose to the other nodes. But the demo can also be driven by a keystore,
 running externally to all of the nodes.
 
-To use a keystore with the demo, first generate a key pair for the keystore by logging into the CLI (`zerok_client`) and generating a key (`gen_key sending`). Next,
+To use a keystore with the demo, first generate a key pair for the keystore by logging into the CLI (`wallet-cli`) and generating a key (`gen_key sending`). Next,
 start the demo as you normally would, but pass the extra argument `--faucet-pub-key $PUB_KEY` to each node, and pass `--full` to at least one node. The lead node will initialize a ledger containing a single record of 2^32 native tokens, owned by the keystore.
 
 In a separate terminal, you can now enter the interactive keystore REPL:

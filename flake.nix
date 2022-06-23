@@ -97,8 +97,18 @@
           localSystem = system;
           crossSystem = { config = "${arch}-unknown-${os}-musl"; };
         };
+        pythonEnv = pkgs.poetry2nix.mkPoetryEnv { projectDir = ./.; };
+        myPython = with pkgs; [ poetry pythonEnv ];
+        shellHook  = ''
+          # on mac os `bin/pwd -P` returns the canonical path on case insensitive file-systems
+          my_pwd=$(/bin/pwd -P 2> /dev/null || pwd)
+
+          export PATH=${pkgs.xdot}/bin:$PATH
+          export PATH=''${my_pwd}/bin:$PATH
+        '';
       in {
         devShell = pkgs.mkShell {
+          shellHook = shellHook;
           buildInputs = with pkgs;
             [
               nixWithFlakes
@@ -107,7 +117,7 @@
               git
               mdbook # make-doc, documentation generation
               stableToolchain
-            ] ++ rustDeps;
+            ] ++ myPython ++ rustDeps;
 
           RUST_SRC_PATH = "${stableToolchain}/lib/rustlib/src/rust/library";
           RUST_BACKTRACE = 1;
@@ -115,14 +125,13 @@
         };
         devShells = {
           perfShell = pkgs.mkShell {
+            shellHook = shellHook;
             buildInputs = with pkgs;
               [ cargo-llvm-cov sixtyStableToolchain ] ++ rustDeps;
           };
 
           staticShell = pkgs.mkShell {
-            shellHook = ''
-              export PATH=${pkgs.xdot}/bin:$PATH
-            '';
+            shellHook = shellHook;
             DEP_CURL_STATIC = "y";
             "CARGO_TARGET_${pkgs.lib.toUpper arch}_UNKNOWN_${pkgs.lib.toUpper os}_MUSL_LINKER" =
               "${pkgs.llvmPackages_latest.lld}/bin/lld";
