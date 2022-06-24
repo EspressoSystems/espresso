@@ -315,7 +315,6 @@ async fn generate_transactions(
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::from_args();
     tracing_subscriber::fmt()
-        .compact()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_ansi(options.colored_logs)
         .init();

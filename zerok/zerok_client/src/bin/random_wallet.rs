@@ -179,7 +179,6 @@ async fn main() {
     let args = Args::from_args();
 
     tracing_subscriber::fmt()
-        .compact()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env().add_directive(Level::INFO.into()),
         )
