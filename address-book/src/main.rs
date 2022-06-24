@@ -50,29 +50,31 @@ struct Args {
 // }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Snafu)]
-struct AddressBookError {
-    e: ConfigError,
+enum AddressBookError {
+    Config { msg: String },
+}
+
+impl From<ConfigError> for AddressBookError {
+    fn from(error: ConfigError) -> Self {
+        Self::Config {
+            msg: error.to_string(),
+        }
+    }
 }
 
 impl From<std::io::Error> for AddressBookError {
     fn from(error: std::io::Error) -> Self {
-        AddressBookError {
-            e: ConfigError::Foreign(Box::new(error)),
+        AddressBookError::Config {
+            msg: error.to_string(),
         }
     }
 }
 
 impl From<toml::de::Error> for AddressBookError {
     fn from(error: toml::de::Error) -> Self {
-        AddressBookError {
-            e: ConfigError::Foreign(Box::new(error)),
+        AddressBookError::Config {
+            msg: error.to_string(),
         }
-    }
-}
-
-impl From<ConfigError> for AddressBookError {
-    fn from(error: ConfigError) -> Self {
-        AddressBookError { e: error }
     }
 }
 
@@ -96,9 +98,8 @@ async fn main() -> Result<(), AddressBookError> {
     let want_color = settings.get_bool("ansi_color").unwrap_or(false);
 
     tracing_subscriber::fmt()
-        .compact()
-        .with_ansi(want_color)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_ansi(want_color)
         .init();
 
     // Fetch the configuration values before any slow operations.
@@ -122,18 +123,22 @@ async fn main() -> Result<(), AddressBookError> {
     // Define the handlers for the routes
     api.post("insert_pubkey", |req, _server_state| {
         async move {
-            info!("insert pubkey req: {:?}", req);
-            Ok(())
+            //info!("insert pubkey req: {:?}", req);
+            Ok("insert pubkey req".to_string())
         }
         .boxed()
     })
     .unwrap();
 
     app.register_module("", api).unwrap();
-    //app.serve(base_url).await
+    app.serve(base_url)
+        .await
+        .map_err(|err| AddressBookError::Config {
+            msg: err.to_string(),
+        })
 
     // cleanup_signals.await;
-    Ok(())
+    //    Ok(())
 }
 
 #[cfg(windows)]
