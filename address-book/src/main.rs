@@ -11,33 +11,128 @@
 // You should have received a copy of the GNU General Public License along with this program. If
 // not, see <https://www.gnu.org/licenses/>.
 
-use address_book::{address_book_port, address_book_store_path, init_web_server, FileStore};
-use std::fs;
+use address_book::{address_book_port, address_book_store_path, FileStore, ServerState};
+use async_std::sync::{Arc, RwLock};
+use clap::Parser;
+use config::ConfigError;
+use futures::FutureExt;
+use serde::{Deserialize, Serialize};
+use snafu::Snafu;
+use std::{fs, io::Error, path::PathBuf, process};
+use tide_disco::{
+    configure_router, get_api_path, get_settings, http::StatusCode, init_web_server, load_api, Api,
+    App, AppServerState, ConfigKey, HealthStatus::*,
+};
+use toml::{from_slice, value::Value};
+use tracing::info;
+use url::Url;
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    #[clap(long)]
+    /// Server address
+    base_url: Option<Url>,
+    #[clap(long)]
+    /// HTTP routes
+    api_toml: Option<PathBuf>,
+    /// If true, log in color. Otherwise, no color.
+    #[clap(long)]
+    ansi_color: Option<bool>,
+}
+
+// impl Interrupt for InterruptHandle {
+//     fn signal_action(signal: i32) {
+//         // TOOD modify web_state based on the signal.
+//         println!("\nReceived signal {}", signal);
+//         process::exit(1);
+//     }
+// }
+
+#[derive(Clone, Debug, Deserialize, Serialize, Snafu)]
+struct AddressBookError {
+    e: ConfigError,
+}
+
+impl From<std::io::Error> for AddressBookError {
+    fn from(error: std::io::Error) -> Self {
+        AddressBookError {
+            e: ConfigError::Foreign(Box::new(error)),
+        }
+    }
+}
+
+impl From<toml::de::Error> for AddressBookError {
+    fn from(error: toml::de::Error) -> Self {
+        AddressBookError {
+            e: ConfigError::Foreign(Box::new(error)),
+        }
+    }
+}
+
+impl From<ConfigError> for AddressBookError {
+    fn from(error: ConfigError) -> Self {
+        AddressBookError { e: error }
+    }
+}
+
+impl tide_disco::Error for AddressBookError {
+    fn catch_all(status: StatusCode, msg: String) -> Self {
+        unimplemented!();
+    }
+    fn status(&self) -> StatusCode {
+        StatusCode::InternalServerError
+    }
+}
 
 #[async_std::main]
-async fn main() -> Result<(), std::io::Error> {
-    let cleanup_signals = register_interrupt_signals();
+async fn main() -> Result<(), AddressBookError> {
+    // let cleanup_signals = register_interrupt_signals();
+
+    // Combine settings from multiple sources.
+    let settings = get_settings::<Args>()?;
+
+    // Colorful logs upon request.
+    let want_color = settings.get_bool("ansi_color").unwrap_or(false);
 
     tracing_subscriber::fmt()
         .compact()
-        .with_ansi(false)
+        .with_ansi(want_color)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
+    // Fetch the configuration values before any slow operations.
+    let api_toml = &settings.get_string(ConfigKey::api_toml.as_ref())?;
+    let base_url = &settings.get_string(ConfigKey::base_url.as_ref())?;
+
     let store_path = address_book_store_path();
-    tracing::info!("Using store path {:?}", store_path);
+    info!("Using store path {:?}", store_path);
     fs::create_dir_all(&store_path)?;
     let store = FileStore::new(store_path);
+    let mut server_state = ServerState {
+        store: Arc::new(store),
+    };
+    let mut app = App::<_, AddressBookError>::with_state(RwLock::new(server_state));
+    info!("Using API path {:?}", api_toml);
+    let mut api = Api::<RwLock<ServerState<FileStore>>, AddressBookError>::new(toml::from_slice(
+        &fs::read(api_toml)?,
+    )?)
+    .unwrap();
 
-    init_web_server(address_book_port(), store)
-        .await
-        .unwrap_or_else(|err| {
-            panic!("Web server exited with an error: {}", err);
-        })
-        .await?;
+    // Define the handlers for the routes
+    api.post("insert_pubkey", |req, _server_state| {
+        async move {
+            info!("insert pubkey req: {:?}", req);
+            Ok(())
+        }
+        .boxed()
+    })
+    .unwrap();
 
-    cleanup_signals.await;
+    app.register_module("", api).unwrap();
+    //app.serve(base_url).await
 
+    // cleanup_signals.await;
     Ok(())
 }
 

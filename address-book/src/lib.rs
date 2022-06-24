@@ -169,8 +169,8 @@ pub struct InsertPubKey {
 }
 
 #[derive(Clone)]
-struct ServerState<T: Store> {
-    store: Arc<T>,
+pub struct ServerState<T: Store> {
+    pub store: Arc<T>,
 }
 
 pub fn address_book_temp_dir() -> TempDir {
@@ -199,27 +199,27 @@ pub fn address_book_store_path() -> PathBuf {
     }
 }
 
-pub async fn init_web_server<T: Store + 'static>(
-    port: u16,
-    store: T,
-) -> std::io::Result<JoinHandle<std::io::Result<()>>> {
-    let mut app = tide::with_state(ServerState {
-        store: Arc::new(store),
-    });
-    app.with(
-        CorsMiddleware::new()
-            .allow_methods("GET, POST".parse::<HeaderValue>().unwrap())
-            .allow_headers("*".parse::<HeaderValue>().unwrap())
-            .allow_origin(Origin::from("*"))
-            .allow_credentials(true),
-    );
-    app.at("/insert_pubkey").post(insert_pubkey);
-    app.at("/request_pubkey").post(request_pubkey);
-    app.at("/request_peers").get(request_peers);
-    app.at("/healthcheck").get(healthcheck);
-    let address = format!("0.0.0.0:{}", port);
-    Ok(spawn(app.listen(address)))
-}
+// pub async fn init_web_server<T: Store + 'static>(
+//     port: u16,
+//     store: T,
+// ) -> std::io::Result<JoinHandle<std::io::Result<()>>> {
+//     let mut app = tide::with_state(ServerState {
+//         store: Arc::new(store),
+//     });
+//     app.with(
+//         CorsMiddleware::new()
+//             .allow_methods("GET, POST".parse::<HeaderValue>().unwrap())
+//             .allow_headers("*".parse::<HeaderValue>().unwrap())
+//             .allow_origin(Origin::from("*"))
+//             .allow_credentials(true),
+//     );
+//     app.at("/insert_pubkey").post(insert_pubkey);
+//     app.at("/request_pubkey").post(request_pubkey);
+//     app.at("/request_peers").get(request_peers);
+//     app.at("/healthcheck").get(healthcheck);
+//     let address = format!("0.0.0.0:{}", port);
+//     Ok(spawn(app.listen(address)))
+// }
 
 pub async fn wait_for_server(port: u16) {
     // Wait for the server to come up and start serving.

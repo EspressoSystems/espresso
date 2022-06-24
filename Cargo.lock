@@ -17,6 +17,8 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "bincode",
+ "clap 3.2.6",
+ "config",
  "dirs",
  "futures",
  "hex",
@@ -37,6 +39,7 @@ dependencies = [
  "tide",
  "tide-disco",
  "tide-websockets",
+ "toml",
  "tracing",
  "tracing-futures",
  "tracing-subscriber 0.3.11",
