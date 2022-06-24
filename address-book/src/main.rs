@@ -12,7 +12,6 @@ async fn main() -> Result<(), std::io::Error> {
     let cleanup_signals = register_interrupt_signals();
 
     tracing_subscriber::fmt()
-        .compact()
         .with_ansi(false)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
