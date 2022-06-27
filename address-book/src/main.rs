@@ -11,7 +11,10 @@
 // You should have received a copy of the GNU General Public License along with this program. If
 // not, see <https://www.gnu.org/licenses/>.
 
-use address_book::{address_book_port, address_book_store_path, FileStore, ServerState};
+use address_book::{
+    address_book_port, address_book_store_path, insert_pubkey, request_peers, request_pubkey,
+    FileStore, ServerState,
+};
 use async_std::sync::{Arc, RwLock};
 use clap::Parser;
 use config::ConfigError;
@@ -121,10 +124,25 @@ async fn main() -> Result<(), AddressBookError> {
     .unwrap();
 
     // Define the handlers for the routes
-    api.post("insert_pubkey", |req, _server_state| {
+    api.post("insert_pubkey", |req_params, server_state| {
         async move {
-            //info!("insert pubkey req: {:?}", req);
-            Ok("insert pubkey req".to_string())
+            info!("insert pubkey");
+            Ok(format!(
+                "insert pubkey req_params.body_bytes(): {:?}",
+                req_params.body_bytes()
+            ))
+            // insert_pubkey(req_params, server_state)
+        }
+        .boxed()
+    })
+    .unwrap();
+    api.post("request_pubkey", |req_params, server_state| {
+        async move {
+            info!("request pubkey");
+            Ok(format!(
+                "request pubkey req_params.body_bytes(): {:?}",
+                req_params.body_bytes()
+            ))
         }
         .boxed()
     })

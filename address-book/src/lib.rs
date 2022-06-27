@@ -251,7 +251,7 @@ fn verify_sig_and_get_pub_key(insert_request: InsertPubKey) -> Result<UserPubKey
 }
 
 /// Insert or update the public key at the given address.
-async fn insert_pubkey<T: Store>(
+pub async fn insert_pubkey<T: Store>(
     mut req: tide::Request<ServerState<T>>,
 ) -> Result<tide::Response, tide::Error> {
     let insert_request: InsertPubKey = net::server::request_body(&mut req).await?;
@@ -262,7 +262,7 @@ async fn insert_pubkey<T: Store>(
 
 /// Fetch the public key for the given address. If not found, return
 /// StatusCode::NotFound.
-async fn request_pubkey<T: Store>(
+pub async fn request_pubkey<T: Store>(
     mut req: tide::Request<ServerState<T>>,
 ) -> Result<tide::Response, tide::Error> {
     let address: UserAddress = net::server::request_body(&mut req).await?;
@@ -283,7 +283,7 @@ async fn request_pubkey<T: Store>(
 }
 
 /// Fetch all the public key bundles for all peers.
-async fn request_peers<T: Store>(
+pub async fn request_peers<T: Store>(
     req: tide::Request<ServerState<T>>,
 ) -> Result<tide::Response, tide::Error> {
     match req.state().store.list() {
@@ -297,19 +297,4 @@ async fn request_peers<T: Store>(
         }
         Err(_) => Ok(tide::Response::new(StatusCode::InternalServerError)),
     }
-}
-
-/// Return a JSON expression with status 200 indicating the server
-/// is up and running. The JSON expression is simply,
-///    {"status": "available"}
-/// When the server is running but unable to process requests
-/// normally, a response with status 503 and payload {"status":
-/// "unavailable"} should be added.
-async fn healthcheck<T: Store>(
-    mut _req: tide::Request<ServerState<T>>,
-) -> Result<tide::Response, tide::Error> {
-    Ok(tide::Response::builder(200)
-        .content_type(tide::http::mime::JSON)
-        .body(json!({"status": "available"}))
-        .build())
 }
