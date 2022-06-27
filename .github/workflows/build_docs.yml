@@ -25,9 +25,7 @@ on:
 
 jobs:
   doc-generation:
-    runs-on: [self-hosted, X64]
-    container:
-      image: ghcr.io/espressosystems/devops-rust:1.59
+    runs-on: ubuntu-latest
     steps:
       - uses: styfle/cancel-workflow-action@0.9.1
         name: Cancel Outdated Builds
@@ -42,6 +40,15 @@ jobs:
         run: |
           git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com".insteadOf git://github.com
           git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com".insteadOf ssh://git@github.com
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: default
+          toolchain: stable
+          override: true
+          default: true
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v1
         name: Enable Rust Caching
