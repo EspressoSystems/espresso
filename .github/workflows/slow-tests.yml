@@ -13,7 +13,7 @@ env:
   RUST_TEST_THREADS: 4
 
 jobs:
-  build:
+  slow-tests:
     runs-on: [self-hosted, X64]
     container:
       image: ghcr.io/espressosystems/devops-rust:1.59
