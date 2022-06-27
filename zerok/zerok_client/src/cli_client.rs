@@ -140,9 +140,11 @@ impl CliClient {
     /// values using named capture groups in regexes.
     ///
     /// If `keystore` refers to a keystore that has not yet been created, a new one will be created. The
-    /// [TestState] always starts off with one keystore, index 0, which gets an initial grant of 2^32
+    /// `TestState` always starts off with one keystore, index 0, which gets an initial grant of 2^32
     /// native tokens. So `command(0, "command")` will not load a new keystore. But the first time
     /// `command(1, "command")` is called, it will block until keystore 1 is created.
+    /// 
+    /// [output]: #method.output
     pub fn command(&mut self, id: usize, command: impl AsRef<str>) -> Result<&mut Self, String> {
         let command = self.substitute(command)?;
         let keystore = self
