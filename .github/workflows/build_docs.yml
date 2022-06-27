@@ -10,7 +10,7 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <https://www.gnu.org/licenses/>.
 
-name: Build
+name: Generate Documentation
 
 on:
   push:
@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  doc-generation:
     runs-on: [self-hosted, X64]
     container:
       image: ghcr.io/espressosystems/devops-rust:1.59

@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  nix:
     runs-on: [self-hosted, X64]
     container:
       image: ghcr.io/espressosystems/nix:main
