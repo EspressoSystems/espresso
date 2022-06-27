@@ -10,13 +10,13 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use phaselock::H_256;
-use phaselock::data::{Stage, StateHash};
 use phaselock::committee::DynamicCommittee;
+use phaselock::data::{Stage, StateHash};
+use phaselock::H_256;
 use phaselock_types::data::ViewNumber;
 use phaselock_types::traits::election::Election;
-use phaselock_types::traits::signature_key::EncodedSignature;
 use phaselock_types::traits::signature_key::ed25519::{Ed25519Priv, Ed25519Pub};
+use phaselock_types::traits::signature_key::EncodedSignature;
 use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 
