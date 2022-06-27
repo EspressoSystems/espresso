@@ -109,7 +109,7 @@ impl From<Box<bincode::ErrorKind>> for EspressoError {
 /// Having default conversion functions for each variant ensures that new error types can be added
 /// to [EspressoError] without breaking existing conversions, as long as a corresponding new default
 /// method is added to this trait.
-/// 
+///
 /// [catch_all]: #tymethod.catch_all
 pub trait FromError: Sized {
     fn catch_all(msg: String) -> Self;
@@ -150,7 +150,7 @@ pub trait FromError: Sized {
     /// If `source` can be downcast to an [Error], it is converted to the specific type using
     /// [from_espresso_error]. Otherwise, it is converted to a [String] using [Display] and then
     /// converted to the specific type using [catch_all].
-    /// 
+    ///
     /// [from_espresso_error]: #method.from_espresso_error
     /// [catch_all]: #tymethod.catch_all
     fn from_client_error(source: surf::Error) -> Self {
