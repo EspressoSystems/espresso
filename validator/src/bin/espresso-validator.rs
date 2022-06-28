@@ -127,8 +127,7 @@ fn generate_keys(options: &Options, config: &ConsensusConfig) {
 
     // Generate public key for each node
     for (node_id, pub_key) in gen_pub_keys(config).into_iter().enumerate() {
-        let pub_key_str = serde_json::to_string(&pub_key)
-            .unwrap_or_else(|err| panic!("Error while serializing the public key: {}", err));
+        let pub_key_str = pub_key.to_string();
         let mut pk_file = File::create(
             [&pk_dir, Path::new(&format!("pk_{}", node_id))]
                 .iter()
@@ -153,7 +152,7 @@ fn get_public_key(options: &Options, node_id: u64) -> Ed25519Pub {
     pk_file
         .read_to_string(&mut pk_str)
         .unwrap_or_else(|err| panic!("Error while reading public key file: {}", err));
-    serde_json::from_str(&pk_str).expect("Error while reading public key")
+    pk_str.parse().expect("Error while reading public key")
 }
 
 async fn generate_transactions(
