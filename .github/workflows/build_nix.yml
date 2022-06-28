@@ -23,11 +23,7 @@ on:
 
 jobs:
   nix:
-    runs-on: [self-hosted, X64]
-    container:
-      image: ghcr.io/espressosystems/nix:main
-      volumes:
-        - github_nix:/nix
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Configure Git
@@ -37,6 +33,9 @@ jobs:
 
       - name: Checkout Repository
         uses: actions/checkout@v3
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v17
 
       - uses: cachix/cachix-action@v10
         with:
