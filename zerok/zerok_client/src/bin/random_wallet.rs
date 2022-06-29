@@ -264,7 +264,7 @@ async fn main() {
                 break;
             }
             Err(err) => {
-                println!("Retrying faucet because of {:?}", err);
+                tracing::error!("Retrying faucet because of {:?}", err);
                 retry_delay().await;
             }
         }
