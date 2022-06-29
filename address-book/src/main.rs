@@ -142,12 +142,20 @@ async fn main() -> Result<(), AddressBookError> {
         async move {
             info!("request pubkey");
             info!("dummy UserAddress: {}", UserAddress::default());
+            info!(
+                "serialized: {:?}",
+                bincode::serialize(&UserAddress::default()).unwrap()
+            );
             let bytes = req_params.body_bytes();
             info!("bytes: {:?}", bytes);
             let s = String::from_utf8_lossy(&bytes);
             info!("string: {}", s);
             let tb64: TaggedBase64 = TaggedBase64::parse(&s).unwrap();
-            let address: UserAddress = bincode::deserialize(&bytes).unwrap();
+            info!("tb64 value: {:?}", tb64.value());
+            // let address: UserAddress = bincode::deserialize(&bytes).unwrap();
+            // let address: UserAddress = bincode::deserialize(&tb64.value()).unwrap();
+            // let address: UserAddress = bincode::deserialize(&s.as_bytes()).unwrap();
+            // info!("address from tb64 value: {:?}", address);
             Ok(format!("request pubkey for address: {:?}", address))
         }
         .boxed()
