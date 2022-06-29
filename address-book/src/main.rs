@@ -19,9 +19,11 @@ use async_std::sync::{Arc, RwLock};
 use clap::Parser;
 use config::ConfigError;
 use futures::FutureExt;
+use jf_cap::keys::UserAddress;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::{fs, io::Error, path::PathBuf, process};
+use tagged_base64::*;
 use tide_disco::{
     configure_router, get_api_path, get_settings, http::StatusCode, init_web_server, load_api, Api,
     App, AppServerState, ConfigKey, HealthStatus::*,
@@ -139,10 +141,14 @@ async fn main() -> Result<(), AddressBookError> {
     api.post("request_pubkey", |req_params, server_state| {
         async move {
             info!("request pubkey");
-            Ok(format!(
-                "request pubkey req_params.body_bytes(): {:?}",
-                req_params.body_bytes()
-            ))
+            info!("dummy UserAddress: {}", UserAddress::default());
+            let bytes = req_params.body_bytes();
+            info!("bytes: {:?}", bytes);
+            let s = String::from_utf8_lossy(&bytes);
+            info!("string: {}", s);
+            let tb64: TaggedBase64 = TaggedBase64::parse(&s).unwrap();
+            let address: UserAddress = bincode::deserialize(&bytes).unwrap();
+            Ok(format!("request pubkey for address: {:?}", address))
         }
         .boxed()
     })
