@@ -1,20 +1,34 @@
 // Copyright (c) 2022 Espresso Systems (espressosys.com)
 //
-// This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
-// You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with this program. If
+// not, see <https://www.gnu.org/licenses/>.
 
 use address_book::{
     address_book_temp_dir, init_web_server, wait_for_server, FileStore, InsertPubKey, Store,
     TransientFileStore,
 };
+use async_std::task::spawn;
+use clap::Parser;
 use jf_cap::keys::{UserKeyPair, UserPubKey};
 use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
 use std::collections::HashSet;
+use tide_disco::{get_settings, ConfigKey};
 
-const ROUND_TRIP_COUNT: u64 = 100;
-const NOT_FOUND_COUNT: u64 = 100;
+const ROUND_TRIP_COUNT: u64 = 1; //100;
+const NOT_FOUND_COUNT: u64 = 1; //100;
+
+#[derive(Parser, Debug)]
+#[clap(version)]
+struct Args {}
 
 // Test
 //    lookup(insert(x)) = x
@@ -23,10 +37,13 @@ const NOT_FOUND_COUNT: u64 = 100;
 //
 async fn round_trip<T: Store + 'static>(store: T) {
     let port = pick_unused_port().unwrap();
-    init_web_server(port, store)
-        .await
-        .expect("Failed to run server.");
-    wait_for_server(port).await;
+    let base_url: String = format!("http://127.0.0.1:{port}");
+    let settings = get_settings::<Args>().unwrap();
+    let api_toml = &settings.get_string(ConfigKey::api_toml.as_ref()).unwrap();
+    let app = init_web_server(api_toml.to_string(), store).unwrap();
+
+    let handle = spawn(app.serve(base_url.clone()));
+    wait_for_server(&base_url).await;
 
     let mut rng = rand_chacha::ChaChaRng::from_seed([0u8; 32]);
     let mut rng2 = rand_chacha::ChaChaRng::from_seed([0u8; 32]);
@@ -40,14 +57,14 @@ async fn round_trip<T: Store + 'static>(store: T) {
         let pub_key_bytes = bincode::serialize(&pub_key).unwrap();
         let sig = user_key.sign(&pub_key_bytes);
         let json_request = InsertPubKey { pub_key_bytes, sig };
-        let _response = surf::post(format!("http://127.0.0.1:{}/insert_pubkey", port))
+        let _response = surf::post(format!("{base_url}/insert_pubkey"))
             .content_type(surf::http::mime::JSON)
             .body_json(&json_request)
             .unwrap()
             .await
             .unwrap();
         let address_bytes = bincode::serialize(&pub_key.address()).unwrap();
-        let mut response = surf::post(format!("http://127.0.0.1:{}/request_pubkey", port))
+        let mut response = surf::post(format!("{base_url}/request_pubkey"))
             .content_type(surf::http::mime::BYTE_STREAM)
             .body_bytes(&address_bytes)
             .await
@@ -55,7 +72,7 @@ async fn round_trip<T: Store + 'static>(store: T) {
         let bytes = response.body_bytes().await.unwrap();
         let gotten_pub_key: UserPubKey = bincode::deserialize(&bytes).unwrap();
         assert_eq!(gotten_pub_key, pub_key);
-        let mut response = surf::get(format!("http://127.0.0.1:{}/request_peers", port))
+        let mut response = surf::get(format!("{base_url}/request_peers"))
             .await
             .unwrap();
         let bytes = response.body_bytes().await.unwrap();
@@ -69,7 +86,7 @@ async fn round_trip<T: Store + 'static>(store: T) {
         let user_key = UserKeyPair::generate(&mut rng2);
         let pub_key = user_key.pub_key();
         let address_bytes = bincode::serialize(&pub_key.address()).unwrap();
-        let mut response = surf::post(format!("http://127.0.0.1:{}/request_pubkey", port))
+        let mut response = surf::post(format!("{base_url}/request_pubkey"))
             .content_type(surf::http::mime::BYTE_STREAM)
             .body_bytes(&address_bytes)
             .await
@@ -88,7 +105,7 @@ async fn round_trip<T: Store + 'static>(store: T) {
         let user_key = UserKeyPair::generate(&mut rng2);
         let pub_key = user_key.pub_key();
         let address_bytes = bincode::serialize(&pub_key.address()).unwrap();
-        let mut response = surf::post(format!("http://127.0.0.1:{}/request_pubkey", port))
+        let mut response = surf::post(format!("{base_url}/request_pubkey"))
             .content_type(surf::http::mime::BYTE_STREAM)
             .body_bytes(&address_bytes)
             .await
@@ -96,6 +113,7 @@ async fn round_trip<T: Store + 'static>(store: T) {
         let bytes = response.body_bytes().await.unwrap();
         assert!(bincode::deserialize::<UserPubKey>(&bytes).is_err());
     }
+    assert!(handle.cancel().await.is_some());
 }
 
 #[async_std::test]

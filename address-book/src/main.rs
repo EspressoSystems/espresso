@@ -11,27 +11,10 @@
 // You should have received a copy of the GNU General Public License along with this program. If
 // not, see <https://www.gnu.org/licenses/>.
 
-use address_book::{
-    address_book_port, address_book_store_path, insert_pubkey, request_peers, request_pubkey,
-    AddressBookError, FileStore, ServerState, Store,
-};
-use async_std::sync::{Arc, RwLock};
+use address_book::{address_book_store_path, init_web_server, AddressBookError, FileStore};
 use clap::Parser;
-use config::ConfigError;
-use futures::FutureExt;
-use jf_cap::keys::UserAddress;
-use jf_cap::keys::{UserKeyPair, UserPubKey};
-use rand_chacha::rand_core::SeedableRng;
-use serde::{Deserialize, Serialize};
-use snafu::Snafu;
-use std::io::{Read, Write};
-use std::{fs, io::Error, path::PathBuf, process};
-use tagged_base64::*;
-use tide_disco::{
-    configure_router, get_api_path, get_settings, http::StatusCode, init_web_server, load_api, Api,
-    App, AppServerState, ConfigKey, HealthStatus::*,
-};
-use toml::{from_slice, value::Value};
+use std::{fs, path::PathBuf};
+use tide_disco::{get_settings, ConfigKey};
 use tracing::info;
 use url::Url;
 
@@ -57,6 +40,14 @@ struct Args {
 //     }
 // }
 
+// TODO move to tide-disco
+fn init_logging(want_color: bool) {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_ansi(want_color)
+        .init();
+}
+
 #[async_std::main]
 async fn main() -> Result<(), AddressBookError> {
     // let cleanup_signals = register_interrupt_signals();
@@ -67,10 +58,7 @@ async fn main() -> Result<(), AddressBookError> {
     // Colorful logs upon request.
     let want_color = settings.get_bool("ansi_color").unwrap_or(false);
 
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_ansi(want_color)
-        .init();
+    init_logging(want_color);
 
     // Fetch the configuration values before any slow operations.
     let api_toml = &settings.get_string(ConfigKey::api_toml.as_ref())?;
@@ -80,60 +68,9 @@ async fn main() -> Result<(), AddressBookError> {
     info!("Using store path {:?}", store_path);
     fs::create_dir_all(&store_path)?;
     let store = FileStore::new(store_path);
-    let mut server_state = ServerState {
-        store: Arc::new(store),
-    };
-    let mut app = App::<_, AddressBookError>::with_state(RwLock::new(server_state));
-    info!("Using API path {:?}", api_toml);
-    let mut api = Api::<RwLock<ServerState<FileStore>>, AddressBookError>::new(toml::from_slice(
-        &fs::read(api_toml)?,
-    )?)
-    .unwrap();
 
-    // Define the handlers for the routes
-    api.post("insert_pubkey", |req_params, server_state| {
-        async move {
-            info!("insert pubkey");
-            Ok(format!(
-                "insert pubkey req_params.body_bytes(): {:?}",
-                req_params.body_bytes()
-            ))
-            // insert_pubkey(req_params, server_state)
-        }
-        .boxed()
-    })
-    .unwrap();
-    api.post("request_pubkey", |req_params, server_state| {
-        async move {
-            let address: UserAddress =
-                bincode::deserialize(&req_params.body_bytes()).map_err(|e| {
-                    AddressBookError::Other {
-                        status: StatusCode::BadRequest,
-                        msg: "Unable to deseralize the user address from the post data".to_string(),
-                    }
-                })?;
-            match (*server_state.store).load(&address) {
-                Ok(pub_key) => match pub_key {
-                    Some(value) => {
-                        if let Ok(bytes) = bincode::serialize(&value) {
-                            Ok(bytes)
-                        } else {
-                            Err(AddressBookError::DeserializationError)
-                        }
-                    }
-                    _ => Err(AddressBookError::AddressNotFound {
-                        status: StatusCode::NotFound,
-                        address: address,
-                    }),
-                },
-                Err(_) => Err(AddressBookError::IoError),
-            }
-        }
-        .boxed()
-    })
-    .unwrap();
+    let app = init_web_server(api_toml.to_string(), store)?;
 
-    app.register_module("", api).unwrap();
     app.serve(base_url)
         .await
         .map_err(|err| AddressBookError::Config {
