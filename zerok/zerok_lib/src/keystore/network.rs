@@ -255,6 +255,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
         url.set_scheme("ws").unwrap();
 
         //todo !jeb.bearer handle connection failures.
+        //      https://github.com/EspressoSystems/seahorse/issues/117
         // This should only fail if the server is incorrect or down, so we should handle by retrying
         // or failing over to a different server.
         let all_events = connect_async(url)
@@ -270,6 +271,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
         Box::pin(
             chosen_events
                 //todo !jeb.bearer handle stream errors
+                //      https://github.com/EspressoSystems/seahorse/issues/117
                 // If there is an error in the stream, or the server sends us invalid data, we
                 // should retry or fail over to a different server.
                 .filter_map(|msg| {
@@ -341,7 +343,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
     async fn submit(
         &mut self,
         txn: ElaboratedTransaction,
-        // TODO: do something with this?
         _txn_info: TransactionInfo<EspressoLedger>,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
         Self::post(&self.validator_client, "/submit", &txn).await
@@ -366,7 +367,9 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
             };
             let txid = TransactionId(BlockId(txid.0 as usize), txid.1 as usize);
             // TODO: fix the trait so we don't need this unwrap
+            //       https://github.com/EspressoSystems/seahorse/issues/223
             // TODO: include memos in transactions so we don't have to do this
+            //       https://github.com/EspressoSystems/espresso/issues/345
             Self::post(&self.query_client, format!("/memos/{}", txid), &body)
                 .await
                 .unwrap()
@@ -377,7 +380,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
         &self,
         _from: EventIndex,
     ) -> Result<(MerkleTree, EventIndex), KeystoreError<EspressoLedger>> {
-        // TODO: how should this initialize?
         let LedgerSnapshot { records, .. } = self.get("getsnapshot/0/true").await?;
         Ok((records.0, Default::default()))
     }
