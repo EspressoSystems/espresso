@@ -11,6 +11,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If
 // not, see <https://www.gnu.org/licenses/>.
 
+use address_book::Store;
 use address_book::{
     address_book_port, address_book_store_path, insert_pubkey, request_peers, request_pubkey,
     FileStore, ServerState,
@@ -20,8 +21,11 @@ use clap::Parser;
 use config::ConfigError;
 use futures::FutureExt;
 use jf_cap::keys::UserAddress;
+use jf_cap::keys::{UserKeyPair, UserPubKey};
+use rand_chacha::rand_core::SeedableRng;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
+use std::io::{Read, Write};
 use std::{fs, io::Error, path::PathBuf, process};
 use tagged_base64::*;
 use tide_disco::{
@@ -56,7 +60,19 @@ struct Args {
 
 #[derive(Clone, Debug, Deserialize, Serialize, Snafu)]
 enum AddressBookError {
-    Config { msg: String },
+    Config {
+        msg: String,
+    },
+    AddressNotFound {
+        status: StatusCode,
+        address: UserAddress,
+    },
+    DeserializationError,
+    IoError,
+    Other {
+        status: StatusCode,
+        msg: String,
+    },
 }
 
 impl From<ConfigError> for AddressBookError {
@@ -88,7 +104,17 @@ impl tide_disco::Error for AddressBookError {
         unimplemented!();
     }
     fn status(&self) -> StatusCode {
-        StatusCode::InternalServerError
+        match self {
+            AddressBookError::AddressNotFound {
+                status: status_code,
+                address: _,
+            } => *status_code,
+            AddressBookError::Other {
+                status: status_code,
+                msg: _,
+            } => *status_code,
+            _ => StatusCode::InternalServerError,
+        }
     }
 }
 
@@ -141,22 +167,29 @@ async fn main() -> Result<(), AddressBookError> {
     api.post("request_pubkey", |req_params, server_state| {
         async move {
             info!("request pubkey");
-            info!("dummy UserAddress: {}", UserAddress::default());
-            info!(
-                "serialized: {:?}",
-                bincode::serialize(&UserAddress::default()).unwrap()
-            );
-            let bytes = req_params.body_bytes();
-            info!("bytes: {:?}", bytes);
-            let s = String::from_utf8_lossy(&bytes);
-            info!("string: {}", s);
-            let tb64: TaggedBase64 = TaggedBase64::parse(&s).unwrap();
-            info!("tb64 value: {:?}", tb64.value());
-            // let address: UserAddress = bincode::deserialize(&bytes).unwrap();
-            // let address: UserAddress = bincode::deserialize(&tb64.value()).unwrap();
-            // let address: UserAddress = bincode::deserialize(&s.as_bytes()).unwrap();
-            // info!("address from tb64 value: {:?}", address);
-            Ok(format!("request pubkey for address: {:?}", address))
+            let address: UserAddress =
+                bincode::deserialize(&req_params.body_bytes()).map_err(|e| {
+                    AddressBookError::Other {
+                        status: StatusCode::BadRequest,
+                        msg: "Unable to deseralize the user address from the post data".to_string(),
+                    }
+                })?;
+            match (*server_state.store).load(&address) {
+                Ok(pub_key) => match pub_key {
+                    Some(value) => {
+                        if let Ok(bytes) = bincode::serialize(&value) {
+                            Ok(bytes)
+                        } else {
+                            Err(AddressBookError::DeserializationError)
+                        }
+                    }
+                    _ => Err(AddressBookError::AddressNotFound {
+                        status: StatusCode::NotFound,
+                        address: address,
+                    }),
+                },
+                Err(_) => Err(AddressBookError::IoError),
+            }
         }
         .boxed()
     })
