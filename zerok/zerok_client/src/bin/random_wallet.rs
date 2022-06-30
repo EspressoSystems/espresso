@@ -249,6 +249,8 @@ async fn main() {
         }
     };
     let address = pub_key.address();
+    keystore.await_key_scan(&address).await.unwrap();
+
     event!(Level::INFO, "address = {:?}", address);
 
     // Wait for the scan of the ledger to catch up.
@@ -429,7 +431,7 @@ async fn main() {
                 }
             }
             OperationType::Mint => {
-                let new_asset = keystore
+                let new_asset = match keystore
                     .define_asset(
                         "Random keystore asset".to_string(),
                         &[],
@@ -440,33 +442,45 @@ async fn main() {
                             .unwrap(),
                     )
                     .await
-                    .expect("failed to define asset");
+                {
+                    Ok(txn) => txn,
+                    Err(err) => {
+                        event!(Level::ERROR, "Error defining asset: {}", err);
+                        continue;
+                    }
+                };
 
                 event!(Level::INFO, "defined a new asset type: {}", new_asset.code);
 
                 event!(Level::INFO, "minting my asset type {}", new_asset.code);
-                loop {
-                    let txn = keystore
-                        .mint(
-                            Some(&address),
-                            1,
-                            &new_asset.code,
-                            1u64 << 32,
-                            pub_key.clone(),
-                        )
-                        .await
-                        .expect("failed to generate mint transaction");
-                    let status = keystore
-                        .await_transaction(&txn)
-                        .await
-                        .expect("error waiting for mint to complete");
-                    if status.succeeded() {
-                        break;
+                let txn = match keystore
+                    .mint(
+                        Some(&address),
+                        1,
+                        &new_asset.code,
+                        1u64 << 32,
+                        pub_key.clone(),
+                    )
+                    .await
+                {
+                    Ok(txn) => txn,
+                    Err(err) => {
+                        event!(Level::ERROR, "Error minting asset: {}", err);
+                        continue;
                     }
-                    // The mint transaction is allowed to fail due to contention from other clients.
-                    event!(Level::WARN, "mint transaction failed, retrying...");
-                    retry_delay().await;
+                };
+                match keystore.await_transaction(&txn).await {
+                    Ok(status) => {
+                        if !status.succeeded() {
+                            event!(Level::WARN, "mint failed!");
+                        }
+                    }
+                    Err(err) => {
+                        event!(Level::ERROR, "error while waiting for mint: {}", err);
+                    }
                 }
+                // The mint transaction is allowed to fail due to contention from other clients.
+                retry_delay().await;
                 event!(Level::INFO, "minted custom asset");
             }
             OperationType::Freeze => {
