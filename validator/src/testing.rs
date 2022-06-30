@@ -27,7 +27,7 @@ use surf::Url;
 use tempdir::TempDir;
 use zerok_lib::{
     keystore::{
-        loader::{KeystoreLoader, LoaderMetadata},
+        loader::{KeystoreLoader, MnemonicPasswordLogin},
         network::NetworkBackend,
         EspressoKeystore,
     },
@@ -92,8 +92,8 @@ pub struct TestNetwork {
 impl TestNetwork {
     pub async fn create_wallet(
         &self,
-        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = LoaderMetadata>,
-    ) -> EspressoKeystore<'static, NetworkBackend<'static>, LoaderMetadata> {
+        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = MnemonicPasswordLogin>,
+    ) -> EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin> {
         let backend = NetworkBackend::new(
             &*UNIVERSAL_PARAM,
             self.query_api.clone(),

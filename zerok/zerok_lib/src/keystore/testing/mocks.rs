@@ -31,6 +31,7 @@ use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
 use reef::traits::Transaction as _;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
+    sparse_merkle_tree::SparseMerkleTree,
     testing,
     testing::MockEventSource,
     txn_builder::{PendingTransaction, TransactionInfo, TransactionState},
@@ -191,8 +192,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
 
                     records: Default::default(),
                     nullifiers: ledger.network().nullifiers.clone(),
-                    record_mt: ledger.network().records.clone(),
-                    merkle_leaf_to_forget: None,
+                    record_mt: SparseMerkleTree::sparse(ledger.network().records.clone()),
 
                     now: ledger.now(),
                     transactions: Default::default(),

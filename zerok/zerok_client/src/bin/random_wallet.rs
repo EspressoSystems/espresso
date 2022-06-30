@@ -32,7 +32,7 @@
 // `-w KEY_FILE.pub` and pass the key pair to `random_keystore` with `-k KEY_FILE`.
 
 use async_std::task::sleep;
-use jf_cap::keys::{FreezerPubKey, UserPubKey};
+use jf_cap::keys::{FreezerPubKey, UserKeyPair, UserPubKey};
 use jf_cap::structs::{AssetCode, AssetPolicy, FreezeFlag};
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
@@ -49,6 +49,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 use structopt::StructOpt;
+use surf::StatusCode;
 use tempdir::TempDir;
 use tracing::{event, Level};
 use zerok_lib::{
@@ -208,7 +209,7 @@ async fn main() {
     let mut keystore = Keystore::new(backend, &mut loader)
         .await
         .expect("error loading keystore");
-    match args.key_path {
+    let pub_key = match args.key_path {
         Some(path) => {
             let mut file = File::open(path).unwrap_or_else(|err| {
                 panic!("cannot open private key file: {}", err);
@@ -217,11 +218,12 @@ async fn main() {
             file.read_to_end(&mut bytes).unwrap_or_else(|err| {
                 panic!("error reading private key file: {}", err);
             });
+            let key_pair: UserKeyPair = bincode::deserialize(&bytes).unwrap_or_else(|err| {
+                panic!("invalid private key file: {}", err);
+            });
             keystore
                 .add_user_key(
-                    bincode::deserialize(&bytes).unwrap_or_else(|err| {
-                        panic!("invalid private key file: {}", err);
-                    }),
+                    key_pair.clone(),
                     "Random keystore key".to_string(),
                     EventIndex::default(),
                 )
@@ -229,12 +231,9 @@ async fn main() {
                 .unwrap_or_else(|err| {
                     panic!("error loading key: {}", err);
                 });
+            key_pair.pub_key()
         }
         None => {
-            keystore
-                .generate_user_key("Random Key".to_string(), None)
-                .await
-                .unwrap();
             keystore
                 .generate_viewing_key("view key".to_string())
                 .await
@@ -243,36 +242,51 @@ async fn main() {
                 .generate_freeze_key("freeze key".to_string())
                 .await
                 .unwrap();
+            keystore
+                .generate_user_key("Random Key".to_string(), Some(EventIndex::default()))
+                .await
+                .unwrap()
         }
-    }
-
-    let pub_key = keystore.pub_keys().await.remove(0);
+    };
     let address = pub_key.address();
     event!(Level::INFO, "address = {:?}", address);
-    let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
 
-    // Request native asset for the keystore.
-    loop {
-        match surf::post(format!("{}request_fee_assets", args.faucet_url))
-            .content_type(surf::http::mime::BYTE_STREAM)
-            .body_bytes(&receiver_key_bytes)
-            .await
-        {
-            Ok(_) => {
-                break;
-            }
-            Err(err) => {
-                tracing::error!("Retrying faucet because of {:?}", err);
-                retry_delay().await;
+    // Wait for the scan of the ledger to catch up.
+    keystore.await_key_scan(&address).await.unwrap();
+
+    if keystore.balance(&AssetCode::native()).await == 0u64.into() {
+        // Request native asset for the keystore.
+        let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
+        loop {
+            match surf::post(format!("{}request_fee_assets", args.faucet_url))
+                .content_type(surf::http::mime::BYTE_STREAM)
+                .body_bytes(&receiver_key_bytes)
+                .await
+            {
+                Ok(res) if res.status() == StatusCode::Ok => {
+                    break;
+                }
+                Ok(res) => {
+                    tracing::error!("retrying faucet because of {} response", res.status());
+                    retry_delay().await;
+                }
+                Err(err) => {
+                    tracing::error!("Retrying faucet because of {:?}", err);
+                    retry_delay().await;
+                }
             }
         }
-    }
 
-    // Wait for initial balance.
-    while keystore.balance(&AssetCode::native()).await == 0u64.into() {
-        event!(Level::INFO, "waiting for initial balance");
-        retry_delay().await;
+        // Wait for initial balance.
+        while keystore.balance(&AssetCode::native()).await == 0u64.into() {
+            event!(Level::INFO, "waiting for initial balance");
+            retry_delay().await;
+        }
     }
+    tracing::info!(
+        "initial balance: {}",
+        keystore.balance(&AssetCode::native()).await
+    );
 
     // Check if we already have a mintable asset (if we are loading from a saved keystore).
     let my_asset = match keystore

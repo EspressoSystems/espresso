@@ -1,8 +1,14 @@
 // Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
 //
-// This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
-// You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
 
 //! Turns a trickle into a shower.
 //!
@@ -24,8 +30,8 @@ use surf::Url;
 use tempdir::TempDir;
 use zerok_lib::{
     keystore::{
-        hd::KeyTree,
-        loader::{Loader, LoaderMetadata},
+        hd::{KeyTree, Mnemonic},
+        loader::{CreateLoader, MnemonicPasswordLogin},
         network::NetworkBackend,
         txn_builder::TransactionStatus,
         EspressoKeystore, EspressoKeystoreError,
@@ -37,7 +43,7 @@ use zerok_lib::{
 pub struct Options {
     /// mnemonic for the master faucet keystore
     #[structopt(short, long, env = "ESPRESSO_FAUCET_WALLET_MNEMONIC")]
-    pub master_mnemonic: String,
+    pub master_mnemonic: Mnemonic,
 
     /// number of new keystores to generate
     #[structopt(short, long, default_value = "10")]
@@ -63,15 +69,17 @@ pub struct Options {
 async fn create_keystore(
     opt: &Options,
     rng: &mut ChaChaRng,
-    mnemonic: String,
+    mnemonic: Mnemonic,
     dir: PathBuf,
-) -> Result<EspressoKeystore<'static, NetworkBackend<'static>, LoaderMetadata>, EspressoKeystoreError>
-{
+) -> Result<
+    EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin>,
+    EspressoKeystoreError,
+> {
     // We are never going to re-open this keystore once it's created, so we don't really need a
     // password. Just make it random bytes.
     let mut password = [0; 32];
     rng.fill_bytes(&mut password);
-    let mut loader = Loader::from_literal(Some(mnemonic), hex::encode(password), dir);
+    let mut loader = CreateLoader::exclusive(rng, dir, mnemonic, hex::encode(password));
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
         opt.esqs_url.clone(),
@@ -112,7 +120,7 @@ async fn main() {
                 let dir = [dir.path(), Path::new(&format!("child_keystore_{}", i))]
                     .iter()
                     .collect();
-                let mut keystore = create_keystore(opt, &mut rng, mnemonic.to_string(), dir)
+                let mut keystore = create_keystore(opt, &mut rng, mnemonic.clone(), dir)
                     .await
                     .unwrap();
                 let key = keystore
