@@ -179,9 +179,7 @@ async fn main() {
     let args = Args::from_args();
 
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env().add_directive(Level::INFO.into()),
-        )
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_ansi(args.colored_logs)
         .init();
     event!(Level::INFO, "args = {:?}", args);
@@ -264,7 +262,7 @@ async fn main() {
                 break;
             }
             Err(err) => {
-                println!("Retrying faucet because of {:?}", err);
+                tracing::error!("Retrying faucet because of {:?}", err);
                 retry_delay().await;
             }
         }
