@@ -11,10 +11,9 @@
 // You should have received a copy of the GNU General Public License along with this program. If
 // not, see <https://www.gnu.org/licenses/>.
 
-use address_book::Store;
 use address_book::{
     address_book_port, address_book_store_path, insert_pubkey, request_peers, request_pubkey,
-    FileStore, ServerState,
+    AddressBookError, FileStore, ServerState, Store,
 };
 use async_std::sync::{Arc, RwLock};
 use clap::Parser;
@@ -57,66 +56,6 @@ struct Args {
 //         process::exit(1);
 //     }
 // }
-
-#[derive(Clone, Debug, Deserialize, Serialize, Snafu)]
-enum AddressBookError {
-    Config {
-        msg: String,
-    },
-    AddressNotFound {
-        status: StatusCode,
-        address: UserAddress,
-    },
-    DeserializationError,
-    IoError,
-    Other {
-        status: StatusCode,
-        msg: String,
-    },
-}
-
-impl From<ConfigError> for AddressBookError {
-    fn from(error: ConfigError) -> Self {
-        Self::Config {
-            msg: error.to_string(),
-        }
-    }
-}
-
-impl From<std::io::Error> for AddressBookError {
-    fn from(error: std::io::Error) -> Self {
-        AddressBookError::Config {
-            msg: error.to_string(),
-        }
-    }
-}
-
-impl From<toml::de::Error> for AddressBookError {
-    fn from(error: toml::de::Error) -> Self {
-        AddressBookError::Config {
-            msg: error.to_string(),
-        }
-    }
-}
-
-impl tide_disco::Error for AddressBookError {
-    fn catch_all(status: StatusCode, msg: String) -> Self {
-        unimplemented!();
-    }
-    fn status(&self) -> StatusCode {
-        match self {
-            AddressBookError::AddressNotFound {
-                status: status_code,
-                address: _,
-            } => *status_code,
-            AddressBookError::Other {
-                status: status_code,
-                msg: _,
-            } => *status_code,
-            _ => StatusCode::InternalServerError,
-        }
-    }
-}
 
 #[async_std::main]
 async fn main() -> Result<(), AddressBookError> {
@@ -166,7 +105,6 @@ async fn main() -> Result<(), AddressBookError> {
     .unwrap();
     api.post("request_pubkey", |req_params, server_state| {
         async move {
-            info!("request pubkey");
             let address: UserAddress =
                 bincode::deserialize(&req_params.body_bytes()).map_err(|e| {
                     AddressBookError::Other {
