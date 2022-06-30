@@ -21,7 +21,13 @@ mod cli_client;
 
 use async_trait::async_trait;
 use jf_cap::proof::UniversalParam;
-use seahorse::{cli::*, io::SharedIO, KeystoreError};
+use seahorse::{
+    cli::*,
+    io::SharedIO,
+    loader::{InteractiveLoader, MnemonicPasswordLogin},
+    reader::Reader,
+    KeystoreError,
+};
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
@@ -114,6 +120,8 @@ impl<'a> CLI<'a> for EspressoCli {
     type Ledger = EspressoLedger;
     type Backend = NetworkBackend<'a>;
     type Args = Args;
+    type Loader = InteractiveLoader;
+    type Meta = MnemonicPasswordLogin;
 
     async fn init_backend(
         univ_param: &'a UniversalParam,
@@ -126,6 +134,13 @@ impl<'a> CLI<'a> for EspressoCli {
             args.submit_url,
         )
         .await
+    }
+
+    async fn init_loader(
+        storage: PathBuf,
+        input: Reader,
+    ) -> Result<Self::Loader, KeystoreError<Self::Ledger>> {
+        Ok(InteractiveLoader::new(storage, input))
     }
 }
 

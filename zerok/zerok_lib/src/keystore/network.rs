@@ -37,6 +37,7 @@ use seahorse::txn_builder::PendingTransaction;
 use seahorse::txn_builder::TransactionInfo;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
+    sparse_merkle_tree::SparseMerkleTree,
     txn_builder::TransactionState,
     BincodeSnafu, ClientConfigSnafu, CryptoSnafu, KeystoreBackend, KeystoreError, KeystoreState,
 };
@@ -216,23 +217,13 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
                 .collect::<Result<_, _>>()?,
         });
 
-        // `records` should be _almost_ completely sparse. However, even a fully pruned Merkle tree
-        // contains the last leaf appended, but as a new keystore, we don't care about _any_ of the
-        // leaves, so make a note to forget the last one once more leaves have been appended.
-        let merkle_leaf_to_forget = if records.0.num_leaves() > 0 {
-            Some(records.0.num_leaves() - 1)
-        } else {
-            None
-        };
-
         let state = KeystoreState {
             proving_keys,
             txn_state: TransactionState {
                 validator,
 
                 nullifiers,
-                record_mt: records.0,
-                merkle_leaf_to_forget,
+                record_mt: SparseMerkleTree::sparse(records.0),
                 now: EventIndex::from_source(EventSource::QueryService, num_events),
                 records: Default::default(),
 
