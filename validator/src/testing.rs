@@ -11,7 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    full_node_mem_data_source::QueryData, gen_pub_keys, init_validator, init_web_server,
+    full_node_mem_data_source::QueryData, gen_keys, init_validator, init_web_server,
     ConsensusConfig, GenesisState, Node, NodeOpt, MINIMUM_NODES,
 };
 use async_std::task::{block_on, spawn, JoinHandle};
@@ -150,7 +150,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
 
     println!("generating public keys");
     let start = Instant::now();
-    let pub_keys = gen_pub_keys(&config);
+    let (priv_keys, pub_keys) = gen_keys(&config);
     println!("generated public keys in {:?}", start.elapsed());
 
     let store = TempDir::new("minimal_test_network_store").unwrap();
@@ -160,6 +160,8 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         let genesis = genesis.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
+        let priv_key = priv_keys[i].clone();
+
         store_path.push(i.to_string());
         async move {
             let mut opt = NodeOpt {
@@ -173,8 +175,16 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             let data_source =
                 async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
 
-            let node =
-                init_validator(&opt, &config, pub_keys, genesis, i, data_source.clone()).await;
+            let node = init_validator(
+                &opt,
+                &config,
+                priv_key,
+                pub_keys,
+                genesis,
+                i,
+                data_source.clone(),
+            )
+            .await;
 
             // If applicable, run a query service.
             let url = if let Node::Full(node) = &node {

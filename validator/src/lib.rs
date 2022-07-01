@@ -484,6 +484,7 @@ impl GenesisState {
 async fn init_phaselock(
     options: &NodeOpt,
     known_nodes: Vec<Ed25519Pub>,
+    priv_key: Ed25519Priv,
     threshold: u64,
     node_id: u64,
     networking: WNetwork<
@@ -496,6 +497,7 @@ async fn init_phaselock(
 ) -> Node {
     // Create the initial phaselock
     let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
+    let pub_key = known_nodes[node_id as usize].clone();
     let config = PhaseLockConfig {
         total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
         threshold: NonZeroUsize::new(threshold as usize).unwrap(),
@@ -505,7 +507,7 @@ async fn init_phaselock(
         timeout_ratio: (11, 10),
         round_start_delay: 1,
         start_delay: 1,
-        propose_min_round_time: Duration::from_secs(1),
+        propose_min_round_time: Duration::from_secs(0),
         propose_max_round_time: Duration::from_secs(10),
     };
     debug!(?config);
@@ -550,14 +552,11 @@ async fn init_phaselock(
         .iter()
         .collect::<PathBuf>();
 
-    let private_key = Ed25519Priv::generated_from_seed_indexed([0_u8; 32], node_id);
-    let public_key = Ed25519Pub::from_private(&private_key);
-
     let phaselock = PhaseLock::init(
         genesis,
-        Vec::new(),
-        public_key,
-        private_key,
+        config.known_nodes.clone(),
+        pub_key,
+        priv_key,
         node_id,
         config,
         state.validator,
@@ -889,21 +888,30 @@ pub fn init_web_server(
     Ok(join_handle)
 }
 
+/// Generate a list of private and public keys. Will return exactly `config.nodes.len()` keys, with a given `config.seed` seed.
+pub fn gen_keys(config: &ConsensusConfig) -> (Vec<Ed25519Priv>, Vec<Ed25519Pub>) {
+    let mut priv_keys = Vec::with_capacity(config.nodes.len());
+    let mut pub_keys = Vec::with_capacity(config.nodes.len());
+
+    for node_id in 0..config.nodes.len() {
+        let priv_key = Ed25519Priv::generated_from_seed_indexed(config.seed.0, node_id as u64);
+        let pub_key = Ed25519Pub::from_private(&priv_key);
+
+        priv_keys.push(priv_key);
+        pub_keys.push(pub_key);
+    }
+    (priv_keys, pub_keys)
+}
+
+/// Generate a list of public keys. Will return exactly `config.nodes.len()` keys, with a given `config.seed` seed.
 pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<Ed25519Pub> {
-    config
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(node_id, _)| {
-            let privkey = Ed25519Priv::generated_from_seed_indexed([0u8; 32], node_id as u64);
-            Ed25519Pub::from_private(&privkey)
-        })
-        .collect()
+    gen_keys(config).1
 }
 
 pub async fn init_validator(
     options: &NodeOpt,
     config: &ConsensusConfig,
+    priv_key: Ed25519Priv,
     pub_keys: Vec<Ed25519Pub>,
     genesis: GenesisState,
     own_id: usize,
@@ -921,17 +929,13 @@ pub async fn init_validator(
     )
     .await;
     #[allow(clippy::type_complexity)]
-    let mut other_nodes = Vec::new();
+    let mut other_nodes = Vec::with_capacity(config.nodes.len() - 1);
     for (id, node) in config.nodes.iter().enumerate() {
         if id != own_id {
             other_nodes.push((id as u64, &pub_keys[id], node.socket_addr()));
         }
     }
-    let known_nodes: Vec<Ed25519Pub> = other_nodes
-        .iter()
-        .map(|(_, pubkey, _)| *pubkey)
-        .cloned()
-        .collect();
+    let known_nodes = pub_keys.clone();
 
     // Connect the networking implementations
     for (id, pub_key, addr) in other_nodes {
@@ -952,6 +956,7 @@ pub async fn init_validator(
     init_phaselock(
         options,
         known_nodes,
+        priv_key,
         threshold,
         own_id as u64,
         own_network,
