@@ -16,10 +16,12 @@ use jf_cap::{
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
 use key_set::{KeySet, VerifierKeySet};
-use phaselock::types::ed25519::Ed25519Priv;
 use phaselock::{
     traits::implementations::{AtomicStorage, WNetwork},
-    types::{ed25519::Ed25519Pub, Message, SignatureKey},
+    types::{
+        ed25519::{Ed25519Priv, Ed25519Pub},
+        Message, SignatureKey,
+    },
     PhaseLock, PhaseLockConfig, PhaseLockError, H_256,
 };
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
@@ -928,7 +930,6 @@ pub async fn init_validator(
         config.nodes[own_id].port,
     )
     .await;
-    #[allow(clippy::type_complexity)]
     let mut other_nodes = Vec::with_capacity(config.nodes.len() - 1);
     for (id, node) in config.nodes.iter().enumerate() {
         if id != own_id {

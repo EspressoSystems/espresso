@@ -181,7 +181,7 @@ pub struct LedgerTransition {
 /// A QueryService accumulates the full state of the ledger, making it available for consumption by
 /// network APIs and such.
 #[async_trait]
-pub trait QueryService: Send + Sync {
+pub trait QueryService {
     async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError>;
 
     async fn num_blocks(&self) -> Result<usize, QueryServiceError> {

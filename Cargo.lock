@@ -2184,7 +2184,6 @@ dependencies = [
  "async-trait",
  "async-tungstenite 0.15.0",
  "bincode",
- "ed25519-compact",
  "escargot",
  "espresso-availability-api",
  "espresso-catchup-api",

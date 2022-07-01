@@ -25,8 +25,9 @@ pub struct Committee<S, const N: usize> {
     /// A table mapping public keys with their associated stake.
     stake_table: BTreeMap<Ed25519Pub, u64>,
 
-    // /// Inner structure for committee election.
-    // _election: PhantomData<DynamicCommittee<S, N>>,
+    /// Inner structure for committee election.
+    _election: PhantomData<DynamicCommittee<S, N>>,
+
     /// State phantom.
     _state_phantom: PhantomData<S>,
 }
@@ -36,7 +37,7 @@ impl<S, const N: usize> Committee<S, N> {
     pub fn new(stake_table: BTreeMap<Ed25519Pub, u64>) -> Self {
         Self {
             stake_table,
-            // _election: PhantomData,
+            _election: PhantomData,
             _state_phantom: PhantomData,
         }
     }

@@ -17,8 +17,10 @@ use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
 use jf_cap::keys::UserPubKey;
-use phaselock::types::ed25519::Ed25519Priv;
-use phaselock::types::{ed25519::Ed25519Pub, EventType};
+use phaselock::types::{
+    ed25519::{Ed25519Priv, Ed25519Pub},
+    EventType,
+};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -373,7 +375,7 @@ async fn main() -> Result<(), std::io::Error> {
             &config,
             Ed25519Priv::generated_from_seed_indexed(config.seed.0, own_id),
             // TODO(vko): The pub keys should be known based on the `config.seed` and `config.nodes.len()`
-            // should we still load this from file?
+            // should we still load these `pub_keys` from file?
             pub_keys,
             genesis,
             own_id as usize,
