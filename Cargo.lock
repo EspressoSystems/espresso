@@ -1874,7 +1874,7 @@ dependencies = [
  "tracing",
  "tracing-distributed",
  "tracing-futures",
- "tracing-subscriber 0.2.25",
+ "tracing-subscriber 0.3.9",
  "zerok_lib",
 ]
 
@@ -5760,7 +5760,7 @@ dependencies = [
  "tempdir",
  "toml",
  "tracing",
- "tracing-subscriber 0.2.25",
+ "tracing-subscriber 0.3.9",
  "zerok_lib",
 ]
 
