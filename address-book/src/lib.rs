@@ -350,6 +350,8 @@ pub fn get_user_address(req_params: RequestParams) -> Result<UserAddress, Addres
     })?
 }
 
+//----
+
 // TODO move all the error stuff to a separate file
 #[derive(Clone, Debug, Deserialize, Serialize, Snafu)]
 pub enum AddressBookError {

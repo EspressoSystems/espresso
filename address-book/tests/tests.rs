@@ -22,6 +22,7 @@ use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
 use std::collections::HashSet;
 use tide_disco::{get_settings, ConfigKey};
+use tracing::info;
 
 const ROUND_TRIP_COUNT: u64 = 1; //100;
 const NOT_FOUND_COUNT: u64 = 1; //100;
@@ -57,12 +58,13 @@ async fn round_trip<T: Store + 'static>(store: T) {
         let pub_key_bytes = bincode::serialize(&pub_key).unwrap();
         let sig = user_key.sign(&pub_key_bytes);
         let json_request = InsertPubKey { pub_key_bytes, sig };
-        let _response = surf::post(format!("{base_url}/insert_pubkey"))
+        let response = surf::post(format!("{base_url}/insert_pubkey"))
             .content_type(surf::http::mime::JSON)
             .body_json(&json_request)
             .unwrap()
             .await
             .unwrap();
+        info!("response: {:?}", response);
         let address_bytes = bincode::serialize(&pub_key.address()).unwrap();
         let mut response = surf::post(format!("{base_url}/request_pubkey"))
             .content_type(surf::http::mime::BYTE_STREAM)
