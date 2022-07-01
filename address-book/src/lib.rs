@@ -226,10 +226,7 @@ pub fn init_web_server<T: Store + 'static>(
 
             let pub_key = verify_sig_and_get_pub_key(insert_request)?;
             (*server_state.store).save(&pub_key.address(), &pub_key)?;
-            Ok(format!(
-                "insert pubkey req_params.body_bytes(): {:?}",
-                req_params.body_bytes()
-            ))
+            Ok(())
         }
         .boxed()
     })
@@ -237,21 +234,13 @@ pub fn init_web_server<T: Store + 'static>(
     api.post("request_pubkey", |req_params, server_state| {
         async move {
             let address = get_user_address(req_params)?;
+            // TODO convert to map_err expression
             match (*server_state.store).load(&address) {
-                Ok(pub_key) => match pub_key {
-                    Some(value) => {
-                        if let Ok(bytes) = bincode::serialize(&value) {
-                            Ok(bytes)
-                        } else {
-                            Err(AddressBookError::DeserializationError)
-                        }
-                    }
-                    _ => Err(AddressBookError::AddressNotFound {
-                        status: StatusCode::NotFound,
-                        address,
-                    }),
-                },
-                Err(_) => Err(AddressBookError::IoError),
+                Ok(pub_key) => Ok(pub_key),
+                Err(_) => Err(AddressBookError::AddressNotFound {
+                    status: StatusCode::NotFound,
+                    address,
+                }),
             }
         }
         .boxed()
@@ -260,13 +249,7 @@ pub fn init_web_server<T: Store + 'static>(
     api.get("request_peers", |_req_params, server_state| {
         async move {
             match (*server_state.store).list() {
-                Ok(pk_list) => {
-                    if let Ok(bytes) = bincode::serialize(&pk_list) {
-                        Ok(bytes)
-                    } else {
-                        Err(AddressBookError::DeserializationError)
-                    }
-                }
+                Ok(pk_list) => Ok(pk_list),
                 Err(_) => Err(AddressBookError::IoError),
             }
         }
