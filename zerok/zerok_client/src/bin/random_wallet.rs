@@ -249,8 +249,6 @@ async fn main() {
         }
     };
     let address = pub_key.address();
-    keystore.await_key_scan(&address).await.unwrap();
-
     event!(Level::INFO, "address = {:?}", address);
 
     // Wait for the scan of the ledger to catch up.
