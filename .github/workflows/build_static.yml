@@ -73,14 +73,15 @@ jobs:
           nix develop .#staticShell --option sandbox relaxed -c cargo build --release
 
       # prune all untagged artifacts besides the most recent 5.
-      - uses: c-hive/gha-remove-artifacts@v1
-        if: ${{ github.event_name != 'pull_request' }}
-        name: Garbage collect old artifacts
-        with:
-          skip-tags: true
-          skip-recent: 5
-          GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_PAT }}
-          age: '0 day'
+      # BREAKING BUILD AS OF 2022-07-01
+      #- uses: c-hive/gha-remove-artifacts@v1
+      #  if: ${{ github.event_name != 'pull_request' }}
+      #  name: Garbage collect old artifacts
+      #  with:
+      #    skip-tags: true
+      #    skip-recent: 5
+      #    GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_PAT }}
+      #    age: '0 day'
 
 
       - name: Upload address book artifact
