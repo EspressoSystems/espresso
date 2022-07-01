@@ -317,7 +317,6 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
             events: MockEventSource::new(EventSource::QueryService),
         };
 
-        // TODO: should we make this deterministic?
         let mut rng = crate::testing::crypto_rng_from_seed([0x42u8; 32]);
 
         // Broadcast receiver memos for the records which are included in the tree from the start,

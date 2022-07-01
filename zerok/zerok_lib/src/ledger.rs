@@ -51,6 +51,7 @@ impl traits::NullifierSet for SetMerkleTree {
             // generate a proof that the nullifier for one of our owned records is _not_ in the
             // tree. We should be more careful about pruning to cut down on the amount we have to
             // ask the network.
+            // https://github.com/EspressoSystems/espresso/issues/414
             self.forget(*nullifier);
         }
 
