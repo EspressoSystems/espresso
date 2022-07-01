@@ -35,14 +35,11 @@
         os = (builtins.elemAt (builtins.elemAt info 3) 0);
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        stableToolchain = pkgs.rust-bin.stable."1.59.0".minimal.override {
-          extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
-        };
-        sixtyStableToolchain = pkgs.rust-bin.stable."1.60.0".minimal.override {
+        stableToolchain = pkgs.rust-bin.stable."1.62.0".minimal.override {
           extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
         };
         stableMuslRustToolchain =
-          pkgs.rust-bin.stable."1.59.0".minimal.override {
+          pkgs.rust-bin.stable."1.62.0".minimal.override {
             extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
             targets = [ "${arch}-unknown-${os}-musl" ];
           };
@@ -185,7 +182,7 @@
           perfShell = pkgs.mkShell {
             shellHook = shellHook;
             buildInputs = with pkgs;
-              [ cargo-llvm-cov sixtyStableToolchain ] ++ rustDeps;
+              [ cargo-llvm-cov stableToolchain ] ++ rustDeps;
           };
 
           staticShell = pkgs.mkShell {
