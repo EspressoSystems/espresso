@@ -21,6 +21,7 @@ use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::Signature;
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use snafu::Snafu;
 use std::env;
 use std::path::PathBuf;
@@ -28,6 +29,7 @@ use std::{fs, time::Duration};
 use tempdir::TempDir;
 use tide::StatusCode;
 use tide_disco::{Api, App, RequestParams};
+use tracing::info;
 
 #[cfg(not(windows))]
 pub mod signal;
@@ -218,11 +220,22 @@ pub fn init_web_server<T: Store + 'static>(
 
     api.post("insert_pubkey", |req_params, server_state| {
         async move {
-            let insert_request: InsertPubKey = bincode::deserialize(&req_params.body_bytes())
+            info!(
+                "insert_pubkey lossy string: {:?}",
+                String::from_utf8_lossy(&req_params.body_bytes())
+            );
+            let insert_request: InsertPubKey = serde_json::from_slice(&req_params.body_bytes())
                 .map_err(|_e| AddressBookError::Other {
                     status: StatusCode::BadRequest,
                     msg: "Unable to deseralize the insert request from the post data".to_string(),
                 })?;
+            // let insert_request: InsertPubKey = bincode::deserialize(&req_params.body_bytes())
+            //     .map_err(|_e| AddressBookError::Other {
+            //         status: StatusCode::BadRequest,
+            //         msg: "Unable to deseralize the insert request from the post data".to_string(),
+            //     })?;
+
+            info!("/insert_pubkey InsertPubKey: {:?}", &insert_request);
 
             let pub_key = verify_sig_and_get_pub_key(insert_request)?;
             (*server_state.store).save(&pub_key.address(), &pub_key)?;
@@ -234,13 +247,31 @@ pub fn init_web_server<T: Store + 'static>(
     api.post("request_pubkey", |req_params, server_state| {
         async move {
             let address = get_user_address(req_params)?;
+            info!("about to lookup address: {:?}", &address);
             // TODO convert to map_err expression
             match (*server_state.store).load(&address) {
-                Ok(pub_key) => Ok(pub_key),
-                Err(_) => Err(AddressBookError::AddressNotFound {
-                    status: StatusCode::NotFound,
-                    address,
-                }),
+                Ok(Some(pub_key)) => {
+                    info!("/request_pubkey load returns an option");
+                    let upk: UserPubKey = pub_key;
+                    //Ok(pub_key)
+                    Ok(upk)
+                }
+                Ok(None) => {
+                    info!("/request_pubkey load failed");
+                    // TODO Something went more wrong than address not found
+                    Err(AddressBookError::AddressNotFound {
+                        status: StatusCode::NotFound,
+                        address,
+                    })
+                }
+                Err(_) => {
+                    info!("/request_pubkey load failed");
+                    // TODO Something went more wrong than address not found
+                    Err(AddressBookError::AddressNotFound {
+                        status: StatusCode::NotFound,
+                        address,
+                    })
+                }
             }
         }
         .boxed()
@@ -344,10 +375,13 @@ pub async fn request_peers<T: Store>(
 // TODO Maybe accept Vec<u8> instead.
 // TODO Add information about deserializing POST data to the low-level error
 pub fn get_user_address(req_params: RequestParams) -> Result<UserAddress, AddressBookError> {
-    bincode::deserialize(&req_params.body_bytes()).map_err(|e| AddressBookError::Other {
-        status: StatusCode::BadRequest,
-        msg: e.to_string(),
-    })?
+    let address: UserAddress =
+        bincode::deserialize(&req_params.body_bytes()).map_err(|e| AddressBookError::Other {
+            status: StatusCode::BadRequest,
+            msg: e.to_string(),
+        })?;
+    info!("get_user_address UserAddress: {:?}", address);
+    Ok(address)
 }
 
 //----

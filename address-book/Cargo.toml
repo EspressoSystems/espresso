@@ -40,6 +40,7 @@ once_cell = "1"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.82"
 signal-hook = "0.3.14"
 snafu = { version = "0.7", features = ["backtraces"] }
 surf = "2.3.2"
@@ -54,9 +55,11 @@ tracing = "0.1.34"
 tracing-futures = "0.2"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter", "json"] }
 url = "2.2.2"
+# TODO debugging - can't print in cargo test anymore because --nocapture gets eaten by clap
+portpicker = "0.1"
 
 [target.'cfg(not(windows))'.dependencies]
 signal-hook-async-std = "0.2.2"
 
 [dev-dependencies]
-portpicker = "0.1"
+#portpicker = "0.1"
