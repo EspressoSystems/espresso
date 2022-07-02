@@ -58,8 +58,8 @@ use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
 use std::collections::HashSet;
 
-const ROUND_TRIP_COUNT: u64 = 1; //100;
-const NOT_FOUND_COUNT: u64 = 1; //100;
+const ROUND_TRIP_COUNT: u64 = 10; //100;
+const NOT_FOUND_COUNT: u64 = 10; //100;
 
 // Test
 //    lookup(insert(x)) = x
@@ -104,13 +104,16 @@ async fn round_trip<T: Store + 'static>(store: T) {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::Ok);
-        let bytes = response.body_bytes().await.unwrap();
-        info!(
-            "bytes of a user pub key or none: {:?}",
-            String::from_utf8_lossy(&bytes)
-        );
+        // let bytes = response.body_bytes().await.unwrap();
+        // info!(
+        //     "bytes of a user pub key or none: {:?}",
+        //     String::from_utf8_lossy(&bytes)
+        // );
         // let gotten_pub_key: UserPubKey = bincode::deserialize(&bytes).unwrap();
-        let gotten_pub_key: UserPubKey = serde_json::from_slice(&bytes).unwrap();
+
+        // TODO this works, but can we use body_json()?
+        // let gotten_pub_key: UserPubKey = serde_json::from_slice(&bytes).unwrap();
+        let gotten_pub_key: UserPubKey = response.body_json().await.unwrap();
         assert_eq!(gotten_pub_key, pub_key);
         info!("Round trip insert request succeeded.");
         let mut response = surf::get(format!("{base_url}/request_peers"))
