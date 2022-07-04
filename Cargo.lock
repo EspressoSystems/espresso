@@ -36,7 +36,7 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "tracing-log",
- "tracing-subscriber 0.3.9",
+ "tracing-subscriber 0.3.14",
 ]
 
 [[package]]
@@ -1874,7 +1874,7 @@ dependencies = [
  "tracing",
  "tracing-distributed",
  "tracing-futures",
- "tracing-subscriber 0.3.9",
+ "tracing-subscriber 0.3.14",
  "zerok_lib",
 ]
 
@@ -2014,7 +2014,7 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "tracing-log",
- "tracing-subscriber 0.3.9",
+ "tracing-subscriber 0.3.14",
  "tracing-test",
  "zerok_lib",
 ]
@@ -5120,7 +5120,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d686ec1c0f384b1277f097b2f279a2ecc11afe8c133c1aabf036a27cb4cd206e"
 dependencies = [
  "tracing",
- "tracing-subscriber 0.3.9",
+ "tracing-subscriber 0.3.14",
 ]
 
 [[package]]
@@ -5178,13 +5178,13 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.9"
+version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e0ab7bdc962035a87fba73f3acca9b8a8d0034c2e6f60b84aeaaddddc155dce"
+checksum = "3a713421342a5a666b7577783721d3117f1b69a393df803ee17bb73b1e122a59"
 dependencies = [
  "ansi_term",
- "lazy_static",
  "matchers 0.1.0",
+ "once_cell",
  "regex",
  "sharded-slab",
  "smallvec",
@@ -5202,7 +5202,7 @@ checksum = "3eb7bda2e93bbc9c5b247034acc6a4b3d04f033a3d4b8fc1cb87d4d1c7c7ebd7"
 dependencies = [
  "lazy_static",
  "tracing-core",
- "tracing-subscriber 0.3.9",
+ "tracing-subscriber 0.3.14",
  "tracing-test-macro",
 ]
 
@@ -5760,7 +5760,7 @@ dependencies = [
  "tempdir",
  "toml",
  "tracing",
- "tracing-subscriber 0.3.9",
+ "tracing-subscriber 0.3.14",
  "zerok_lib",
 ]
 
