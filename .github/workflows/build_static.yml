@@ -87,26 +87,12 @@ jobs:
       - name: Upload address book artifact
         uses: actions/upload-artifact@v3
         with:
-          name: x86_64-unknown-linux-musl-address-book
-          path: target/x86_64-unknown-linux-musl/release/address-book
-
-      - name: Upload faucet artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-faucet
-          path: target/x86_64-unknown-linux-musl/release/faucet
-
-      - name: Upload validator artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-validator
-          path: target/x86_64-unknown-linux-musl/release/espresso-validator
-
-      - name: Upload random wallet artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-random-wallet
-          path: target/x86_64-unknown-linux-musl/release/random_wallet
+          name: x86_64-unknown-linux-musl-services
+          path: |
+            target/x86_64-unknown-linux-musl/release/address-book
+            target/x86_64-unknown-linux-musl/release/espresso-validator
+            target/x86_64-unknown-linux-musl/release/faucet
+            target/x86_64-unknown-linux-musl/release/random_wallet
 
   static-dockers:
     runs-on: ubuntu-latest
@@ -118,25 +104,7 @@ jobs:
       - name: Download address-book executable
         uses: actions/download-artifact@v3
         with:
-          name: x86_64-unknown-linux-musl-address-book
-          path: target/x86_64-unknown-linux-musl/release/
-
-      - name: Download faucet executable
-        uses: actions/download-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-faucet
-          path: target/x86_64-unknown-linux-musl/release/
-
-      - name: Download validator executable
-        uses: actions/download-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-validator
-          path: target/x86_64-unknown-linux-musl/release/
-
-      - name: Download random wallet executable
-        uses: actions/download-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-random-wallet
+          name: x86_64-unknown-linux-musl-services
           path: target/x86_64-unknown-linux-musl/release/
 
       - name: Setup Docker BuildKit (buildx)
