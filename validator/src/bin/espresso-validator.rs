@@ -21,8 +21,6 @@ use phaselock::types::{
     ed25519::{Ed25519Priv, Ed25519Pub},
     EventType,
 };
-use std::fs::File;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use structopt::StructOpt;
@@ -125,37 +123,59 @@ fn get_pk_dir(options: &Options) -> PathBuf {
     options.pk_path.clone().unwrap_or_else(default_pk_path)
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct KeyInFile {
+    pub private: String,
+    pub public: String,
+}
+
+impl KeyInFile {
+    fn new(private: &Ed25519Priv, public: &Ed25519Pub) -> Self {
+        Self {
+            private: private.to_string(),
+            public: public.to_string(),
+        }
+    }
+}
+
 fn generate_keys(options: &Options, config: &ConsensusConfig) {
     let pk_dir = get_pk_dir(options);
 
+    let (private_keys, public_keys) = gen_keys(config);
+
     // Generate public key for each node
-    for (node_id, pub_key) in gen_pub_keys(config).into_iter().enumerate() {
-        let pub_key_str = pub_key.to_string();
-        let mut pk_file = File::create(
-            [&pk_dir, Path::new(&format!("pk_{}", node_id))]
-                .iter()
-                .collect::<PathBuf>(),
-        )
-        .unwrap_or_else(|err| panic!("Error while creating a public key file: {}", err));
-        pk_file
-            .write_all(pub_key_str.as_bytes())
-            .unwrap_or_else(|err| panic!("Error while writing to the public key file: {}", err));
+    for (node_id, (private, public)) in private_keys
+        .into_iter()
+        .zip(public_keys.into_iter())
+        .enumerate()
+    {
+        let path: PathBuf = [&pk_dir, Path::new(&format!("pk_{}.toml", node_id))]
+            .iter()
+            .collect();
+
+        let contents = toml::to_string_pretty(&KeyInFile::new(&private, &public))
+            .expect("Could not serialize key file");
+        std::fs::write(path, contents).expect("Could not write keys to file");
     }
     info!("Public key files created");
 }
 
 /// Gets public key of a node from its public key file.
-fn get_public_key(options: &Options, node_id: u64) -> Ed25519Pub {
-    let path = [&get_pk_dir(options), Path::new(&format!("pk_{}", node_id))]
-        .iter()
-        .collect::<PathBuf>();
-    let mut pk_file = File::open(&path)
+fn get_keys_for_node(options: &Options, node_id: u64) -> (Ed25519Priv, Ed25519Pub) {
+    let path = [
+        &get_pk_dir(options),
+        Path::new(&format!("pk_{}.toml", node_id)),
+    ]
+    .iter()
+    .collect::<PathBuf>();
+    let pk_str = std::fs::read_to_string(&path)
         .unwrap_or_else(|_| panic!("Cannot find public key file: {}", path.display()));
-    let mut pk_str = String::new();
-    pk_file
-        .read_to_string(&mut pk_str)
-        .unwrap_or_else(|err| panic!("Error while reading public key file: {}", err));
-    pk_str.parse().expect("Error while reading public key")
+    let KeyInFile { private, public } = toml::from_str(&pk_str)
+        .unwrap_or_else(|e| panic!("Cannot deserialize key file {}: {:?}", path.display(), e));
+
+    let private = private.parse().expect("Invalid private key");
+    let public = public.parse().expect("Invalid public key");
+    (private, public)
 }
 
 async fn generate_transactions(
@@ -366,17 +386,17 @@ async fn main() -> Result<(), std::io::Error> {
         } else {
             (GenesisState::new(options.faucet_pub_key.clone()), None)
         };
-        let pub_keys = (0..config.nodes.len())
+        let (priv_key, _pub_key) = get_keys_for_node(&options, own_id);
+        let known_nodes = (0..config.nodes.len())
             .into_iter()
-            .map(|i| get_public_key(&options, i as u64))
+            .map(|i| get_keys_for_node(&options, i as u64).1)
             .collect();
+
         let phaselock = init_validator(
             &options.node_opt,
             &config,
-            Ed25519Priv::generated_from_seed_indexed(config.seed.0, own_id),
-            // TODO(vko): The pub keys should be known based on the `config.seed` and `config.nodes.len()`
-            // should we still load these `pub_keys` from file?
-            pub_keys,
+            priv_key,
+            known_nodes,
             genesis,
             own_id as usize,
             data_source.clone(),
