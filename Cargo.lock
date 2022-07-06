@@ -3061,7 +3061,7 @@ dependencies = [
 [[package]]
 name = "net"
 version = "0.3.1"
-source = "git+https://github.com/EspressoSystems/net.git#0e204c8e5fb9416c2e779d8a33280fb47bcd0a75"
+source = "git+https://github.com/EspressoSystems/net.git#e7da8287da866e7442e8d0264e4a5cf71df8f8cd"
 dependencies = [
  "ark-serialize",
  "ark-std",
@@ -3069,6 +3069,7 @@ dependencies = [
  "commit",
  "futures",
  "generic-array",
+ "hex",
  "itertools 0.10.3",
  "jf-cap",
  "jf-utils",
