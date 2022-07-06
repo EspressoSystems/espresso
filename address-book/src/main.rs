@@ -11,26 +11,30 @@
 // You should have received a copy of the GNU General Public License along with this program. If
 // not, see <https://www.gnu.org/licenses/>.
 
-use address_book::{init_web_server, AddressBookError};
+use address_book::{error::AddressBookError, init_web_server};
 use clap::Parser;
 use std::{fs, path::PathBuf};
+use strum_macros::AsRefStr;
 use tide::StatusCode;
-use tide_disco::{get_settings, ConfigKey};
+use tide_disco::{get_settings, DiscoArgs, DiscoKey};
 use tracing::{info, trace};
 use url::Url;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
+    #[clap(flatten)]
+    disco_args: DiscoArgs,
     #[clap(long)]
-    /// Server address
-    base_url: Option<Url>,
-    #[clap(long)]
-    /// HTTP routes
-    api_toml: Option<PathBuf>,
-    /// If true, log in color. Otherwise, no color.
-    #[clap(long)]
-    ansi_color: Option<bool>,
+    /// Storage path
+    store_path: Option<PathBuf>,
+}
+
+/// Lookup keys for application-specific configuration settings
+#[derive(AsRefStr, Debug)]
+#[allow(non_camel_case_types)]
+pub enum AppKey {
+    store_path,
 }
 
 // impl Interrupt for InterruptHandle {
@@ -71,7 +75,7 @@ async fn round_trip<T: Store + 'static>(store: T) {
     let port = pick_unused_port().unwrap();
     let base_url: String = format!("http://127.0.0.1:{port}");
     let settings = get_settings::<Args>().unwrap();
-    let api_toml = &settings.get_string(ConfigKey::api_toml.as_ref()).unwrap();
+    let api_toml = &settings.get_string(DiscoKey::api_toml.as_ref()).unwrap();
     let app = init_web_server(api_toml.to_string(), store).unwrap();
 
     let handle = spawn(app.serve(base_url.clone()));
@@ -167,14 +171,19 @@ async fn main() -> Result<(), AddressBookError> {
     // Combine settings from multiple sources.
     let settings = get_settings::<Args>()?;
 
+    info!(
+        "Store path: {:?}",
+        &settings.get_string(AppKey::store_path.as_ref())?
+    );
+
     // Colorful logs upon request.
     let want_color = settings.get_bool("ansi_color").unwrap_or(false);
 
     init_logging(want_color);
 
     // Fetch the configuration values before any slow operations.
-    let api_toml = &settings.get_string(ConfigKey::api_toml.as_ref())?;
-    let base_url = &settings.get_string(ConfigKey::base_url.as_ref())?;
+    let api_toml = &settings.get_string(DiscoKey::api_toml.as_ref())?;
+    let base_url = &settings.get_string(DiscoKey::base_url.as_ref())?;
 
     let store_path = address_book_store_path();
     info!("Using store path {:?}", store_path);
@@ -199,6 +208,7 @@ async fn main() -> Result<(), AddressBookError> {
 #[cfg(windows)]
 async fn register_interrupt_signals() {
     // Signals aren't properly supported on windows so we'll just exit
+    process::exit(1);
 }
 
 #[cfg(not(windows))]

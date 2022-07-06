@@ -34,6 +34,8 @@ dependencies = [
  "signal-hook",
  "signal-hook-async-std",
  "snafu",
+ "strum 0.20.0",
+ "strum_macros",
  "surf",
  "tagged-base64 0.1.0",
  "tempdir",

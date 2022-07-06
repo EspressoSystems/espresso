@@ -13,22 +13,22 @@
 
 #![doc = include_str!("../README.md")]
 
+use crate::error::AddressBookError;
 use crate::store::Store;
 use async_std::sync::{Arc, RwLock};
 use async_std::task::sleep;
-use config::ConfigError;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::Signature;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use snafu::Snafu;
 use std::{fs, time::Duration};
 use tide::StatusCode;
 use tide_disco::{Api, App, RequestParams};
 use tracing::trace;
 
+pub mod error;
 pub mod store;
 
 #[cfg(not(windows))]
@@ -268,75 +268,4 @@ pub fn get_user_address(req_params: RequestParams) -> Result<UserAddress, Addres
             msg: e.to_string(),
         })?;
     Ok(address)
-}
-
-//----
-
-// TODO move all the error stuff to a separate file
-#[derive(Clone, Debug, Deserialize, Serialize, Snafu)]
-pub enum AddressBookError {
-    Config {
-        msg: String,
-    },
-    AddressNotFound {
-        status: StatusCode,
-        address: UserAddress,
-    },
-    DeserializationError,
-    IoError,
-    Other {
-        status: StatusCode,
-        msg: String,
-    },
-}
-
-impl From<ConfigError> for AddressBookError {
-    fn from(error: ConfigError) -> Self {
-        Self::Config {
-            msg: error.to_string(),
-        }
-    }
-}
-
-impl From<std::io::Error> for AddressBookError {
-    fn from(error: std::io::Error) -> Self {
-        AddressBookError::Config {
-            msg: error.to_string(),
-        }
-    }
-}
-
-impl From<toml::de::Error> for AddressBookError {
-    fn from(error: toml::de::Error) -> Self {
-        AddressBookError::Config {
-            msg: error.to_string(),
-        }
-    }
-}
-
-impl tide_disco::Error for AddressBookError {
-    fn catch_all(status: StatusCode, msg: String) -> Self {
-        AddressBookError::Other { status, msg }
-    }
-    fn status(&self) -> StatusCode {
-        match self {
-            AddressBookError::AddressNotFound {
-                status: status_code,
-                address: _,
-            } => *status_code,
-            AddressBookError::Other {
-                status: status_code,
-                msg: _,
-            } => *status_code,
-            _ => StatusCode::InternalServerError,
-        }
-    }
-}
-
-impl From<tide::Error> for AddressBookError {
-    fn from(error: tide::Error) -> Self {
-        AddressBookError::Config {
-            msg: error.to_string(),
-        }
-    }
 }
