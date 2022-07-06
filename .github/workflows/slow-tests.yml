@@ -18,7 +18,7 @@ jobs:
     container:
       image: ghcr.io/espressosystems/devops-rust:1.62
     steps:
-      - uses: styfle/cancel-workflow-action@0.9.1
+      - uses: styfle/cancel-workflow-action@0.10.0
         name: Cancel Outdated Builds
         with:
           access_token: ${{ github.token }}
