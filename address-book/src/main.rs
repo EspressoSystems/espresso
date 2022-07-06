@@ -11,12 +11,12 @@
 // You should have received a copy of the GNU General Public License along with this program. If
 // not, see <https://www.gnu.org/licenses/>.
 
-use address_book::{address_book_store_path, init_web_server, AddressBookError, FileStore};
+use address_book::{init_web_server, AddressBookError};
 use clap::Parser;
 use std::{fs, path::PathBuf};
 use tide::StatusCode;
 use tide_disco::{get_settings, ConfigKey};
-use tracing::info;
+use tracing::{info, trace};
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -50,7 +50,8 @@ fn init_logging(want_color: bool) {
 }
 
 use address_book::{
-    address_book_temp_dir, wait_for_server, InsertPubKey, Store, TransientFileStore,
+    store::{address_book_store_path, address_book_temp_dir, FileStore, Store, TransientFileStore},
+    wait_for_server, InsertPubKey,
 };
 use async_std::task::spawn;
 use jf_cap::keys::{UserKeyPair, UserPubKey};
@@ -88,7 +89,6 @@ async fn round_trip<T: Store + 'static>(store: T) {
         let pub_key_bytes = bincode::serialize(&pub_key).unwrap();
         let sig = user_key.sign(&pub_key_bytes);
         let json_request = InsertPubKey { pub_key_bytes, sig };
-        info!("json_request: {:?}", json_request);
         let response = surf::post(format!("{base_url}/insert_pubkey"))
             .content_type(surf::http::mime::JSON)
             .body_json(&json_request)
@@ -96,7 +96,6 @@ async fn round_trip<T: Store + 'static>(store: T) {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::Ok);
-        info!("response: {:?}", response);
         let address_bytes = bincode::serialize(&pub_key.address()).unwrap();
         let mut response = surf::post(format!("{base_url}/request_pubkey"))
             .content_type(surf::http::mime::BYTE_STREAM)
@@ -104,24 +103,12 @@ async fn round_trip<T: Store + 'static>(store: T) {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::Ok);
-        // let bytes = response.body_bytes().await.unwrap();
-        // info!(
-        //     "bytes of a user pub key or none: {:?}",
-        //     String::from_utf8_lossy(&bytes)
-        // );
-        // let gotten_pub_key: UserPubKey = bincode::deserialize(&bytes).unwrap();
-
-        // TODO this works, but can we use body_json()?
-        // let gotten_pub_key: UserPubKey = serde_json::from_slice(&bytes).unwrap();
         let gotten_pub_key: UserPubKey = response.body_json().await.unwrap();
         assert_eq!(gotten_pub_key, pub_key);
-        info!("Round trip insert request succeeded.");
         let mut response = surf::get(format!("{base_url}/request_peers"))
             .await
             .unwrap();
         let bytes = response.body_bytes().await.unwrap();
-        info!("peers: {:?}", String::from_utf8_lossy(&bytes));
-        // let gotten_pub_keys: Vec<UserPubKey> = bincode::deserialize(&bytes).unwrap();
         let gotten_pub_keys: Vec<UserPubKey> = serde_json::from_slice(&bytes).unwrap();
         let gotten_set: HashSet<UserPubKey> = gotten_pub_keys.into_iter().collect();
         assert_eq!(gotten_set, inserted);
@@ -138,13 +125,12 @@ async fn round_trip<T: Store + 'static>(store: T) {
             .await
             .unwrap();
         let bytes = response.body_bytes().await.unwrap();
-        // let gotten_pub_key: UserPubKey = bincode::deserialize(&bytes).unwrap();
         let gotten_pub_key: UserPubKey = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(gotten_pub_key, pub_key);
     }
 
     // Lookup addresses we didn't insert.
-    tracing::error!(
+    trace!(
         "The following {} 'No such' errors are expected.",
         NOT_FOUND_COUNT
     );

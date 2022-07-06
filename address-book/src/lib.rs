@@ -13,178 +13,29 @@
 
 #![doc = include_str!("../README.md")]
 
+use crate::store::Store;
 use async_std::sync::{Arc, RwLock};
 use async_std::task::sleep;
 use config::ConfigError;
+use futures::future::BoxFuture;
 use futures::FutureExt;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::Signature;
-use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use snafu::Snafu;
-use std::env;
-use std::path::PathBuf;
 use std::{fs, time::Duration};
-use tempdir::TempDir;
 use tide::StatusCode;
 use tide_disco::{Api, App, RequestParams};
-use tracing::info;
+use tracing::trace;
+
+pub mod store;
 
 #[cfg(not(windows))]
 pub mod signal;
 
 pub const DEFAULT_PORT: u16 = 50078u16;
 const STARTUP_RETRIES: u32 = 255;
-
-// TODO move persistence to a separate file
-//----
-pub trait Store: Clone + Send + Sync {
-    fn save(&self, address: &UserAddress, pub_key: &UserPubKey) -> Result<(), std::io::Error>;
-    fn load(&self, address: &UserAddress) -> Result<Option<UserPubKey>, std::io::Error>;
-    fn list(&self) -> Result<Vec<UserPubKey>, std::io::Error>;
-}
-
-#[derive(Debug, Clone)]
-pub struct FileStore {
-    dir: PathBuf,
-}
-
-/// Persistent file backed store.
-/// Each (address, pub_key) pair is store in a single file inside `dir`.
-impl FileStore {
-    pub fn new(dir: PathBuf) -> Self {
-        Self { dir }
-    }
-
-    fn path(&self, address: &UserAddress) -> PathBuf {
-        let as_hex = hex::encode(bincode::serialize(&address).unwrap());
-        self.dir.join(format!("{}.bin", as_hex))
-    }
-
-    fn tmp_path(&self, address: &UserAddress) -> PathBuf {
-        let rand_string: String = rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(16)
-            .map(char::from)
-            .collect();
-
-        self.path(address).with_extension(rand_string)
-    }
-}
-
-impl Store for FileStore {
-    fn save(&self, address: &UserAddress, pub_key: &UserPubKey) -> Result<(), std::io::Error> {
-        let tmp_path = self.tmp_path(address);
-        fs::write(
-            &tmp_path,
-            bincode::serialize(&pub_key).expect("Failed to serialize public key."),
-        )?;
-        fs::rename(&tmp_path, self.path(address))
-    }
-    fn load(&self, address: &UserAddress) -> Result<Option<UserPubKey>, std::io::Error> {
-        let path = self.path(address);
-        match fs::read(&path) {
-            Ok(bytes) => Ok(Some(
-                bincode::deserialize(&bytes).expect("Failed to deserialize public key."),
-            )),
-            Err(err) => match err.kind() {
-                std::io::ErrorKind::NotFound => {
-                    tracing::info!("Address {} not found.", address);
-                    Ok(None)
-                }
-                _ => {
-                    tracing::error!("Attempt to read path {:?} failed: {}", path, err);
-                    Err(err)
-                }
-            },
-        }
-    }
-
-    fn list(&self) -> Result<Vec<UserPubKey>, std::io::Error> {
-        let paths = fs::read_dir(&self.dir)?;
-        let mut keys = vec![];
-        for path in paths {
-            let p = path?;
-            match fs::read(&p.path()) {
-                Ok(bytes) => {
-                    let pk = bincode::deserialize(&bytes);
-                    match pk {
-                        Ok(pub_key) => keys.push(pub_key),
-                        Err(err) => tracing::error!(
-                            "Attempt to deserialize path {:?} failed: {}",
-                            p.path(),
-                            err
-                        ),
-                    }
-                }
-                Err(err) => {
-                    tracing::error!("Attempt to read path {:?} failed: {}", p.path(), err);
-                    return Err(err);
-                }
-            }
-        }
-        Ok(keys)
-    }
-}
-
-/// Non-persistent store. Suitable for testing only.
-#[derive(Debug, Clone)]
-pub struct TransientFileStore {
-    store: FileStore,
-}
-
-impl Default for TransientFileStore {
-    fn default() -> Self {
-        Self {
-            store: FileStore::new(
-                TempDir::new("espresso-address-book")
-                    .expect("Failed to create temporary directory.")
-                    .into_path(),
-            ),
-        }
-    }
-}
-
-impl Drop for TransientFileStore {
-    fn drop(&mut self) {
-        fs::remove_dir_all(self.store.dir.clone()).expect("Failed to remove store path.");
-    }
-}
-
-impl Store for TransientFileStore {
-    fn save(&self, address: &UserAddress, pub_key: &UserPubKey) -> Result<(), std::io::Error> {
-        self.store.save(address, pub_key)
-    }
-
-    fn load(&self, address: &UserAddress) -> Result<Option<UserPubKey>, std::io::Error> {
-        self.store.load(address)
-    }
-    fn list(&self) -> Result<Vec<UserPubKey>, std::io::Error> {
-        self.store.list()
-    }
-}
-
-pub fn address_book_temp_dir() -> TempDir {
-    TempDir::new("espresso-address-book").expect("Failed to create temporary directory.")
-}
-
-pub fn espresso_data_path() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("./")))
-        .join(".espresso")
-        .join("espresso")
-}
-
-pub fn address_book_store_path() -> PathBuf {
-    if let Ok(store_path) = std::env::var("ESPRESSO_ADDRESS_BOOK_STORE_PATH") {
-        PathBuf::from(store_path)
-    } else {
-        espresso_data_path().join("address_book").join("store")
-    }
-}
-
-//----
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct InsertPubKey {
@@ -204,6 +55,46 @@ pub fn address_book_port() -> u16 {
     }
 }
 
+// TODO The Ok return doesn't match the expected type State yet
+// the closure returns the user public key but doesn't generate this
+// compiler error
+// pub async fn request_pubkey<State: Store + 'static>(
+//     p: RequestParams,
+//     store: State,
+// ) -> BoxFuture<'static, Result<State, AddressBookError>> {
+//     let address = get_user_address(req_params)?;
+//     // TODO convert to map_err expression
+//     Box::pin(async move {
+//         match (*server_state.store).load(&address) {
+//             Ok(Some(pub_key)) => {
+//                 let upk: UserPubKey = pub_key;
+//                 trace!(
+//                     "/request_pubkey address: {:?} -> pb_key: {:?}",
+//                     &address,
+//                     &upk
+//                 );
+//                 Ok(upk)
+//             }
+//             Ok(None) => {
+//                 // Not sure if this should be an error. The key is
+//                 // simply not present.
+//                 trace!("/request_pubkey not found: {:?}", &address);
+//                 Err(AddressBookError::AddressNotFound {
+//                     status: StatusCode::NotFound,
+//                     address,
+//                 })
+//             }
+//             Err(_) => {
+//                 // TODO Something went more wrong than address not found
+//                 Err(AddressBookError::AddressNotFound {
+//                     status: StatusCode::NotFound,
+//                     address,
+//                 })
+//             }
+//         }
+//     })
+// }
+
 pub fn init_web_server<T: Store + 'static>(
     api_toml: String,
     store: T,
@@ -218,54 +109,51 @@ pub fn init_web_server<T: Store + 'static>(
     )?)
     .unwrap();
 
-    api.post("insert_pubkey", |req_params, server_state| {
-        async move {
-            info!(
-                "insert_pubkey lossy string: {:?}",
-                String::from_utf8_lossy(&req_params.body_bytes())
-            );
-            let insert_request: InsertPubKey = serde_json::from_slice(&req_params.body_bytes())
-                .map_err(|_e| AddressBookError::Other {
-                    status: StatusCode::BadRequest,
-                    msg: "Unable to deseralize the insert request from the post data".to_string(),
-                })?;
-            // let insert_request: InsertPubKey = bincode::deserialize(&req_params.body_bytes())
-            //     .map_err(|_e| AddressBookError::Other {
-            //         status: StatusCode::BadRequest,
-            //         msg: "Unable to deseralize the insert request from the post data".to_string(),
-            //     })?;
+    api.post(
+        "insert_pubkey",
+        |req_params: RequestParams, server_state| {
+            async move {
+                let insert_request: InsertPubKey = serde_json::from_slice(&req_params.body_bytes())
+                    .map_err(|_e| AddressBookError::Other {
+                        status: StatusCode::BadRequest,
+                        msg: "Unable to deseralize the insert request from the post data"
+                            .to_string(),
+                    })?;
 
-            info!("/insert_pubkey InsertPubKey: {:?}", &insert_request);
+                trace!("/insert_pubkey InsertPubKey: {:?}", &insert_request);
 
-            let pub_key = verify_sig_and_get_pub_key(insert_request)?;
-            (*server_state.store).save(&pub_key.address(), &pub_key)?;
-            Ok(())
-        }
-        .boxed()
-    })
+                let pub_key = verify_sig_and_get_pub_key(insert_request)?;
+                (*server_state.store).save(&pub_key.address(), &pub_key)?;
+                Ok(())
+            }
+            .boxed()
+        },
+    )
     .unwrap();
     api.post("request_pubkey", |req_params, server_state| {
         async move {
             let address = get_user_address(req_params)?;
-            info!("about to lookup address: {:?}", &address);
             // TODO convert to map_err expression
             match (*server_state.store).load(&address) {
                 Ok(Some(pub_key)) => {
-                    info!("/request_pubkey load returns an option");
                     let upk: UserPubKey = pub_key;
-                    //Ok(pub_key)
+                    trace!(
+                        "/request_pubkey address: {:?} -> pb_key: {:?}",
+                        &address,
+                        &upk
+                    );
                     Ok(upk)
                 }
                 Ok(None) => {
-                    info!("/request_pubkey load failed");
-                    // TODO Something went more wrong than address not found
+                    // Not sure if this should be an error. The key is
+                    // simply not present.
+                    trace!("/request_pubkey not found: {:?}", &address);
                     Err(AddressBookError::AddressNotFound {
                         status: StatusCode::NotFound,
                         address,
                     })
                 }
                 Err(_) => {
-                    info!("/request_pubkey load failed");
                     // TODO Something went more wrong than address not found
                     Err(AddressBookError::AddressNotFound {
                         status: StatusCode::NotFound,
@@ -293,7 +181,6 @@ pub fn init_web_server<T: Store + 'static>(
     Ok(app)
 }
 
-// TODO exponential backoff seems slightly less efficient than fixed-interval polling
 pub async fn wait_for_server(base_url: &str) {
     // Wait for the server to come up and start serving.
     let pause_ms = Duration::from_millis(100);
@@ -380,7 +267,6 @@ pub fn get_user_address(req_params: RequestParams) -> Result<UserAddress, Addres
             status: StatusCode::BadRequest,
             msg: e.to_string(),
         })?;
-    info!("get_user_address UserAddress: {:?}", address);
     Ok(address)
 }
 
