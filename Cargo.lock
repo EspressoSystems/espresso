@@ -4046,6 +4046,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpassword"
+version = "6.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bf099a1888612545b683d2661a1940089f6c2e5a8e38979b2159da876bfd956"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "winapi",
+]
+
+[[package]]
 name = "rust-argon2"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4252,7 +4264,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "reef",
  "regex",
- "rpassword",
+ "rpassword 5.0.1",
  "rust-argon2 1.0.0",
  "rustyline",
  "serde",
@@ -5816,7 +5828,7 @@ dependencies = [
  "rand_xoshiro",
  "rayon",
  "reef",
- "rpassword",
+ "rpassword 6.0.1",
  "rust-argon2 0.8.3",
  "rustyline",
  "seahorse",

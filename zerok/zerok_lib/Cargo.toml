@@ -46,7 +46,7 @@ rand = "0.7.3"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 rayon = "*"
 reef = { git = "https://github.com/EspressoSystems/reef.git", features = ["testing"] }
-rpassword = "5.0.1"
+rpassword = "6.0.1"
 rust-argon2 = "0.8.3"
 rustyline = "9.0.0"
 seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
