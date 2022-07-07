@@ -1,11 +1,6 @@
 pub use seahorse::testing::MockLedger;
 
-use crate::{
-    ledger::EspressoLedger,
-    node,
-    set_merkle_tree::{SetMerkleProof, SetMerkleTree},
-    state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
-};
+use crate::node;
 use async_std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::stream::Stream;
@@ -28,6 +23,11 @@ use snafu::ResultExt;
 use std::collections::HashMap;
 use std::pin::Pin;
 use testing::MockNetwork;
+use zerok_lib::{
+    ledger::EspressoLedger,
+    set_merkle_tree::{SetMerkleProof, SetMerkleTree},
+    state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
+};
 
 pub struct MockEspressoNetwork<'a> {
     validator: ValidatorState,
@@ -306,7 +306,7 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
         };
 
         // TODO: should we make this deterministic?
-        let mut rng = crate::testing::crypto_rng_from_seed([0x42u8; 32]);
+        let mut rng = zerok_lib::testing::crypto_rng_from_seed([0x42u8; 32]);
 
         // Broadcast receiver memos for the records which are included in the tree from the start,
         // so that clients can access records they have been granted at ledger setup time in a

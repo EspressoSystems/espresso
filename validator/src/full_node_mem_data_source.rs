@@ -10,13 +10,13 @@ use espresso_status_api::query_data::ValidatorStatus;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use seahorse::events::LedgerEvent;
-use zerok_lib::api::EspressoError;
+use validator_node::api::EspressoError;
+use validator_node::node::QueryServiceError;
 use zerok_lib::ledger::EspressoLedger;
-use zerok_lib::node::QueryServiceError;
 use zerok_lib::state::{BlockCommitment, ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree};
 
 #[derive(Default)]
-struct QueryData {
+pub struct QueryData {
     blocks: Vec<BlockQueryData>,
     states: Vec<StateQueryData>,
     index_by_block_hash: HashMap<BlockCommitment, u64>,
@@ -226,5 +226,19 @@ impl UpdateStatusData for QueryData {
     {
         op(&mut self.node_status).map_err(EspressoError::from)?;
         Ok(())
+    }
+}
+
+impl QueryData {
+    pub fn new() -> QueryData {
+        QueryData {
+            blocks: Vec::new(),
+            states: Vec::new(),
+            index_by_block_hash: HashMap::new(),
+            index_by_txn_hash: HashMap::new(),
+            events: Vec::new(),
+            cached_nullifier_sets: BTreeMap::new(),
+            node_status: ValidatorStatus::default(),
+        }
     }
 }

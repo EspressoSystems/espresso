@@ -35,4 +35,5 @@ tempdir = "0.3.7"
 toml = "0.5"
 tracing = "0.1.26"
 tracing-subscriber = "0.2.19"
+validator_node = { path = "../validator_node/" }
 zerok_lib = { path = "../zerok_lib/" }

@@ -302,27 +302,6 @@ pub(crate) mod ser_display {
     }
 }
 
-pub(crate) mod ser_debug {
-    use serde::de::{Deserialize, Deserializer};
-    use serde::ser::{Serialize, Serializer};
-    use std::fmt::Debug;
-
-    pub fn serialize<S: Serializer, T: Debug>(
-        v: &Result<T, String>,
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
-        let string = match v {
-            Ok(v) => format!("{:?}", v),
-            Err(string) => string.clone(),
-        };
-        Serialize::serialize(&string, s)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>, T>(d: D) -> Result<Result<T, String>, D::Error> {
-        Ok(Err(Deserialize::deserialize(d)?))
-    }
-}
-
 /// Adapter because [TxnApiError] doesn't implement Clone
 impl Clone for ValidationError {
     /// Clone all errors except CryptoError which gets mapped to a
@@ -462,6 +441,7 @@ impl Committable for RecordMerkleFrontier {
 pub mod state_comm {
     use super::*;
     use jf_utils::tagged_blob;
+    use net::Hash;
 
     #[ser_test(arbitrary)]
     #[tagged_blob("STATE")]
@@ -485,6 +465,12 @@ pub mod state_comm {
     impl AsRef<[u8]> for LedgerStateCommitment {
         fn as_ref(&self) -> &[u8] {
             self.0.as_ref()
+        }
+    }
+
+    impl From<LedgerStateCommitment> for Hash {
+        fn from(c: LedgerStateCommitment) -> Self {
+            Self::from(commit::Commitment::<_>::from(c))
         }
     }
 

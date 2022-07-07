@@ -1,5 +1,5 @@
-use crate::committee::Committee;
-use crate::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
+use zerok_lib::committee::Committee;
+use zerok_lib::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
 
 use phaselock::{
     traits::{NetworkingImplementation, NodeImplementation, Storage},

@@ -34,11 +34,8 @@ use std::time::Duration;
 use structopt::StructOpt;
 use tempdir::TempDir;
 use tracing::{event, Level};
-use zerok_lib::{
-    keystore::network::{NetworkBackend, Url},
-    ledger::EspressoLedger,
-    universal_params::UNIVERSAL_PARAM,
-};
+use validator_node::keystore::network::{NetworkBackend, Url};
+use zerok_lib::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 
 type Keystore = seahorse::Keystore<'static, NetworkBackend<'static>, EspressoLedger, ()>;
 
