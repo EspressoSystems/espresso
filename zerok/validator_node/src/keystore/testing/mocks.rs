@@ -1,3 +1,15 @@
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 pub use seahorse::testing::MockLedger;
 
 use crate::node;
@@ -14,6 +26,7 @@ use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
 use reef::traits::Transaction as _;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
+    sparse_merkle_tree::SparseMerkleTree,
     testing,
     testing::MockEventSource,
     txn_builder::{PendingTransaction, TransactionInfo, TransactionState},
@@ -179,8 +192,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
 
                     records: Default::default(),
                     nullifiers: ledger.network().nullifiers.clone(),
-                    record_mt: ledger.network().records.clone(),
-                    merkle_leaf_to_forget: None,
+                    record_mt: SparseMerkleTree::sparse(ledger.network().records.clone()),
 
                     now: ledger.now(),
                     transactions: Default::default(),
@@ -305,7 +317,6 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
             events: MockEventSource::new(EventSource::QueryService),
         };
 
-        // TODO: should we make this deterministic?
         let mut rng = zerok_lib::testing::crypto_rng_from_seed([0x42u8; 32]);
 
         // Broadcast receiver memos for the records which are included in the tree from the start,
@@ -358,7 +369,9 @@ mod espresso_keystore_tests {
     use std::time::Instant;
     use testing::SystemUnderTest;
 
+    #[cfg(feature = "slow-tests")]
     use testing::generic_keystore_tests;
+    #[cfg(feature = "slow-tests")]
     seahorse::instantiate_generic_keystore_tests!(EspressoTest);
 
     #[async_std::test]

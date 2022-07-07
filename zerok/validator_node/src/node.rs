@@ -1,3 +1,15 @@
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 use crate::api::EspressoError;
 use crate::ser_test;
 use crate::validator_node::*;
@@ -653,7 +665,6 @@ impl FullState {
         }
 
         // Store and broadcast the new memos.
-        //todo !jeb.bearer update memos in storage
         let event = LedgerEvent::Memos {
             outputs: izip!(
                 new_memos,
@@ -685,8 +696,6 @@ impl<'a> PhaseLockQueryService<'a> {
         event_source: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
 
         // The current state of the network.
-        //todo !jeb.bearer Query these parameters from another full node if we are not starting off
-        // a fresh network.
         univ_param: &'a jf_cap::proof::UniversalParam,
         mut validator: ValidatorState,
         record_merkle_tree: MerkleTree,
@@ -706,6 +715,8 @@ impl<'a> PhaseLockQueryService<'a> {
         //todo !jeb.bearer If we are not starting from the genesis of the ledger, query the full
         // state at this point from another full node, like
         //  let state = other_node.full_state(validator.commit());
+        // https://github.com/EspressoSystems/espresso/issues/415
+        //
         // For now, just assume we are starting at the beginning:
         let block_hashes = HashMap::new();
         // Use the unpruned record Merkle tree.
@@ -885,8 +896,6 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
         validator: LightWeightNode<NET, STORE>,
 
         // The current state of the network.
-        //todo !jeb.bearer Query these parameters from another full node if we are not starting off
-        // a fresh network.
         univ_param: &'a jf_cap::proof::UniversalParam,
         state: ValidatorState,
         record_merkle_tree: MerkleTree,
@@ -1325,6 +1334,7 @@ mod tests {
 
                     // Posting the same memos twice should fail.
                     // todo !jeb.bearer re-enable this test when persistent memo storage is supported
+                    //      https://github.com/EspressoSystems/espresso/issues/345
                     // match qs
                     //     .post_memos(block_id as u64, txn_id as u64, memos.clone(), sig.clone())
                     //     .await
@@ -1337,6 +1347,7 @@ mod tests {
 
                     // We should be able to query the newly posted memos.
                     // todo !jeb.bearer re-enable this test when persistent memo storage is supported
+                    //      https://github.com/EspressoSystems/espresso/issues/345
                     // let (queried_memos, sig) =
                     //     qs.get_memos(block_id as u64, txn_id as u64).await.unwrap();
                     // txn.verify_receiver_memos_signature(&queried_memos, &sig)

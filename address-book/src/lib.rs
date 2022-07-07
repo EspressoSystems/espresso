@@ -23,6 +23,7 @@ use tide::{
     StatusCode,
 };
 
+#[cfg(not(windows))]
 pub mod signal;
 
 pub const DEFAULT_PORT: u16 = 50078u16;

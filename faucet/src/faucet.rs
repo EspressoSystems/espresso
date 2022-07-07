@@ -1,8 +1,14 @@
 // Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
 //
-// This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
-// You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
 
 //! # The Espresso Faucet
 //!
@@ -15,7 +21,11 @@ use jf_cap::{
     keys::{UserKeyPair, UserPubKey},
     structs::AssetCode,
 };
-use rand::distributions::{Alphanumeric, DistString};
+use rand::{
+    distributions::{Alphanumeric, DistString},
+    SeedableRng,
+};
+use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::path::PathBuf;
@@ -28,7 +38,8 @@ use tide::{
 };
 use validator_node::keystore::{
     events::EventIndex,
-    loader::{Loader, LoaderMetadata},
+    hd::Mnemonic,
+    loader::{MnemonicPasswordLogin, RecoveryLoader},
     network::NetworkBackend,
     EspressoKeystore, EspressoKeystoreError,
 };
@@ -42,7 +53,7 @@ use zerok_lib::universal_params::UNIVERSAL_PARAM;
 pub struct FaucetOptions {
     /// mnemonic for the faucet keystore
     #[structopt(long, env = "ESPRESSO_FAUCET_WALLET_MNEMONIC")]
-    pub mnemonic: String,
+    pub mnemonic: Mnemonic,
 
     /// path to the faucet keystore
     #[structopt(long = "keystore-path", env = "ESPRESSO_FAUCET_WALLET_STORE_PATH")]
@@ -95,7 +106,7 @@ pub struct FaucetOptions {
 
 #[derive(Clone)]
 struct FaucetState {
-    keystore: Arc<Mutex<EspressoKeystore<'static, NetworkBackend<'static>, LoaderMetadata>>>,
+    keystore: Arc<Mutex<EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin>>>,
     grant_size: u64,
     fee_size: u64,
 }
@@ -176,16 +187,16 @@ async fn request_fee_assets(
 
 /// `faucet_key_pair` - If provided, will be added to the faucet keystore.
 pub async fn init_web_server(
+    rng: &mut ChaChaRng,
     opt: &FaucetOptions,
     faucet_key_pair: Option<UserKeyPair>,
 ) -> std::io::Result<JoinHandle<std::io::Result<()>>> {
     let mut password = opt.faucet_password.clone();
     if password.is_empty() {
-        password = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+        password = Alphanumeric.sample_string(rng, 16);
     }
-    let mut loader = Loader::recovery(
-        opt.mnemonic.clone().replace('-', " "),
-        password,
+    let mut loader = RecoveryLoader::new(
+        rng,
         opt.faucet_keystore_path.clone().unwrap_or_else(|| {
             dirs::data_local_dir()
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("./")))
@@ -194,6 +205,8 @@ pub async fn init_web_server(
                 .join("faucet")
                 .join("keystore")
         }),
+        opt.mnemonic.clone(),
+        password,
     );
     let backend = NetworkBackend::new(
         &*UNIVERSAL_PARAM,
@@ -245,15 +258,18 @@ pub async fn init_web_server(
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::fmt()
-        .compact()
         .with_ansi(false)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
     // Initialize the faucet web server.
-    init_web_server(&FaucetOptions::from_args(), None)
-        .await?
-        .await?;
+    init_web_server(
+        &mut ChaChaRng::from_entropy(),
+        &FaucetOptions::from_args(),
+        None,
+    )
+    .await?
+    .await?;
 
     Ok(())
 }
@@ -270,7 +286,7 @@ mod test {
     use std::time::Duration;
     use tempdir::TempDir;
     use tracing_test::traced_test;
-    use validator_node::keystore::hd::KeyTree;
+    use validator_node::keystore::{hd::KeyTree, loader::CreateLoader};
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
         let mut backoff = Duration::from_millis(100);
@@ -302,7 +318,7 @@ mod test {
         let faucet_port = pick_unused_port().unwrap();
         let grant_size = 5000;
         let opt = FaucetOptions {
-            mnemonic: mnemonic.to_string(),
+            mnemonic,
             faucet_keystore_path: Some(PathBuf::from(faucet_dir.path())),
             faucet_password: "".to_string(),
             faucet_port: faucet_port.clone(),
@@ -312,15 +328,19 @@ mod test {
             grant_size,
             fee_size: 100,
         };
-        init_web_server(&opt, Some(faucet_key_pair)).await.unwrap();
+        init_web_server(&mut rng, &opt, Some(faucet_key_pair))
+            .await
+            .unwrap();
         println!("Faucet server initiated.");
 
         // Create a receiver keystore.
         let receiver_dir = TempDir::new("cape_keystore_receiver").unwrap();
-        let mut receiver_loader = Loader::from_literal(
-            Some(KeyTree::random(&mut rng).1.to_string().replace('-', " ")),
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 16),
+        let receiver_mnemonic = KeyTree::random(&mut rng).1;
+        let mut receiver_loader = CreateLoader::exclusive(
+            &mut rng,
             PathBuf::from(receiver_dir.path()),
+            receiver_mnemonic,
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 16),
         );
         let mut receiver = network.create_wallet(&mut receiver_loader).await;
         let receiver_key = receiver

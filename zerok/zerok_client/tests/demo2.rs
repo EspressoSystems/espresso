@@ -1,3 +1,15 @@
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 extern crate zerok_client;
 use zerok_client::cli_client::cli_test;
 
@@ -104,6 +116,7 @@ fn demo2() {
             //  * show that all validators have the same state commitment (/getsnapshot)
             //  * show the public information about the committed block (/getblock, /gettransaction,
             //    /getunspentrecord)
+            // https://github.com/EspressoSystems/espresso/issues/413
             //
             // Close a validator (not 0, that's the server for the keystores) and show that we can
             // still complete transactions.
@@ -133,6 +146,7 @@ fn demo2() {
             // TODO Query the state commitments again, showing that
             //  1. All the validator's still agree on the state
             //  2. The restarted valiator has caught up and now agrees on the latest state
+            // https://github.com/EspressoSystems/espresso/issues/413
             //
             // To show that non-native assets work just as well, define, mint and transfer one.
             // Define a new asset and mint some for the receiver.

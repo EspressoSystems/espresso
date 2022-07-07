@@ -1,4 +1,15 @@
 #![allow(dead_code)]
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
 
 use async_std::task::{block_on, sleep, spawn_blocking};
 use escargot::CargoBuild;
@@ -129,9 +140,11 @@ impl CliClient {
     /// values using named capture groups in regexes.
     ///
     /// If `keystore` refers to a keystore that has not yet been created, a new one will be created. The
-    /// [TestState] always starts off with one keystore, index 0, which gets an initial grant of 2^32
+    /// `TestState` always starts off with one keystore, index 0, which gets an initial grant of 2^32
     /// native tokens. So `command(0, "command")` will not load a new keystore. But the first time
     /// `command(1, "command")` is called, it will block until keystore 1 is created.
+    ///
+    /// [output]: #method.output
     pub fn command(&mut self, id: usize, command: impl AsRef<str>) -> Result<&mut Self, String> {
         let command = self.substitute(command)?;
         let keystore = self
@@ -310,7 +323,7 @@ impl Keystore {
     }
 
     fn key_gen(key_path: &Path) -> Result<(), String> {
-        cargo_run("zerok_client")?
+        cargo_run("zerok_client", "wallet-cli")?
             .args([
                 "-g",
                 key_path
@@ -353,7 +366,7 @@ impl Keystore {
         if self.process.is_some() {
             return Err(String::from("keystore is already open"));
         }
-        let mut child = cargo_run("zerok_client")?
+        let mut child = cargo_run("zerok_client", "wallet-cli")?
             .args([
                 "--storage",
                 self.storage.path().as_os_str().to_str().ok_or_else(|| {
@@ -501,7 +514,7 @@ impl Validator {
         let id = self.id;
         let port = self.port;
         let mut child = spawn_blocking(move || {
-            cargo_run("espresso-validator")
+            cargo_run("espresso-validator", "espresso-validator")
                 .map_err(err)?
                 .args([
                     "--config",
@@ -562,9 +575,9 @@ fn err(err: impl std::fmt::Display) -> String {
     err.to_string()
 }
 
-fn cargo_run(bin: impl AsRef<str>) -> Result<Command, String> {
+fn cargo_run(package: impl AsRef<str>, bin: impl AsRef<str>) -> Result<Command, String> {
     Ok(CargoBuild::new()
-        .package(bin.as_ref())
+        .package(package.as_ref())
         .bin(bin.as_ref())
         .current_release()
         .current_target()

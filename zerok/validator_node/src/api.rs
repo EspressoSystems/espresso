@@ -1,3 +1,15 @@
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 use fmt::{Display, Formatter};
 use jf_cap::{structs::ReceiverMemo, Signature, TransactionNote};
 use phaselock::PhaseLockError;
@@ -97,6 +109,8 @@ impl From<Box<bincode::ErrorKind>> for EspressoError {
 /// Having default conversion functions for each variant ensures that new error types can be added
 /// to [EspressoError] without breaking existing conversions, as long as a corresponding new default
 /// method is added to this trait.
+///
+/// [catch_all]: #tymethod.catch_all
 pub trait FromError: Sized {
     fn catch_all(msg: String) -> Self;
 
@@ -136,6 +150,9 @@ pub trait FromError: Sized {
     /// If `source` can be downcast to an [Error], it is converted to the specific type using
     /// [from_espresso_error]. Otherwise, it is converted to a [String] using [Display] and then
     /// converted to the specific type using [catch_all].
+    ///
+    /// [from_espresso_error]: #method.from_espresso_error
+    /// [catch_all]: #tymethod.catch_all
     fn from_client_error(source: surf::Error) -> Self {
         Self::from_espresso_error(<EspressoError as Error>::from_client_error(source))
     }
@@ -193,7 +210,7 @@ impl FromError for seahorse::KeystoreError<EspressoLedger> {
 /// Context for embedding network client errors into specific error types.
 ///
 /// This type implements the [IntoError] trait from SNAFU, so it can be used with
-/// [ResultExt::context] just like automatically generated SNAFU contexts.
+/// `ResultExt::context` just like automatically generated SNAFU contexts.
 ///
 /// Calling `some_result.context(EspressoError)` will convert a potential error from a [surf::Error]
 /// to a specific error type `E: FromError` using the method `E::from_client_error`, provided by the

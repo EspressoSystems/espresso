@@ -1,3 +1,15 @@
+# Copyright (c) 2022 Espresso Systems (espressosys.com)
+# This file is part of the Espresso library.
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# General Public License as published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program. If not,
+# see <https://www.gnu.org/licenses/>.
+
 name: Static Build
 
 on:
@@ -5,6 +17,9 @@ on:
     branches:
       - main
       - release-*
+    tags:
+      # YYYYMMDD
+      - "20[0-9][0-9][0-1][0-9][0-3][0-9]*"
   pull_request:
     branches:
       - main
@@ -34,6 +49,16 @@ jobs:
           name: espresso-systems-private
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
+      - name: Cache cargo
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git
+            target
+          key: espresso-static-v1-${{ hashFiles('Cargo.lock') }}
+
       - name: Fix Git Security Issue
         run: git config --global --add safe.directory "$PWD"
 
@@ -48,39 +73,26 @@ jobs:
           nix develop .#staticShell --option sandbox relaxed -c cargo build --release
 
       # prune all untagged artifacts besides the most recent 5.
-      - uses: c-hive/gha-remove-artifacts@v1
-        if: ${{ github.event_name != 'pull_request' }}
-        name: Garbage collect old artifacts
-        with:
-          skip-tags: true
-          skip-recent: 5
-          GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_PAT }}
-          age: '0 day'
+      # BREAKING BUILD AS OF 2022-07-01
+      #- uses: c-hive/gha-remove-artifacts@v1
+      #  if: ${{ github.event_name != 'pull_request' }}
+      #  name: Garbage collect old artifacts
+      #  with:
+      #    skip-tags: true
+      #    skip-recent: 5
+      #    GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_PAT }}
+      #    age: '0 day'
 
 
       - name: Upload address book artifact
         uses: actions/upload-artifact@v3
         with:
-          name: x86_64-unknown-linux-musl-address-book
-          path: target/x86_64-unknown-linux-musl/release/address-book
-
-      - name: Upload faucet artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-faucet
-          path: target/x86_64-unknown-linux-musl/release/faucet
-
-      - name: Upload validator artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-validator
-          path: target/x86_64-unknown-linux-musl/release/espresso-validator
-
-      - name: Upload random wallet artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-random-wallet
-          path: target/x86_64-unknown-linux-musl/release/random_wallet
+          name: x86_64-unknown-linux-musl-services
+          path: |
+            target/x86_64-unknown-linux-musl/release/address-book
+            target/x86_64-unknown-linux-musl/release/espresso-validator
+            target/x86_64-unknown-linux-musl/release/faucet
+            target/x86_64-unknown-linux-musl/release/random_wallet
 
   static-dockers:
     runs-on: ubuntu-latest
@@ -92,25 +104,7 @@ jobs:
       - name: Download address-book executable
         uses: actions/download-artifact@v3
         with:
-          name: x86_64-unknown-linux-musl-address-book
-          path: target/x86_64-unknown-linux-musl/release/
-
-      - name: Download faucet executable
-        uses: actions/download-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-faucet
-          path: target/x86_64-unknown-linux-musl/release/
-
-      - name: Download validator executable
-        uses: actions/download-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-validator
-          path: target/x86_64-unknown-linux-musl/release/
-
-      - name: Download random wallet executable
-        uses: actions/download-artifact@v3
-        with:
-          name: x86_64-unknown-linux-musl-random-wallet
+          name: x86_64-unknown-linux-musl-services
           path: target/x86_64-unknown-linux-musl/release/
 
       - name: Setup Docker BuildKit (buildx)
@@ -141,7 +135,7 @@ jobs:
         id: validator
         with:
           images: ghcr.io/espressosystems/espresso/validator
-        
+
       - name: Generate random wallet docker metadata
         uses: docker/metadata-action@v3
         id: random-wallet
@@ -185,6 +179,5 @@ jobs:
           file: ./docker/random-wallet.Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.validator.outputs.tags }}
-          labels: ${{ steps.validator.outputs.labels }}
-
+          tags: ${{ steps.random-wallet.outputs.tags }}
+          labels: ${{ steps.random-wallet.outputs.labels }}

@@ -43,7 +43,7 @@ snafu = { version = "0.7", features = ["backtraces"] }
 surf = "2.3.1"
 tempdir = "0.3.7"
 tide = "0.16.0"
-tracing = "0.1.26"
+tracing = "0.1.35"
 zerok_lib = { path = "../zerok_lib" }
 
 [dev-dependencies]
