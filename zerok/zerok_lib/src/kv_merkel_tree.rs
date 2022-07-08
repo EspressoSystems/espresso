@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::tree_hash::{*, committable_hash::*};
 use generic_array::{GenericArray};
 use core::fmt::Debug;
+use typenum::Unsigned;
 
 
 
@@ -18,7 +19,7 @@ use core::fmt::Debug;
 /// testing purposes. The implementation tests for logical equality of the represented set, ignoring
 /// sparseness. That is, any two sets with the same root hash will compare equal, even if the
 /// elements retained in memory are different between the two sets.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum KVMerkleTree<K, V, T> 
 where
     K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
@@ -38,7 +39,7 @@ where
     },
     Branch {
         digest: <CommitableHash<K,V,T> as KVTreeHash>::Digest,
-        children: Box<GenericArray<<CommitableHash<K,V,T> as KVTreeHash>::Digest, <CommitableHash<K,V,T> as KVTreeHash>::BranchArity>>,
+        children: GenericArray<<CommitableHash<K,V,T> as KVTreeHash>::Digest, <CommitableHash<K,V,T> as KVTreeHash>::BranchArity>,
     },
 }
 
@@ -64,7 +65,7 @@ impl<'a,K,V,D,A> arbitrary::Arbitrary<'a> for KVMerkleTree<K,V,D,A,T> {
     }
 }
 */
-impl<K,V, T> KVMerkleTree<K,V,T>
+impl<K,V,T> KVMerkleTree<K,V,T>
 where
     K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
     V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
@@ -75,15 +76,12 @@ where
         let key_bits = key_bit_vec.into_iter();
 
         let mut h = <CommitableHash<K,V,T> as KVTreeHash>::hash_leaf(key, value);
-        //KALEY: what happens when >2 siblings??
-        //KALEY: .into_iter() needed again?
-        for sib_is_left in key_bits.into_iter().take(height) {
-            let (l, r) = if sib_is_left {
-                (<CommitableHash<K,V,T> as KVTreeHash>::empty_digest(), h)
-            } else {
-                (h, <CommitableHash<K,V,T> as KVTreeHash>::empty_digest())
-            };
-            h = <CommitableHash<K,V,T> as KVTreeHash>::hash_branch([l, r]);
+
+        for sib in key_bits.into_iter().take(height) {
+            let mut childs = GenericArray::from_iter(vec![<CommitableHash<K,V,T> as KVTreeHash>::empty_digest(); <CommitableHash<K,V,T> as KVTreeHash>::BranchArity::to_usize()]);
+            childs[sib as usize] = h;
+            h = <CommitableHash<K,V,T> as KVTreeHash>::hash_branch(childs);
+            
         }
 
         Self::Leaf {
@@ -95,9 +93,9 @@ where
     }
 
     //fn new_branch(l: Box<Self>, r: Box<Self>) -> Self {
-    fn new_branch(children: Box<GenericArray<<CommitableHash<K,V,T> as KVTreeHash>::Digest, <CommitableHash<K,V,T> as KVTreeHash>::BranchArity>>) -> Self {
+    fn new_branch(children: GenericArray<<CommitableHash<K,V,T> as KVTreeHash>::Digest, <CommitableHash<K,V,T> as KVTreeHash>::BranchArity>) -> Self {
         Self::Branch {
-            digest: <CommitableHash<K,V,T> as KVTreeHash>::hash_branch(*children),
+            digest: <CommitableHash<K,V,T> as KVTreeHash>::hash_branch(children),
             children,
         }
     }
@@ -204,14 +202,10 @@ where
                 let mut running_hash = <CommitableHash<K,V,T> as KVTreeHash>::hash_leaf(*key, *value);
 
                 // if the height is too large, keep hashing
-                //KALEY: more than 2 children issue?
-                for sib_is_left in key_bits.chain(core::iter::repeat(false)).take(*height) {
-                    let sib = <CommitableHash<K,V,T> as KVTreeHash>::empty_digest();
-                    running_hash = {
-                        let l = if sib_is_left { sib } else { running_hash };
-                        let r = if sib_is_left { running_hash } else { sib };
-                        <CommitableHash<K,V,T> as KVTreeHash>::hash_branch([l, r])
-                    };
+                for sib in key_bits.chain(core::iter::repeat(0)).take(*height) {
+                    let mut childs = GenericArray::from_iter(vec![<CommitableHash<K,V,T> as KVTreeHash>::empty_digest(); <CommitableHash<K,V,T> as KVTreeHash>::BranchArity::to_usize()]);
+                    childs[sib as usize] = running_hash;
+                    running_hash = <CommitableHash<K,V,T> as KVTreeHash>::hash_branch(childs);
                 }
                 running_hash
             }
@@ -256,7 +250,6 @@ where
         let start_bit = key_bit_vec.len() - self.path.len();
         let key_bits = key_bit_vec.into_iter().skip(start_bit);
 
-        //KALEY: fix for >2 children?
         for (sib, sib_is_left) in self.path.iter().zip(key_bits) {
             let sib = *sib;
             running_hash = {
