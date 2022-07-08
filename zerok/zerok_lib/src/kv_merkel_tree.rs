@@ -8,10 +8,10 @@ use ark_serialize::*;
 use core::mem;
 //use jf_cap::structs::Nullifier;
 use serde::{Deserialize, Serialize};
-use crate::tree_hash::{*, committable_hash::*};
-use generic_array::{GenericArray};
+use crate::tree_hash::{*};
+use generic_array::{GenericArray,ArrayLength};
 use core::fmt::Debug;
-use typenum::Unsigned;
+
 
 
 
@@ -20,34 +20,39 @@ use typenum::Unsigned;
 /// sparseness. That is, any two sets with the same root hash will compare equal, even if the
 /// elements retained in memory are different between the two sets.
 #[derive(Debug, Clone)]
-pub enum KVMerkleTree<K, V, T> 
+pub enum KVMerkleTree<Hash, Arity> 
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //T: CommitableHashTag,
+    Hash: KVTreeHash,
+    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
 {
     EmptySubtree,
     ForgottenSubtree {
-        digest: <CommitableHash<K,V,T> as KVTreeHash>::Digest,
+        digest: Hash::Digest,
     },
     Leaf {
-        digest: <CommitableHash<K,V,T> as KVTreeHash>::Digest,
+        digest: Hash::Digest,
         /// how far above the "true" leaf level this leaf is
         height: usize,
-        key: <CommitableHash<K,V,T> as KVTreeHash>::Key,
-        value: <CommitableHash<K,V,T> as KVTreeHash>::Value,
+        key: Hash::Key,
+        value: Hash::Value,
     },
     Branch {
-        digest: <CommitableHash<K,V,T> as KVTreeHash>::Digest,
-        children: GenericArray<<CommitableHash<K,V,T> as KVTreeHash>::Digest, <CommitableHash<K,V,T> as KVTreeHash>::BranchArity>,
+        digest: Hash::Digest,
+        //children: GenericArray<Hash::Digest, Hash::BranchArity>,
+        children: Box<GenericArray<KVMerkleTree<Hash,Arity>, Arity>>,
     },
 }
 
-impl<K,V,T> PartialEq<Self> for KVMerkleTree<K,V,T>
+impl<Hash, Arity> PartialEq<Self> for KVMerkleTree<Hash, Arity>
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    Hash: KVTreeHash,
+    //T: CommitableHashTag,
+    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
  {
     fn eq(&self, other: &Self) -> bool {
         self.hash() == other.hash()
@@ -65,22 +70,24 @@ impl<'a,K,V,D,A> arbitrary::Arbitrary<'a> for KVMerkleTree<K,V,D,A,T> {
     }
 }
 */
-impl<K,V,T> KVMerkleTree<K,V,T>
+impl<Hash, Arity> KVMerkleTree<Hash, Arity>
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    Hash: KVTreeHash,
+    //T: CommitableHashTag,
+    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq  + ArrayLength<Hash::Digest>,
  {
-    fn new_leaf(height: usize, key: <CommitableHash<K,V,T> as KVTreeHash>::Key, value: <CommitableHash<K,V,T> as KVTreeHash>::Value) -> Self {
-        let key_bit_vec = <CommitableHash<K,V,T> as KVTreeHash>::traversal_of_digest(<CommitableHash<K,V,T> as KVTreeHash>::hash_key(key));
+    fn new_leaf(height: usize, key: Hash::Key, value: Hash::Value) -> Self {
+        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
         let key_bits = key_bit_vec.into_iter();
 
-        let mut h = <CommitableHash<K,V,T> as KVTreeHash>::hash_leaf(key, value);
+        let mut h = Hash::hash_leaf(key, value);
 
         for sib in key_bits.into_iter().take(height) {
-            let mut childs = GenericArray::from_iter(vec![<CommitableHash<K,V,T> as KVTreeHash>::empty_digest(); <CommitableHash<K,V,T> as KVTreeHash>::BranchArity::to_usize()]);
+            let mut childs = GenericArray::from_iter(vec![Hash::empty_digest(); Arity::to_usize()]);
             childs[sib as usize] = h;
-            h = <CommitableHash<K,V,T> as KVTreeHash>::hash_branch(childs);
+            h = Hash::hash_branch(childs);
             
         }
 
@@ -93,19 +100,22 @@ where
     }
 
     //fn new_branch(l: Box<Self>, r: Box<Self>) -> Self {
-    fn new_branch(children: GenericArray<<CommitableHash<K,V,T> as KVTreeHash>::Digest, <CommitableHash<K,V,T> as KVTreeHash>::BranchArity>) -> Self {
+    fn new_branch(children: Box<GenericArray<Self, Arity>>) -> Self {
+        let childs = GenericArray::from_iter(children.into_iter().map(|d| d.hash()));
         Self::Branch {
-            digest: <CommitableHash<K,V,T> as KVTreeHash>::hash_branch(children),
+            digest: Hash::hash_branch(childs),
             children,
         }
     }
 }
 
-impl <K,V,T> Default for KVMerkleTree<K,V,T> 
+impl <Hash, Arity> Default for KVMerkleTree<Hash,Arity> 
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //T: CommitableHashTag,
+    Hash: KVTreeHash,
+    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq  + ArrayLength<Hash::Digest>,
 {
     fn default() -> Self {
         Self::EmptySubtree
@@ -113,26 +123,30 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum KVMerkleTerminalNode<K,V,T> 
+pub enum KVMerkleTerminalNode<Hash> 
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //T: CommitableHashTag,
+    Hash: KVTreeHash,
+    //Arity: ArrayLength<KVMerkleTree<K, V, Hash, Arity>> + Debug + PartialEq,
  {
     EmptySubtree,
     Leaf {
         /// how far above the "true" leaf level this leaf is
         height: usize,
-        key: <CommitableHash<K,V,T> as KVTreeHash>::Key,
-        value: <CommitableHash<K,V,T> as KVTreeHash>::Value,
+        key: Hash::Key,
+        value: Hash::Value,
     },
 }
 
-impl<K,V,T> CanonicalSerialize for KVMerkleTerminalNode<K,V,T> 
+impl<Hash> CanonicalSerialize for KVMerkleTerminalNode<Hash> 
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //T: CommitableHashTag,
+    Hash: KVTreeHash,
+    //Arity: ArrayLength<KVMerkleTree<K, V, Hash, Arity>> + Debug + PartialEq,
  {
     fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
         match self {
@@ -158,11 +172,13 @@ where
     }
 }
 
-impl<K,V,T> CanonicalDeserialize for KVMerkleTerminalNode<K,V,T>
+impl<Hash> CanonicalDeserialize for KVMerkleTerminalNode<Hash>
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //T: CommitableHashTag,
+    Hash: KVTreeHash,
+    //Arity: ArrayLength<KVMerkleTree<K, V, Hash, Arity>> + Debug + PartialEq,
  {
     fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
         let mut flag = [0u8];
@@ -180,32 +196,35 @@ where
     }
 }
 
-impl<K,V,T> KVMerkleTerminalNode<K,V,T>
+impl<Hash> KVMerkleTerminalNode<Hash>
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //T: CommitableHashTag,
+    Hash: KVTreeHash,
+    //Arity: ArrayLength<KVMerkleTree<K, V, Hash, Arity>> + Debug + PartialEq,
 {
-    fn value(&self) -> <CommitableHash<K,V,T> as KVTreeHash>::Digest {
+    fn value<Arity>(&self) -> Hash::Digest 
+    where
+        Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq  + ArrayLength<Hash::Digest>,
+    {
         use KVMerkleTerminalNode::*;
         match self {
-            EmptySubtree => <CommitableHash<K,V,T> as KVTreeHash>::empty_digest(),
+            EmptySubtree => Hash::empty_digest(),
             Leaf { height, key, value } => {
-                //KALEY: reminder to check *'s if weird build errors
-                //KALEY: double check that this is correct (using hash_key here)
-                let key_bit_vec = <CommitableHash<K,V,T> as KVTreeHash>::traversal_of_digest(<CommitableHash<K,V,T> as KVTreeHash>::hash_key(*key));
+                let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(*key));
 
                 // the path only goes until a terminal node is reached, so skip
                 // part of the bit-vec
                 let key_bits = key_bit_vec.into_iter();
 
-                let mut running_hash = <CommitableHash<K,V,T> as KVTreeHash>::hash_leaf(*key, *value);
+                let mut running_hash = Hash::hash_leaf(*key, *value);
 
                 // if the height is too large, keep hashing
                 for sib in key_bits.chain(core::iter::repeat(0)).take(*height) {
-                    let mut childs = GenericArray::from_iter(vec![<CommitableHash<K,V,T> as KVTreeHash>::empty_digest(); <CommitableHash<K,V,T> as KVTreeHash>::BranchArity::to_usize()]);
+                    let mut childs = GenericArray::from_iter(vec![Hash::empty_digest(); Arity::to_usize()]);
                     childs[sib as usize] = running_hash;
-                    running_hash = <CommitableHash<K,V,T> as KVTreeHash>::hash_branch(childs);
+                    running_hash = Hash::hash_branch(childs);
                 }
                 running_hash
             }
@@ -224,42 +243,45 @@ where
     Serialize,
     Deserialize,
 )]
-pub struct KVMerkleProof<K,V,T> 
+pub struct KVMerkleProof<Hash,Arity> 
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //T: CommitableHashTag,
+    Hash: KVTreeHash,
+    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
  {
-    terminal_node: KVMerkleTerminalNode<K,V,T>,
-    path: Vec<<CommitableHash<K,V,T> as KVTreeHash>::Digest>,
+    terminal_node: KVMerkleTerminalNode<Hash>,
+    path: Vec<GenericArray<Hash::Digest, Arity>>,
 }
 
-impl<K,V,T> KVMerkleProof<K,V,T>
+impl<Hash,Arity> KVMerkleProof<Hash,Arity>
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //T: CommitableHashTag,
+    Hash: KVTreeHash,
+    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
  {
-    pub fn check(&self, key: <CommitableHash<K,V,T> as KVTreeHash>::Key, value: <CommitableHash<K,V,T> as KVTreeHash>::Value, root: <CommitableHash<K,V,T> as KVTreeHash>::Digest) -> Result<bool, <CommitableHash<K,V,T> as KVTreeHash>::Digest> {
-        let mut running_hash = self.terminal_node.value();
+    pub fn check(&self, key: Hash::Key, value: Hash::Value, root: Hash::Digest) -> Result<bool, Hash::Digest> {
+        let mut running_hash = self.terminal_node.value::<Arity>();
 
-        let key_bit_vec = <CommitableHash<K,V,T> as KVTreeHash>::traversal_of_digest(<CommitableHash<K,V,T> as KVTreeHash>::hash_key(key));
+        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
 
         // the path only goes until a terminal node is reached, so skip
         // part of the bit-vec
         let start_bit = key_bit_vec.len() - self.path.len();
         let key_bits = key_bit_vec.into_iter().skip(start_bit);
 
-        for (sib, sib_is_left) in self.path.iter().zip(key_bits) {
-            let sib = *sib;
+        for (sibs, sib_position) in self.path.iter().zip(key_bits) {
+            let sibs = *sibs;
             running_hash = {
-                let l = if sib_is_left { sib } else { running_hash };
-                let r = if sib_is_left { running_hash } else { sib };
-                <CommitableHash<K,V,T> as KVTreeHash>::hash_branch([l, r])
+                sibs.insert(sib_position as usize, running_hash);
+                Hash::hash_branch(GenericArray::from_iter(sibs))
             };
         }
 
-        if &running_hash == root {
+        if running_hash == root {
             Ok(match &self.terminal_node {
                 KVMerkleTerminalNode::EmptySubtree {} => false,
                 KVMerkleTerminalNode::Leaf {
@@ -274,20 +296,22 @@ where
     }
 }
 
-impl<K,V, T> KVMerkleTree<K,V,T>
+impl<Hash,Arity> KVMerkleTree<Hash,Arity>
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //T: CommitableHashTag,
+    Hash: KVTreeHash,
+    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
  {
-    pub fn sparse(root: <CommitableHash<K,V,T> as KVTreeHash>::Digest) -> Self {
+    pub fn sparse(root: Hash::Digest) -> Self {
         Self::ForgottenSubtree { digest: root }
     }
 
-    pub fn hash(&self) -> <CommitableHash<K,V,T> as KVTreeHash>::Digest {
+    pub fn hash(&self) -> Hash::Digest {
         use KVMerkleTree::*;
         match self {
-            EmptySubtree => <CommitableHash<K,V,T> as KVTreeHash>::empty_digest(),
+            EmptySubtree => Hash::empty_digest(),
             Leaf { digest, .. } => *digest,
             ForgottenSubtree { digest, .. } => *digest,
             Branch { digest, .. } => *digest,
@@ -295,18 +319,22 @@ where
     }
 
     /// Returns `None` if the element is in a forgotten subtree
-    pub fn contains(&self, key: <CommitableHash<K,V,T> as KVTreeHash>::Key, value: <CommitableHash<K,V,T> as KVTreeHash>::Value) -> Option<(bool, KVMerkleProof<K,V,T>)> {
+    pub fn contains(&self, key: Hash::Key, value: Hash::Value) -> Option<(bool, KVMerkleProof<Hash,Arity>)> {
         use KVMerkleTree::*;
-        let key_bit_vec = <CommitableHash<K,V,T> as KVTreeHash>::traversal_of_digest(<CommitableHash<K,V,T> as KVTreeHash>::hash_key(key));
+        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
         let key_bits = key_bit_vec.into_iter().rev();
 
-        let mut path = vec![];
+        let mut path = vec![vec![];0];
         let mut end_branch = self;
-        for sib_is_left in key_bits {
+        for sib in key_bits {
             match end_branch {
-                Branch { l, r, .. } => {
-                    path.push(if sib_is_left { l.hash() } else { r.hash() });
-                    end_branch = if sib_is_left { r.as_ref() } else { l.as_ref() };
+                Branch { children, .. } => {
+                    //GenericArray::from_iter(children.into_iter().map(|d| d.hash()))
+                    let children_l: Vec<_> = children[0..sib as usize].into_iter().map(|d| d.hash()).collect();
+                    let children_r: Vec<_> = children[sib as usize + 1 ..].into_iter().map(|d| d.hash()).collect();
+                    let all_children = children_l.append(&mut children_r);
+                    path.push(all_children);
+                    end_branch = &children[sib as usize];
                 }
                 _ => {
                     break;
@@ -349,9 +377,9 @@ where
         }
     }
 
-    pub fn insert(&mut self, key: <CommitableHash<K,V,T> as KVTreeHash>::Key, value: <CommitableHash<K,V,T> as KVTreeHash>::Value) -> Option<()> {
+    pub fn insert(&mut self, key: Hash::Key, value: Hash::Value) -> Option<()> {
         use KVMerkleTree::*;
-        let key_bit_vec = <CommitableHash<K,V,T> as KVTreeHash>::traversal_of_digest(<CommitableHash<K,V,T> as KVTreeHash>::hash_key(key));
+        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
         let mut end_height = key_bit_vec.len();
         let key_bits = key_bit_vec.into_iter().rev();
 
@@ -376,7 +404,7 @@ where
                     // Figure out if this leaf is down the same tree or if it's a sibling
                     let leaf_is_left = {
                         debug_assert!(height > 0);
-                        let key_bit_vec = <CommitableHash<K,V,T> as KVTreeHash>::traversal_of_digest(<CommitableHash<K,V,T> as KVTreeHash>::hash_key(key));
+                        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
                         !key_bit_vec[height - 1]
                     };
 
@@ -439,9 +467,9 @@ where
         ret
     }
 
-    pub fn forget(&mut self, key: <CommitableHash<K,V,T> as KVTreeHash>::Key, value: <CommitableHash<K,V,T> as KVTreeHash>::Value) -> Option<KVMerkleProof<K,V,T>> {
+    pub fn forget(&mut self, key: Hash::Key, value: Hash::Value) -> Option<KVMerkleProof<Hash,Arity>> {
         use KVMerkleTree::*;
-        let key_bit_vec = <CommitableHash<K,V,T> as KVTreeHash>::traversal_of_digest(<CommitableHash<K,V,T> as KVTreeHash>::hash_key(key));
+        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
         let key_bits = key_bit_vec.into_iter().rev();
 
         let mut siblings = vec![];
@@ -511,23 +539,23 @@ where
 
     pub fn remember(
         &mut self,
-        key: <CommitableHash<K,V,T> as KVTreeHash>::Key,
-        value: <CommitableHash<K,V,T> as KVTreeHash>::Value,
-        proof: KVMerkleProof<K,V,T>,
-    ) -> Result<(), <CommitableHash<K,V,T> as KVTreeHash>::Digest> {
+        key: Hash::Key,
+        value: Hash::Value,
+        proof: KVMerkleProof<Hash,Arity>,
+    ) -> Result<(), Hash::Digest> {
         // Check the proof before we do anything. After checking, we can
         // safely assume that all the values along the path match.
         let key_in_set = proof.check(key, value, self.hash())?;
 
         use KVMerkleTree::*;
-        let key_bit_vec = <CommitableHash<K,V,T> as KVTreeHash>::traversal_of_digest(<CommitableHash<K,V,T> as KVTreeHash>::hash_key(key));
+        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
 
         let mut siblings = vec![];
         let mut end_branch = mem::replace(self, EmptySubtree);
 
         // TODO: this is redundant with the checking
         let path_hashes = {
-            let mut running_hash = proof.terminal_node.value();
+            let mut running_hash = proof.terminal_node.value::<Arity>();
 
             let mut ret = vec![];
             ret.reserve(proof.path.len() + 1);
@@ -590,7 +618,7 @@ where
                     KVMerkleTerminalNode::EmptySubtree => {
                         // TODO: should this be possible????? it feels like it
                         // shouldn't be
-                        assert_eq!(digest, <CommitableHash<K,V,T> as KVTreeHash>::empty_digest());
+                        assert_eq!(digest, Hash::empty_digest());
                         EmptySubtree
                     }
 
@@ -615,14 +643,16 @@ where
     }
 }
 
-pub fn set_merkle_lw_multi_insert<K,V,T>(
-    inserts: Vec<(K, V, KVMerkleProof<K,V,T>)>,
-    root: <CommitableHash<K,V,T> as KVTreeHash>::Digest,
-) -> Result<(<CommitableHash<K,V,T> as KVTreeHash>::Digest, Vec<KVMerkleProof<K,V,T>>), <CommitableHash<K,V,T> as KVTreeHash>::Digest> 
+pub fn set_merkle_lw_multi_insert<Hash,Arity>(
+    inserts: Vec<KVMerkleProof<Hash,Arity>>,
+    root: Hash::Digest,
+) -> Result<(Hash::Digest, Vec<KVMerkleProof<Hash,Arity>>), Hash::Digest> 
 where
-    K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    T: CommitableHashTag,
+    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+   // T: CommitableHashTag,
+   Hash: KVTreeHash,
+   Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
  {
     let mut kvs = vec![];
     let mut s = KVMerkleTree::ForgottenSubtree { digest: root };
