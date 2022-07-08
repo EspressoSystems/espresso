@@ -17,7 +17,7 @@
 use async_std::task::block_on;
 use libfuzzer_sys::arbitrary::{Arbitrary, Result, Unstructured};
 use libfuzzer_sys::fuzz_target;
-use zerok_lib::keystore::test_helpers::*;
+use validator_node::keystore::test_helpers::*;
 
 #[derive(Debug)]
 struct MultiXfrParams {
@@ -97,5 +97,7 @@ fuzz_target!(|params: MultiXfrParams| {
         init_recs,
     } = params;
 
-    block_on(test_multixfr_keystore(txs, nkeys, ndefs, init_rec, init_recs))
+    block_on(test_multixfr_keystore(
+        txs, nkeys, ndefs, init_rec, init_recs,
+    ))
 });

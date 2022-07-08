@@ -1875,6 +1875,7 @@ dependencies = [
  "tracing-distributed",
  "tracing-futures",
  "tracing-subscriber 0.3.14",
+ "validator_node",
  "zerok_lib",
 ]
 
@@ -2016,6 +2017,7 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber 0.3.14",
  "tracing-test",
+ "validator_node",
  "zerok_lib",
 ]
 
@@ -5404,6 +5406,54 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "936e4b492acfd135421d8dca4b1aa80a7bfc26e702ef3af710e0752684df5372"
 
 [[package]]
+name = "validator_node"
+version = "0.1.0"
+dependencies = [
+ "address-book",
+ "arbitrary",
+ "arbitrary-wrappers",
+ "ark-serialize",
+ "ark-std",
+ "async-std",
+ "async-trait",
+ "async-tungstenite 0.15.0",
+ "async_executors",
+ "bincode",
+ "bitvec 0.20.1",
+ "commit",
+ "espresso-availability-api",
+ "espresso-catchup-api",
+ "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git)",
+ "espresso-metastate-api",
+ "espresso-status-api",
+ "futures",
+ "itertools 0.10.3",
+ "jf-cap",
+ "jf-primitives",
+ "jf-utils",
+ "key-set",
+ "lazy_static",
+ "net",
+ "phaselock",
+ "phaselock-types",
+ "proptest",
+ "quickcheck",
+ "quickcheck_macros",
+ "rand 0.7.3",
+ "rand_chacha 0.3.1",
+ "reef",
+ "seahorse",
+ "serde",
+ "serde_json",
+ "snafu",
+ "surf",
+ "tempdir",
+ "tide",
+ "tracing",
+ "zerok_lib",
+]
+
+[[package]]
 name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5779,6 +5829,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber 0.3.14",
+ "validator_node",
  "zerok_lib",
 ]
 

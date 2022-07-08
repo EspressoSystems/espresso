@@ -28,16 +28,14 @@ use std::time::Duration;
 use structopt::StructOpt;
 use surf::Url;
 use tempdir::TempDir;
-use zerok_lib::{
-    keystore::{
-        hd::{KeyTree, Mnemonic},
-        loader::{CreateLoader, MnemonicPasswordLogin},
-        network::NetworkBackend,
-        txn_builder::TransactionStatus,
-        EspressoKeystore, EspressoKeystoreError,
-    },
-    universal_params::UNIVERSAL_PARAM,
+use validator_node::keystore::{
+    hd::{KeyTree, Mnemonic},
+    loader::{CreateLoader, MnemonicPasswordLogin},
+    network::NetworkBackend,
+    txn_builder::TransactionStatus,
+    EspressoKeystore, EspressoKeystoreError,
 };
+use zerok_lib::universal_params::UNIVERSAL_PARAM;
 
 #[derive(Debug, StructOpt)]
 pub struct Options {

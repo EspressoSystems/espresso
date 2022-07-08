@@ -10,20 +10,17 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::full_persistence::FullPersistence;
-pub use crate::state::state_comm::LedgerStateCommitment;
-use crate::{
-    ledger::EspressoLedger,
-    ser_test,
-    set_merkle_tree::*,
-    state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
-    validator_node::*,
-};
+use crate::api::EspressoError;
+use crate::ser_test;
+use crate::validator_node::*;
 use arbitrary::Arbitrary;
 use arbitrary_wrappers::*;
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
 use async_trait::async_trait;
+use espresso_availability_api::data_source::UpdateAvailabilityData;
+use espresso_catchup_api::data_source::UpdateCatchUpData;
+use espresso_metastate_api::data_source::UpdateMetaStateData;
 pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::{channel::mpsc, future::RemoteHandle, select, task::SpawnExt};
@@ -45,6 +42,13 @@ use snafu::Snafu;
 use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use tracing::{debug, error};
+use zerok_lib::full_persistence::FullPersistence;
+pub use zerok_lib::state::state_comm::LedgerStateCommitment;
+use zerok_lib::{
+    ledger::EspressoLedger,
+    set_merkle_tree::*,
+    state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
+};
 
 pub trait ConsensusEvent {
     fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState>;
@@ -320,6 +324,20 @@ struct FullState {
     // Clients which have subscribed to events starting at some time in the future, to be added to
     // `subscribers` when the time comes.
     pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<LedgerEvent<EspressoLedger>>>>,
+
+    // Handles to the new store go here for now, in order to minimize the potential failure
+    // modes for the refactoring. Once we move over to the tide_disco based services, we may be
+    // able to remove most of this FullNode/FullState, leaving just the PhaseLockEvent processing
+    // and whatever needs to be added for subscription support.
+
+    // The status updates will need to be elsewhere, because that won't work through dyn. It will require a generic hook-up.
+    #[allow(dead_code)]
+    catchup_store: Arc<RwLock<dyn UpdateCatchUpData<Error = EspressoError> + Send + Sync>>,
+    #[allow(dead_code)]
+    availability_store:
+        Arc<RwLock<dyn UpdateAvailabilityData<Error = EspressoError> + Send + Sync>>,
+    #[allow(dead_code)]
+    meta_state_store: Arc<RwLock<dyn UpdateMetaStateData<Error = EspressoError> + Send + Sync>>,
 }
 
 impl FullState {
@@ -673,6 +691,7 @@ pub struct PhaseLockQueryService<'a> {
 }
 
 impl<'a> PhaseLockQueryService<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         event_source: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
 
@@ -683,6 +702,15 @@ impl<'a> PhaseLockQueryService<'a> {
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
         mut full_persisted: FullPersistence,
+        catchup_store: Arc<
+            RwLock<impl UpdateCatchUpData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
+        availability_store: Arc<
+            RwLock<impl UpdateAvailabilityData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
+        meta_state_store: Arc<
+            RwLock<impl UpdateMetaStateData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
     ) -> Self {
         //todo !jeb.bearer If we are not starting from the genesis of the ledger, query the full
         // state at this point from another full node, like
@@ -722,6 +750,9 @@ impl<'a> PhaseLockQueryService<'a> {
             proposed: ElaboratedBlock::default(),
             subscribers: Default::default(),
             pending_subscribers: Default::default(),
+            catchup_store,
+            availability_store,
+            meta_state_store,
         }));
 
         // Spawn event handling task.
@@ -860,6 +891,7 @@ pub struct FullNode<'a, NET: PLNet, STORE: PLStore> {
 }
 
 impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         validator: LightWeightNode<NET, STORE>,
 
@@ -870,6 +902,15 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
         full_persisted: FullPersistence,
+        catchup_store: Arc<
+            RwLock<impl UpdateCatchUpData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
+        availability_store: Arc<
+            RwLock<impl UpdateAvailabilityData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
+        meta_state_store: Arc<
+            RwLock<impl UpdateMetaStateData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
     ) -> Self {
         let query_service = PhaseLockQueryService::new(
             validator.subscribe(),
@@ -879,6 +920,9 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
             nullifiers,
             unspent_memos,
             full_persisted,
+            catchup_store,
+            availability_store,
+            meta_state_store,
         );
         Self {
             validator,
@@ -975,15 +1019,17 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        testing::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo},
-        universal_params::UNIVERSAL_PARAM,
-    };
+    use crate::api::EspressoError;
     use async_std::task::block_on;
+    use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
     use jf_cap::{sign_receiver_memos, KeyPair, MerkleLeafProof, MerkleTree};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
     use tempdir::TempDir;
+    use zerok_lib::{
+        testing::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo},
+        universal_params::UNIVERSAL_PARAM,
+    };
 
     #[derive(Debug)]
     struct MockConsensusEvent {
@@ -1118,6 +1164,42 @@ mod tests {
         (initial_state, history)
     }
 
+    #[derive(Default)]
+    struct TestOnlyMockAllStores;
+
+    impl UpdateAvailabilityData for TestOnlyMockAllStores {
+        type Error = EspressoError;
+
+        fn append_blocks(
+            &mut self,
+            _blocks: &mut Vec<BlockQueryData>,
+            _states: &mut Vec<StateQueryData>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    impl UpdateCatchUpData for TestOnlyMockAllStores {
+        type Error = EspressoError;
+        fn append_events(
+            &mut self,
+            _events: &mut Vec<LedgerEvent<EspressoLedger>>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    impl UpdateMetaStateData for TestOnlyMockAllStores {
+        type Error = EspressoError;
+        fn append_block_nullifiers(
+            &mut self,
+            _block_id: u64,
+            _nullifiers: Vec<Nullifier>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
     #[allow(clippy::type_complexity)]
     fn test_query_service(
         txs: Vec<Vec<(bool, u16, u16, u8, u8, i32)>>,
@@ -1150,6 +1232,8 @@ mod tests {
             )));
             let full_persisted =
                 FullPersistence::new(temp_persisted_dir.path(), "full_store").unwrap();
+
+            let mock_store = Arc::new(RwLock::new(TestOnlyMockAllStores::default()));
             let mut qs = PhaseLockQueryService::new(
                 events,
                 &*UNIVERSAL_PARAM,
@@ -1158,6 +1242,9 @@ mod tests {
                 initial_state.2,
                 initial_state.3,
                 full_persisted,
+                mock_store.clone(),
+                mock_store.clone(),
+                mock_store.clone(),
             );
 
             // The first event gives receiver memos for the records in the initial state of the

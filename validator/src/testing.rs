@@ -11,8 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    gen_pub_keys, init_validator, init_web_server, ConsensusConfig, GenesisState, Node, NodeOpt,
-    MINIMUM_NODES,
+    full_node_mem_data_source::QueryData, gen_pub_keys, init_validator, init_web_server,
+    ConsensusConfig, GenesisState, Node, NodeOpt, MINIMUM_NODES,
 };
 use async_std::task::{block_on, spawn, JoinHandle};
 use futures::{channel::oneshot, future::join_all};
@@ -25,16 +25,15 @@ use std::mem::take;
 use std::time::Instant;
 use surf::Url;
 use tempdir::TempDir;
-use zerok_lib::{
+use validator_node::{
     keystore::{
         loader::{KeystoreLoader, MnemonicPasswordLogin},
         network::NetworkBackend,
         EspressoKeystore,
     },
-    ledger::EspressoLedger,
     node::Validator,
-    universal_params::UNIVERSAL_PARAM,
 };
+use zerok_lib::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 
 pub struct TestNode {
     pub query_api: Option<Url>,
@@ -171,7 +170,11 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 opt.full = true;
                 opt.web_server_port = pick_unused_port().unwrap();
             }
-            let node = init_validator(&opt, &config, pub_keys, genesis, i).await;
+            let data_source =
+                async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
+
+            let node =
+                init_validator(&opt, &config, pub_keys, genesis, i, data_source.clone()).await;
 
             // If applicable, run a query service.
             let url = if let Node::Full(node) = &node {

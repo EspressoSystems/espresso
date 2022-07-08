@@ -10,17 +10,17 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::{
-    ledger::EspressoLedger,
-    set_merkle_tree::SetMerkleProof,
-    state::{state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction},
-};
 use fmt::{Display, Formatter};
 use jf_cap::{structs::ReceiverMemo, Signature, TransactionNote};
 use phaselock::PhaseLockError;
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, Snafu};
 use std::fmt;
+use zerok_lib::{
+    ledger::EspressoLedger,
+    set_merkle_tree::SetMerkleProof,
+    state::{state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction},
+};
 
 pub use net::*;
 
@@ -31,7 +31,7 @@ pub enum EspressoError {
         source: crate::node::QueryServiceError,
     },
     Validation {
-        source: crate::state::ValidationError,
+        source: zerok_lib::state::ValidationError,
     },
     #[snafu(display("{:?}", source))]
     Consensus {
@@ -39,7 +39,7 @@ pub enum EspressoError {
         // will serialize Ok(err) to Err(format(err)), and when we deserialize we will at least
         // preserve the variant ConsensusError and a String representation of the underlying error.
         // Unfortunately, this means we cannot use this variant as a SNAFU error source.
-        #[serde(with = "crate::state::ser_debug")]
+        #[serde(with = "crate::serializers::ser_debug")]
         #[snafu(source(false))]
         source: Result<Box<PhaseLockError>, String>,
     },
@@ -68,8 +68,8 @@ impl From<crate::node::QueryServiceError> for EspressoError {
     }
 }
 
-impl From<crate::state::ValidationError> for EspressoError {
-    fn from(source: crate::state::ValidationError) -> Self {
+impl From<zerok_lib::state::ValidationError> for EspressoError {
+    fn from(source: zerok_lib::state::ValidationError) -> Self {
         Self::Validation { source }
     }
 }
@@ -118,7 +118,7 @@ pub trait FromError: Sized {
         Self::catch_all(source.to_string())
     }
 
-    fn from_validation_error(source: crate::state::ValidationError) -> Self {
+    fn from_validation_error(source: zerok_lib::state::ValidationError) -> Self {
         Self::catch_all(source.to_string())
     }
 
@@ -167,7 +167,7 @@ impl FromError for EspressoError {
         Self::QueryService { source }
     }
 
-    fn from_validation_error(source: crate::state::ValidationError) -> Self {
+    fn from_validation_error(source: zerok_lib::state::ValidationError) -> Self {
         Self::Validation { source }
     }
 
@@ -195,7 +195,7 @@ impl FromError for seahorse::KeystoreError<EspressoLedger> {
         source.into()
     }
 
-    fn from_validation_error(source: crate::state::ValidationError) -> Self {
+    fn from_validation_error(source: zerok_lib::state::ValidationError) -> Self {
         Self::InvalidBlock { source }
     }
 
@@ -228,12 +228,6 @@ impl<E: FromError + ErrorCompat + std::error::Error> IntoError<E> for ClientErro
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // API response types for Espresso-specific data structures
 //
-
-impl From<LedgerStateCommitment> for Hash {
-    fn from(c: LedgerStateCommitment) -> Self {
-        Self::from(commit::Commitment::<_>::from(c))
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommittedBlock {

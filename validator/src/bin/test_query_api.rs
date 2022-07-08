@@ -46,14 +46,14 @@ use std::time::Duration;
 use structopt::StructOpt;
 use tempdir::TempDir;
 use tracing::{event, Level};
-use zerok_lib::{
+use validator_node::{
     api::client::*,
     api::*,
     keystore::network::{NetworkBackend, Url},
-    ledger::EspressoLedger,
     node::{LedgerSummary, QueryServiceError},
-    state::ElaboratedBlock,
-    universal_params::UNIVERSAL_PARAM,
+};
+use zerok_lib::{
+    ledger::EspressoLedger, state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM,
 };
 
 #[derive(StructOpt)]

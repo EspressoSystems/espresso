@@ -36,16 +36,14 @@ use tide::{
     security::{CorsMiddleware, Origin},
     StatusCode,
 };
-use zerok_lib::{
-    keystore::{
-        events::EventIndex,
-        hd::Mnemonic,
-        loader::{MnemonicPasswordLogin, RecoveryLoader},
-        network::NetworkBackend,
-        EspressoKeystore, EspressoKeystoreError,
-    },
-    universal_params::UNIVERSAL_PARAM,
+use validator_node::keystore::{
+    events::EventIndex,
+    hd::Mnemonic,
+    loader::{MnemonicPasswordLogin, RecoveryLoader},
+    network::NetworkBackend,
+    EspressoKeystore, EspressoKeystoreError,
 };
+use zerok_lib::universal_params::UNIVERSAL_PARAM;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -288,7 +286,7 @@ mod test {
     use std::time::Duration;
     use tempdir::TempDir;
     use tracing_test::traced_test;
-    use zerok_lib::keystore::{hd::KeyTree, loader::CreateLoader};
+    use validator_node::keystore::{hd::KeyTree, loader::CreateLoader};
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
         let mut backoff = Duration::from_millis(100);

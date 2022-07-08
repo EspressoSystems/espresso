@@ -42,4 +42,5 @@ tempdir = "0.3.7"
 toml = "0.5"
 tracing = "0.1.35"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+validator_node = { path = "../validator_node/" }
 zerok_lib = { path = "../zerok_lib/" }

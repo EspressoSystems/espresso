@@ -13,10 +13,7 @@
 use crate::{
     api,
     api::{ClientError, EspressoError},
-    ledger::EspressoLedger,
     node,
-    set_merkle_tree::{SetMerkleProof, SetMerkleTree},
-    state::{ElaboratedTransaction, MERKLE_HEIGHT},
 };
 use address_book::InsertPubKey;
 use api::client::*;
@@ -49,6 +46,11 @@ use std::time::Duration;
 use surf::http::content::{Accept, MediaTypeProposal};
 use surf::http::{headers, mime};
 pub use surf::Url;
+use zerok_lib::{
+    ledger::EspressoLedger,
+    set_merkle_tree::{SetMerkleProof, SetMerkleTree},
+    state::{ElaboratedTransaction, MERKLE_HEIGHT},
+};
 
 pub struct NetworkBackend<'a> {
     univ_param: &'a UniversalParam,

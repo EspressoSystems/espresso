@@ -10,8 +10,8 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::committee::Committee;
-use crate::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
+use zerok_lib::committee::Committee;
+use zerok_lib::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
 
 use phaselock::{
     traits::{NetworkingImplementation, NodeImplementation, Storage},

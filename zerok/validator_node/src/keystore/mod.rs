@@ -14,7 +14,7 @@ pub mod network;
 #[cfg(any(test, feature = "mocks"))]
 pub mod testing;
 
-use crate::ledger::EspressoLedger;
+use zerok_lib::ledger::EspressoLedger;
 
 pub use seahorse::*;
 

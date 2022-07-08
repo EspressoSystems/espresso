@@ -13,6 +13,7 @@
 #![deny(warnings)]
 
 use async_std::task::{sleep, spawn_blocking};
+use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
 use jf_cap::keys::UserPubKey;
@@ -25,8 +26,8 @@ use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use tide::http::Url;
 use tracing::info;
+use validator_node::node::{QueryService, Validator};
 use zerok_lib::{
-    node::{QueryService, Validator},
     state::{ElaboratedBlock, ElaboratedTransaction},
     testing::{MultiXfrTestState, TxnPrintInfo},
 };
@@ -344,6 +345,8 @@ async fn main() -> Result<(), std::io::Error> {
         generate_keys(&options, &config);
     }
 
+    let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
+
     if let Some(own_id) = options.id {
         // Initialize the state and phaselock
         let (genesis, state) = if options.num_txn.is_some() {
@@ -364,6 +367,7 @@ async fn main() -> Result<(), std::io::Error> {
             pub_keys,
             genesis,
             own_id as usize,
+            data_source.clone(),
         )
         .await;
 

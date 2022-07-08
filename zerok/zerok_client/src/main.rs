@@ -31,10 +31,8 @@ use seahorse::{
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
-use zerok_lib::{
-    keystore::network::{NetworkBackend, Url},
-    ledger::EspressoLedger,
-};
+use validator_node::keystore::network::{NetworkBackend, Url};
+use zerok_lib::ledger::EspressoLedger;
 
 #[derive(StructOpt)]
 pub struct Args {

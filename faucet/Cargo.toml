@@ -52,7 +52,8 @@ tracing = "0.1.35"
 tracing-futures = "0.2"
 tracing-log = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-zerok_lib = { path = "../zerok/zerok_lib" }
+validator_node = { path = "../zerok/validator_node/" }
+zerok_lib = { path = "../zerok/zerok_lib/" }
 
 [dev-dependencies]
 espresso-validator = { path = "../validator", features = ["testing"] }

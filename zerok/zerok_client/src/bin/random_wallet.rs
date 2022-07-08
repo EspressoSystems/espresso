@@ -52,11 +52,8 @@ use structopt::StructOpt;
 use surf::StatusCode;
 use tempdir::TempDir;
 use tracing::{event, Level};
-use zerok_lib::{
-    keystore::network::{NetworkBackend, Url},
-    ledger::EspressoLedger,
-    universal_params::UNIVERSAL_PARAM,
-};
+use validator_node::keystore::network::{NetworkBackend, Url};
+use zerok_lib::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 
 #[derive(Debug)]
 pub enum OperationType {
