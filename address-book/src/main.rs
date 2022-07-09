@@ -12,8 +12,8 @@
 // not, see <https://www.gnu.org/licenses/>.
 
 use address_book::{
-    compose_config_path, error::AddressBookError, init_web_server, store::address_book_store_path,
-    store::FileStore, AppKey, Args, APP_NAME, ORG_NAME,
+    error::AddressBookError, init_web_server, store::address_book_store_path, store::FileStore,
+    AppKey, Args, APP_NAME, ORG_DIR_NAME,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -51,7 +51,7 @@ async fn main() -> Result<(), AddressBookError> {
         .join("api")
         .join("api.toml");
     let settings = compose_settings::<Args>(
-        &ORG_NAME,
+        &ORG_DIR_NAME,
         &APP_NAME,
         &[
             (
@@ -64,7 +64,6 @@ async fn main() -> Result<(), AddressBookError> {
                 &address_book_store_path().to_str().unwrap(),
             ),
         ],
-        &compose_config_path(),
     )?;
 
     // Colorful logs upon request.

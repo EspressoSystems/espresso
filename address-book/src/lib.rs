@@ -16,18 +16,17 @@
 use crate::error::AddressBookError;
 use crate::store::Store;
 use async_std::sync::{Arc, RwLock};
-use async_std::task::sleep;
 use clap::Parser;
 use futures::FutureExt;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::Signature;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::fs;
 use std::path::PathBuf;
-use std::{fs, time::Duration};
 use strum_macros::AsRefStr;
 use tide::StatusCode;
-use tide_disco::{org_data_path, Api, App, DiscoArgs, RequestParams};
+use tide_disco::{Api, App, DiscoArgs, RequestParams};
 use tracing::trace;
 
 pub mod error;
@@ -36,11 +35,13 @@ pub mod store;
 #[cfg(not(windows))]
 pub mod signal;
 
+/// Application name used for locating configuration files
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
-pub const ORG_NAME: &str = "espresso";
+// TODO Move ORG_DIR_NAME to another organization-specific crate
+/// Organization name used for locating configuration files
+pub const ORG_DIR_NAME: &str = "espresso";
 
-const STARTUP_RETRIES: u32 = 255;
-
+/// Command line arguments
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 pub struct Args {
@@ -52,23 +53,29 @@ pub struct Args {
 }
 
 /// Lookup keys for application-specific configuration settings
+// Although we could use literal strings, this approach allows the compiler to catch typos.
 #[derive(AsRefStr, Debug)]
 #[allow(non_camel_case_types)]
 pub enum AppKey {
     store_path,
 }
 
+/// Structure to supply parameters to web requests
 #[derive(Debug, Deserialize, Serialize)]
 pub struct InsertPubKey {
     pub pub_key_bytes: Vec<u8>,
     pub sig: Signature,
 }
 
+/// Web server state
 #[derive(Clone)]
 pub struct ServerState<T: Store> {
     pub store: Arc<T>,
 }
 
+/// Initialize the web server
+///
+/// Bind route handlers and documentation
 pub fn init_web_server<T: Store + 'static>(
     api_toml: String,
     store: T,
@@ -81,6 +88,8 @@ pub fn init_web_server<T: Store + 'static>(
         &fs::read(api_toml)?,
     )?)
     .unwrap();
+
+    // Insert or update the public key at the given address.
     api.post(
         "insert_pubkey",
         |req_params: RequestParams, server_state| {
@@ -102,9 +111,11 @@ pub fn init_web_server<T: Store + 'static>(
         },
     )
     .unwrap();
+
+    // Fetch the public key for the given address. If not found, return
+    // StatusCode::NotFound.
     api.post("request_pubkey", |req_params, server_state| {
         async move {
-            //            let address = get_user_address(req_params)?;
             let address: UserAddress =
                 bincode::deserialize(&req_params.body_bytes()).map_err(|e| {
                     AddressBookError::DeserializationError {
@@ -138,6 +149,8 @@ pub fn init_web_server<T: Store + 'static>(
         .boxed()
     })
     .unwrap();
+
+    // Fetch all the public key bundles for all peers.
     api.get("request_peers", |_req_params, server_state| {
         async move {
             match (*server_state.store).list() {
@@ -152,20 +165,8 @@ pub fn init_web_server<T: Store + 'static>(
     Ok(app)
 }
 
-pub async fn wait_for_server(base_url: &str) {
-    // Wait for the server to come up and start serving.
-    let pause_ms = Duration::from_millis(100);
-    for _ in 0..STARTUP_RETRIES {
-        if surf::connect(base_url).send().await.is_ok() {
-            return;
-        }
-        sleep(pause_ms).await;
-    }
-    panic!(
-        "Address Book did not start in {:?} milliseconds",
-        pause_ms * STARTUP_RETRIES
-    );
-}
+// TODO Verify that externally observable behavior change didn't change and delete old code
+//---- Old route handlers below.
 
 /// Lookup a user public key from a signed public key address. Fail with
 /// tide::StatusCode::BadRequest if key deserialization or the signature check
@@ -228,22 +229,4 @@ pub async fn request_peers<T: Store>(
         }
         Err(_) => Ok(tide::Response::new(StatusCode::InternalServerError)),
     }
-}
-
-// TODO Maybe accept Vec<u8> instead.
-pub fn get_user_address(req_params: RequestParams) -> Result<UserAddress, AddressBookError> {
-    let address: UserAddress = bincode::deserialize(&req_params.body_bytes()).map_err(|e| {
-        AddressBookError::DeserializationError {
-            status: StatusCode::BadRequest,
-            msg: e.to_string(),
-        }
-    })?;
-    Ok(address)
-}
-
-pub fn compose_config_path() -> PathBuf {
-    let mut app_config_path = org_data_path(&ORG_NAME);
-    app_config_path = app_config_path.join(APP_NAME).join(APP_NAME);
-    app_config_path.set_extension("toml");
-    app_config_path
 }

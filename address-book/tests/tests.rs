@@ -12,8 +12,9 @@
 // not, see <https://www.gnu.org/licenses/>.
 
 use address_book::{
-    init_web_server, store::address_book_temp_dir, store::FileStore, store::Store,
-    store::TransientFileStore, wait_for_server, InsertPubKey,
+    init_web_server,
+    store::{address_book_temp_dir, FileStore, Store, TransientFileStore},
+    InsertPubKey,
 };
 use async_std::task::spawn;
 use jf_cap::keys::{UserKeyPair, UserPubKey};
@@ -21,6 +22,7 @@ use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
 use std::collections::HashSet;
 use tide::StatusCode;
+use tide_disco::wait_for_server;
 
 const ROUND_TRIP_COUNT: u64 = 100;
 const NOT_FOUND_COUNT: u64 = 100;
