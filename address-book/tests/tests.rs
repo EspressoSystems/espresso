@@ -12,24 +12,18 @@
 // not, see <https://www.gnu.org/licenses/>.
 
 use address_book::{
-    address_book_temp_dir, init_web_server, wait_for_server, FileStore, InsertPubKey, Store,
-    TransientFileStore,
+    init_web_server, store::address_book_temp_dir, store::FileStore, store::Store,
+    store::TransientFileStore, wait_for_server, InsertPubKey,
 };
 use async_std::task::spawn;
-use clap::Parser;
 use jf_cap::keys::{UserKeyPair, UserPubKey};
 use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
 use std::collections::HashSet;
-use tide_disco::{get_settings, ConfigKey};
-use tracing::info;
+use tide::StatusCode;
 
-const ROUND_TRIP_COUNT: u64 = 1; //100;
-const NOT_FOUND_COUNT: u64 = 1; //100;
-
-#[derive(Parser, Debug)]
-#[clap(version)]
-struct Args {}
+const ROUND_TRIP_COUNT: u64 = 100;
+const NOT_FOUND_COUNT: u64 = 100;
 
 // Test
 //    lookup(insert(x)) = x
@@ -39,10 +33,15 @@ struct Args {}
 async fn round_trip<T: Store + 'static>(store: T) {
     let port = pick_unused_port().unwrap();
     let base_url: String = format!("http://127.0.0.1:{port}");
-    let settings = get_settings::<Args>().unwrap();
-    let api_toml = &settings.get_string(ConfigKey::api_toml.as_ref()).unwrap();
-    let app = init_web_server(api_toml.to_string(), store).unwrap();
+    let api_path = std::env::current_dir()
+        .unwrap()
+        .join("api")
+        .join("api.toml");
 
+    let app = init_web_server(api_path.to_str().unwrap().to_string(), store).expect("Huh");
+
+    // Note: we don't want to take base_url from the settings because we want to pick a free port
+    // for testing.
     let handle = spawn(app.serve(base_url.clone()));
     wait_for_server(&base_url).await;
 
@@ -64,21 +63,21 @@ async fn round_trip<T: Store + 'static>(store: T) {
             .unwrap()
             .await
             .unwrap();
-        info!("response: {:?}", response);
+        assert_eq!(response.status(), StatusCode::Ok);
         let address_bytes = bincode::serialize(&pub_key.address()).unwrap();
         let mut response = surf::post(format!("{base_url}/request_pubkey"))
             .content_type(surf::http::mime::BYTE_STREAM)
             .body_bytes(&address_bytes)
             .await
             .unwrap();
-        let bytes = response.body_bytes().await.unwrap();
-        let gotten_pub_key: UserPubKey = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(response.status(), StatusCode::Ok);
+        let gotten_pub_key: UserPubKey = response.body_json().await.unwrap();
         assert_eq!(gotten_pub_key, pub_key);
         let mut response = surf::get(format!("{base_url}/request_peers"))
             .await
             .unwrap();
         let bytes = response.body_bytes().await.unwrap();
-        let gotten_pub_keys: Vec<UserPubKey> = bincode::deserialize(&bytes).unwrap();
+        let gotten_pub_keys: Vec<UserPubKey> = serde_json::from_slice(&bytes).unwrap();
         let gotten_set: HashSet<UserPubKey> = gotten_pub_keys.into_iter().collect();
         assert_eq!(gotten_set, inserted);
     }
@@ -94,15 +93,11 @@ async fn round_trip<T: Store + 'static>(store: T) {
             .await
             .unwrap();
         let bytes = response.body_bytes().await.unwrap();
-        let gotten_pub_key: UserPubKey = bincode::deserialize(&bytes).unwrap();
+        let gotten_pub_key: UserPubKey = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(gotten_pub_key, pub_key);
     }
 
     // Lookup addresses we didn't insert.
-    tracing::error!(
-        "The following {} 'No such' errors are expected.",
-        NOT_FOUND_COUNT
-    );
     for _ in 0..NOT_FOUND_COUNT {
         let user_key = UserKeyPair::generate(&mut rng2);
         let pub_key = user_key.pub_key();
@@ -115,7 +110,7 @@ async fn round_trip<T: Store + 'static>(store: T) {
         let bytes = response.body_bytes().await.unwrap();
         assert!(bincode::deserialize::<UserPubKey>(&bytes).is_err());
     }
-    assert!(handle.cancel().await.is_some());
+    assert!(handle.cancel().await.is_none());
 }
 
 #[async_std::test]
@@ -123,9 +118,9 @@ async fn test_address_book() {
     // Can change to using two separate tests once the webserver port is
     // configurable.
     let temp_dir = address_book_temp_dir();
-    let store = FileStore::new(temp_dir.path().to_path_buf());
-    round_trip(store).await;
+    let file_store = FileStore::new(temp_dir.path().to_path_buf());
+    round_trip(file_store).await;
 
-    let store = TransientFileStore::default();
-    round_trip(store).await
+    let transient_store = TransientFileStore::default();
+    round_trip(transient_store).await
 }

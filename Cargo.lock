@@ -5375,6 +5375,7 @@ dependencies = [
  "clap 3.2.6",
  "config",
  "derive_more",
+ "dirs",
  "edit-distance",
  "futures",
  "futures-util",

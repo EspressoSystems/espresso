@@ -26,7 +26,10 @@ pub enum AddressBookError {
         status: StatusCode,
         address: UserAddress,
     },
-    DeserializationError,
+    DeserializationError {
+        status: StatusCode,
+        msg: String,
+    },
     IoError,
     Other {
         status: StatusCode,

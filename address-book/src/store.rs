@@ -17,6 +17,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use tempdir::TempDir;
+use tide_disco::org_data_path;
 use tracing::{error, trace};
 
 pub trait Store: Clone + Send + Sync {
@@ -147,17 +148,12 @@ pub fn address_book_temp_dir() -> TempDir {
     TempDir::new("espresso-address-book").expect("Failed to create temporary directory.")
 }
 
-pub fn espresso_data_path() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("./")))
-        .join(".espresso")
-        .join("espresso")
-}
-
 pub fn address_book_store_path() -> PathBuf {
     if let Ok(store_path) = std::env::var("ESPRESSO_ADDRESS_BOOK_STORE_PATH") {
         PathBuf::from(store_path)
     } else {
-        espresso_data_path().join("address_book").join("store")
+        org_data_path("espresso")
+            .join(env!("CARGO_PKG_NAME"))
+            .join("store")
     }
 }

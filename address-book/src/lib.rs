@@ -17,15 +17,17 @@ use crate::error::AddressBookError;
 use crate::store::Store;
 use async_std::sync::{Arc, RwLock};
 use async_std::task::sleep;
-use futures::future::BoxFuture;
+use clap::Parser;
 use futures::FutureExt;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::Signature;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::path::PathBuf;
 use std::{fs, time::Duration};
+use strum_macros::AsRefStr;
 use tide::StatusCode;
-use tide_disco::{Api, App, RequestParams};
+use tide_disco::{org_data_path, Api, App, DiscoArgs, RequestParams};
 use tracing::trace;
 
 pub mod error;
@@ -34,8 +36,27 @@ pub mod store;
 #[cfg(not(windows))]
 pub mod signal;
 
-pub const DEFAULT_PORT: u16 = 50078u16;
+pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
+pub const ORG_NAME: &str = "espresso";
+
 const STARTUP_RETRIES: u32 = 255;
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+pub struct Args {
+    #[clap(flatten)]
+    pub disco_args: DiscoArgs,
+    #[clap(long)]
+    /// Storage path
+    pub store_path: Option<PathBuf>,
+}
+
+/// Lookup keys for application-specific configuration settings
+#[derive(AsRefStr, Debug)]
+#[allow(non_camel_case_types)]
+pub enum AppKey {
+    store_path,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct InsertPubKey {
@@ -48,53 +69,6 @@ pub struct ServerState<T: Store> {
     pub store: Arc<T>,
 }
 
-pub fn address_book_port() -> u16 {
-    match std::env::var("ESPRESSO_ADDRESS_BOOK_PORT") {
-        Ok(port) => port.parse().unwrap(),
-        Err(_) => DEFAULT_PORT,
-    }
-}
-
-// TODO The Ok return doesn't match the expected type State yet
-// the closure returns the user public key but doesn't generate this
-// compiler error
-// pub async fn request_pubkey<State: Store + 'static>(
-//     p: RequestParams,
-//     store: State,
-// ) -> BoxFuture<'static, Result<State, AddressBookError>> {
-//     let address = get_user_address(req_params)?;
-//     // TODO convert to map_err expression
-//     Box::pin(async move {
-//         match (*server_state.store).load(&address) {
-//             Ok(Some(pub_key)) => {
-//                 let upk: UserPubKey = pub_key;
-//                 trace!(
-//                     "/request_pubkey address: {:?} -> pb_key: {:?}",
-//                     &address,
-//                     &upk
-//                 );
-//                 Ok(upk)
-//             }
-//             Ok(None) => {
-//                 // Not sure if this should be an error. The key is
-//                 // simply not present.
-//                 trace!("/request_pubkey not found: {:?}", &address);
-//                 Err(AddressBookError::AddressNotFound {
-//                     status: StatusCode::NotFound,
-//                     address,
-//                 })
-//             }
-//             Err(_) => {
-//                 // TODO Something went more wrong than address not found
-//                 Err(AddressBookError::AddressNotFound {
-//                     status: StatusCode::NotFound,
-//                     address,
-//                 })
-//             }
-//         }
-//     })
-// }
-
 pub fn init_web_server<T: Store + 'static>(
     api_toml: String,
     store: T,
@@ -102,13 +76,11 @@ pub fn init_web_server<T: Store + 'static>(
     let server_state = ServerState {
         store: Arc::new(store),
     };
-
     let mut app = App::<_, AddressBookError>::with_state(RwLock::new(server_state));
     let mut api = Api::<RwLock<ServerState<T>>, AddressBookError>::new(toml::from_slice(
         &fs::read(api_toml)?,
     )?)
     .unwrap();
-
     api.post(
         "insert_pubkey",
         |req_params: RequestParams, server_state| {
@@ -132,8 +104,14 @@ pub fn init_web_server<T: Store + 'static>(
     .unwrap();
     api.post("request_pubkey", |req_params, server_state| {
         async move {
-            let address = get_user_address(req_params)?;
-            // TODO convert to map_err expression
+            //            let address = get_user_address(req_params)?;
+            let address: UserAddress =
+                bincode::deserialize(&req_params.body_bytes()).map_err(|e| {
+                    AddressBookError::DeserializationError {
+                        status: StatusCode::BadRequest,
+                        msg: e.to_string(),
+                    }
+                })?;
             match (*server_state.store).load(&address) {
                 Ok(Some(pub_key)) => {
                     let upk: UserPubKey = pub_key;
@@ -145,21 +123,16 @@ pub fn init_web_server<T: Store + 'static>(
                     Ok(upk)
                 }
                 Ok(None) => {
-                    // Not sure if this should be an error. The key is
-                    // simply not present.
                     trace!("/request_pubkey not found: {:?}", &address);
                     Err(AddressBookError::AddressNotFound {
                         status: StatusCode::NotFound,
                         address,
                     })
                 }
-                Err(_) => {
-                    // TODO Something went more wrong than address not found
-                    Err(AddressBookError::AddressNotFound {
-                        status: StatusCode::NotFound,
-                        address,
-                    })
-                }
+                Err(e) => Err(AddressBookError::Other {
+                    status: StatusCode::InternalServerError,
+                    msg: e.to_string(),
+                }),
             }
         }
         .boxed()
@@ -175,9 +148,7 @@ pub fn init_web_server<T: Store + 'static>(
         .boxed()
     })
     .unwrap();
-
     app.register_module("", api).unwrap();
-
     Ok(app)
 }
 
@@ -260,12 +231,19 @@ pub async fn request_peers<T: Store>(
 }
 
 // TODO Maybe accept Vec<u8> instead.
-// TODO Add information about deserializing POST data to the low-level error
 pub fn get_user_address(req_params: RequestParams) -> Result<UserAddress, AddressBookError> {
-    let address: UserAddress =
-        bincode::deserialize(&req_params.body_bytes()).map_err(|e| AddressBookError::Other {
+    let address: UserAddress = bincode::deserialize(&req_params.body_bytes()).map_err(|e| {
+        AddressBookError::DeserializationError {
             status: StatusCode::BadRequest,
             msg: e.to_string(),
-        })?;
+        }
+    })?;
     Ok(address)
+}
+
+pub fn compose_config_path() -> PathBuf {
+    let mut app_config_path = org_data_path(&ORG_NAME);
+    app_config_path = app_config_path.join(APP_NAME).join(APP_NAME);
+    app_config_path.set_extension("toml");
+    app_config_path
 }
