@@ -213,7 +213,6 @@ impl UpdateMetaStateData for QueryData {
             nullifier_set
         })?;
         self.cached_nullifier_sets.insert(block_id, nullifier_set);
-        // TODO: thin out older entries (every other, geometric) when the total gets too large
         Ok(())
     }
 }
