@@ -39,7 +39,6 @@ use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
-use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use tracing::{debug, error};
@@ -441,13 +440,6 @@ impl FullState {
                             );
                             self.full_persisted.store_nullifier_set(&nullifiers);
                             self.full_persisted.commit_accepted();
-
-                            let mut catchup_store = futures::executor::block_on { self.catchup_store.write().await };
-                            catchup_store.append_events(&mut vec![LedgerEvent::Commit {
-                                block: (*block).clone(),
-                                block_id: block_index as u64,
-                                state_comm: self.validator.commit(),
-                            }]);
 
                             // Notify subscribers of the new block.
                             self.send_event(LedgerEvent::Commit {
