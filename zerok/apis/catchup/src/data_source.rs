@@ -16,11 +16,15 @@ use zerok_lib::ledger::EspressoLedger;
 pub trait CatchUpDataSource {
     type EventIterType: AsRef<[LedgerEvent<EspressoLedger>]>;
 
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool;
     fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType;
 }
 
 pub trait UpdateCatchUpData {
     type Error;
+
+    fn event_count(&self) -> usize;
 
     fn append_events(
         &mut self,
