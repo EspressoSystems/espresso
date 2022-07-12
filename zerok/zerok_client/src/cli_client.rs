@@ -63,7 +63,7 @@ impl CliClient {
         pub_key_path.set_extension("pub");
         let pub_key = bincode::deserialize(&fs::read(&pub_key_path).unwrap()).unwrap();
 
-        // Each validator gets two ports: one for its PhaseLock node and one for the web sever.
+        // Each validator gets two ports: one for its HotShot node and one for the web sever.
         let mut ports = [(0, 0); 6];
         for p in &mut ports {
             *p = (
@@ -251,14 +251,14 @@ impl CliClient {
         pub_key: UserPubKey,
         ports: &[(u16, u16)],
     ) -> Result<Vec<Validator>, String> {
-        let (phaselock_ports, server_ports): (Vec<_>, Vec<_>) = ports.iter().cloned().unzip();
+        let (hotshot_ports, server_ports): (Vec<_>, Vec<_>) = ports.iter().cloned().unzip();
         let config = ConsensusConfig {
             seed: [
                 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4,
                 5, 6, 7, 8,
             ]
             .into(),
-            nodes: phaselock_ports
+            nodes: hotshot_ports
                 .into_iter()
                 .map(|port| {
                     Url::parse(&format!("http://localhost:{}", port))

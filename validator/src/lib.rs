@@ -16,13 +16,13 @@ use jf_cap::{
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
 use key_set::{KeySet, VerifierKeySet};
-use phaselock::{
+use hotshot::{
     traits::implementations::{AtomicStorage, WNetwork},
     types::{
         ed25519::{Ed25519Priv, Ed25519Pub},
         Message, SignatureKey,
     },
-    PhaseLock, PhaseLockConfig, PhaseLockError, H_256,
+    HotShot, HotShotConfig, HotShotError, H_256,
 };
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -42,7 +42,7 @@ use validator_node::{
     api::EspressoError,
     api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
     node,
-    node::{EventStream, PhaseLockEvent, QueryService, Validator},
+    node::{EventStream, HotShotEvent, QueryService, Validator},
 };
 use zerok_lib::{
     committee::Committee,
@@ -334,9 +334,9 @@ pub enum Node {
 
 #[async_trait]
 impl Validator for Node {
-    type Event = PhaseLockEvent;
+    type Event = HotShotEvent;
 
-    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
+    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), HotShotError> {
         match self {
             Node::Light(n) => <LWNode as Validator>::submit_transaction(n, tx).await,
             Node::Full(n) => n.read().await.submit_transaction(tx).await,
@@ -350,7 +350,7 @@ impl Validator for Node {
         }
     }
 
-    async fn current_state(&self) -> Result<Option<ValidatorState>, PhaseLockError> {
+    async fn current_state(&self) -> Result<Option<ValidatorState>, HotShotError> {
         match self {
             Node::Light(n) => n.current_state().await,
             Node::Full(n) => n.read().await.current_state().await,
@@ -481,9 +481,9 @@ impl GenesisState {
     }
 }
 
-/// Creates the initial state and phaselock for simulation.
+/// Creates the initial state and hotshot for simulation.
 #[allow(clippy::too_many_arguments)]
-async fn init_phaselock(
+async fn init_hotshot(
     options: &NodeOpt,
     known_nodes: Vec<Ed25519Pub>,
     priv_key: Ed25519Priv,
@@ -497,10 +497,10 @@ async fn init_phaselock(
     state: GenesisState,
     data_source: Arc<RwLock<QueryData>>,
 ) -> Node {
-    // Create the initial phaselock
+    // Create the initial hotshot
     let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
     let pub_key = known_nodes[node_id as usize].clone();
-    let config = PhaseLockConfig {
+    let config = HotShotConfig {
         total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
         threshold: NonZeroUsize::new(threshold as usize).unwrap(),
         max_transactions: NonZeroUsize::new(100).unwrap(),
@@ -547,14 +547,14 @@ async fn init_phaselock(
         None
     };
 
-    let phaselock_persistence = [storage_path, Path::new("phaselock")]
+    let hotshot_persistence = [storage_path, Path::new("hotshot")]
         .iter()
         .collect::<PathBuf>();
     let node_persistence = [storage_path, Path::new("node")]
         .iter()
         .collect::<PathBuf>();
 
-    let phaselock = PhaseLock::init(
+    let hotshot = HotShot::init(
         genesis,
         config.known_nodes.clone(),
         pub_key,
@@ -563,13 +563,13 @@ async fn init_phaselock(
         config,
         state.validator,
         networking,
-        AtomicStorage::open(&phaselock_persistence).unwrap(),
+        AtomicStorage::open(&hotshot_persistence).unwrap(),
         lw_persistence,
         Committee::new(stake_table),
     )
     .await
     .unwrap();
-    debug!("phaselock launched");
+    debug!("hotshot launched");
 
     let validator = if full_node {
         let full_persisted = FullPersistence::new(&node_persistence, "full_node").unwrap();
@@ -591,7 +591,7 @@ async fn init_phaselock(
                 .unwrap_or_else(|_| Default::default())
         };
         let node = FullNode::new(
-            phaselock,
+            hotshot,
             univ_param.unwrap(),
             stored_state,
             records,
@@ -604,7 +604,7 @@ async fn init_phaselock(
         );
         Node::Full(Arc::new(RwLock::new(node)))
     } else {
-        Node::Light(phaselock)
+        Node::Light(hotshot)
     };
 
     validator
@@ -953,8 +953,8 @@ pub async fn init_validator(
     }
     debug!("All nodes connected to network");
 
-    // Initialize the state and phaselock
-    init_phaselock(
+    // Initialize the state and hotshot
+    init_hotshot(
         options,
         known_nodes,
         priv_key,

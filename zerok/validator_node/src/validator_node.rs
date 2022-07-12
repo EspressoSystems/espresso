@@ -13,12 +13,12 @@
 use zerok_lib::committee::Committee;
 use zerok_lib::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
 
-use phaselock::{
+use hotshot::{
     traits::{NetworkingImplementation, NodeImplementation, Storage},
     types::Message,
     H_256,
 };
-use phaselock_types::traits::signature_key::ed25519::Ed25519Pub;
+use hotshot_types::traits::signature_key::ed25519::Ed25519Pub;
 
 use core::fmt::Debug;
 use core::marker::PhantomData;

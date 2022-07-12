@@ -28,7 +28,7 @@ use jf_cap::{
 };
 use key_set::{KeySet, ProverKeySet, VerifierKeySet};
 use num_bigint::BigInt;
-use phaselock::traits::{BlockContents, State};
+use hotshot::traits::{BlockContents, State};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;

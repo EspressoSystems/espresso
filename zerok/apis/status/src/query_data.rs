@@ -11,7 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use core::time::Duration;
-use phaselock::{data::QuorumCertificate, types::ed25519::Ed25519Pub, H_256};
+use hotshot::{data::QuorumCertificate, types::ed25519::Ed25519Pub, H_256};
 use std::collections::HashMap;
 use zerok_lib::state::{ElaboratedBlock, ValidatorState};
 

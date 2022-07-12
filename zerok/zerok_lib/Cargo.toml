@@ -40,8 +40,8 @@ lazy_static = "1.4.0"
 mnemonic = "1.0.1"
 net = { git = "https://github.com/EspressoSystems/net.git" }
 num-bigint = "0.4"
-phaselock = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
-phaselock-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
+hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
+hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
 rand = "0.8.5"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 rayon = "*"

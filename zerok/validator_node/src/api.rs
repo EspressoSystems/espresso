@@ -12,7 +12,7 @@
 
 use fmt::{Display, Formatter};
 use jf_cap::{structs::ReceiverMemo, Signature, TransactionNote};
-use phaselock::PhaseLockError;
+use hotshot::HotShotError;
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, Snafu};
 use std::fmt;
@@ -35,13 +35,13 @@ pub enum EspressoError {
     },
     #[snafu(display("{:?}", source))]
     Consensus {
-        // PhaseLockError cannot be serialized. Instead, if we have to serialize this variant, we
+        // HotShotError cannot be serialized. Instead, if we have to serialize this variant, we
         // will serialize Ok(err) to Err(format(err)), and when we deserialize we will at least
         // preserve the variant ConsensusError and a String representation of the underlying error.
         // Unfortunately, this means we cannot use this variant as a SNAFU error source.
         #[serde(with = "crate::serializers::ser_debug")]
         #[snafu(source(false))]
-        source: Result<Box<PhaseLockError>, String>,
+        source: Result<Box<HotShotError>, String>,
     },
     #[snafu(display("error in parameter {}: {}", param, msg))]
     Param { param: String, msg: String },
@@ -74,8 +74,8 @@ impl From<zerok_lib::state::ValidationError> for EspressoError {
     }
 }
 
-impl From<PhaseLockError> for EspressoError {
-    fn from(source: PhaseLockError) -> Self {
+impl From<HotShotError> for EspressoError {
+    fn from(source: HotShotError) -> Self {
         Self::Consensus {
             source: Ok(Box::new(source)),
         }
@@ -122,7 +122,7 @@ pub trait FromError: Sized {
         Self::catch_all(source.to_string())
     }
 
-    fn from_consensus_error(source: Result<PhaseLockError, String>) -> Self {
+    fn from_consensus_error(source: Result<HotShotError, String>) -> Self {
         match source {
             Ok(err) => Self::catch_all(format!("{:?}", err)),
             Err(msg) => Self::catch_all(msg),
@@ -171,7 +171,7 @@ impl FromError for EspressoError {
         Self::Validation { source }
     }
 
-    fn from_consensus_error(source: Result<PhaseLockError, String>) -> Self {
+    fn from_consensus_error(source: Result<HotShotError, String>) -> Self {
         Self::Consensus {
             source: source.map(Box::new),
         }
@@ -199,7 +199,7 @@ impl FromError for seahorse::KeystoreError<EspressoLedger> {
         Self::InvalidBlock { source }
     }
 
-    fn from_consensus_error(source: Result<PhaseLockError, String>) -> Self {
+    fn from_consensus_error(source: Result<HotShotError, String>) -> Self {
         match source {
             Ok(err) => Self::catch_all(err.to_string()),
             Err(msg) => Self::catch_all(msg),

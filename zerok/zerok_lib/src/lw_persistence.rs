@@ -14,7 +14,7 @@ use crate::state::{ElaboratedBlock, ValidatorState};
 use atomic_store::{
     load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
 };
-use phaselock::{traits::StatefulHandler, H_256};
+use hotshot::{traits::StatefulHandler, H_256};
 
 use core::fmt::Debug;
 use std::path::{Path, PathBuf};

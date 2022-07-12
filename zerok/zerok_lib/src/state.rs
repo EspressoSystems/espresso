@@ -29,7 +29,7 @@ use jf_cap::{
 };
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
-use phaselock::{
+use hotshot::{
     data::{BlockHash, LeafHash, TransactionHash},
     traits::{BlockContents, State, Transaction as TransactionTrait},
     H_256,
@@ -169,7 +169,7 @@ impl Committable for ElaboratedTransaction {
     }
 }
 
-/// Allow an elaborated block to be used by the [PhaseLock](https://phaselock.docs.goespresso.com/phaselock/) consensus protocol.
+/// Allow an elaborated block to be used by the [HotShot](https://hotshot.docs.espressosys.com/hotshot/) consensus protocol.
 impl BlockContents<H_256> for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
@@ -214,7 +214,7 @@ impl BlockContents<H_256> for ElaboratedBlock {
     fn hash_leaf(bytes: &[u8]) -> LeafHash<H_256> {
         // TODO: fix this hack, it is specifically working around the
         // misuse-preventing `T: Committable` on `RawCommitmentBuilder`
-        let ret = commit::RawCommitmentBuilder::<Block>::new("PhaseLock bytes")
+        let ret = commit::RawCommitmentBuilder::<Block>::new("HotShot bytes")
             .var_size_bytes(bytes)
             .finalize();
         LeafHash::<H_256>::from_array(ret.try_into().unwrap())

@@ -17,7 +17,7 @@ use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
 use jf_cap::keys::UserPubKey;
-use phaselock::types::{
+use hotshot::types::{
     ed25519::{Ed25519Priv, Ed25519Pub},
     EventType,
 };
@@ -181,7 +181,7 @@ fn get_keys_for_node(options: &Options, node_id: u64) -> (Ed25519Priv, Ed25519Pu
 async fn generate_transactions(
     num_txn: u64,
     own_id: u64,
-    mut phaselock: Node,
+    mut hotshot: Node,
     mut state: MultiXfrTestState,
 ) {
     #[cfg(target_os = "linux")]
@@ -205,7 +205,7 @@ async fn generate_transactions(
         fence();
     };
 
-    let mut events = phaselock.subscribe();
+    let mut events = hotshot.subscribe();
 
     // Start consensus for each transaction
     let mut round = 0;
@@ -218,7 +218,7 @@ async fn generate_transactions(
         report_mem();
         info!(
             "Commitment: {}",
-            phaselock.current_state().await.unwrap().unwrap().commit()
+            hotshot.current_state().await.unwrap().unwrap().commit()
         );
 
         // Generate a transaction if the node ID is 0 and if there isn't a keystore to generate it.
@@ -226,7 +226,7 @@ async fn generate_transactions(
             if let Some(tx) = txn.as_ref() {
                 info!("  - Reproposing a transaction");
                 if txn_proposed_round + 5 < round {
-                    phaselock.submit_transaction(tx.clone().3).await.unwrap();
+                    hotshot.submit_transaction(tx.clone().3).await.unwrap();
                     txn_proposed_round = round;
                 }
             } else {
@@ -243,7 +243,7 @@ async fn generate_transactions(
                 .await;
                 state = new_state;
                 txn = Some(transactions.remove(0));
-                phaselock
+                hotshot
                     .submit_transaction(txn.clone().unwrap().3)
                     .await
                     .unwrap();
@@ -251,10 +251,10 @@ async fn generate_transactions(
             }
         }
 
-        phaselock.start_consensus().await;
+        hotshot.start_consensus().await;
         let success = loop {
-            info!("Waiting for PhaseLock event");
-            let event = events.next().await.expect("PhaseLock unexpectedly closed");
+            info!("Waiting for HotShot event");
+            let event = events.next().await.expect("HotShot unexpectedly closed");
 
             match event.event {
                 EventType::Decide {
@@ -307,7 +307,7 @@ async fn generate_transactions(
                 };
 
                 // If we're running a full node, publish the receiver memos.
-                if let Node::Full(node) = &mut phaselock {
+                if let Node::Full(node) = &mut hotshot {
                     node.write()
                         .await
                         .post_memos(round, ix as u64, owner_memos.clone(), sig)
@@ -377,7 +377,7 @@ async fn main() -> Result<(), std::io::Error> {
     let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
 
     if let Some(own_id) = options.id {
-        // Initialize the state and phaselock
+        // Initialize the state and hotshot
         let (genesis, state) = if options.num_txn.is_some() {
             // If we are going to generate transactions, we need to initialize the ledger with a
             // test state.
@@ -392,7 +392,7 @@ async fn main() -> Result<(), std::io::Error> {
             .map(|i| get_keys_for_node(&options, i as u64).1)
             .collect();
 
-        let phaselock = init_validator(
+        let hotshot = init_validator(
             &options.node_opt,
             &config,
             priv_key,
@@ -404,7 +404,7 @@ async fn main() -> Result<(), std::io::Error> {
         .await;
 
         // If we are running a full node, also host a query API to inspect the accumulated state.
-        let web_server = if let Node::Full(node) = &phaselock {
+        let web_server = if let Node::Full(node) = &hotshot {
             Some(
                 init_web_server(&options.node_opt, node.clone())
                     .expect("Failed to initialize web server"),
@@ -414,9 +414,9 @@ async fn main() -> Result<(), std::io::Error> {
         };
 
         if let Some(num_txn) = options.num_txn {
-            generate_transactions(num_txn, own_id, phaselock, state.unwrap()).await;
+            generate_transactions(num_txn, own_id, hotshot, state.unwrap()).await;
         } else {
-            phaselock.run(pending::<()>()).await;
+            hotshot.run(pending::<()>()).await;
         }
 
         if options.wait {
