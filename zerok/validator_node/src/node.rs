@@ -39,6 +39,7 @@ use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
+use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use tracing::{debug, error};
@@ -303,14 +304,11 @@ struct FullState {
     // but for which memos have not yet been posted. When the memos arrive, we will use this tree
     // to authenticate the new memos to listeners, and then forget them to keep this tree from
     // growing unbounded.
-    //todo replace with persistent range-mapping-based Merkle tree
     records_pending_memos: MerkleTree,
     // Map from past nullifier set root hashes to the index of the state in which that root hash
     // occurred.
-    //todo replace with persistent key value store
     past_nullifiers: HashMap<set_hash::Hash, usize>,
     // Block IDs indexed by block hash.
-    //todo replace with persistent key value store
     block_hashes: HashMap<Vec<u8>, usize>,
     // Total number of committed transactions, aggregated across all blocks.
     num_txns: usize,
@@ -443,6 +441,13 @@ impl FullState {
                             );
                             self.full_persisted.store_nullifier_set(&nullifiers);
                             self.full_persisted.commit_accepted();
+
+                            let mut catchup_store = futures::executor::block_on { self.catchup_store.write().await };
+                            catchup_store.append_events(&mut vec![LedgerEvent::Commit {
+                                block: (*block).clone(),
+                                block_id: block_index as u64,
+                                state_comm: self.validator.commit(),
+                            }]);
 
                             // Notify subscribers of the new block.
                             self.send_event(LedgerEvent::Commit {

@@ -23,7 +23,6 @@ use core::fmt::Debug;
 use core::marker::PhantomData;
 
 /// A lightweight node that handles validation for consensus, and nothing more.
-/// TODO: replace with persisting version of ValidatorNodeImpl, complete with handler for decide callback;
 pub trait PLNet:
     NetworkingImplementation<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>
     + Clone
