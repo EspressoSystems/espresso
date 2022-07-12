@@ -3,7 +3,8 @@ use crate::util::canonical;
 // use arbitrary_wrappers::*;
 use ark_serialize::*;
 use core::fmt::Debug;
-use generic_array::{ArrayLength, GenericArray};
+use generic_array::{ArrayLength, GenericArray, arr::AddLength};
+use typenum::U1;
 
 /// A hash function usable for sparse merkle tree implementations.
 ///
@@ -23,9 +24,10 @@ pub trait KVTreeHash {
     type Key: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize;
     type Value: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize;
 
-    /// The number of children each branch has
-    type BranchArity: ArrayLength<Self::Digest> + Debug + PartialEq;
-    /// How many base-`BranchArity` place values are in a `Digest`
+    /// The number of children each branch has minus one. This is due to the proof paths having sibling
+    /// path lengths of n-1 and the generic implementation relying on type systems
+    type BranchArityMinus1: ArrayLength<Self::Digest> + Debug + PartialEq;
+    /// How many base-BranchArityMinus1 place values are in a `Digest`
     type MaxDepth: ArrayLength<u8> + Debug + PartialEq;
 
     /// A unique digest for empty subtrees
@@ -45,8 +47,9 @@ pub trait KVTreeHash {
     /// Hash a key's contents
     fn hash_key(key: Self::Key) -> Self::Digest;
 
-    /// Hash a branch's children
-    fn hash_branch(children: GenericArray<Self::Digest, Self::BranchArity>) -> Self::Digest;
+    /// Hash a branch's children: the number of siblings in a branch is one greater than the
+    /// AddLength<Self::BranchArityMinus1,U1>
+    fn hash_branch(children: GenericArray<Self::Digest, dyn AddLength<Self::BranchArityMinus1,U1>>) -> Self::Digest;
 }
 
 pub mod treehash_tests {
@@ -55,10 +58,10 @@ pub mod treehash_tests {
     use typenum::Unsigned;
 
     pub fn treehash_basic_checks<TH: KVTreeHash>() {
-        assert!(TH::BranchArity::to_usize() > 1);
+        assert!(AddLength::<TH::BranchArityMinus1,U1>::to_usize() > 0);
         assert_eq!(
-            TH::BranchArity::to_usize(),
-            TH::BranchArity::to_u8() as usize
+            AddLength::<TH::BranchArityMinus1,U1>::to_usize(),
+            AddLength::<TH::BranchArityMinus1,U1>::to_u8() as usize
         );
         assert!(TH::MaxDepth::to_usize() > 0);
         assert_eq!(TH::MaxDepth::to_usize(), TH::MaxDepth::to_u16() as usize);
@@ -69,7 +72,7 @@ pub mod treehash_tests {
             TH::hash_branch(
                 GenericArray::from_exact_iter(vec![
                     TH::empty_digest();
-                    TH::BranchArity::to_usize()
+                    AddLength::<TH::BranchArityMinus1,U1>::to_usize()
                 ])
                 .unwrap()
             )
@@ -85,7 +88,7 @@ pub mod treehash_tests {
 
         for (i, x) in t.iter().enumerate() {
             assert!(
-                ((*x) as usize) < TH::BranchArity::to_usize(),
+                ((*x) as usize) < AddLength::<TH::BranchArityMinus1,U1>::to_usize(),
                 "traversal has invalid step {} at position {}",
                 x,
                 i
@@ -105,11 +108,11 @@ pub mod treehash_tests {
             for i in 0..t2.len() {
                 let v = t2[i];
 
-                t2[i] = TH::BranchArity::to_u8();
+                t2[i] = AddLength::<TH::BranchArityMinus1,U1>::to_u8();
                 assert_eq!(None, TH::digest_of_traversal(&t2));
 
-                if TH::BranchArity::to_u8() <= 128 {
-                    t2[i] = v + TH::BranchArity::to_u8();
+                if AddLength::<TH::BranchArityMinus1,U1>::to_u8() <= 128 {
+                    t2[i] = v + AddLength::<TH::BranchArityMinus1,U1>::to_u8();
                     assert_eq!(None, TH::digest_of_traversal(&t2));
                 }
 
@@ -140,12 +143,12 @@ pub mod treehash_tests {
         let (t_reduced, t_extra_reduced) = {
             let mut ret = t.clone();
             for i in 0..ret.len() {
-                ret[i] %= TH::BranchArity::to_u8();
+                ret[i] %= AddLength::<TH::BranchArityMinus1,U1>::to_u8();
             }
 
             // set the most significant place to 0
             //
-            // only needed if the largest Digest is below pow(BranchArity,
+            // only needed if the largest Digest is below pow(AddLength<Self::BranchArityMinus1,U1>,
             // MaxDepth)
             let mut extra = ret.clone();
             let ix = extra.len() - 1;
@@ -206,14 +209,15 @@ pub mod treehash_tests {
     pub fn treehash_collision_sanity_checks2<TH: KVTreeHash>(
         key: TH::Key,
         val: TH::Value,
-        digests: GenericArray<TH::Digest, TH::BranchArity>,
+        digests: GenericArray<TH::Digest, TH::BranchArityMinus1>,
     ) {
         let mut all_results = HashSet::new();
         all_results.insert(TH::empty_digest());
 
         assert!(all_results.insert(TH::hash_key(key)));
         assert!(all_results.insert(TH::hash_leaf(key, val)));
-        assert!(all_results.insert(TH::hash_branch(digests.clone())));
+        assert!(all_results.insert(TH::hash_branch(digests)));
+        
 
         for d in digests.into_iter().collect::<HashSet<_>>().into_iter() {
             if d != TH::empty_digest() {
@@ -225,8 +229,8 @@ pub mod treehash_tests {
     }
 
     pub fn treehash_collision_sanity_checks3<TH: KVTreeHash>(
-        digests0: GenericArray<TH::Digest, TH::BranchArity>,
-        digests1: GenericArray<TH::Digest, TH::BranchArity>,
+        digests0: GenericArray<TH::Digest, TH::BranchArityMinus1>,
+        digests1: GenericArray<TH::Digest, TH::BranchArityMinus1>,
     ) {
         if digests0 == digests1 {
             assert_eq!(TH::hash_branch(digests0), TH::hash_branch(digests1));
@@ -325,7 +329,7 @@ pub mod committable_hash {
         type Key = K;
         type Value = V;
 
-        type BranchArity = typenum::U2;
+        type BranchArityMinus1 = typenum::U2;
         type MaxDepth = typenum::U256;
 
         fn empty_digest() -> Self::Digest {
@@ -525,14 +529,14 @@ pub mod kv_treehash_tests {
             .collect();
         let digests: GenericArray<
             <TheTreeHash as KVTreeHash>::Digest,
-            <TheTreeHash as KVTreeHash>::BranchArity,
+            AddLength::<<TheTreeHash as KVTreeHash>::BranchArityMinus1,U1>,
         > = GenericArray::from_iter(digests.into_iter().chain(std::iter::repeat(
             <TheTreeHash as KVTreeHash>::empty_digest(),
         )));
 
         let digests2: GenericArray<
             <TheTreeHash2 as KVTreeHash>::Digest,
-            <TheTreeHash2 as KVTreeHash>::BranchArity,
+            AddLength::<<TheTreeHash as KVTreeHash>::BranchArityMinus1,U1>,
         > = GenericArray::from_iter(digests.iter().map(|x| {
             crate::util::canonical::deserialize(&crate::util::canonical::serialize(x).unwrap())
                 .unwrap()
@@ -556,7 +560,7 @@ pub mod kv_treehash_tests {
             .collect();
         let digests0: GenericArray<
             <TheTreeHash as KVTreeHash>::Digest,
-            <TheTreeHash as KVTreeHash>::BranchArity,
+            AddLength::<<TheTreeHash as KVTreeHash>::BranchArityMinus1,U1>,
         > = GenericArray::from_iter(digests0.into_iter().chain(std::iter::repeat(
             <TheTreeHash as KVTreeHash>::empty_digest(),
         )));
@@ -566,7 +570,7 @@ pub mod kv_treehash_tests {
             .collect();
         let digests1: GenericArray<
             <TheTreeHash as KVTreeHash>::Digest,
-            <TheTreeHash as KVTreeHash>::BranchArity,
+            AddLength::<<TheTreeHash as KVTreeHash>::BranchArityMinus1,U1>,
         > = GenericArray::from_iter(digests1.into_iter().chain(std::iter::repeat(
             <TheTreeHash as KVTreeHash>::empty_digest(),
         )));
