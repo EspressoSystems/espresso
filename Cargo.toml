@@ -14,7 +14,7 @@
 resolver = "2"
 
 members = [
-	"address-book",
+    "address-book",
     "faucet",
     "validator",
     "zerok/apis/availability",
@@ -23,9 +23,9 @@ members = [
     "zerok/apis/status",
     "zerok/zerok_client",
     "zerok/zerok_lib",
-    ]
+  ]
 [profile.dev]
 opt-level = 1
 [profile.release]
 debug = true
-# lto = "thin"
+lto = "thin"
