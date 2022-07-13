@@ -511,6 +511,7 @@ async fn init_hotshot(
         start_delay: 1,
         propose_min_round_time: Duration::from_secs(0),
         propose_max_round_time: Duration::from_secs(10),
+        num_bootstrap: 0, // no-op for WSNetwork, will be used by libp2p in the future
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
