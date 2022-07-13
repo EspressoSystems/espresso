@@ -1,7 +1,19 @@
-// Copyright © 2021 Translucence Research, Inc. All rights reserved.
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 #![deny(warnings)]
 
 use async_std::task::{sleep, spawn_blocking};
+use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
 use jf_cap::keys::UserPubKey;
@@ -14,8 +26,8 @@ use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use tide::http::Url;
 use tracing::info;
+use validator_node::node::{QueryService, Validator};
 use zerok_lib::{
-    node::{QueryService, Validator},
     state::{ElaboratedBlock, ElaboratedTransaction},
     testing::{MultiXfrTestState, TxnPrintInfo},
 };
@@ -189,7 +201,6 @@ async fn generate_transactions(
             if let Some(tx) = txn.as_ref() {
                 info!("  - Reproposing a transaction");
                 if txn_proposed_round + 5 < round {
-                    // TODO
                     phaselock.submit_transaction(tx.clone().3).await.unwrap();
                     txn_proposed_round = round;
                 }
@@ -315,7 +326,6 @@ async fn generate_transactions(
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::from_args();
     tracing_subscriber::fmt()
-        .compact()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_ansi(options.colored_logs)
         .init();
@@ -334,6 +344,8 @@ async fn main() -> Result<(), std::io::Error> {
     if options.gen_pk {
         generate_keys(&options, &config);
     }
+
+    let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
 
     if let Some(own_id) = options.id {
         // Initialize the state and phaselock
@@ -355,6 +367,7 @@ async fn main() -> Result<(), std::io::Error> {
             pub_keys,
             genesis,
             own_id as usize,
+            data_source.clone(),
         )
         .await;
 

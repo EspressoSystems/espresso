@@ -18,11 +18,13 @@ use tide::http::{content::Accept, mime};
 use tide::StatusCode;
 use tide_websockets::WebSocketConnection;
 use tracing::{event, Level};
-use zerok_lib::{
+use validator_node::{
     api,
     api::*,
-    ledger::EspressoLedger,
     node::{LedgerSnapshot, LedgerSummary, LedgerTransition, QueryService},
+};
+use zerok_lib::{
+    ledger::EspressoLedger,
     state::{state_comm::LedgerStateCommitment, ElaboratedBlock},
 };
 

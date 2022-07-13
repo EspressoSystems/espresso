@@ -1,0 +1,52 @@
+[package]
+name = "validator_node"
+version = "0.1.0"
+authors = ["Nathan Yospe <nathan@espressosys.net>"]
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+address-book = { path = "../../address-book" }
+arbitrary = { version = "1.0", features = ["derive"] }
+arbitrary-wrappers = { git = "https://github.com/EspressoSystems/arbitrary-wrappers.git" }
+ark-serialize = { version = "0.3.0", features = ["derive"] }
+ark-std = { version = "0.3.0", default-features = false }
+async-std = { version = "1.10.0", features = ["unstable", "attributes"] }
+async-trait = "0.1.51"
+async-tungstenite = { version = "0.15.0", features = ["async-std-runtime"] }
+async_executors = { version = "0.4.2", features = ["async_std"] }
+bincode = "1.3.3"
+bitvec = "0.20.1"
+commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.1.0" }
+espresso-availability-api = { path = "../apis/availability" }
+espresso-catchup-api = { path = "../apis/catchup" }
+espresso-macros = { git = "https://github.com/EspressoSystems/espresso-macros.git" }
+espresso-metastate-api = { path = "../apis/metastate" }
+espresso-status-api = { path = "../apis/status" }
+futures = "0.3.16"
+itertools = "0.10.1"
+jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
+jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
+jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
+key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
+lazy_static = "1.4.0"
+net = { git = "https://github.com/EspressoSystems/net.git" }
+phaselock = { git = "ssh://git@github.com/EspressoSystems/phaselock.git", tag = "v0.0.7" }
+phaselock-types = { git = "ssh://git@github.com/EspressoSystems/phaselock.git", tag = "v0.0.7" }
+rand = "0.7.3"
+rand_chacha = { version = "0.3.1", features = ["serde1"] }
+reef = { git = "https://github.com/EspressoSystems/reef.git", features = ["testing"] }
+seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.61"
+snafu = { version = "0.7", features = ["backtraces"] }
+surf = "2.3.1"
+tempdir = "0.3.7"
+tide = "0.16.0"
+tracing = "0.1.35"
+zerok_lib = { path = "../zerok_lib" }
+
+[dev-dependencies]
+proptest = "0.8.7"
+quickcheck = "1.0"
+quickcheck_macros = "1.0"

@@ -12,6 +12,9 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 async-std = { version = "1.10.0", features = ["unstable", "attributes"] }
 
+[dependencies.validator_node]
+path = "../../validator_node"
+
 [dependencies.zerok_lib]
 path = ".."
 

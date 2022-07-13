@@ -9,7 +9,7 @@
 use num_bigint::BigUint;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use structopt::StructOpt;
-use zerok_lib::keystore::hd::{KeyTree, Mnemonic};
+use validator_node::keystore::hd::{KeyTree, Mnemonic};
 
 pub fn field_to_hex(f: impl Into<BigUint>) -> String {
     let bytes = f

@@ -1,10 +1,19 @@
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 use crate::{
     api,
     api::{ClientError, EspressoError},
-    ledger::EspressoLedger,
     node,
-    set_merkle_tree::{SetMerkleProof, SetMerkleTree},
-    state::{ElaboratedTransaction, MERKLE_HEIGHT},
 };
 use address_book::InsertPubKey;
 use api::client::*;
@@ -25,6 +34,7 @@ use seahorse::txn_builder::PendingTransaction;
 use seahorse::txn_builder::TransactionInfo;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
+    sparse_merkle_tree::SparseMerkleTree,
     txn_builder::TransactionState,
     BincodeSnafu, ClientConfigSnafu, CryptoSnafu, KeystoreBackend, KeystoreError, KeystoreState,
 };
@@ -36,6 +46,11 @@ use std::time::Duration;
 use surf::http::content::{Accept, MediaTypeProposal};
 use surf::http::{headers, mime};
 pub use surf::Url;
+use zerok_lib::{
+    ledger::EspressoLedger,
+    set_merkle_tree::{SetMerkleProof, SetMerkleTree},
+    state::{ElaboratedTransaction, MERKLE_HEIGHT},
+};
 
 pub struct NetworkBackend<'a> {
     univ_param: &'a UniversalParam,
@@ -204,23 +219,13 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
                 .collect::<Result<_, _>>()?,
         });
 
-        // `records` should be _almost_ completely sparse. However, even a fully pruned Merkle tree
-        // contains the last leaf appended, but as a new keystore, we don't care about _any_ of the
-        // leaves, so make a note to forget the last one once more leaves have been appended.
-        let merkle_leaf_to_forget = if records.0.num_leaves() > 0 {
-            Some(records.0.num_leaves() - 1)
-        } else {
-            None
-        };
-
         let state = KeystoreState {
             proving_keys,
             txn_state: TransactionState {
                 validator,
 
                 nullifiers,
-                record_mt: records.0,
-                merkle_leaf_to_forget,
+                record_mt: SparseMerkleTree::sparse(records.0),
                 now: EventIndex::from_source(EventSource::QueryService, num_events),
                 records: Default::default(),
 
@@ -252,6 +257,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
         url.set_scheme("ws").unwrap();
 
         //todo !jeb.bearer handle connection failures.
+        //      https://github.com/EspressoSystems/seahorse/issues/117
         // This should only fail if the server is incorrect or down, so we should handle by retrying
         // or failing over to a different server.
         let all_events = connect_async(url)
@@ -267,6 +273,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
         Box::pin(
             chosen_events
                 //todo !jeb.bearer handle stream errors
+                //      https://github.com/EspressoSystems/seahorse/issues/117
                 // If there is an error in the stream, or the server sends us invalid data, we
                 // should retry or fail over to a different server.
                 .filter_map(|msg| {
@@ -338,7 +345,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
     async fn submit(
         &mut self,
         txn: ElaboratedTransaction,
-        // TODO: do something with this?
         _txn_info: TransactionInfo<EspressoLedger>,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
         Self::post(&self.validator_client, "/submit", &txn).await
@@ -363,7 +369,9 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
             };
             let txid = TransactionId(BlockId(txid.0 as usize), txid.1 as usize);
             // TODO: fix the trait so we don't need this unwrap
+            //       https://github.com/EspressoSystems/seahorse/issues/223
             // TODO: include memos in transactions so we don't have to do this
+            //       https://github.com/EspressoSystems/espresso/issues/345
             Self::post(&self.query_client, format!("/memos/{}", txid), &body)
                 .await
                 .unwrap()
@@ -374,7 +382,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
         &self,
         _from: EventIndex,
     ) -> Result<(MerkleTree, EventIndex), KeystoreError<EspressoLedger>> {
-        // TODO: how should this initialize?
         let LedgerSnapshot { records, .. } = self.get("getsnapshot/0/true").await?;
         Ok((records.0, Default::default()))
     }

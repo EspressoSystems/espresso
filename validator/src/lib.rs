@@ -1,6 +1,7 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 #![deny(warnings)]
 
+use crate::full_node_mem_data_source::QueryData;
 use crate::routes::{
     dispatch_url, dispatch_web_socket, server_error, RouteBinding, UrlSegmentType, UrlSegmentValue,
 };
@@ -34,12 +35,14 @@ use threshold_crypto as tc;
 use tide::{http::Url, StatusCode};
 use tide_websockets::{WebSocket, WebSocketConnection};
 use tracing::{debug, event, Level};
-use zerok_lib::{
+use validator_node::{
     api::EspressoError,
     api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
-    committee::Committee,
     node,
     node::{EventStream, PhaseLockEvent, QueryService, Validator},
+};
+use zerok_lib::{
+    committee::Committee,
     state::{
         ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, SetMerkleTree,
         ValidatorState, MERKLE_HEIGHT,
@@ -49,7 +52,7 @@ use zerok_lib::{
 };
 
 mod disco;
-mod full_node_mem_data_source;
+pub mod full_node_mem_data_source;
 mod ip;
 mod routes;
 
@@ -484,6 +487,7 @@ async fn init_phaselock(
     networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
     full_node: bool,
     state: GenesisState,
+    data_source: Arc<RwLock<QueryData>>,
 ) -> Node {
     // Create the initial phaselock
     let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
@@ -581,6 +585,9 @@ async fn init_phaselock(
             nullifiers,
             state.memos,
             full_persisted,
+            data_source.clone(),
+            data_source.clone(),
+            data_source.clone(),
         );
         Node::Full(Arc::new(RwLock::new(node)))
     } else {
@@ -900,6 +907,7 @@ pub async fn init_validator(
     pub_keys: Vec<PubKey>,
     genesis: GenesisState,
     own_id: usize,
+    data_source: Arc<RwLock<QueryData>>,
 ) -> Node {
     debug!("Current node: {}", own_id);
     let (threshold, secret_keys) = secret_keys(config);
@@ -946,6 +954,7 @@ pub async fn init_validator(
         own_network,
         options.full,
         genesis,
+        data_source,
     )
     .await
 }

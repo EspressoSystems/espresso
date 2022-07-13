@@ -41,18 +41,19 @@ num-bigint = "0.4"
 primitive-types = "0.11"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
-serde = "1.0.136"
+serde = "1.0.139"
 serde_json = "1.0.67"
-snafu = "0.7.0"
+snafu = "0.7.1"
 structopt = "0.3.26"
 surf = "2.3.2"
 tempdir = "0.3.7"
 tide = "0.16.0"
-tracing = "0.1.26"
+tracing = "0.1.35"
 tracing-futures = "0.2"
 tracing-log = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-zerok_lib = { path = "../zerok/zerok_lib" }
+validator_node = { path = "../zerok/validator_node/" }
+zerok_lib = { path = "../zerok/zerok_lib/" }
 
 [dev-dependencies]
 espresso-validator = { path = "../validator", features = ["testing"] }

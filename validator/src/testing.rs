@@ -1,6 +1,18 @@
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 use crate::{
-    gen_pub_keys, init_validator, init_web_server, ConsensusConfig, GenesisState, Node, NodeOpt,
-    MINIMUM_NODES,
+    full_node_mem_data_source::QueryData, gen_pub_keys, init_validator, init_web_server,
+    ConsensusConfig, GenesisState, Node, NodeOpt, MINIMUM_NODES,
 };
 use async_std::task::{block_on, spawn, JoinHandle};
 use futures::{channel::oneshot, future::join_all};
@@ -13,16 +25,15 @@ use std::mem::take;
 use std::time::Instant;
 use surf::Url;
 use tempdir::TempDir;
-use zerok_lib::{
+use validator_node::{
     keystore::{
-        loader::{KeystoreLoader, LoaderMetadata},
+        loader::{KeystoreLoader, MnemonicPasswordLogin},
         network::NetworkBackend,
         EspressoKeystore,
     },
-    ledger::EspressoLedger,
     node::Validator,
-    universal_params::UNIVERSAL_PARAM,
 };
+use zerok_lib::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 
 pub struct TestNode {
     pub query_api: Option<Url>,
@@ -80,8 +91,8 @@ pub struct TestNetwork {
 impl TestNetwork {
     pub async fn create_wallet(
         &self,
-        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = LoaderMetadata>,
-    ) -> EspressoKeystore<'static, NetworkBackend<'static>, LoaderMetadata> {
+        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = MnemonicPasswordLogin>,
+    ) -> EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin> {
         let backend = NetworkBackend::new(
             &*UNIVERSAL_PARAM,
             self.query_api.clone(),
@@ -159,7 +170,11 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 opt.full = true;
                 opt.web_server_port = pick_unused_port().unwrap();
             }
-            let node = init_validator(&opt, &config, pub_keys, genesis, i).await;
+            let data_source =
+                async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
+
+            let node =
+                init_validator(&opt, &config, pub_keys, genesis, i, data_source.clone()).await;
 
             // If applicable, run a query service.
             let url = if let Node::Full(node) = &node {

@@ -1,5 +1,17 @@
-use crate::committee::Committee;
-use crate::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
+use zerok_lib::committee::Committee;
+use zerok_lib::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
 
 use phaselock::{
     traits::{NetworkingImplementation, NodeImplementation, Storage},
@@ -11,7 +23,6 @@ use core::fmt::Debug;
 use core::marker::PhantomData;
 
 /// A lightweight node that handles validation for consensus, and nothing more.
-/// TODO: replace with persisting version of ValidatorNodeImpl, complete with handler for decide callback;
 pub trait PLNet:
     NetworkingImplementation<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>
     + Clone

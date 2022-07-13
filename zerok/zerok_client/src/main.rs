@@ -1,3 +1,15 @@
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 ////////////////////////////////////////////////////////////////////////////////
 // The Espresso Keystore Frontend
 //
@@ -9,14 +21,18 @@ mod cli_client;
 
 use async_trait::async_trait;
 use jf_cap::proof::UniversalParam;
-use seahorse::{cli::*, io::SharedIO, KeystoreError};
+use seahorse::{
+    cli::*,
+    io::SharedIO,
+    loader::{InteractiveLoader, MnemonicPasswordLogin},
+    reader::Reader,
+    KeystoreError,
+};
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
-use zerok_lib::{
-    keystore::network::{NetworkBackend, Url},
-    ledger::EspressoLedger,
-};
+use validator_node::keystore::network::{NetworkBackend, Url};
+use zerok_lib::ledger::EspressoLedger;
 
 #[derive(StructOpt)]
 pub struct Args {
@@ -60,7 +76,7 @@ pub struct Args {
     #[structopt(
         long,
         env = "ESPRESSO_ADDRESS_BOOK_URL",
-        default_value = "http://localhost:50078"
+        default_value = "http://localhost:50088"
     )]
     pub address_book_url: Url,
 
@@ -68,7 +84,7 @@ pub struct Args {
     #[structopt(
         long,
         env = "ESPRESSO_SUBMIT_URL",
-        default_value = "http://localhost:50087"
+        default_value = "http://localhost:50089"
     )]
     pub submit_url: Url,
 }
@@ -102,6 +118,8 @@ impl<'a> CLI<'a> for EspressoCli {
     type Ledger = EspressoLedger;
     type Backend = NetworkBackend<'a>;
     type Args = Args;
+    type Loader = InteractiveLoader;
+    type Meta = MnemonicPasswordLogin;
 
     async fn init_backend(
         univ_param: &'a UniversalParam,
@@ -114,6 +132,13 @@ impl<'a> CLI<'a> for EspressoCli {
             args.submit_url,
         )
         .await
+    }
+
+    async fn init_loader(
+        storage: PathBuf,
+        input: Reader,
+    ) -> Result<Self::Loader, KeystoreError<Self::Ledger>> {
+        Ok(InteractiveLoader::new(storage, input))
     }
 }
 

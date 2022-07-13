@@ -1,17 +1,26 @@
-use crate::full_persistence::FullPersistence;
-pub use crate::state::state_comm::LedgerStateCommitment;
-use crate::{
-    ledger::EspressoLedger,
-    ser_test,
-    set_merkle_tree::*,
-    state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
-    validator_node::*,
-};
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
+use crate::api::EspressoError;
+use crate::ser_test;
+use crate::validator_node::*;
 use arbitrary::Arbitrary;
 use arbitrary_wrappers::*;
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
 use async_trait::async_trait;
+use espresso_availability_api::data_source::UpdateAvailabilityData;
+use espresso_catchup_api::data_source::UpdateCatchUpData;
+use espresso_metastate_api::data_source::UpdateMetaStateData;
 pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::{channel::mpsc, future::RemoteHandle, select, task::SpawnExt};
@@ -33,6 +42,13 @@ use snafu::Snafu;
 use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use tracing::{debug, error};
+use zerok_lib::full_persistence::FullPersistence;
+pub use zerok_lib::state::state_comm::LedgerStateCommitment;
+use zerok_lib::{
+    ledger::EspressoLedger,
+    set_merkle_tree::*,
+    state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
+};
 
 pub trait ConsensusEvent {
     fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState>;
@@ -287,14 +303,11 @@ struct FullState {
     // but for which memos have not yet been posted. When the memos arrive, we will use this tree
     // to authenticate the new memos to listeners, and then forget them to keep this tree from
     // growing unbounded.
-    //todo replace with persistent range-mapping-based Merkle tree
     records_pending_memos: MerkleTree,
     // Map from past nullifier set root hashes to the index of the state in which that root hash
     // occurred.
-    //todo replace with persistent key value store
     past_nullifiers: HashMap<set_hash::Hash, usize>,
     // Block IDs indexed by block hash.
-    //todo replace with persistent key value store
     block_hashes: HashMap<Vec<u8>, usize>,
     // Total number of committed transactions, aggregated across all blocks.
     num_txns: usize,
@@ -308,6 +321,20 @@ struct FullState {
     // Clients which have subscribed to events starting at some time in the future, to be added to
     // `subscribers` when the time comes.
     pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<LedgerEvent<EspressoLedger>>>>,
+
+    // Handles to the new store go here for now, in order to minimize the potential failure
+    // modes for the refactoring. Once we move over to the tide_disco based services, we may be
+    // able to remove most of this FullNode/FullState, leaving just the PhaseLockEvent processing
+    // and whatever needs to be added for subscription support.
+
+    // The status updates will need to be elsewhere, because that won't work through dyn. It will require a generic hook-up.
+    #[allow(dead_code)]
+    catchup_store: Arc<RwLock<dyn UpdateCatchUpData<Error = EspressoError> + Send + Sync>>,
+    #[allow(dead_code)]
+    availability_store:
+        Arc<RwLock<dyn UpdateAvailabilityData<Error = EspressoError> + Send + Sync>>,
+    #[allow(dead_code)]
+    meta_state_store: Arc<RwLock<dyn UpdateMetaStateData<Error = EspressoError> + Send + Sync>>,
 }
 
 impl FullState {
@@ -635,7 +662,6 @@ impl FullState {
         }
 
         // Store and broadcast the new memos.
-        //todo !jeb.bearer update memos in storage
         let event = LedgerEvent::Memos {
             outputs: izip!(
                 new_memos,
@@ -662,22 +688,32 @@ pub struct PhaseLockQueryService<'a> {
 }
 
 impl<'a> PhaseLockQueryService<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         event_source: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
 
         // The current state of the network.
-        //todo !jeb.bearer Query these parameters from another full node if we are not starting off
-        // a fresh network.
         univ_param: &'a jf_cap::proof::UniversalParam,
         mut validator: ValidatorState,
         record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
         mut full_persisted: FullPersistence,
+        catchup_store: Arc<
+            RwLock<impl UpdateCatchUpData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
+        availability_store: Arc<
+            RwLock<impl UpdateAvailabilityData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
+        meta_state_store: Arc<
+            RwLock<impl UpdateMetaStateData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
     ) -> Self {
         //todo !jeb.bearer If we are not starting from the genesis of the ledger, query the full
         // state at this point from another full node, like
         //  let state = other_node.full_state(validator.commit());
+        // https://github.com/EspressoSystems/espresso/issues/415
+        //
         // For now, just assume we are starting at the beginning:
         let block_hashes = HashMap::new();
         // Use the unpruned record Merkle tree.
@@ -711,6 +747,9 @@ impl<'a> PhaseLockQueryService<'a> {
             proposed: ElaboratedBlock::default(),
             subscribers: Default::default(),
             pending_subscribers: Default::default(),
+            catchup_store,
+            availability_store,
+            meta_state_store,
         }));
 
         // Spawn event handling task.
@@ -849,18 +888,26 @@ pub struct FullNode<'a, NET: PLNet, STORE: PLStore> {
 }
 
 impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         validator: LightWeightNode<NET, STORE>,
 
         // The current state of the network.
-        //todo !jeb.bearer Query these parameters from another full node if we are not starting off
-        // a fresh network.
         univ_param: &'a jf_cap::proof::UniversalParam,
         state: ValidatorState,
         record_merkle_tree: MerkleTree,
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
         full_persisted: FullPersistence,
+        catchup_store: Arc<
+            RwLock<impl UpdateCatchUpData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
+        availability_store: Arc<
+            RwLock<impl UpdateAvailabilityData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
+        meta_state_store: Arc<
+            RwLock<impl UpdateMetaStateData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
     ) -> Self {
         let query_service = PhaseLockQueryService::new(
             validator.subscribe(),
@@ -870,6 +917,9 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
             nullifiers,
             unspent_memos,
             full_persisted,
+            catchup_store,
+            availability_store,
+            meta_state_store,
         );
         Self {
             validator,
@@ -966,15 +1016,17 @@ impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        testing::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo},
-        universal_params::UNIVERSAL_PARAM,
-    };
+    use crate::api::EspressoError;
     use async_std::task::block_on;
+    use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
     use jf_cap::{sign_receiver_memos, KeyPair, MerkleLeafProof, MerkleTree};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
     use tempdir::TempDir;
+    use zerok_lib::{
+        testing::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo},
+        universal_params::UNIVERSAL_PARAM,
+    };
 
     #[derive(Debug)]
     struct MockConsensusEvent {
@@ -1109,6 +1161,42 @@ mod tests {
         (initial_state, history)
     }
 
+    #[derive(Default)]
+    struct TestOnlyMockAllStores;
+
+    impl UpdateAvailabilityData for TestOnlyMockAllStores {
+        type Error = EspressoError;
+
+        fn append_blocks(
+            &mut self,
+            _blocks: &mut Vec<BlockQueryData>,
+            _states: &mut Vec<StateQueryData>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    impl UpdateCatchUpData for TestOnlyMockAllStores {
+        type Error = EspressoError;
+        fn append_events(
+            &mut self,
+            _events: &mut Vec<LedgerEvent<EspressoLedger>>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    impl UpdateMetaStateData for TestOnlyMockAllStores {
+        type Error = EspressoError;
+        fn append_block_nullifiers(
+            &mut self,
+            _block_id: u64,
+            _nullifiers: Vec<Nullifier>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
     #[allow(clippy::type_complexity)]
     fn test_query_service(
         txs: Vec<Vec<(bool, u16, u16, u8, u8, i32)>>,
@@ -1141,6 +1229,8 @@ mod tests {
             )));
             let full_persisted =
                 FullPersistence::new(temp_persisted_dir.path(), "full_store").unwrap();
+
+            let mock_store = Arc::new(RwLock::new(TestOnlyMockAllStores::default()));
             let mut qs = PhaseLockQueryService::new(
                 events,
                 &*UNIVERSAL_PARAM,
@@ -1149,6 +1239,9 @@ mod tests {
                 initial_state.2,
                 initial_state.3,
                 full_persisted,
+                mock_store.clone(),
+                mock_store.clone(),
+                mock_store.clone(),
             );
 
             // The first event gives receiver memos for the records in the initial state of the
@@ -1238,6 +1331,7 @@ mod tests {
 
                     // Posting the same memos twice should fail.
                     // todo !jeb.bearer re-enable this test when persistent memo storage is supported
+                    //      https://github.com/EspressoSystems/espresso/issues/345
                     // match qs
                     //     .post_memos(block_id as u64, txn_id as u64, memos.clone(), sig.clone())
                     //     .await
@@ -1250,6 +1344,7 @@ mod tests {
 
                     // We should be able to query the newly posted memos.
                     // todo !jeb.bearer re-enable this test when persistent memo storage is supported
+                    //      https://github.com/EspressoSystems/espresso/issues/345
                     // let (queried_memos, sig) =
                     //     qs.get_memos(block_id as u64, txn_id as u64).await.unwrap();
                     // txn.verify_receiver_memos_signature(&queried_memos, &sig)

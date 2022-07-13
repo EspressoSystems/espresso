@@ -1,14 +1,26 @@
-use crate::{
-    ledger::EspressoLedger,
-    set_merkle_tree::SetMerkleProof,
-    state::{state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction},
-};
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 use fmt::{Display, Formatter};
 use jf_cap::{structs::ReceiverMemo, Signature, TransactionNote};
 use phaselock::PhaseLockError;
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, Snafu};
 use std::fmt;
+use zerok_lib::{
+    ledger::EspressoLedger,
+    set_merkle_tree::SetMerkleProof,
+    state::{state_comm::LedgerStateCommitment, Block, ElaboratedBlock, ElaboratedTransaction},
+};
 
 pub use net::*;
 
@@ -19,7 +31,7 @@ pub enum EspressoError {
         source: crate::node::QueryServiceError,
     },
     Validation {
-        source: crate::state::ValidationError,
+        source: zerok_lib::state::ValidationError,
     },
     #[snafu(display("{:?}", source))]
     Consensus {
@@ -27,7 +39,7 @@ pub enum EspressoError {
         // will serialize Ok(err) to Err(format(err)), and when we deserialize we will at least
         // preserve the variant ConsensusError and a String representation of the underlying error.
         // Unfortunately, this means we cannot use this variant as a SNAFU error source.
-        #[serde(with = "crate::state::ser_debug")]
+        #[serde(with = "crate::serializers::ser_debug")]
         #[snafu(source(false))]
         source: Result<Box<PhaseLockError>, String>,
     },
@@ -56,8 +68,8 @@ impl From<crate::node::QueryServiceError> for EspressoError {
     }
 }
 
-impl From<crate::state::ValidationError> for EspressoError {
-    fn from(source: crate::state::ValidationError) -> Self {
+impl From<zerok_lib::state::ValidationError> for EspressoError {
+    fn from(source: zerok_lib::state::ValidationError) -> Self {
         Self::Validation { source }
     }
 }
@@ -97,6 +109,8 @@ impl From<Box<bincode::ErrorKind>> for EspressoError {
 /// Having default conversion functions for each variant ensures that new error types can be added
 /// to [EspressoError] without breaking existing conversions, as long as a corresponding new default
 /// method is added to this trait.
+///
+/// [catch_all]: #tymethod.catch_all
 pub trait FromError: Sized {
     fn catch_all(msg: String) -> Self;
 
@@ -104,7 +118,7 @@ pub trait FromError: Sized {
         Self::catch_all(source.to_string())
     }
 
-    fn from_validation_error(source: crate::state::ValidationError) -> Self {
+    fn from_validation_error(source: zerok_lib::state::ValidationError) -> Self {
         Self::catch_all(source.to_string())
     }
 
@@ -136,6 +150,9 @@ pub trait FromError: Sized {
     /// If `source` can be downcast to an [Error], it is converted to the specific type using
     /// [from_espresso_error]. Otherwise, it is converted to a [String] using [Display] and then
     /// converted to the specific type using [catch_all].
+    ///
+    /// [from_espresso_error]: #method.from_espresso_error
+    /// [catch_all]: #tymethod.catch_all
     fn from_client_error(source: surf::Error) -> Self {
         Self::from_espresso_error(<EspressoError as Error>::from_client_error(source))
     }
@@ -150,7 +167,7 @@ impl FromError for EspressoError {
         Self::QueryService { source }
     }
 
-    fn from_validation_error(source: crate::state::ValidationError) -> Self {
+    fn from_validation_error(source: zerok_lib::state::ValidationError) -> Self {
         Self::Validation { source }
     }
 
@@ -178,7 +195,7 @@ impl FromError for seahorse::KeystoreError<EspressoLedger> {
         source.into()
     }
 
-    fn from_validation_error(source: crate::state::ValidationError) -> Self {
+    fn from_validation_error(source: zerok_lib::state::ValidationError) -> Self {
         Self::InvalidBlock { source }
     }
 
@@ -193,7 +210,7 @@ impl FromError for seahorse::KeystoreError<EspressoLedger> {
 /// Context for embedding network client errors into specific error types.
 ///
 /// This type implements the [IntoError] trait from SNAFU, so it can be used with
-/// [ResultExt::context] just like automatically generated SNAFU contexts.
+/// `ResultExt::context` just like automatically generated SNAFU contexts.
 ///
 /// Calling `some_result.context(EspressoError)` will convert a potential error from a [surf::Error]
 /// to a specific error type `E: FromError` using the method `E::from_client_error`, provided by the
@@ -211,12 +228,6 @@ impl<E: FromError + ErrorCompat + std::error::Error> IntoError<E> for ClientErro
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // API response types for Espresso-specific data structures
 //
-
-impl From<LedgerStateCommitment> for Hash {
-    fn from(c: LedgerStateCommitment) -> Self {
-        Self::from(commit::Commitment::<_>::from(c))
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommittedBlock {

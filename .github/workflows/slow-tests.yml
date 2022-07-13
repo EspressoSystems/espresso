@@ -1,0 +1,42 @@
+name: Slow Tests
+
+on:
+  push:
+    branches:
+      - main
+      - release-*
+  schedule:
+    - cron: "0 1 * * 1"
+  workflow_dispatch:
+
+env:
+  RUST_TEST_THREADS: 4
+
+jobs:
+  slow-tests:
+    runs-on: [self-hosted, X64]
+    container:
+      image: ghcr.io/espressosystems/devops-rust:1.62
+    steps:
+      - uses: styfle/cancel-workflow-action@0.10.0
+        name: Cancel Outdated Builds
+        with:
+          access_token: ${{ github.token }}
+
+      - name: Potential broken submodules fix
+        run: |
+          git checkout -f $(git -c user.name=x -c user.email=x@x commit-tree $(git hash-object -t tree /dev/null) < /dev/null) || :
+
+      - uses: actions/checkout@v2
+        name: Checkout Repository
+
+      - name: Configure Git
+        run: |
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com".insteadOf git://github.com
+          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com".insteadOf ssh://git@github.com
+
+      - uses: Swatinem/rust-cache@v1
+        name: Enable Rust Caching
+
+      - name: Run Tests
+        run: cargo test --release --features=slow-tests

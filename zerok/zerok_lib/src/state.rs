@@ -1,4 +1,15 @@
 #![deny(warnings)]
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
 
 use espresso_macros::*;
 
@@ -302,27 +313,6 @@ pub(crate) mod ser_display {
     }
 }
 
-pub(crate) mod ser_debug {
-    use serde::de::{Deserialize, Deserializer};
-    use serde::ser::{Serialize, Serializer};
-    use std::fmt::Debug;
-
-    pub fn serialize<S: Serializer, T: Debug>(
-        v: &Result<T, String>,
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
-        let string = match v {
-            Ok(v) => format!("{:?}", v),
-            Err(string) => string.clone(),
-        };
-        Serialize::serialize(&string, s)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>, T>(d: D) -> Result<Result<T, String>, D::Error> {
-        Ok(Err(Deserialize::deserialize(d)?))
-    }
-}
-
 /// Adapter because [TxnApiError] doesn't implement Clone
 impl Clone for ValidationError {
     /// Clone all errors except CryptoError which gets mapped to a
@@ -462,6 +452,7 @@ impl Committable for RecordMerkleFrontier {
 pub mod state_comm {
     use super::*;
     use jf_utils::tagged_blob;
+    use net::Hash;
 
     #[ser_test(arbitrary)]
     #[tagged_blob("STATE")]
@@ -485,6 +476,12 @@ pub mod state_comm {
     impl AsRef<[u8]> for LedgerStateCommitment {
         fn as_ref(&self) -> &[u8] {
             self.0.as_ref()
+        }
+    }
+
+    impl From<LedgerStateCommitment> for Hash {
+        fn from(c: LedgerStateCommitment) -> Self {
+            Self::from(commit::Commitment::<_>::from(c))
         }
     }
 

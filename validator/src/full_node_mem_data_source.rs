@@ -1,3 +1,15 @@
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 use std::collections::{BTreeMap, HashMap};
 use std::convert::From;
 
@@ -10,13 +22,13 @@ use espresso_status_api::query_data::ValidatorStatus;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use seahorse::events::LedgerEvent;
-use zerok_lib::api::EspressoError;
+use validator_node::api::EspressoError;
+use validator_node::node::QueryServiceError;
 use zerok_lib::ledger::EspressoLedger;
-use zerok_lib::node::QueryServiceError;
 use zerok_lib::state::{BlockCommitment, ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree};
 
 #[derive(Default)]
-struct QueryData {
+pub struct QueryData {
     blocks: Vec<BlockQueryData>,
     states: Vec<StateQueryData>,
     index_by_block_hash: HashMap<BlockCommitment, u64>,
@@ -201,7 +213,6 @@ impl UpdateMetaStateData for QueryData {
             nullifier_set
         })?;
         self.cached_nullifier_sets.insert(block_id, nullifier_set);
-        // TODO: thin out older entries (every other, geometric) when the total gets too large
         Ok(())
     }
 }
@@ -226,5 +237,19 @@ impl UpdateStatusData for QueryData {
     {
         op(&mut self.node_status).map_err(EspressoError::from)?;
         Ok(())
+    }
+}
+
+impl QueryData {
+    pub fn new() -> QueryData {
+        QueryData {
+            blocks: Vec::new(),
+            states: Vec::new(),
+            index_by_block_hash: HashMap::new(),
+            index_by_txn_hash: HashMap::new(),
+            events: Vec::new(),
+            cached_nullifier_sets: BTreeMap::new(),
+            node_status: ValidatorStatus::default(),
+        }
     }
 }
