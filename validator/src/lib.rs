@@ -927,6 +927,7 @@ pub async fn init_validator(
 ) -> Node {
     debug!("Current node: {}", own_id);
 
+    // hotshot requires this threshold to be at least 2/3rd of the nodes for safety guarantee reasons
     let threshold = ((config.nodes.len() as u64 * 2) / 3) + 1;
 
     // Get networking information

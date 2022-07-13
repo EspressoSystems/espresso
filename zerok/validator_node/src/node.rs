@@ -1230,11 +1230,11 @@ mod tests {
             let initial_uid = initial_state.0.record_merkle_commitment.num_leaves;
             assert_eq!(initial_state.0.commit(), history[0].0.commit());
             let events = Box::pin(stream::iter(history.clone().into_iter().map(
-                |(_, block, _, state, qcs)| MockConsensusEvent {
+                |(_, block, _, state, quorum_certificate)| MockConsensusEvent {
                     event: EventType::Decide {
                         block: Arc::new(vec![block]),
                         state: Arc::new(vec![state]),
-                        qcs: Arc::new(vec![qcs]),
+                        qcs: Arc::new(vec![quorum_certificate]),
                     },
                 },
             )));
