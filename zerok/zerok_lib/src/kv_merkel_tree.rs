@@ -20,39 +20,33 @@ use core::fmt::Debug;
 /// sparseness. That is, any two sets with the same root hash will compare equal, even if the
 /// elements retained in memory are different between the two sets.
 #[derive(Debug, Clone)]
-pub enum KVMerkleTree<Hash, Arity> 
+pub enum KVMerkleTree<KVHash, Arity> 
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //T: CommitableHashTag,
-    Hash: KVTreeHash,
-    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
+    KVHash: KVTreeHash + Clone,
+    Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq + ArrayLength<KVHash::Digest>,
 {
     EmptySubtree,
     ForgottenSubtree {
-        digest: Hash::Digest,
+        digest: KVHash::Digest,
     },
     Leaf {
-        digest: Hash::Digest,
+        digest: KVHash::Digest,
         /// how far above the "true" leaf level this leaf is
         height: usize,
-        key: Hash::Key,
-        value: Hash::Value,
+        key: KVHash::Key,
+        value: KVHash::Value,
     },
     Branch {
-        digest: Hash::Digest,
+        digest: KVHash::Digest,
         //children: GenericArray<Hash::Digest, Hash::BranchArity>,
-        children: Box<GenericArray<KVMerkleTree<Hash,Arity>, Arity>>,
+        children: Box<GenericArray<KVMerkleTree<KVHash,Arity>, Arity>>,
     },
 }
 
-impl<Hash, Arity> PartialEq<Self> for KVMerkleTree<Hash, Arity>
+impl<KVHash, Arity> PartialEq<Self> for KVMerkleTree<KVHash, Arity>
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    Hash: KVTreeHash,
-    //T: CommitableHashTag,
-    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
+    KVHash: KVTreeHash + Clone,
+    Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq + ArrayLength<KVHash::Digest>,
  {
     fn eq(&self, other: &Self) -> bool {
         self.hash() == other.hash()
@@ -70,24 +64,21 @@ impl<'a,K,V,D,A> arbitrary::Arbitrary<'a> for KVMerkleTree<K,V,D,A,T> {
     }
 }
 */
-impl<Hash, Arity> KVMerkleTree<Hash, Arity>
+impl<KVHash, Arity> KVMerkleTree<KVHash, Arity>
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    Hash: KVTreeHash,
-    //T: CommitableHashTag,
-    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq  + ArrayLength<Hash::Digest>,
+    KVHash: KVTreeHash + Clone,
+    Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq  + ArrayLength<KVHash::Digest>,
  {
-    fn new_leaf(height: usize, key: Hash::Key, value: Hash::Value) -> Self {
-        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
+    fn new_leaf(height: usize, key: KVHash::Key, value: KVHash::Value) -> Self {
+        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
         let key_bits = key_bit_vec.into_iter();
 
-        let mut h = Hash::hash_leaf(key, value);
+        let mut h = KVHash::hash_leaf(key, value);
 
         for sib in key_bits.into_iter().take(height) {
-            let mut childs = GenericArray::from_iter(vec![Hash::empty_digest(); Arity::to_usize()]);
+            let mut childs = GenericArray::from_iter(vec![KVHash::empty_digest(); Arity::to_usize()]);
             childs[sib as usize] = h;
-            h = Hash::hash_branch(childs);
+            h = KVHash::hash_branch(childs);
             
         }
 
@@ -99,54 +90,42 @@ where
         }
     }
 
-    //fn new_branch(l: Box<Self>, r: Box<Self>) -> Self {
     fn new_branch(children: Box<GenericArray<Self, Arity>>) -> Self {
         let childs = GenericArray::from_iter(children.into_iter().map(|d| d.hash()));
         Self::Branch {
-            digest: Hash::hash_branch(childs),
+            digest: KVHash::hash_branch(childs),
             children,
         }
     }
 }
 
-impl <Hash, Arity> Default for KVMerkleTree<Hash,Arity> 
+impl <KVHash, Arity> Default for KVMerkleTree<KVHash,Arity> 
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //T: CommitableHashTag,
-    Hash: KVTreeHash,
-    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq  + ArrayLength<Hash::Digest>,
+    KVHash: KVTreeHash + Clone,
+    Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq  + ArrayLength<KVHash::Digest>,
 {
     fn default() -> Self {
         Self::EmptySubtree
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum KVMerkleTerminalNode<Hash> 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KVMerkleTerminalNode<KVHash> 
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //T: CommitableHashTag,
-    Hash: KVTreeHash,
-    //Arity: ArrayLength<KVMerkleTree<K, V, Hash, Arity>> + Debug + PartialEq,
+    KVHash: KVTreeHash + Clone,
  {
     EmptySubtree,
     Leaf {
         /// how far above the "true" leaf level this leaf is
         height: usize,
-        key: Hash::Key,
-        value: Hash::Value,
+        key: KVHash::Key,
+        value: KVHash::Value,
     },
 }
 
-impl<Hash> CanonicalSerialize for KVMerkleTerminalNode<Hash> 
+impl<KVHash> CanonicalSerialize for KVMerkleTerminalNode<KVHash> 
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //T: CommitableHashTag,
-    Hash: KVTreeHash,
-    //Arity: ArrayLength<KVMerkleTree<K, V, Hash, Arity>> + Debug + PartialEq,
+    KVHash: KVTreeHash + Clone,
  {
     fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
         match self {
@@ -172,13 +151,9 @@ where
     }
 }
 
-impl<Hash> CanonicalDeserialize for KVMerkleTerminalNode<Hash>
+impl<KVHash> CanonicalDeserialize for KVMerkleTerminalNode<KVHash>
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //T: CommitableHashTag,
-    Hash: KVTreeHash,
-    //Arity: ArrayLength<KVMerkleTree<K, V, Hash, Arity>> + Debug + PartialEq,
+    KVHash: KVTreeHash + Clone,
  {
     fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
         let mut flag = [0u8];
@@ -196,35 +171,31 @@ where
     }
 }
 
-impl<Hash> KVMerkleTerminalNode<Hash>
+impl<KVHash> KVMerkleTerminalNode<KVHash>
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //T: CommitableHashTag,
-    Hash: KVTreeHash,
-    //Arity: ArrayLength<KVMerkleTree<K, V, Hash, Arity>> + Debug + PartialEq,
+    KVHash: KVTreeHash + Clone,
 {
-    fn value<Arity>(&self) -> Hash::Digest 
+    fn value<Arity>(&self) -> KVHash::Digest 
     where
-        Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq  + ArrayLength<Hash::Digest>,
+        Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq  + ArrayLength<KVHash::Digest>,
     {
         use KVMerkleTerminalNode::*;
         match self {
-            EmptySubtree => Hash::empty_digest(),
+            EmptySubtree => KVHash::empty_digest(),
             Leaf { height, key, value } => {
-                let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(*key));
+                let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(*key));
 
                 // the path only goes until a terminal node is reached, so skip
                 // part of the bit-vec
                 let key_bits = key_bit_vec.into_iter();
 
-                let mut running_hash = Hash::hash_leaf(*key, *value);
+                let mut running_hash = KVHash::hash_leaf(*key, *value);
 
                 // if the height is too large, keep hashing
                 for sib in key_bits.chain(core::iter::repeat(0)).take(*height) {
-                    let mut childs = GenericArray::from_iter(vec![Hash::empty_digest(); Arity::to_usize()]);
+                    let mut childs = GenericArray::from_iter(vec![KVHash::empty_digest(); Arity::to_usize()]);
                     childs[sib as usize] = running_hash;
-                    running_hash = Hash::hash_branch(childs);
+                    running_hash = KVHash::hash_branch(childs);
                 }
                 running_hash
             }
@@ -237,36 +208,29 @@ where
     Clone,
     PartialEq,
     Eq,
-    Hash,
     CanonicalSerialize,
     CanonicalDeserialize,
     Serialize,
     Deserialize,
 )]
-pub struct KVMerkleProof<Hash,Arity> 
+pub struct KVMerkleProof<KVHash,Arity> 
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //T: CommitableHashTag,
-    Hash: KVTreeHash,
-    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
+    KVHash: KVTreeHash + Clone,
+    Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq + ArrayLength<KVHash::Digest>,
  {
-    terminal_node: KVMerkleTerminalNode<Hash>,
-    path: Vec<GenericArray<Hash::Digest, Arity>>,
+    terminal_node: KVMerkleTerminalNode<KVHash>,
+    path: Vec<GenericArray<KVHash::Digest, Arity>>,
 }
 
-impl<Hash,Arity> KVMerkleProof<Hash,Arity>
+impl<KVHash,Arity> KVMerkleProof<KVHash,Arity>
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //T: CommitableHashTag,
-    Hash: KVTreeHash,
-    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
+    KVHash: KVTreeHash + Clone,
+    Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq + ArrayLength<KVHash::Digest>,
  {
-    pub fn check(&self, key: Hash::Key, value: Hash::Value, root: Hash::Digest) -> Result<bool, Hash::Digest> {
+    pub fn check(&self, key: KVHash::Key, value: KVHash::Value, root: KVHash::Digest) -> Result<bool, KVHash::Digest> {
         let mut running_hash = self.terminal_node.value::<Arity>();
 
-        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
+        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
 
         // the path only goes until a terminal node is reached, so skip
         // part of the bit-vec
@@ -274,10 +238,10 @@ where
         let key_bits = key_bit_vec.into_iter().skip(start_bit);
 
         for (sibs, sib_position) in self.path.iter().zip(key_bits) {
-            let sibs = *sibs;
+            let sibs_vec: Vec<_> = sibs.to_vec();
             running_hash = {
-                sibs.insert(sib_position as usize, running_hash);
-                Hash::hash_branch(GenericArray::from_iter(sibs))
+                sibs_vec.insert(sib_position as usize, running_hash);
+                KVHash::hash_branch(GenericArray::from_iter(sibs_vec))
             };
         }
 
@@ -296,22 +260,19 @@ where
     }
 }
 
-impl<Hash,Arity> KVMerkleTree<Hash,Arity>
+impl<KVHash,Arity> KVMerkleTree<KVHash,Arity>
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //T: CommitableHashTag,
-    Hash: KVTreeHash,
-    Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
+    KVHash: KVTreeHash + Clone,
+    Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq + ArrayLength<KVHash::Digest>,
  {
-    pub fn sparse(root: Hash::Digest) -> Self {
+    pub fn sparse(root: KVHash::Digest) -> Self {
         Self::ForgottenSubtree { digest: root }
     }
 
-    pub fn hash(&self) -> Hash::Digest {
+    pub fn hash(&self) -> KVHash::Digest {
         use KVMerkleTree::*;
         match self {
-            EmptySubtree => Hash::empty_digest(),
+            EmptySubtree => KVHash::empty_digest(),
             Leaf { digest, .. } => *digest,
             ForgottenSubtree { digest, .. } => *digest,
             Branch { digest, .. } => *digest,
@@ -319,20 +280,20 @@ where
     }
 
     /// Returns `None` if the element is in a forgotten subtree
-    pub fn contains(&self, key: Hash::Key, value: Hash::Value) -> Option<(bool, KVMerkleProof<Hash,Arity>)> {
+    pub fn contains(&self, key: KVHash::Key, value: KVHash::Value) -> Option<(bool, KVMerkleProof<KVHash,Arity>)> {
         use KVMerkleTree::*;
-        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
+        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
         let key_bits = key_bit_vec.into_iter().rev();
 
-        let mut path = vec![vec![];0];
+        let mut path = Vec::new();
         let mut end_branch = self;
         for sib in key_bits {
             match end_branch {
                 Branch { children, .. } => {
-                    //GenericArray::from_iter(children.into_iter().map(|d| d.hash()))
                     let children_l: Vec<_> = children[0..sib as usize].into_iter().map(|d| d.hash()).collect();
                     let children_r: Vec<_> = children[sib as usize + 1 ..].into_iter().map(|d| d.hash()).collect();
-                    let all_children = children_l.append(&mut children_r);
+                    children_l.append(&mut children_r);
+                    let all_children = GenericArray::from_iter(children_l.into_iter());
                     path.push(all_children);
                     end_branch = &children[sib as usize];
                 }
@@ -377,16 +338,16 @@ where
         }
     }
 
-    pub fn insert(&mut self, key: Hash::Key, value: Hash::Value) -> Option<()> {
+    pub fn insert(&mut self, key: KVHash::Key, value: KVHash::Value) -> Option<()> {
         use KVMerkleTree::*;
-        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
+        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
         let mut end_height = key_bit_vec.len();
         let key_bits = key_bit_vec.into_iter().rev();
 
         let mut siblings = vec![];
         let mut end_branch = mem::replace(self, EmptySubtree);
-        for sib_is_left in key_bits {
-            let sib = match end_branch {
+        for pos in key_bits {
+            let sibs = match end_branch {
                 ForgottenSubtree { .. } => {
                     break;
                 }
@@ -394,34 +355,42 @@ where
                     break;
                 }
                 Branch { children, .. } => {
-                    let (sib, next) = if sib_is_left { (children[0], children[1]) } else { (children[1], children[0]) };
-                    end_branch = *next;
-                    sib
+                    //let (target, next) = if sib_is_left { (children[0], children[1]) } else { (children[1], children[0]) };
+                    let target = children[pos as usize];
+                    let children_l: Vec<_> = children[0..pos as usize].into_iter().map(|x | *x).collect();
+                    let children_r: Vec<_> = children[pos as usize + 1 ..].into_iter().map(|x| *x).collect();
+                    children_l.append(&mut children_r);
+                    //let all_other_children = GenericArray::from_iter(children_l.into_iter());
+                    end_branch = target;
+                    children_l
                 }
 
                 Leaf { height, key, value, .. } => {
                     debug_assert_eq!(height, end_height);
                     // Figure out if this leaf is down the same tree or if it's a sibling
-                    let leaf_is_left = {
+                    let leaf_pos = {
                         debug_assert!(height > 0);
-                        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
+                        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
                         !key_bit_vec[height - 1]
                     };
 
-                    let new_leaf = Box::new(Self::new_leaf(height - 1, key, value));
-                    let (new_end_branch, new_sib) = if leaf_is_left == sib_is_left {
-                        (Box::new(EmptySubtree), new_leaf)
+                    let new_leaf = Self::new_leaf(height - 1, key, value);
+                    //needs to be arity+1?
+                    let (new_end_branch, new_sibs) = if leaf_pos == pos {
+                        let new_branches = vec![&EmptySubtree; Arity::to_usize()];
+                        //KALEY: if leaf_pos == pos == maxsize, something may get weird?
+                        new_branches[pos as usize] = &new_leaf;
+                        (EmptySubtree, new_branches.into_iter().map(|x| *x).collect::<Vec<_>>())
                     } else {
-                        (new_leaf, Box::new(EmptySubtree))
+                        (new_leaf, vec![EmptySubtree; Arity::to_usize()])
                     };
-
-                    end_branch = *new_end_branch;
-                    new_sib
+                    end_branch = new_end_branch;
+                    new_sibs
                 }
             };
             end_height -= 1;
 
-            siblings.push((sib_is_left, sib));
+            siblings.push((pos, sibs));
         }
 
         let mut ret = Some(());
@@ -453,23 +422,19 @@ where
         };
 
         siblings.reverse();
-        for (sib_is_left, sib) in siblings {
-            let (l, r) = if sib_is_left {
-                (sib, Box::new(end_branch))
-            } else {
-                (Box::new(end_branch), sib)
-            };
-
-            end_branch = Self::new_branch([l, r]);
+        for (pos, sibs) in siblings {
+            sibs.insert(pos as usize, end_branch);
+            let sibs_arr: GenericArray<KVMerkleTree<KVHash,Arity>,Arity> = GenericArray::from_exact_iter(sibs).unwrap();
+            end_branch = Self::new_branch(Box::new(sibs_arr));
         }
         *self = end_branch;
 
         ret
     }
 
-    pub fn forget(&mut self, key: Hash::Key, value: Hash::Value) -> Option<KVMerkleProof<Hash,Arity>> {
+    pub fn forget(&mut self, key: KVHash::Key, value: KVHash::Value) -> Option<KVMerkleProof<KVHash,Arity>> {
         use KVMerkleTree::*;
-        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
+        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
         let key_bits = key_bit_vec.into_iter().rev();
 
         let mut siblings = vec![];
@@ -539,40 +504,42 @@ where
 
     pub fn remember(
         &mut self,
-        key: Hash::Key,
-        value: Hash::Value,
-        proof: KVMerkleProof<Hash,Arity>,
-    ) -> Result<(), Hash::Digest> {
+        key: KVHash::Key,
+        value: KVHash::Value,
+        proof: KVMerkleProof<KVHash,Arity>,
+    ) -> Result<(), KVHash::Digest> {
         // Check the proof before we do anything. After checking, we can
-        // safely assume that all the values along the path match.
+        // safely assume that all the values along the path match. This first 
+        //check can be removed as an optimization opportunity if we really need 
+        //to, but keeping it in is defensive programming
         let key_in_set = proof.check(key, value, self.hash())?;
 
         use KVMerkleTree::*;
-        let key_bit_vec = Hash::traversal_of_digest(Hash::hash_key(key));
+        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
 
         let mut siblings = vec![];
         let mut end_branch = mem::replace(self, EmptySubtree);
 
-        // TODO: this is redundant with the checking
         let path_hashes = {
             let mut running_hash = proof.terminal_node.value::<Arity>();
 
             let mut ret = vec![];
             ret.reserve(proof.path.len() + 1);
 
-            for (sib_is_left, sib_hash) in
+            for (sib, sib_hashes) in
                 key_bit_vec.iter().rev().zip(proof.path.iter().rev()).rev()
             {
-                let (l, r) = if *sib_is_left {
-                    (*sib_hash, running_hash)
-                } else {
-                    (running_hash, *sib_hash)
+                let sibs_vec: Vec<_> = sib_hashes.to_vec();
+                
+                sibs_vec.insert(*sib as usize, running_hash);
+                let branch_hash = KVHash::hash_branch(GenericArray::from_iter(sibs_vec));
+
+                ret.push((running_hash, branch_hash));
+                let children = vec![];
+                for branch in sib_hashes {
+                    children.push(ForgottenSubtree { digest: *branch })
                 };
-                ret.push((running_hash, sib_hash));
-                running_hash = Self::new_branch([
-                    Box::new(ForgottenSubtree { digest: l }),
-                    Box::new(ForgottenSubtree { digest: r }),
-                ])
+                running_hash = Self::new_branch(Box::new(GenericArray::from_iter(children)))
                 .hash();
             }
 
@@ -582,19 +549,24 @@ where
 
         let key_bits = key_bit_vec.into_iter().rev();
 
-        for (sib_is_left, (node_hash, sib_hash)) in key_bits.zip(path_hashes.into_iter()) {
+        for (pos, (node_hash, sib_hash)) in key_bits.zip(path_hashes.into_iter()) {
             let sib = match end_branch {
                 ForgottenSubtree { .. } => {
                     end_branch = ForgottenSubtree { digest: node_hash };
-                    Box::new(ForgottenSubtree { digest: *sib_hash })
+                    let sib_branches = vec![];
+
+                    Box::new(ForgottenSubtree { digest: sib_hash })
                 }
                 EmptySubtree => {
                     unreachable!();
                 } // TODO: is this unreachable?
                 Branch { children, .. } => {
-                    let (sib, next) = if sib_is_left { (children[0], children[1]) } else { (children[1], children[0]) };
-                    end_branch = next;
-                    sib
+                    let children_l: Vec<_> = children[0..pos as usize].into_iter().map(|d| d.hash()).collect();
+                    let children_r: Vec<_> = children[pos as usize + 1 ..].into_iter().map(|d| d.hash()).collect();
+                    children_l.append(&mut children_r);
+                    let all_children = GenericArray::from_iter(children_l.into_iter());
+                    end_branch = &children[pos as usize];
+                    all_children
                 }
                 //KALEY: existing key/diff value problem?
                 Leaf {
@@ -609,7 +581,7 @@ where
                 }
             };
 
-            siblings.push((sib_is_left, sib));
+            siblings.push((pos, sib));
         }
 
         end_branch = match end_branch {
@@ -618,7 +590,7 @@ where
                     KVMerkleTerminalNode::EmptySubtree => {
                         // TODO: should this be possible????? it feels like it
                         // shouldn't be
-                        assert_eq!(digest, Hash::empty_digest());
+                        assert_eq!(digest, KVHash::empty_digest());
                         EmptySubtree
                     }
 
@@ -643,16 +615,13 @@ where
     }
 }
 
-pub fn set_merkle_lw_multi_insert<Hash,Arity>(
-    inserts: Vec<KVMerkleProof<Hash,Arity>>,
-    root: Hash::Digest,
-) -> Result<(Hash::Digest, Vec<KVMerkleProof<Hash,Arity>>), Hash::Digest> 
+pub fn set_merkle_lw_multi_insert<KVHash,Arity>(
+    inserts: Vec<KVMerkleProof<KVHash,Arity>>,
+    root: KVHash::Digest,
+) -> Result<(KVHash::Digest, Vec<KVMerkleProof<KVHash,Arity>>), KVHash::Digest> 
 where
-    //K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-    //V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-   // T: CommitableHashTag,
-   Hash: KVTreeHash,
-   Arity: ArrayLength<KVMerkleTree<Hash, Arity>> + Debug + PartialEq + ArrayLength<Hash::Digest>,
+   KVHash: KVTreeHash + Clone,
+   Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq + ArrayLength<KVHash::Digest>,
  {
     let mut kvs = vec![];
     let mut s = KVMerkleTree::ForgottenSubtree { digest: root };
