@@ -247,7 +247,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         ledger
             .network()
             .address_map
-            .insert(pub_key.address(), pub_key.clone());
+            .insert(pub_key.address(), pub_key);
         Ok(())
     }
 

@@ -1,5 +1,6 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 #![deny(warnings)]
+#![allow(clippy::format_push_string)]
 
 use crate::full_node_mem_data_source::QueryData;
 use crate::routes::{
@@ -9,6 +10,11 @@ use ark_serialize::*;
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
+use hotshot::{
+    traits::implementations::{AtomicStorage, WNetwork},
+    types::{Message, SignatureKey},
+    HotShot, HotShotConfig, HotShotError, H_256,
+};
 use jf_cap::{
     structs::{Amount, AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
     MerkleTree, TransactionVerifyingKey,
@@ -16,22 +22,17 @@ use jf_cap::{
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
 use key_set::{KeySet, VerifierKeySet};
-use phaselock::{
-    traits::implementations::{AtomicStorage, WNetwork},
-    types::Message,
-    PhaseLock, PhaseLockConfig, PhaseLockError, PubKey, H_256,
-};
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
-use rand_chacha_02::{rand_core::SeedableRng as _, ChaChaRng as ChaChaRng02};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
 use std::io::Read;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::Duration;
 use std::{fs, fs::File};
 use structopt::StructOpt;
-use threshold_crypto as tc;
 use tide::{http::Url, StatusCode};
 use tide_websockets::{WebSocket, WebSocketConnection};
 use tracing::{debug, event, Level};
@@ -39,7 +40,7 @@ use validator_node::{
     api::EspressoError,
     api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
     node,
-    node::{EventStream, PhaseLockEvent, QueryService, Validator},
+    node::{EventStream, HotShotEvent, QueryService, Validator},
 };
 use zerok_lib::{
     committee::Committee,
@@ -50,6 +51,7 @@ use zerok_lib::{
     testing::{MultiXfrRecordSpec, MultiXfrTestState},
     universal_params::UNIVERSAL_PARAM,
 };
+use zerok_lib::{PrivKey, PubKey};
 
 mod disco;
 pub mod full_node_mem_data_source;
@@ -294,7 +296,7 @@ async fn get_networking<
     pub_key: PubKey,
     listen_addr: &str,
     port: u16,
-) -> WNetwork<T> {
+) -> WNetwork<T, PubKey> {
     debug!(?pub_key);
     let network = WNetwork::new(pub_key, listen_addr, port, None).await;
     if let Ok(n) = network {
@@ -315,7 +317,10 @@ async fn get_networking<
     panic!("Failed to open a port");
 }
 
-type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>;
+type PLNetwork = WNetwork<
+    Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
+    PubKey,
+>;
 type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
@@ -328,9 +333,9 @@ pub enum Node {
 
 #[async_trait]
 impl Validator for Node {
-    type Event = PhaseLockEvent;
+    type Event = HotShotEvent;
 
-    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
+    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), HotShotError> {
         match self {
             Node::Light(n) => <LWNode as Validator>::submit_transaction(n, tx).await,
             Node::Full(n) => n.read().await.submit_transaction(tx).await,
@@ -344,7 +349,7 @@ impl Validator for Node {
         }
     }
 
-    async fn current_state(&self) -> Arc<ValidatorState> {
+    async fn current_state(&self) -> Result<Option<ValidatorState>, HotShotError> {
         match self {
             Node::Light(n) => n.current_state().await,
             Node::Full(n) => n.read().await.current_state().await,
@@ -475,31 +480,37 @@ impl GenesisState {
     }
 }
 
-/// Creates the initial state and phaselock for simulation.
+/// Creates the initial state and hotshot for simulation.
 #[allow(clippy::too_many_arguments)]
-async fn init_phaselock(
+async fn init_hotshot(
     options: &NodeOpt,
-    public_keys: tc::PublicKeySet,
-    secret_key_share: tc::SecretKeyShare,
     known_nodes: Vec<PubKey>,
+    priv_key: PrivKey,
     threshold: u64,
     node_id: u64,
-    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
+    networking: WNetwork<
+        Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
+        PubKey,
+    >,
     full_node: bool,
     state: GenesisState,
     data_source: Arc<RwLock<QueryData>>,
 ) -> Node {
-    // Create the initial phaselock
+    // Create the initial hotshot
     let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
-    let config = PhaseLockConfig {
-        total_nodes: known_nodes.len() as u32,
-        threshold: threshold as u32,
-        max_transactions: 100,
+    let pub_key = known_nodes[node_id as usize].clone();
+    let config = HotShotConfig {
+        total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
+        threshold: NonZeroUsize::new(threshold as usize).unwrap(),
+        max_transactions: NonZeroUsize::new(100).unwrap(),
         known_nodes,
         next_view_timeout: 10_000,
         timeout_ratio: (11, 10),
         round_start_delay: 1,
         start_delay: 1,
+        propose_min_round_time: Duration::from_secs(0),
+        propose_max_round_time: Duration::from_secs(10),
+        num_bootstrap: 0, // no-op for WSNetwork, will be used by libp2p in the future
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
@@ -536,27 +547,29 @@ async fn init_phaselock(
         None
     };
 
-    let phaselock_persistence = [storage_path, Path::new("phaselock")]
+    let hotshot_persistence = [storage_path, Path::new("hotshot")]
         .iter()
         .collect::<PathBuf>();
     let node_persistence = [storage_path, Path::new("node")]
         .iter()
         .collect::<PathBuf>();
-    let phaselock = PhaseLock::init(
+
+    let hotshot = HotShot::init(
         genesis,
-        public_keys,
-        secret_key_share,
+        config.known_nodes.clone(),
+        pub_key,
+        priv_key,
         node_id,
         config,
         state.validator,
         networking,
-        AtomicStorage::open(&phaselock_persistence).unwrap(),
+        AtomicStorage::open(&hotshot_persistence).unwrap(),
         lw_persistence,
         Committee::new(stake_table),
     )
     .await
     .unwrap();
-    debug!("phaselock launched");
+    debug!("hotshot launched");
 
     let validator = if full_node {
         let full_persisted = FullPersistence::new(&node_persistence, "full_node").unwrap();
@@ -578,7 +591,7 @@ async fn init_phaselock(
                 .unwrap_or_else(|_| Default::default())
         };
         let node = FullNode::new(
-            phaselock,
+            hotshot,
             univ_param.unwrap(),
             stored_state,
             records,
@@ -591,7 +604,7 @@ async fn init_phaselock(
         );
         Node::Full(Arc::new(RwLock::new(node)))
     } else {
-        Node::Light(phaselock)
+        Node::Light(hotshot)
     };
 
     validator
@@ -877,41 +890,45 @@ pub fn init_web_server(
     Ok(join_handle)
 }
 
-fn secret_keys(config: &ConsensusConfig) -> (u64, tc::SecretKeySet) {
-    // Generate key sets
-    let threshold = ((config.nodes.len() as u64 * 2) / 3) + 1;
-    (
-        threshold,
-        tc::SecretKeySet::random(
-            threshold as usize - 1,
-            &mut ChaChaRng02::from_seed(config.seed.into()),
-        ),
-    )
+/// Generate a list of private and public keys. Will return exactly `config.nodes.len()` keys, with a given `config.seed` seed.
+pub fn gen_keys(config: &ConsensusConfig) -> Vec<KeyPair> {
+    let mut keys = Vec::with_capacity(config.nodes.len());
+
+    for node_id in 0..config.nodes.len() {
+        let private = PrivKey::generated_from_seed_indexed(config.seed.0, node_id as u64);
+        let public = PubKey::from_private(&private);
+
+        keys.push(KeyPair { public, private })
+    }
+    keys
 }
 
-pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<PubKey> {
-    let (_, secret_keys) = secret_keys(config);
+pub struct KeyPair {
+    pub public: PubKey,
+    pub private: PrivKey,
+}
 
-    // Generate public key for each node
-    config
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(node_id, _)| PubKey::from_secret_key_set_escape_hatch(&secret_keys, node_id as u64))
+/// Generate a list of public keys. Will return exactly `config.nodes.len()` keys, with a given `config.seed` seed.
+pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<PubKey> {
+    gen_keys(config)
+        .into_iter()
+        .map(|pair| pair.public)
         .collect()
 }
 
 pub async fn init_validator(
     options: &NodeOpt,
     config: &ConsensusConfig,
+    priv_key: PrivKey,
     pub_keys: Vec<PubKey>,
     genesis: GenesisState,
     own_id: usize,
     data_source: Arc<RwLock<QueryData>>,
 ) -> Node {
     debug!("Current node: {}", own_id);
-    let (threshold, secret_keys) = secret_keys(config);
-    let secret_key_share = secret_keys.secret_key_share(own_id);
+
+    // hotshot requires this threshold to be at least 2/3rd of the nodes for safety guarantee reasons
+    let threshold = ((config.nodes.len() as u64 * 2) / 3) + 1;
 
     // Get networking information
     let own_network = get_networking(
@@ -920,13 +937,13 @@ pub async fn init_validator(
         config.nodes[own_id].port,
     )
     .await;
-    #[allow(clippy::type_complexity)]
-    let mut other_nodes = Vec::new();
+    let mut other_nodes = Vec::with_capacity(config.nodes.len() - 1);
     for (id, node) in config.nodes.iter().enumerate() {
         if id != own_id {
             other_nodes.push((id as u64, &pub_keys[id], node.socket_addr()));
         }
     }
+    let known_nodes = pub_keys.clone();
 
     // Connect the networking implementations
     for (id, pub_key, addr) in other_nodes {
@@ -943,12 +960,11 @@ pub async fn init_validator(
     }
     debug!("All nodes connected to network");
 
-    // Initialize the state and phaselock
-    init_phaselock(
+    // Initialize the state and hotshot
+    init_hotshot(
         options,
-        secret_keys.public_keys(),
-        secret_key_share,
-        pub_keys,
+        known_nodes,
+        priv_key,
         threshold,
         own_id as u64,
         own_network,

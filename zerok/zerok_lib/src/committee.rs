@@ -10,12 +10,16 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use phaselock::{committee::DynamicCommittee, data::StateHash, PrivKey, PubKey, H_256};
-use phaselock_types::traits::election::Election;
+use hotshot::committee::DynamicCommittee;
+use hotshot::data::{Stage, StateHash};
+use hotshot::H_256;
+use hotshot_types::data::ViewNumber;
+use hotshot_types::traits::election::Election;
+use hotshot_types::traits::signature_key::EncodedSignature;
 use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 
-use threshold_crypto as tc;
+use crate::{PrivKey, PubKey};
 
 /// A structure for committee election.
 pub struct Committee<S, const N: usize> {
@@ -40,7 +44,7 @@ impl<S, const N: usize> Committee<S, N> {
     }
 }
 
-impl<S: Send + Sync + Default, const N: usize> Election<N> for Committee<S, N> {
+impl<S: Send + Sync + Default, const N: usize> Election<PubKey, N> for Committee<S, N> {
     /// A table mapping public keys with their associated stake.
     type StakeTable = BTreeMap<PubKey, u64>;
 
@@ -53,10 +57,10 @@ impl<S: Send + Sync + Default, const N: usize> Election<N> for Committee<S, N> {
     type State = S;
 
     /// A membership proof.
-    type VoteToken = tc::SignatureShare;
+    type VoteToken = EncodedSignature;
 
     /// A tuple of a validated vote token and the associated selected stake.
-    type ValidatedVoteToken = (PubKey, tc::SignatureShare, HashSet<u64>);
+    type ValidatedVoteToken = (PubKey, EncodedSignature, HashSet<u64>);
 
     /// The stake table is stateless for now.
     fn get_stake_table(&self, _state: &Self::State) -> Self::StakeTable {
@@ -64,7 +68,12 @@ impl<S: Send + Sync + Default, const N: usize> Election<N> for Committee<S, N> {
     }
 
     /// Determines the leader.
-    fn get_leader(&self, table: &Self::StakeTable, view_number: u64) -> PubKey {
+    fn get_leader(
+        &self,
+        table: &Self::StakeTable,
+        view_number: ViewNumber,
+        _stage: Stage,
+    ) -> PubKey {
         DynamicCommittee::<S, N>::get_leader(table, view_number)
     }
 
@@ -73,7 +82,7 @@ impl<S: Send + Sync + Default, const N: usize> Election<N> for Committee<S, N> {
         &self,
         table: &Self::StakeTable,
         selection_threshold: Self::SelectionThreshold,
-        view_number: u64,
+        view_number: ViewNumber,
         pub_key: PubKey,
         token: Self::VoteToken,
         next_state: StateHash<N>,
@@ -100,7 +109,7 @@ impl<S: Send + Sync + Default, const N: usize> Election<N> for Committee<S, N> {
         &self,
         table: &Self::StakeTable,
         selection_threshold: Self::SelectionThreshold,
-        view_number: u64,
+        view_number: ViewNumber,
         private_key: &PrivKey,
         next_state: StateHash<N>,
     ) -> Option<Self::VoteToken> {

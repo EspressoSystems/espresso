@@ -24,17 +24,17 @@ use espresso_metastate_api::data_source::UpdateMetaStateData;
 pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::{channel::mpsc, future::RemoteHandle, select, task::SpawnExt};
+use hotshot::{
+    traits::BlockContents,
+    types::{EventType, HotShotHandle},
+    HotShotError, H_256,
+};
 use itertools::izip;
 use jf_cap::{
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
     MerkleTree, Signature,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
-use phaselock::{
-    traits::BlockContents,
-    types::{EventType, PhaseLockHandle},
-    PhaseLockError, H_256,
-};
 use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 use serde::{Deserialize, Serialize};
@@ -54,9 +54,9 @@ pub trait ConsensusEvent {
     fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState>;
 }
 
-pub type PhaseLockEvent = phaselock::types::Event<ElaboratedBlock, ValidatorState>;
+pub type HotShotEvent = hotshot::types::Event<ElaboratedBlock, ValidatorState>;
 
-impl ConsensusEvent for PhaseLockEvent {
+impl ConsensusEvent for HotShotEvent {
     fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState> {
         self.event
     }
@@ -67,9 +67,9 @@ pub type EventStream<Event> = Pin<Box<dyn Send + Stream<Item = Event>>>;
 #[async_trait]
 pub trait Validator {
     type Event: ConsensusEvent;
-    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError>;
+    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), HotShotError>;
     async fn start_consensus(&self);
-    async fn current_state(&self) -> Arc<ValidatorState>;
+    async fn current_state(&self) -> Result<Option<ValidatorState>, HotShotError>;
     fn subscribe(&self) -> EventStream<Self::Event>;
 
     async fn run<F: Send + Future>(self, kill: F)
@@ -92,16 +92,16 @@ pub trait Validator {
                         return;
                     }
                     Some(event) => match event.into_event() {
-                        EventType::Decide { block: _, state } => {
+                        EventType::Decide { state, block: _, qcs: _ } => {
                             if let Some(state) = state.last() {
                                 debug!(". - Committed state {}", state.commit());
                             }
                         }
                         EventType::ViewTimeout { view_number } => {
-                            debug!("  - Round {} timed out.", view_number);
+                            debug!("  - Round {:?} timed out.", view_number);
                         }
                         EventType::Error { error } => {
-                            error!("  - Phaselock error: {}", error);
+                            error!("  - HotShot error: {}", error);
                         }
                         event => {
                             debug!("EVENT: {:?}", event);
@@ -113,17 +113,17 @@ pub trait Validator {
     }
 }
 
-pub type LightWeightNode<NET, STORE> = PhaseLockHandle<ValidatorNodeImpl<NET, STORE>, H_256>;
+pub type LightWeightNode<NET, STORE> = HotShotHandle<ValidatorNodeImpl<NET, STORE>, H_256>;
 
 #[async_trait]
 impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
-    type Event = PhaseLockEvent;
+    type Event = HotShotEvent;
 
-    async fn current_state(&self) -> Arc<ValidatorState> {
+    async fn current_state(&self) -> Result<Option<ValidatorState>, HotShotError> {
         self.get_state().await
     }
 
-    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
+    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), HotShotError> {
         self.submit_transaction(tx).await
     }
 
@@ -137,10 +137,7 @@ impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
         Box::pin(stream::unfold(self.clone(), |mut handle| async move {
             match handle.next_event().await {
                 Ok(event) => Some((event, handle)),
-                Err(err) => panic!(
-                    "unexpected error from PhaseLockHandle::next_event: {:?}",
-                    err
-                ),
+                Err(err) => panic!("unexpected error from HotShotHandle::next_event: {:?}", err),
             }
         }))
     }
@@ -312,8 +309,8 @@ struct FullState {
     // Total number of committed transactions, aggregated across all blocks.
     num_txns: usize,
     // The last block which was proposed. This is currently used to correllate BadBlock and
-    // InconsistentBlock errors from PhaseLock with the block that caused the error. In the future,
-    // PhaseLock errors will contain the bad block (or some kind of reference to it, perhaps through
+    // InconsistentBlock errors from HotShot with the block that caused the error. In the future,
+    // HotShot errors will contain the bad block (or some kind of reference to it, perhaps through
     // persistent storage) and this will not be necessary.
     proposed: ElaboratedBlock,
     // The send ends of all channels which are subscribed to events.
@@ -324,7 +321,7 @@ struct FullState {
 
     // Handles to the new store go here for now, in order to minimize the potential failure
     // modes for the refactoring. Once we move over to the tide_disco based services, we may be
-    // able to remove most of this FullNode/FullState, leaving just the PhaseLockEvent processing
+    // able to remove most of this FullNode/FullState, leaving just the HotShotEvent processing
     // and whatever needs to be added for subscription support.
 
     // The status updates will need to be elsewhere, because that won't work through dyn. It will require a generic hook-up.
@@ -344,7 +341,7 @@ impl FullState {
             Error { error } => {
                 if matches!(
                     *error,
-                    PhaseLockError::BadBlock { .. } | PhaseLockError::InconsistentBlock { .. }
+                    HotShotError::BadBlock { .. } | HotShotError::InconsistentBlock { .. }
                 ) {
                     // If the error is due to a bad block, correllate it with the block that caused
                     // the error (`self.proposed` in our current hacky solution, but eventually
@@ -369,7 +366,7 @@ impl FullState {
                     });
                 }
 
-                // PhaseLock errors that don't relate to blocks being rejected (view timeouts,
+                // HotShot errors that don't relate to blocks being rejected (view timeouts,
                 // network errors, etc.) do not correspond to LedgerEvents.
             }
 
@@ -377,7 +374,11 @@ impl FullState {
                 self.proposed = (*block).clone();
             }
 
-            Decide { block, state } => {
+            Decide {
+                block,
+                state,
+                qcs: _,
+            } => {
                 for (block, state) in block.iter().zip(state.iter()).rev() {
                     // A block has been committed. Update our mirror of the ValidatorState by applying
                     // the new block, and generate a Commit event.
@@ -387,7 +388,7 @@ impl FullState {
                         block.block.clone(),
                         block.proofs.clone(),
                     ) {
-                        // We update our ValidatorState for each block committed by the PhaseLock event
+                        // We update our ValidatorState for each block committed by the HotShot event
                         // source, so we shouldn't ever get out of sync.
                         Err(_) => panic!("state is out of sync with validator"),
                         Ok(_) if self.validator.commit() != state.commit() => {
@@ -679,7 +680,7 @@ impl FullState {
 }
 
 /// A QueryService that aggregates the full ledger state by observing consensus.
-pub struct PhaseLockQueryService<'a> {
+pub struct HotShotQueryService<'a> {
     _univ_param: &'a jf_cap::proof::UniversalParam,
     state: Arc<RwLock<FullState>>,
     // When dropped, this handle will cancel and join the event handling task. It is not used
@@ -687,7 +688,7 @@ pub struct PhaseLockQueryService<'a> {
     _event_task: Arc<RemoteHandle<()>>,
 }
 
-impl<'a> PhaseLockQueryService<'a> {
+impl<'a> HotShotQueryService<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         event_source: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
@@ -807,7 +808,7 @@ impl<'a> PhaseLockQueryService<'a> {
 }
 
 #[async_trait]
-impl<'a> QueryService for PhaseLockQueryService<'a> {
+impl<'a> QueryService for HotShotQueryService<'a> {
     async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError> {
         let state = self.state.read().await;
         Ok(LedgerSummary {
@@ -884,7 +885,7 @@ impl<'a> QueryService for PhaseLockQueryService<'a> {
 /// A full node is a QueryService running alongside a lightweight validator.
 pub struct FullNode<'a, NET: PLNet, STORE: PLStore> {
     validator: LightWeightNode<NET, STORE>,
-    query_service: PhaseLockQueryService<'a>,
+    query_service: HotShotQueryService<'a>,
 }
 
 impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
@@ -909,7 +910,7 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
             RwLock<impl UpdateMetaStateData<Error = EspressoError> + Send + Sync + 'static>,
         >,
     ) -> Self {
-        let query_service = PhaseLockQueryService::new(
+        let query_service = HotShotQueryService::new(
             validator.subscribe(),
             univ_param,
             state,
@@ -946,11 +947,11 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
 impl<'a, NET: PLNet, STORE: PLStore> Validator for FullNode<'a, NET, STORE> {
     type Event = <LightWeightNode<NET, STORE> as Validator>::Event;
 
-    async fn current_state(&self) -> Arc<ValidatorState> {
+    async fn current_state(&self) -> Result<Option<ValidatorState>, HotShotError> {
         self.validator.get_state().await
     }
 
-    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
+    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), HotShotError> {
         self.as_validator().submit_transaction(tx).await
     }
 
@@ -1019,6 +1020,7 @@ mod tests {
     use crate::api::EspressoError;
     use async_std::task::block_on;
     use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
+    use hotshot::data::VecQuorumCertificate;
     use jf_cap::{sign_receiver_memos, KeyPair, MerkleLeafProof, MerkleTree};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
@@ -1058,6 +1060,7 @@ mod tests {
             ElaboratedBlock,
             Vec<(Vec<ReceiverMemo>, Signature)>,
             ValidatorState,
+            VecQuorumCertificate,
         )>,
     ) {
         let mut state = MultiXfrTestState::initialize(
@@ -1120,12 +1123,12 @@ mod tests {
 
             let mut blk = ElaboratedBlock::default();
             let mut signed_memos = vec![];
-            for (ix, keys_and_memos, sig, txn) in txns {
+            for tx in txns {
                 let (owner_memos, kixs) = {
                     let mut owner_memos = vec![];
                     let mut kixs = vec![];
 
-                    for (kix, memo) in keys_and_memos {
+                    for (kix, memo) in tx.keys_and_memos {
                         kixs.push(kix);
                         owner_memos.push(memo);
                     }
@@ -1135,15 +1138,15 @@ mod tests {
                 if state
                     .try_add_transaction(
                         &mut blk,
-                        txn,
-                        ix,
+                        tx.transaction,
+                        tx.index,
                         owner_memos.clone(),
                         kixs,
                         TxnPrintInfo::new_no_time(i, num_txs),
                     )
                     .is_ok()
                 {
-                    signed_memos.push((owner_memos, sig));
+                    signed_memos.push((owner_memos, tx.signature));
                 }
             }
 
@@ -1155,7 +1158,14 @@ mod tests {
                     TxnPrintInfo::new_no_time(i, num_txs),
                 )
                 .unwrap();
-            history.push((prev_state, blk, signed_memos, state.validator.clone()));
+            history.push((
+                prev_state,
+                blk,
+                signed_memos,
+                state.validator.clone(),
+                // TODO(vko): How do we generate a QC from the given transactions again?
+                VecQuorumCertificate::dummy::<H_256>(),
+            ));
         }
 
         (initial_state, history)
@@ -1220,10 +1230,11 @@ mod tests {
             let initial_uid = initial_state.0.record_merkle_commitment.num_leaves;
             assert_eq!(initial_state.0.commit(), history[0].0.commit());
             let events = Box::pin(stream::iter(history.clone().into_iter().map(
-                |(_, block, _, state)| MockConsensusEvent {
+                |(_, block, _, state, quorum_certificate)| MockConsensusEvent {
                     event: EventType::Decide {
                         block: Arc::new(vec![block]),
                         state: Arc::new(vec![state]),
+                        qcs: Arc::new(vec![quorum_certificate]),
                     },
                 },
             )));
@@ -1231,7 +1242,7 @@ mod tests {
                 FullPersistence::new(temp_persisted_dir.path(), "full_store").unwrap();
 
             let mock_store = Arc::new(RwLock::new(TestOnlyMockAllStores::default()));
-            let mut qs = PhaseLockQueryService::new(
+            let mut qs = HotShotQueryService::new(
                 events,
                 &*UNIVERSAL_PARAM,
                 initial_state.0,
@@ -1247,7 +1258,7 @@ mod tests {
             // The first event gives receiver memos for the records in the initial state of the
             // ledger. We can skip that to get to the real events starting at index 1.
             let mut events = qs.subscribe(1).await;
-            for (_, hist_block, _, hist_state) in history.iter() {
+            for (_, hist_block, _, hist_state, _) in history.iter() {
                 match events.next().await.unwrap() {
                     LedgerEvent::Commit { block, .. } => {
                         assert_eq!(block, *hist_block);
@@ -1274,7 +1285,7 @@ mod tests {
 
             // We should now be able to submit receiver memos for the blocks that just got committed.
             let mut expected_uid = initial_uid;
-            for (block_id, (_, block, memos, _)) in history.iter().enumerate() {
+            for (block_id, (_, block, memos, _, _)) in history.iter().enumerate() {
                 for (txn_id, (txn, (memos, sig))) in block.block.0.iter().zip(memos).enumerate() {
                     // Posting memos with an invalid signature should fail.
                     let dummy_signature = sign_receiver_memos(&dummy_key_pair, memos).unwrap();
@@ -1353,7 +1364,7 @@ mod tests {
                 }
             }
 
-            for (block_id, (state, block, _, _)) in history.into_iter().enumerate() {
+            for (block_id, (state, block, _, _, _)) in history.into_iter().enumerate() {
                 // We should be able to query the block and state at each time step in the history
                 // of the ledger.
                 let LedgerTransition {

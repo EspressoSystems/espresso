@@ -15,6 +15,7 @@ use crate::state::*;
 use crate::universal_params::UNIVERSAL_PARAM;
 use arbitrary::Arbitrary;
 use core::iter::once;
+use hotshot::traits::{BlockContents, State};
 use jf_cap::{
     keys::UserKeyPair,
     mint::MintNote,
@@ -28,7 +29,6 @@ use jf_cap::{
 };
 use key_set::{KeySet, ProverKeySet, VerifierKeySet};
 use num_bigint::BigInt;
-use phaselock::traits::{BlockContents, State};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
@@ -473,15 +473,7 @@ impl MultiXfrTestState {
         &mut self,
         block: Vec<(bool, u16, u16, u8, u8, i32)>,
         print_info: TxnPrintInfo,
-    ) -> Result<
-        Vec<(
-            usize,
-            Vec<(usize, ReceiverMemo)>,
-            Signature,
-            ElaboratedTransaction,
-        )>,
-        Box<dyn std::error::Error>,
-    > {
+    ) -> Result<Vec<MultiXfrRecordSpecTransaction>, Box<dyn std::error::Error>> {
         let splits = block
             .into_iter()
             .enumerate()
@@ -852,21 +844,21 @@ impl MultiXfrTestState {
                         .zip(owner_memos.into_iter())
                         .collect();
 
-                    Some((
-                        ix,
+                    Some(MultiXfrRecordSpecTransaction {
+                        index: ix,
                         keys_and_memos,
-                        sig,
-                        ElaboratedTransaction {
+                        signature: sig,
+                        transaction: ElaboratedTransaction {
                             txn: TransactionNote::Transfer(Box::new(txn)),
                             proofs: nullifier_pfs,
                         },
-                    ))
+                    })
                 },
             )
             .filter_map(|x| x)
             .collect::<Vec<_>>();
 
-        txns.sort_by(|(i, _, _, _), (j, _, _, _)| i.cmp(j));
+        txns.sort_by(|left, right| left.index.cmp(&right.index));
         Ok(txns)
     }
 
@@ -882,12 +874,7 @@ impl MultiXfrTestState {
         out_key_ix: u8,
         ix: usize,
         print_info: TxnPrintInfo,
-    ) -> Option<(
-        usize,
-        Vec<(usize, ReceiverMemo)>,
-        Signature,
-        ElaboratedTransaction,
-    )> {
+    ) -> Option<MultiXfrRecordSpecTransaction> {
         if let Some(now) = print_info.now {
             println!(
                 "Txn {}.{}/{} generating single-input transaction: {}s",
@@ -1014,15 +1001,15 @@ impl MultiXfrTestState {
             .zip(owner_memos.into_iter())
             .collect();
 
-        Some((
-            ix,
+        Some(MultiXfrRecordSpecTransaction {
+            index: ix,
             keys_and_memos,
-            sig,
-            ElaboratedTransaction {
+            signature: sig,
+            transaction: ElaboratedTransaction {
                 txn: TransactionNote::Transfer(Box::new(txn)),
                 proofs: nullifier_pfs,
             },
-        ))
+        })
     }
 
     /// Tries to add a transaction to a block.
@@ -1150,6 +1137,14 @@ impl MultiXfrTestState {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct MultiXfrRecordSpecTransaction {
+    pub index: usize,
+    pub keys_and_memos: Vec<(usize, ReceiverMemo)>,
+    pub signature: Signature,
+    pub transaction: ElaboratedTransaction,
+}
+
 pub fn crypto_rng() -> ChaChaRng {
     ChaChaRng::from_entropy()
 }
@@ -1272,12 +1267,12 @@ mod tests {
             });
 
             let mut blk = ElaboratedBlock::default();
-            for (ix, keys_and_memos, _, txn) in txns {
+            for tx in txns {
                 let (owner_memos, kixs) = {
                     let mut owner_memos = vec![];
                     let mut kixs = vec![];
 
-                    for (kix, memo) in keys_and_memos {
+                    for (kix, memo) in tx.keys_and_memos {
                         kixs.push(kix);
                         owner_memos.push(memo);
                     }
@@ -1286,8 +1281,8 @@ mod tests {
 
                 let _ = state.try_add_transaction(
                     &mut blk,
-                    txn,
-                    ix,
+                    tx.transaction,
+                    tx.index,
                     owner_memos,
                     kixs,
                     TxnPrintInfo::new_no_time(i, num_txs),

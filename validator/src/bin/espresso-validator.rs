@@ -16,10 +16,8 @@ use async_std::task::{sleep, spawn_blocking};
 use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
+use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
-use phaselock::{types::EventType, PubKey};
-use std::fs::File;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use structopt::StructOpt;
@@ -27,9 +25,11 @@ use tagged_base64::TaggedBase64;
 use tide::http::Url;
 use tracing::info;
 use validator_node::node::{QueryService, Validator};
+use zerok_lib::testing::MultiXfrRecordSpecTransaction;
 use zerok_lib::{
-    state::{ElaboratedBlock, ElaboratedTransaction},
+    state::ElaboratedBlock,
     testing::{MultiXfrTestState, TxnPrintInfo},
+    PrivKey, PubKey,
 };
 
 #[derive(StructOpt)]
@@ -122,44 +122,61 @@ fn get_pk_dir(options: &Options) -> PathBuf {
     options.pk_path.clone().unwrap_or_else(default_pk_path)
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct KeyInFile {
+    pub private: String,
+    pub public: String,
+}
+
+impl KeyInFile {
+    fn new(private: &PrivKey, public: &PubKey) -> Self {
+        Self {
+            private: private.to_string(),
+            public: public.to_string(),
+        }
+    }
+}
+
 fn generate_keys(options: &Options, config: &ConsensusConfig) {
     let pk_dir = get_pk_dir(options);
 
+    let keys = gen_keys(config);
+
     // Generate public key for each node
-    for (node_id, pub_key) in gen_pub_keys(config).into_iter().enumerate() {
-        let pub_key_str = serde_json::to_string(&pub_key)
-            .unwrap_or_else(|err| panic!("Error while serializing the public key: {}", err));
-        let mut pk_file = File::create(
-            [&pk_dir, Path::new(&format!("pk_{}", node_id))]
-                .iter()
-                .collect::<PathBuf>(),
-        )
-        .unwrap_or_else(|err| panic!("Error while creating a public key file: {}", err));
-        pk_file
-            .write_all(pub_key_str.as_bytes())
-            .unwrap_or_else(|err| panic!("Error while writing to the public key file: {}", err));
+    for (node_id, key) in keys.into_iter().enumerate() {
+        let path: PathBuf = [&pk_dir, Path::new(&format!("pk_{}.toml", node_id))]
+            .iter()
+            .collect();
+
+        let contents = toml::to_string_pretty(&KeyInFile::new(&key.private, &key.public))
+            .expect("Could not serialize key file");
+        std::fs::write(path, contents).expect("Could not write keys to file");
     }
     info!("Public key files created");
 }
 
 /// Gets public key of a node from its public key file.
-fn get_public_key(options: &Options, node_id: u64) -> PubKey {
-    let path = [&get_pk_dir(options), Path::new(&format!("pk_{}", node_id))]
-        .iter()
-        .collect::<PathBuf>();
-    let mut pk_file = File::open(&path)
+fn get_key_pair_for_node(options: &Options, node_id: u64) -> KeyPair {
+    let path = [
+        &get_pk_dir(options),
+        Path::new(&format!("pk_{}.toml", node_id)),
+    ]
+    .iter()
+    .collect::<PathBuf>();
+    let pk_str = std::fs::read_to_string(&path)
         .unwrap_or_else(|_| panic!("Cannot find public key file: {}", path.display()));
-    let mut pk_str = String::new();
-    pk_file
-        .read_to_string(&mut pk_str)
-        .unwrap_or_else(|err| panic!("Error while reading public key file: {}", err));
-    serde_json::from_str(&pk_str).expect("Error while reading public key")
+    let KeyInFile { private, public } = toml::from_str(&pk_str)
+        .unwrap_or_else(|e| panic!("Cannot deserialize key file {}: {:?}", path.display(), e));
+
+    let private = private.parse().expect("Invalid private key");
+    let public = public.parse().expect("Invalid public key");
+    KeyPair { private, public }
 }
 
 async fn generate_transactions(
     num_txn: u64,
     own_id: u64,
-    mut phaselock: Node,
+    mut hotshot: Node,
     mut state: MultiXfrTestState,
 ) {
     #[cfg(target_os = "linux")]
@@ -183,25 +200,31 @@ async fn generate_transactions(
         fence();
     };
 
-    let mut events = phaselock.subscribe();
+    let mut events = hotshot.subscribe();
 
     // Start consensus for each transaction
     let mut round = 0;
     let mut succeeded_round = 0;
-    let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
+    let mut txn: Option<MultiXfrRecordSpecTransaction> = None;
     let mut txn_proposed_round = 0;
     let mut final_commitment = None;
     while succeeded_round < num_txn {
         info!("Starting round {}", round + 1);
         report_mem();
-        info!("Commitment: {}", phaselock.current_state().await.commit());
+        info!(
+            "Commitment: {}",
+            hotshot.current_state().await.unwrap().unwrap().commit()
+        );
 
         // Generate a transaction if the node ID is 0 and if there isn't a keystore to generate it.
         if own_id == 0 {
             if let Some(tx) = txn.as_ref() {
                 info!("  - Reproposing a transaction");
                 if txn_proposed_round + 5 < round {
-                    phaselock.submit_transaction(tx.clone().3).await.unwrap();
+                    hotshot
+                        .submit_transaction(tx.transaction.clone())
+                        .await
+                        .unwrap();
                     txn_proposed_round = round;
                 }
             } else {
@@ -217,22 +240,27 @@ async fn generate_transactions(
                 })
                 .await;
                 state = new_state;
-                txn = Some(transactions.remove(0));
-                phaselock
-                    .submit_transaction(txn.clone().unwrap().3)
+                let transaction = transactions.remove(0);
+                hotshot
+                    .submit_transaction(transaction.transaction.clone())
                     .await
                     .unwrap();
+                txn = Some(transaction);
                 txn_proposed_round = round;
             }
         }
 
-        phaselock.start_consensus().await;
+        hotshot.start_consensus().await;
         let success = loop {
-            info!("Waiting for PhaseLock event");
-            let event = events.next().await.expect("PhaseLock unexpectedly closed");
+            info!("Waiting for HotShot event");
+            let event = events.next().await.expect("HotShot unexpectedly closed");
 
             match event.event {
-                EventType::Decide { block: _, state } => {
+                EventType::Decide {
+                    block: _,
+                    state,
+                    qcs: _,
+                } => {
                     if !state.is_empty() {
                         let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                             .unwrap()
@@ -263,14 +291,14 @@ async fn generate_transactions(
         if success {
             // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
             // current node), and there is no attached keystore.
-            if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
+            if let Some(txn) = core::mem::take(&mut txn) {
                 info!("  - Adding the transaction");
                 let mut blk = ElaboratedBlock::default();
                 let (owner_memos, kixs) = {
                     let mut owner_memos = vec![];
                     let mut kixs = vec![];
 
-                    for (kix, memo) in keys_and_memos {
+                    for (kix, memo) in txn.keys_and_memos {
                         kixs.push(kix);
                         owner_memos.push(memo);
                     }
@@ -278,10 +306,10 @@ async fn generate_transactions(
                 };
 
                 // If we're running a full node, publish the receiver memos.
-                if let Node::Full(node) = &mut phaselock {
+                if let Node::Full(node) = &mut hotshot {
                     node.write()
                         .await
-                        .post_memos(round, ix as u64, owner_memos.clone(), sig)
+                        .post_memos(round, txn.index as u64, owner_memos.clone(), txn.signature)
                         .await
                         .unwrap();
                 }
@@ -289,8 +317,8 @@ async fn generate_transactions(
                 state
                     .try_add_transaction(
                         &mut blk,
-                        t,
-                        ix,
+                        txn.transaction,
+                        txn.index,
                         owner_memos,
                         kixs,
                         TxnPrintInfo::new_no_time(round as usize, 1),
@@ -348,7 +376,7 @@ async fn main() -> Result<(), std::io::Error> {
     let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
 
     if let Some(own_id) = options.id {
-        // Initialize the state and phaselock
+        // Initialize the state and hotshot
         let (genesis, state) = if options.num_txn.is_some() {
             // If we are going to generate transactions, we need to initialize the ledger with a
             // test state.
@@ -357,14 +385,17 @@ async fn main() -> Result<(), std::io::Error> {
         } else {
             (GenesisState::new(options.faucet_pub_key.clone()), None)
         };
-        let pub_keys = (0..config.nodes.len())
+        let priv_key = get_key_pair_for_node(&options, own_id).private;
+        let known_nodes = (0..config.nodes.len())
             .into_iter()
-            .map(|i| get_public_key(&options, i as u64))
+            .map(|i| get_key_pair_for_node(&options, i as u64).public)
             .collect();
-        let phaselock = init_validator(
+
+        let hotshot = init_validator(
             &options.node_opt,
             &config,
-            pub_keys,
+            priv_key,
+            known_nodes,
             genesis,
             own_id as usize,
             data_source.clone(),
@@ -372,7 +403,7 @@ async fn main() -> Result<(), std::io::Error> {
         .await;
 
         // If we are running a full node, also host a query API to inspect the accumulated state.
-        let web_server = if let Node::Full(node) = &phaselock {
+        let web_server = if let Node::Full(node) = &hotshot {
             Some(
                 init_web_server(&options.node_opt, node.clone())
                     .expect("Failed to initialize web server"),
@@ -382,9 +413,9 @@ async fn main() -> Result<(), std::io::Error> {
         };
 
         if let Some(num_txn) = options.num_txn {
-            generate_transactions(num_txn, own_id, phaselock, state.unwrap()).await;
+            generate_transactions(num_txn, own_id, hotshot, state.unwrap()).await;
         } else {
-            phaselock.run(pending::<()>()).await;
+            hotshot.run(pending::<()>()).await;
         }
 
         if options.wait {

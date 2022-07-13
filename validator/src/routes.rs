@@ -3,8 +3,8 @@
 use crate::WebState;
 use api::{server, BlockId, Hash, TaggedBlob, TransactionId, UnspentRecord};
 use futures::prelude::*;
+use hotshot::traits::BlockContents;
 use itertools::izip;
-use phaselock::traits::BlockContents;
 use seahorse::events::LedgerEvent;
 use serde::{Deserialize, Serialize};
 use server::{best_response_type, response};

@@ -149,7 +149,7 @@ impl traits::Block for ElaboratedBlock {
     }
 
     fn add_transaction(&mut self, txn: Self::Transaction) -> Result<(), ValidationError> {
-        use phaselock::traits::BlockContents;
+        use hotshot::traits::BlockContents;
         *self = self.add_transaction_raw(&txn)?;
         Ok(())
     }

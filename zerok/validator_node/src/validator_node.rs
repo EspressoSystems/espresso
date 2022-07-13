@@ -10,22 +10,25 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use zerok_lib::committee::Committee;
-use zerok_lib::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
-
-use phaselock::{
+use core::fmt::Debug;
+use core::marker::PhantomData;
+use hotshot::{
     traits::{NetworkingImplementation, NodeImplementation, Storage},
     types::Message,
     H_256,
 };
-
-use core::fmt::Debug;
-use core::marker::PhantomData;
+use zerok_lib::{
+    committee::Committee,
+    state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState},
+    PubKey,
+};
 
 /// A lightweight node that handles validation for consensus, and nothing more.
 pub trait PLNet:
-    NetworkingImplementation<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>
-    + Clone
+    NetworkingImplementation<
+        Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
+        PubKey,
+    > + Clone
     + Debug
     + 'static
 {
@@ -33,7 +36,8 @@ pub trait PLNet:
 
 impl<
         T: NetworkingImplementation<
-                Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>,
+                Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
+                PubKey,
             > + Clone
             + Debug
             + 'static,
@@ -75,4 +79,6 @@ impl<NET: PLNet, STORE: PLStore> NodeImplementation<H_256> for ValidatorNodeImpl
     type StatefulHandler = LWPersistence;
 
     type Election = Committee<(), H_256>;
+
+    type SignatureKey = PubKey;
 }

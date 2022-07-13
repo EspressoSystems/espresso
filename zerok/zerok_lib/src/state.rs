@@ -23,17 +23,17 @@ use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
+use hotshot::{
+    data::{BlockHash, LeafHash, TransactionHash},
+    traits::{BlockContents, State, Transaction as TransactionTrait},
+    H_256,
+};
 use jf_cap::{
     errors::TxnApiError, structs::Nullifier, txn_batch_verify, MerkleCommitment, MerkleFrontier,
     MerkleLeafProof, MerkleTree, NodeValue, TransactionNote,
 };
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
-use phaselock::{
-    data::{BlockHash, LeafHash, TransactionHash},
-    traits::{BlockContents, State, Transaction as TransactionTrait},
-    H_256,
-};
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashSet, VecDeque};
@@ -74,12 +74,7 @@ pub struct ElaboratedTransaction {
     pub proofs: Vec<SetMerkleProof>,
 }
 
-impl TransactionTrait<H_256> for ElaboratedTransaction {
-    fn hash(&self) -> TransactionHash<H_256> {
-        // This is not used in phaselock 0.0.7 and will be replaced in 0.0.8 with `id`
-        todo!()
-    }
-}
+impl TransactionTrait<H_256> for ElaboratedTransaction {}
 
 impl ElaboratedTransaction {
     /// Compute a cryptographic hash committing to an elaborated
@@ -174,7 +169,7 @@ impl Committable for ElaboratedTransaction {
     }
 }
 
-/// Allow an elaborated block to be used by the [PhaseLock](https://phaselock.docs.goespresso.com/phaselock/) consensus protocol.
+/// Allow an elaborated block to be used by the [HotShot](https://hotshot.docs.espressosys.com/hotshot/) consensus protocol.
 impl BlockContents<H_256> for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
@@ -219,7 +214,7 @@ impl BlockContents<H_256> for ElaboratedBlock {
     fn hash_leaf(bytes: &[u8]) -> LeafHash<H_256> {
         // TODO: fix this hack, it is specifically working around the
         // misuse-preventing `T: Committable` on `RawCommitmentBuilder`
-        let ret = commit::RawCommitmentBuilder::<Block>::new("PhaseLock bytes")
+        let ret = commit::RawCommitmentBuilder::<Block>::new("HotShot bytes")
             .var_size_bytes(bytes)
             .finalize();
         LeafHash::<H_256>::from_array(ret.try_into().unwrap())

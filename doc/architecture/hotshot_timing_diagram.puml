@@ -1,6 +1,6 @@
 @startuml
 
-concise "Phaselock" as PL
+concise "HotShot" as PL
 
 concise "Replica 1" as R1
 concise "Replica 2" as R2

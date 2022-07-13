@@ -24,13 +24,13 @@ COPY validator/public /public
 
 # Configure the validator to run the demo, with 7 nodes and pre-generated public keys, by default.
 COPY validator/src/node-config.toml /config/node-config.toml
-COPY validator/src/pk_0 /config/pk_0
-COPY validator/src/pk_1 /config/pk_1
-COPY validator/src/pk_2 /config/pk_2
-COPY validator/src/pk_3 /config/pk_3
-COPY validator/src/pk_4 /config/pk_4
-COPY validator/src/pk_5 /config/pk_5
-COPY validator/src/pk_6 /config/pk_6
+COPY validator/src/pk_0.toml /config/pk_0.toml
+COPY validator/src/pk_1.toml /config/pk_1.toml
+COPY validator/src/pk_2.toml /config/pk_2.toml
+COPY validator/src/pk_3.toml /config/pk_3.toml
+COPY validator/src/pk_4.toml /config/pk_4.toml
+COPY validator/src/pk_5.toml /config/pk_5.toml
+COPY validator/src/pk_6.toml /config/pk_6.toml
 
 # Set file locations.
 ENV ESPRESSO_VALIDATOR_CONFIG_PATH=/config/node-config.toml

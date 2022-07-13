@@ -4,7 +4,7 @@ component Validator {
 
     component Conf as "Configuration"
 
-    component Phaselock as "Phaselock Instance" {
+    component HotShot as "HotShot Instance" {
         portin conf_pli
         interface "get_events_since/:first" as if1
         interface "get_events_since/:first/:count" as if2

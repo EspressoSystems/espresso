@@ -696,7 +696,7 @@ mod tests {
         let update_vals = updates
             .iter()
             .cloned()
-            .chain(checks.iter().filter_map(|x| x.ok().clone()))
+            .chain(checks.iter().filter_map(|x| x.ok()))
             .map(|u| (u, Nullifier::random_for_test(&mut prng)))
             .collect::<HashMap<_, _>>();
         let mut hset = HashSet::new();
