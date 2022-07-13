@@ -1,5 +1,6 @@
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 #![deny(warnings)]
+#![allow(clippy::format_push_string)]
 
 use crate::full_node_mem_data_source::QueryData;
 use crate::routes::{
@@ -11,10 +12,7 @@ use async_std::task;
 use async_trait::async_trait;
 use hotshot::{
     traits::implementations::{AtomicStorage, WNetwork},
-    types::{
-        ed25519::{Ed25519Priv, Ed25519Pub},
-        Message, SignatureKey,
-    },
+    types::{Message, SignatureKey},
     HotShot, HotShotConfig, HotShotError, H_256,
 };
 use jf_cap::{
@@ -53,6 +51,7 @@ use zerok_lib::{
     testing::{MultiXfrRecordSpec, MultiXfrTestState},
     universal_params::UNIVERSAL_PARAM,
 };
+use zerok_lib::{PrivKey, PubKey};
 
 mod disco;
 pub mod full_node_mem_data_source;
@@ -294,10 +293,10 @@ fn reset_store_dir(store_dir: PathBuf) {
 async fn get_networking<
     T: Clone + Serialize + DeserializeOwned + Send + Sync + std::fmt::Debug + 'static,
 >(
-    pub_key: Ed25519Pub,
+    pub_key: PubKey,
     listen_addr: &str,
     port: u16,
-) -> WNetwork<T, Ed25519Pub> {
+) -> WNetwork<T, PubKey> {
     debug!(?pub_key);
     let network = WNetwork::new(pub_key, listen_addr, port, None).await;
     if let Ok(n) = network {
@@ -319,8 +318,8 @@ async fn get_networking<
 }
 
 type PLNetwork = WNetwork<
-    Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
-    Ed25519Pub,
+    Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
+    PubKey,
 >;
 type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
@@ -485,13 +484,13 @@ impl GenesisState {
 #[allow(clippy::too_many_arguments)]
 async fn init_hotshot(
     options: &NodeOpt,
-    known_nodes: Vec<Ed25519Pub>,
-    priv_key: Ed25519Priv,
+    known_nodes: Vec<PubKey>,
+    priv_key: PrivKey,
     threshold: u64,
     node_id: u64,
     networking: WNetwork<
-        Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
-        Ed25519Pub,
+        Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
+        PubKey,
     >,
     full_node: bool,
     state: GenesisState,
@@ -892,30 +891,36 @@ pub fn init_web_server(
 }
 
 /// Generate a list of private and public keys. Will return exactly `config.nodes.len()` keys, with a given `config.seed` seed.
-pub fn gen_keys(config: &ConsensusConfig) -> (Vec<Ed25519Priv>, Vec<Ed25519Pub>) {
-    let mut priv_keys = Vec::with_capacity(config.nodes.len());
-    let mut pub_keys = Vec::with_capacity(config.nodes.len());
+pub fn gen_keys(config: &ConsensusConfig) -> Vec<KeyPair> {
+    let mut keys = Vec::with_capacity(config.nodes.len());
 
     for node_id in 0..config.nodes.len() {
-        let priv_key = Ed25519Priv::generated_from_seed_indexed(config.seed.0, node_id as u64);
-        let pub_key = Ed25519Pub::from_private(&priv_key);
+        let private = PrivKey::generated_from_seed_indexed(config.seed.0, node_id as u64);
+        let public = PubKey::from_private(&private);
 
-        priv_keys.push(priv_key);
-        pub_keys.push(pub_key);
+        keys.push(KeyPair { public, private })
     }
-    (priv_keys, pub_keys)
+    keys
+}
+
+pub struct KeyPair {
+    pub public: PubKey,
+    pub private: PrivKey,
 }
 
 /// Generate a list of public keys. Will return exactly `config.nodes.len()` keys, with a given `config.seed` seed.
-pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<Ed25519Pub> {
-    gen_keys(config).1
+pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<PubKey> {
+    gen_keys(config)
+        .into_iter()
+        .map(|pair| pair.public)
+        .collect()
 }
 
 pub async fn init_validator(
     options: &NodeOpt,
     config: &ConsensusConfig,
-    priv_key: Ed25519Priv,
-    pub_keys: Vec<Ed25519Pub>,
+    priv_key: PrivKey,
+    pub_keys: Vec<PubKey>,
     genesis: GenesisState,
     own_id: usize,
     data_source: Arc<RwLock<QueryData>>,

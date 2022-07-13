@@ -150,7 +150,11 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
 
     println!("generating public keys");
     let start = Instant::now();
-    let (priv_keys, pub_keys) = gen_keys(&config);
+    let keys = gen_keys(&config);
+    let pub_keys = keys
+        .iter()
+        .map(|key| key.public.clone())
+        .collect::<Vec<_>>();
     println!("generated public keys in {:?}", start.elapsed());
 
     let store = TempDir::new("minimal_test_network_store").unwrap();
@@ -160,7 +164,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         let genesis = genesis.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
-        let priv_key = priv_keys[i].clone();
+        let priv_key = keys[i].private.clone();
 
         store_path.push(i.to_string());
         async move {

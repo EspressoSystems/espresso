@@ -22,3 +22,6 @@ pub mod universal_params;
 mod util;
 
 extern crate espresso_macros;
+
+pub type PubKey = hotshot::types::ed25519::Ed25519Pub;
+pub type PrivKey = hotshot::types::ed25519::Ed25519Priv;

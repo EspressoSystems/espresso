@@ -16,10 +16,7 @@ use async_std::task::{sleep, spawn_blocking};
 use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
-use hotshot::types::{
-    ed25519::{Ed25519Priv, Ed25519Pub},
-    EventType,
-};
+use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -28,9 +25,11 @@ use tagged_base64::TaggedBase64;
 use tide::http::Url;
 use tracing::info;
 use validator_node::node::{QueryService, Validator};
+use zerok_lib::testing::MultiXfrRecordSpecTransaction;
 use zerok_lib::{
-    state::{ElaboratedBlock, ElaboratedTransaction},
+    state::ElaboratedBlock,
     testing::{MultiXfrTestState, TxnPrintInfo},
+    PrivKey, PubKey,
 };
 
 #[derive(StructOpt)]
@@ -130,7 +129,7 @@ struct KeyInFile {
 }
 
 impl KeyInFile {
-    fn new(private: &Ed25519Priv, public: &Ed25519Pub) -> Self {
+    fn new(private: &PrivKey, public: &PubKey) -> Self {
         Self {
             private: private.to_string(),
             public: public.to_string(),
@@ -141,19 +140,15 @@ impl KeyInFile {
 fn generate_keys(options: &Options, config: &ConsensusConfig) {
     let pk_dir = get_pk_dir(options);
 
-    let (private_keys, public_keys) = gen_keys(config);
+    let keys = gen_keys(config);
 
     // Generate public key for each node
-    for (node_id, (private, public)) in private_keys
-        .into_iter()
-        .zip(public_keys.into_iter())
-        .enumerate()
-    {
+    for (node_id, key) in keys.into_iter().enumerate() {
         let path: PathBuf = [&pk_dir, Path::new(&format!("pk_{}.toml", node_id))]
             .iter()
             .collect();
 
-        let contents = toml::to_string_pretty(&KeyInFile::new(&private, &public))
+        let contents = toml::to_string_pretty(&KeyInFile::new(&key.private, &key.public))
             .expect("Could not serialize key file");
         std::fs::write(path, contents).expect("Could not write keys to file");
     }
@@ -161,7 +156,7 @@ fn generate_keys(options: &Options, config: &ConsensusConfig) {
 }
 
 /// Gets public key of a node from its public key file.
-fn get_keys_for_node(options: &Options, node_id: u64) -> (Ed25519Priv, Ed25519Pub) {
+fn get_key_pair_for_node(options: &Options, node_id: u64) -> KeyPair {
     let path = [
         &get_pk_dir(options),
         Path::new(&format!("pk_{}.toml", node_id)),
@@ -175,7 +170,7 @@ fn get_keys_for_node(options: &Options, node_id: u64) -> (Ed25519Priv, Ed25519Pu
 
     let private = private.parse().expect("Invalid private key");
     let public = public.parse().expect("Invalid public key");
-    (private, public)
+    KeyPair { private, public }
 }
 
 async fn generate_transactions(
@@ -210,7 +205,7 @@ async fn generate_transactions(
     // Start consensus for each transaction
     let mut round = 0;
     let mut succeeded_round = 0;
-    let mut txn: Option<(usize, _, _, ElaboratedTransaction)> = None;
+    let mut txn: Option<MultiXfrRecordSpecTransaction> = None;
     let mut txn_proposed_round = 0;
     let mut final_commitment = None;
     while succeeded_round < num_txn {
@@ -226,7 +221,10 @@ async fn generate_transactions(
             if let Some(tx) = txn.as_ref() {
                 info!("  - Reproposing a transaction");
                 if txn_proposed_round + 5 < round {
-                    hotshot.submit_transaction(tx.clone().3).await.unwrap();
+                    hotshot
+                        .submit_transaction(tx.transaction.clone())
+                        .await
+                        .unwrap();
                     txn_proposed_round = round;
                 }
             } else {
@@ -242,11 +240,12 @@ async fn generate_transactions(
                 })
                 .await;
                 state = new_state;
-                txn = Some(transactions.remove(0));
+                let transaction = transactions.remove(0);
                 hotshot
-                    .submit_transaction(txn.clone().unwrap().3)
+                    .submit_transaction(transaction.transaction.clone())
                     .await
                     .unwrap();
+                txn = Some(transaction);
                 txn_proposed_round = round;
             }
         }
@@ -292,14 +291,14 @@ async fn generate_transactions(
         if success {
             // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
             // current node), and there is no attached keystore.
-            if let Some((ix, keys_and_memos, sig, t)) = core::mem::take(&mut txn) {
+            if let Some(txn) = core::mem::take(&mut txn) {
                 info!("  - Adding the transaction");
                 let mut blk = ElaboratedBlock::default();
                 let (owner_memos, kixs) = {
                     let mut owner_memos = vec![];
                     let mut kixs = vec![];
 
-                    for (kix, memo) in keys_and_memos {
+                    for (kix, memo) in txn.keys_and_memos {
                         kixs.push(kix);
                         owner_memos.push(memo);
                     }
@@ -310,7 +309,7 @@ async fn generate_transactions(
                 if let Node::Full(node) = &mut hotshot {
                     node.write()
                         .await
-                        .post_memos(round, ix as u64, owner_memos.clone(), sig)
+                        .post_memos(round, txn.index as u64, owner_memos.clone(), txn.signature)
                         .await
                         .unwrap();
                 }
@@ -318,8 +317,8 @@ async fn generate_transactions(
                 state
                     .try_add_transaction(
                         &mut blk,
-                        t,
-                        ix,
+                        txn.transaction,
+                        txn.index,
                         owner_memos,
                         kixs,
                         TxnPrintInfo::new_no_time(round as usize, 1),
@@ -386,10 +385,10 @@ async fn main() -> Result<(), std::io::Error> {
         } else {
             (GenesisState::new(options.faucet_pub_key.clone()), None)
         };
-        let (priv_key, _pub_key) = get_keys_for_node(&options, own_id);
+        let priv_key = get_key_pair_for_node(&options, own_id).private;
         let known_nodes = (0..config.nodes.len())
             .into_iter()
-            .map(|i| get_keys_for_node(&options, i as u64).1)
+            .map(|i| get_key_pair_for_node(&options, i as u64).public)
             .collect();
 
         let hotshot = init_validator(

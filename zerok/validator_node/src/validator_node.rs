@@ -10,24 +10,24 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use zerok_lib::committee::Committee;
-use zerok_lib::state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState};
-
+use core::fmt::Debug;
+use core::marker::PhantomData;
 use hotshot::{
     traits::{NetworkingImplementation, NodeImplementation, Storage},
     types::Message,
     H_256,
 };
-use hotshot_types::traits::signature_key::ed25519::Ed25519Pub;
-
-use core::fmt::Debug;
-use core::marker::PhantomData;
+use zerok_lib::{
+    committee::Committee,
+    state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState},
+    PubKey,
+};
 
 /// A lightweight node that handles validation for consensus, and nothing more.
 pub trait PLNet:
     NetworkingImplementation<
-        Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
-        Ed25519Pub,
+        Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
+        PubKey,
     > + Clone
     + Debug
     + 'static
@@ -36,8 +36,8 @@ pub trait PLNet:
 
 impl<
         T: NetworkingImplementation<
-                Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
-                Ed25519Pub,
+                Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
+                PubKey,
             > + Clone
             + Debug
             + 'static,
@@ -80,5 +80,5 @@ impl<NET: PLNet, STORE: PLStore> NodeImplementation<H_256> for ValidatorNodeImpl
 
     type Election = Committee<(), H_256>;
 
-    type SignatureKey = Ed25519Pub;
+    type SignatureKey = PubKey;
 }

@@ -1123,12 +1123,12 @@ mod tests {
 
             let mut blk = ElaboratedBlock::default();
             let mut signed_memos = vec![];
-            for (ix, keys_and_memos, sig, txn) in txns {
+            for tx in txns {
                 let (owner_memos, kixs) = {
                     let mut owner_memos = vec![];
                     let mut kixs = vec![];
 
-                    for (kix, memo) in keys_and_memos {
+                    for (kix, memo) in tx.keys_and_memos {
                         kixs.push(kix);
                         owner_memos.push(memo);
                     }
@@ -1138,15 +1138,15 @@ mod tests {
                 if state
                     .try_add_transaction(
                         &mut blk,
-                        txn,
-                        ix,
+                        tx.transaction,
+                        tx.index,
                         owner_memos.clone(),
                         kixs,
                         TxnPrintInfo::new_no_time(i, num_txs),
                     )
                     .is_ok()
                 {
-                    signed_memos.push((owner_memos, sig));
+                    signed_memos.push((owner_memos, tx.signature));
                 }
             }
 

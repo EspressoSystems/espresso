@@ -11,12 +11,15 @@
 // see <https://www.gnu.org/licenses/>.
 
 use core::time::Duration;
-use hotshot::{data::QuorumCertificate, types::ed25519::Ed25519Pub, H_256};
+use hotshot::{data::QuorumCertificate, H_256};
 use std::collections::HashMap;
-use zerok_lib::state::{ElaboratedBlock, ValidatorState};
+use zerok_lib::{
+    state::{ElaboratedBlock, ValidatorState},
+    PubKey,
+};
 
 pub struct PeerInfo {
-    pub peer_id: Ed25519Pub,
+    pub peer_id: PubKey,
 }
 
 #[derive(Default)]
