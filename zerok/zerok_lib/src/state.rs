@@ -23,17 +23,17 @@ use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
+use hotshot::{
+    data::{BlockHash, LeafHash, TransactionHash},
+    traits::{BlockContents, State, Transaction as TransactionTrait},
+    H_256,
+};
 use jf_cap::{
     errors::TxnApiError, structs::Nullifier, txn_batch_verify, MerkleCommitment, MerkleFrontier,
     MerkleLeafProof, MerkleTree, NodeValue, TransactionNote,
 };
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
-use hotshot::{
-    data::{BlockHash, LeafHash, TransactionHash},
-    traits::{BlockContents, State, Transaction as TransactionTrait},
-    H_256,
-};
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashSet, VecDeque};

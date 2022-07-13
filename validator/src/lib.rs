@@ -9,13 +9,6 @@ use ark_serialize::*;
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
-use jf_cap::{
-    structs::{Amount, AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
-    MerkleTree, TransactionVerifyingKey,
-};
-use jf_primitives::merkle_tree::FilledMTBuilder;
-use jf_utils::tagged_blob;
-use key_set::{KeySet, VerifierKeySet};
 use hotshot::{
     traits::implementations::{AtomicStorage, WNetwork},
     types::{
@@ -24,6 +17,13 @@ use hotshot::{
     },
     HotShot, HotShotConfig, HotShotError, H_256,
 };
+use jf_cap::{
+    structs::{Amount, AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
+    MerkleTree, TransactionVerifyingKey,
+};
+use jf_primitives::merkle_tree::FilledMTBuilder;
+use jf_utils::tagged_blob;
+use key_set::{KeySet, VerifierKeySet};
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use server::request_body;

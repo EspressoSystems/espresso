@@ -15,6 +15,7 @@ use crate::state::*;
 use crate::universal_params::UNIVERSAL_PARAM;
 use arbitrary::Arbitrary;
 use core::iter::once;
+use hotshot::traits::{BlockContents, State};
 use jf_cap::{
     keys::UserKeyPair,
     mint::MintNote,
@@ -28,7 +29,6 @@ use jf_cap::{
 };
 use key_set::{KeySet, ProverKeySet, VerifierKeySet};
 use num_bigint::BigInt;
-use hotshot::traits::{BlockContents, State};
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;

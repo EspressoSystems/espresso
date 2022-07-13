@@ -11,8 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use fmt::{Display, Formatter};
-use jf_cap::{structs::ReceiverMemo, Signature, TransactionNote};
 use hotshot::HotShotError;
+use jf_cap::{structs::ReceiverMemo, Signature, TransactionNote};
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, Snafu};
 use std::fmt;

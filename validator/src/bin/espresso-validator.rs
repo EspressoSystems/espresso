@@ -16,11 +16,11 @@ use async_std::task::{sleep, spawn_blocking};
 use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
-use jf_cap::keys::UserPubKey;
 use hotshot::types::{
     ed25519::{Ed25519Priv, Ed25519Pub},
     EventType,
 };
+use jf_cap::keys::UserPubKey;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use structopt::StructOpt;

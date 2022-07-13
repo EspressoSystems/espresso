@@ -33,8 +33,8 @@
 use async_std::future::timeout;
 use async_tungstenite::async_std::connect_async;
 use futures::prelude::*;
-use itertools::izip;
 use hotshot::traits::BlockContents;
+use itertools::izip;
 use seahorse::{
     events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnafu, Keystore, KeystoreError,
 };

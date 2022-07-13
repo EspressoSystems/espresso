@@ -24,17 +24,17 @@ use espresso_metastate_api::data_source::UpdateMetaStateData;
 pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::{channel::mpsc, future::RemoteHandle, select, task::SpawnExt};
+use hotshot::{
+    traits::BlockContents,
+    types::{EventType, HotShotHandle},
+    HotShotError, H_256,
+};
 use itertools::izip;
 use jf_cap::{
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
     MerkleTree, Signature,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
-use hotshot::{
-    traits::BlockContents,
-    types::{EventType, HotShotHandle},
-    HotShotError, H_256,
-};
 use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 use serde::{Deserialize, Serialize};
@@ -137,10 +137,7 @@ impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
         Box::pin(stream::unfold(self.clone(), |mut handle| async move {
             match handle.next_event().await {
                 Ok(event) => Some((event, handle)),
-                Err(err) => panic!(
-                    "unexpected error from HotShotHandle::next_event: {:?}",
-                    err
-                ),
+                Err(err) => panic!("unexpected error from HotShotHandle::next_event: {:?}", err),
             }
         }))
     }
@@ -1023,8 +1020,8 @@ mod tests {
     use crate::api::EspressoError;
     use async_std::task::block_on;
     use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
-    use jf_cap::{sign_receiver_memos, KeyPair, MerkleLeafProof, MerkleTree};
     use hotshot::data::VecQuorumCertificate;
+    use jf_cap::{sign_receiver_memos, KeyPair, MerkleLeafProof, MerkleTree};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
     use tempdir::TempDir;
