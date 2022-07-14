@@ -59,6 +59,7 @@
             # required to compile ethers-rs
             darwin.apple_sdk.frameworks.Security
             darwin.apple_sdk.frameworks.CoreFoundation
+            darwin.apple_sdk.frameworks.SystemConfiguration
 
             # https://github.com/NixOS/nixpkgs/issues/126182
             libiconv

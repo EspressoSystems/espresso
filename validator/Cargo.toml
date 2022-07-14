@@ -33,6 +33,7 @@ espresso-metastate-api = { path = "../zerok/apis/metastate" }
 espresso-status-api = { path = "../zerok/apis/status" }
 futures = "0.3.0"
 futures-util = "0.3.8"
+hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
@@ -41,7 +42,6 @@ jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jelly
 key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 markdown = "0.3"
 net = { git = "https://github.com/EspressoSystems/net.git" }
-hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
 portpicker = { version = "0.1", optional = true }
 rand_chacha = { package = "rand_chacha", version = "0.3.1" }
 rand_chacha_02 = { package = "rand_chacha", version = "0.2.2" }
