@@ -21,7 +21,7 @@ use async_std::{
 use atomic_store::{
     load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
 };
-use futures::{channel::mpsc, future::join_all, stream::StreamExt};
+use futures::{channel::mpsc, stream::StreamExt};
 use jf_cap::{
     keys::{UserKeyPair, UserPubKey},
     structs::{AssetCode, FreezeFlag},
@@ -50,10 +50,10 @@ use validator_node::keystore::{
     hd::Mnemonic,
     loader::{MnemonicPasswordLogin, RecoveryLoader},
     network::NetworkBackend,
-    txn_builder::{RecordInfo, TransactionReceipt, TransactionStatus},
+    txn_builder::{RecordInfo, TransactionStatus},
     EspressoKeystore, EspressoKeystoreError, RecordAmount,
 };
-use zerok_lib::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
+use zerok_lib::universal_params::UNIVERSAL_PARAM;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -553,7 +553,7 @@ async fn worker(id: usize, mut state: FaucetState) {
                     break keystore;
                 }
             };
-            if let Err(err) = keystore
+            match keystore
                 .transfer(
                     None,
                     &AssetCode::native(),
@@ -562,11 +562,16 @@ async fn worker(id: usize, mut state: FaucetState) {
                 )
                 .await
             {
-                tracing::error!("worker {}: failed to transfer: {}", id, err);
-                // If we failed, mark the request as failed in the queue so it can be retried
-                // later.
-                state.queue.fail(pub_key).await;
-                continue 'wait_for_requests;
+                Ok(receipt) => {
+                    keystore.await_transaction(&receipt).await.ok();
+                }
+                Err(err) => {
+                    tracing::error!("worker {}: failed to transfer: {}", id, err);
+                    // If we failed, mark the request as failed in the queue so it can be retried
+                    // later.
+                    state.queue.fail(pub_key).await;
+                    continue 'wait_for_requests;
+                }
             }
 
             // Update the queue with the results of this grant; find out if the key needs more
@@ -643,137 +648,77 @@ async fn maintain_enough_records(state: FaucetState, mut wakeup: mpsc::Receiver<
             drop(keystore);
             wakeup.next().await;
         }
-
-        if let Some(transactions) = break_up_records(&state).await {
-            // If we succeeded, wait until we are signalled again. Even though we may not have
-            // enough records just yet, we will when the transactions submitted by
-            // `break_up_records` finalize. Returning to the previous loop and checking if we have
-            // enough records might spuriously lead us to call `break_up_records` again, which would
-            // be an unnecessary waste of time.
-            tracing::info!(
-                "will have sufficient records after {} transactions, waiting for a change",
-                transactions.len()
-            );
-            wakeup.next().await;
-        }
+        break_up_records(&state).await;
     }
 }
 
 /// Break records into smaller pieces to create at least `state.num_records` total.
 ///
-/// If successful, returns a list of transaction receipts which will give at least
-/// `state.num_records` when they are finalized. If there were not enough large records to break up
-/// to obtain the desired number of records, returns [None].
-async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionReceipt<EspressoLedger>>> {
+/// Returns `true` if successful.
+async fn break_up_records(state: &FaucetState) -> bool {
     // Break up records until we have enough again.
     loop {
-        // Generate as many transactions as we can simultaneously.
-        let mut transactions = Vec::new();
-        loop {
-            // Acquire the keystore lock inside the loop, so we release it after each transfer.
-            // Holding the lock for too long can unneccessarily slow down faucet requests.
-            let mut keystore = state.keystore.lock().await;
-            let pub_key = keystore.pub_keys().await[0].clone();
-            let records = spendable_records(&*keystore, state.grant_size)
-                .await
-                .collect::<Vec<_>>();
+        // Acquire the keystore lock inside the loop, so we release it after each transfer.
+        // Holding the lock for too long can unneccessarily slow down faucet requests.
+        let mut keystore = state.keystore.lock().await;
+        let pub_key = keystore.pub_keys().await[0].clone();
+        let records = spendable_records(&*keystore, state.grant_size)
+            .await
+            .collect::<Vec<_>>();
 
-            if records.len() + 2 * transactions.len() >= state.num_records {
-                // We will have enough records again once the pending transactions finish. Return
-                // _without_ waiting for pending transactions to finish: if we know we are going to
-                // have enough records once they finish, there is no point in holding the keystore
-                // lock and just waiting. Perhaps a faucet request can be filled using the records
-                // we already have while the last few transactions are pending.
-                //
-                // Return the list of transaction receipts so the caller can wait on them if they
-                // want.
-                return Some(transactions);
-            }
-
-            let largest_record = match records
-                .into_iter()
-                .max_by(|x, y| x.amount().cmp(&y.amount()))
-            {
-                Some(record) if record.amount() >= state.grant_size * 2u64 => record,
-                _ => {
-                    // There are no records large enough to break up. Break out of the loop and wait
-                    // for the transactions we have already initiated to finish. The change from
-                    // those transactions will give us more records to break up.
-                    break;
-                }
-            };
-
-            let split_amount = largest_record.amount() / 2;
-            let change_amount = largest_record.amount() - split_amount;
-
-            tracing::info!(
-                "breaking up a record of size {} into records of size {} and {}",
-                largest_record.amount(),
-                split_amount,
-                change_amount,
-            );
-
-            // There is not yet an interface for transferring a specific record, so we just have to
-            // specify the appropriate amounts and trust that Seahorse will use the largest record
-            // available (it should). We specify two outputs so that if an existing record with
-            // `change_amount` exists it won't be used "as is", which would prevent this loop
-            // from making progress.
-            let receipt = match keystore
-                .transfer(
-                    None,
-                    &AssetCode::native(),
-                    &[
-                        (pub_key.clone(), change_amount),
-                        (pub_key.clone(), split_amount),
-                    ],
-                    0u64,
-                )
-                .await
-            {
-                Ok(receipt) => receipt,
-                Err(err) => {
-                    // If our transfers start failing, we will assume there is something wrong and
-                    // try not to put extra stress on the system. Break out of the inner loop and
-                    // wait for the transactions we did initiate to finish.
-                    tracing::error!("record breakup transfer failed: {}", err);
-                    break;
-                }
-            };
-            transactions.push(receipt);
+        if records.len() >= state.num_records {
+            return true;
         }
 
-        if transactions.is_empty() {
-            // We did not have sufficient records to generate any break-up transactions. Give up
-            // early and return with fewer-than-desired records. When the allocation of records
-            // changes, the record breaker thread will be notified and we will get to try again.
-            tracing::warn!("No large records to break up");
-            return None;
-        }
-
-        // If we get here, it means we generated some transactions, but it was not enough to give us
-        // the desired number of records. Wait until those transactions finish, then repeat the
-        // process, splitting up the outputs of those transactions.
-        //
-        // Note we have to reacquire the lock, since we released it at the end of the previous loop.
-        // This is good: it potentially allows another thread to grab the lock and make a transfer
-        // before we acquire it, during time where we would just be idly waiting. If this happens,
-        // it only means we spend less time waiting for our transactions once we are able to
-        // reacquire the lock.
-        tracing::info!(
-            "waiting for {} transactions before breaking more records",
-            transactions.len()
-        );
-        let keystore = state.keystore.lock().await;
-        for result in join_all(
-            transactions
-                .iter()
-                .map(|receipt| keystore.await_transaction(receipt)),
-        )
-        .await
+        let largest_record = match records
+            .into_iter()
+            .max_by(|x, y| x.amount().cmp(&y.amount()))
         {
-            if !matches!(result, Ok(TransactionStatus::Retired)) {
-                tracing::error!("record breakup transfer did not complete successfully");
+            Some(record) if record.amount() >= state.grant_size * 2u64 => record,
+            _ => {
+                // There are no records large enough to break up.
+                return false;
             }
+        };
+
+        let split_amount = largest_record.amount() / 2;
+        let change_amount = largest_record.amount() - split_amount;
+
+        tracing::info!(
+            "breaking up a record of size {} into records of size {} and {}",
+            largest_record.amount(),
+            split_amount,
+            change_amount,
+        );
+
+        // There is not yet an interface for transferring a specific record, so we just have to
+        // specify the appropriate amounts and trust that Seahorse will use the largest record
+        // available (it should). We specify two outputs so that if an existing record with
+        // `change_amount` exists it won't be used "as is", which would prevent this loop
+        // from making progress.
+        let receipt = match keystore
+            .transfer(
+                None,
+                &AssetCode::native(),
+                &[
+                    (pub_key.clone(), change_amount),
+                    (pub_key.clone(), split_amount),
+                ],
+                0u64,
+            )
+            .await
+        {
+            Ok(receipt) => receipt,
+            Err(err) => {
+                // If our transfers start failing, we will assume there is something wrong and
+                // try not to put extra stress on the system.
+                tracing::error!("record breakup transfer failed: {}", err);
+                return false;
+            }
+        };
+        match keystore.await_transaction(&receipt).await {
+            Ok(TransactionStatus::Retired) => {}
+            _ => tracing::error!("record breakup transfer did not complete successfully"),
         }
     }
 }
@@ -868,15 +813,7 @@ pub async fn init_web_server(
     tracing::info!("Keystore balance before init: {}", bal);
 
     // Create at least `opt.num_records` if possible, before starting to handle requests.
-    if let Some(transactions) = break_up_records(&state).await {
-        let keystore = state.keystore.lock().await;
-        join_all(
-            transactions
-                .iter()
-                .map(|receipt| keystore.await_transaction(receipt)),
-        )
-        .await;
-    }
+    break_up_records(&state).await;
 
     // Spawn a thread to continuously break records into smaller records to maintain
     // `opt.num_records` at a time.
