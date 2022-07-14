@@ -458,9 +458,9 @@ impl MultiXfrTestState {
 
     /// Generates transactions with the specified block information.
     ///
-    /// For each transaction `(multi_input, rec1, rec2, key1, key2, diff)` in `block`, takes the the
-    ///     records {rec1} or {rec1, rec2} (depending on the value of `multi_input`), transfers them
-    ///     to `key1`, and, if `multi_input`, `key2`, and tries to have the difference in value
+    /// For each transaction `(multi_input, rec1, rec2, key1, key2, diff, expire)` in `block`, takes
+    ///     the records {rec1} or {rec1, rec2} (depending on the value of `multi_input`), transfers
+    ///     them to `key1`, and, if `multi_input`, `key2`, and tries to have the difference in value
     ///     between the output records be `diff`.
     ///
     /// Returns vector of
@@ -471,7 +471,7 @@ impl MultiXfrTestState {
     #[allow(clippy::type_complexity)]
     pub fn generate_transactions(
         &mut self,
-        block: Vec<(bool, u16, u16, u8, u8, i32)>,
+        block: Vec<(bool, u16, u16, u8, u8, i32, bool)>,
         print_info: TxnPrintInfo,
     ) -> Result<Vec<MultiXfrRecordSpecTransaction>, Box<dyn std::error::Error>> {
         let splits = block
@@ -483,7 +483,7 @@ impl MultiXfrTestState {
         let mut txns = splits
             .into_par_iter()
             .map(
-                |((ix, (multi_input, in1, in2, k1, k2, amt_diff)), mut prng)| {
+                |((ix, (multi_input, in1, in2, k1, k2, amt_diff, expire)), mut prng)| {
                     let now = Instant::now();
 
                     println!("Txn {}.{}/{}", print_info.round + 1, ix, print_info.num_txs);
@@ -545,6 +545,7 @@ impl MultiXfrTestState {
                                 assert!(!self.nullifiers.contains(nullifier).unwrap().0);
                                 open_rec
                             }));
+                            break;
                         }
                     }
 
@@ -558,6 +559,7 @@ impl MultiXfrTestState {
                                 fee_rec,
                                 k1,
                                 ix,
+                                expire,
                                 TxnPrintInfo::new(print_info.round, print_info.num_txs, now),
                             );
                         }
@@ -641,6 +643,7 @@ impl MultiXfrTestState {
                                 fee_rec,
                                 k1,
                                 ix,
+                                expire,
                                 TxnPrintInfo::new(print_info.round, print_info.num_txs, now),
                             );
                         }
@@ -805,7 +808,11 @@ impl MultiXfrTestState {
                         vec![input1, input2],
                         &[out_rec1, out_rec2],
                         fee_info,
-                        self.validator.prev_commit_time + 1,
+                        if expire {
+                            self.validator.prev_commit_time + 1
+                        } else {
+                            2u64.pow(jf_cap::constants::MAX_TIMESTAMP_LEN as u32) - 1
+                        },
                         self.prove_keys.xfr.key_for_size(3, 3).unwrap(),
                         vec![],
                     )
@@ -873,6 +880,7 @@ impl MultiXfrTestState {
         fee_rec: Option<(u64, RecordOpening)>,
         out_key_ix: u8,
         ix: usize,
+        expire: bool,
         print_info: TxnPrintInfo,
     ) -> Option<MultiXfrRecordSpecTransaction> {
         if let Some(now) = print_info.now {
@@ -965,7 +973,11 @@ impl MultiXfrTestState {
             vec![input],
             &[out_rec1],
             fee_info,
-            self.validator.prev_commit_time + 1,
+            if expire {
+                self.validator.prev_commit_time + 1
+            } else {
+                2u64.pow(jf_cap::constants::MAX_TIMESTAMP_LEN as u32) - 1
+            },
             self.prove_keys.xfr.key_for_size(2, 2).unwrap(),
             vec![],
         )
@@ -1100,7 +1112,7 @@ impl MultiXfrTestState {
             )
         });
 
-        assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root);
+        assert_eq!(self.nullifiers.hash(), self.validator.nullifiers_root());
         Ok(())
     }
 
@@ -1245,7 +1257,7 @@ mod tests {
 
         for (i, block) in txs.into_iter().enumerate() {
             assert_eq!(state.owners.len(), state.memos.len());
-            assert_eq!(state.validator.nullifiers_root, state.nullifiers.hash());
+            assert_eq!(state.validator.nullifiers_root(), state.nullifiers.hash());
             MultiXfrTestState::update_timer(&mut state.outer_timer, |_| {
                 println!(
                     "Block {}/{}, {} candidate txns",
@@ -1257,7 +1269,13 @@ mod tests {
 
             // let block = block.into_iter().take(5).collect::<Vec<_>>();
             let txns = state
-                .generate_transactions(block, TxnPrintInfo::new_no_time(i, num_txs))
+                .generate_transactions(
+                    block
+                        .into_iter()
+                        .map(|tx| (tx.0, tx.1, tx.2, tx.3, tx.4, tx.5, true))
+                        .collect(),
+                    TxnPrintInfo::new_no_time(i, num_txs),
+                )
                 .unwrap();
 
             let mut generation_time: f32 = 0.0;
@@ -1412,6 +1430,85 @@ mod tests {
         // Test validators with the same length, but different histories.
         v2.past_record_merkle_roots.0.push_front(NodeValue::from(1));
         assert_ne!(v1.commit(), v2.commit());
+    }
+
+    // Test historical nullifier verification. Builds two transactions against the same state but
+    // submits them in two sequential blocks, so that the second transaction must be validated
+    // against a historical nullifier set.
+    //
+    // If `double_spend`, both transactions try to spend the same nullifier, so the second one
+    // should fail. This tests that validation correctly distinguishes between historical and
+    // invalid nullifier proofs.
+    fn test_sliding_nullifiers(double_spend: bool) {
+        let mut state = MultiXfrTestState::initialize(
+            [0x7au8; 32],
+            2,
+            1,
+            (
+                MultiXfrRecordSpec {
+                    asset_def_ix: 1,
+                    owner_key_ix: 0,
+                    asset_amount: 1,
+                },
+                vec![MultiXfrRecordSpec {
+                    asset_def_ix: 1,
+                    owner_key_ix: 1,
+                    asset_amount: 1,
+                }],
+            ),
+        )
+        .unwrap();
+
+        // Generate 2 transfers at the same time.
+        let txns = state
+            .generate_transactions(
+                vec![
+                    (false, 0, 0, 1, 1, 0, true),
+                    (false, if double_spend { 0 } else { 2 }, 0, 1, 1, 0, false),
+                ],
+                TxnPrintInfo::new_no_time(0, 2),
+            )
+            .unwrap();
+        // Submit the transactions in two separate blocks, so that the second one is validated
+        // against an updated nullifier set.
+        for (i, tx) in txns.into_iter().enumerate() {
+            let (owner_memos, kixs) = {
+                let mut owner_memos = vec![];
+                let mut kixs = vec![];
+
+                for (kix, memo) in tx.keys_and_memos {
+                    kixs.push(kix);
+                    owner_memos.push(memo);
+                }
+                (owner_memos, kixs)
+            };
+
+            let mut blk = ElaboratedBlock::default();
+            let _ = state.try_add_transaction(
+                &mut blk,
+                tx.transaction,
+                tx.index,
+                owner_memos,
+                kixs,
+                TxnPrintInfo::new_no_time(i, 2),
+            );
+            let res = state.validate_and_apply(blk, 0.0, TxnPrintInfo::new_no_time(i, 2));
+            if i == 0 || !double_spend {
+                res.unwrap();
+            } else {
+                res.unwrap_err();
+            }
+        }
+    }
+
+    #[test]
+    fn test_sliding_nullifiers_valid() {
+        test_sliding_nullifiers(false);
+    }
+
+    #[test]
+    fn test_sliding_nullifiers_double_spend() {
+        test_sliding_nullifiers(true);
     }
 
     #[test]
@@ -1615,7 +1712,7 @@ mod tests {
             },
         };
 
-        assert_eq!(nullifiers.hash(), validator.nullifiers_root);
+        assert_eq!(nullifiers.hash(), validator.nullifiers_root());
 
         println!(
             "New record merkle path retrieved: {}s",

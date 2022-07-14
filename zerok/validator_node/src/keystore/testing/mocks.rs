@@ -381,7 +381,7 @@ mod espresso_keystore_tests {
 
         // The sender keystore (keystores[0]) gets an initial grant of 2 for a transaction fee and a
         // payment. keystores[1] will act as the receiver, and keystores[2] will be a third party
-        // which generates RECORD_ROOT_HISTORY_SIZE-1 transfers while a transfer from keystores[0] is
+        // which generates HISTORY_SIZE-1 transfers while a transfer from keystores[0] is
         // pending, after which we will check if the pending transaction can be updated and
         // resubmitted.
         let (ledger, mut keystores) = t
@@ -390,7 +390,7 @@ mod espresso_keystore_tests {
                 vec![
                     2,
                     0,
-                    2 * (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64,
+                    2 * (ValidatorState::HISTORY_SIZE - 1) as u64,
                 ],
                 &mut now,
             )
@@ -416,11 +416,11 @@ mod espresso_keystore_tests {
         // Generate a transaction, invalidating the pending transfer.
         println!(
             "generating {} transfers to invalidate the original transfer: {}s",
-            ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1,
+            ValidatorState::HISTORY_SIZE - 1,
             now.elapsed().as_secs_f32(),
         );
         now = Instant::now();
-        for _ in 0..ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1 {
+        for _ in 0..ValidatorState::HISTORY_SIZE - 1 {
             keystores[2]
                 .0
                 .transfer(
@@ -462,7 +462,7 @@ mod espresso_keystore_tests {
         );
         assert_eq!(
             keystores[1].0.balance(&AssetCode::native()).await,
-            (1 + ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1).into()
+            (1 + ValidatorState::HISTORY_SIZE - 1).into()
         );
 
         Ok(())

@@ -183,7 +183,7 @@ impl Ledger for EspressoLedger {
     }
 
     fn record_root_history() -> usize {
-        ValidatorState::RECORD_ROOT_HISTORY_SIZE
+        ValidatorState::HISTORY_SIZE
     }
 
     fn merkle_height() -> u8 {

@@ -1,3 +1,15 @@
+# Copyright (c) 2022 Espresso Systems (espressosys.com)
+# This file is part of the Espresso library.
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# General Public License as published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program. If not,
+# see <https://www.gnu.org/licenses/>.
+
 [package]
 name = "zerok_lib"
 version = "0.1.0"
@@ -28,6 +40,8 @@ futures = "0.3.16"
 generic-array = { version = "0.14.4", features = ["serde"] }
 hex = "0.4.3"
 hmac = "0.12.1"
+hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
+hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
@@ -40,8 +54,6 @@ lazy_static = "1.4.0"
 mnemonic = "1.0.1"
 net = { git = "https://github.com/EspressoSystems/net.git" }
 num-bigint = "0.4"
-hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
-hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
 rand = "0.8.5"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 rayon = "*"

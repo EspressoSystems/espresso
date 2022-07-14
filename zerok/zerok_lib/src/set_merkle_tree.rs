@@ -622,28 +622,33 @@ impl SetMerkleTree {
 
         Ok(())
     }
+
+    pub fn multi_insert(
+        &mut self,
+        inserts: impl IntoIterator<Item = (Nullifier, SetMerkleProof)>,
+    ) -> Result<Vec<SetMerkleProof>, set_hash::Hash> {
+        let mut nulls = vec![];
+        for (n, proof) in inserts {
+            self.remember(n, proof)?;
+            nulls.push(n);
+        }
+        for n in nulls.iter() {
+            self.insert(*n).unwrap();
+        }
+        Ok(nulls
+            .into_iter()
+            .map(|n| self.contains(n).unwrap().1)
+            .collect())
+    }
 }
 
 pub fn set_merkle_lw_multi_insert(
     inserts: Vec<(Nullifier, SetMerkleProof)>,
     root: set_hash::Hash,
 ) -> Result<(set_hash::Hash, Vec<SetMerkleProof>), set_hash::Hash> {
-    let mut nulls = vec![];
     let mut s = SetMerkleTree::ForgottenSubtree { value: root };
-    for (n, proof) in inserts {
-        s.remember(n, proof)?;
-        nulls.push(n);
-    }
-    for n in nulls.iter() {
-        s.insert(*n).unwrap();
-    }
-    Ok((
-        s.hash(),
-        nulls
-            .into_iter()
-            .map(|n| s.contains(n).unwrap().1)
-            .collect(),
-    ))
+    let proofs = s.multi_insert(inserts)?;
+    Ok((s.hash(), proofs))
 }
 
 #[cfg(test)]
