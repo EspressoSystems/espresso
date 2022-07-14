@@ -857,7 +857,7 @@ mod test {
     use async_std::task::{sleep, spawn_blocking};
     use escargot::CargoBuild;
     use espresso_validator::testing::minimal_test_network;
-    use futures::{Future, future::join_all};
+    use futures::{future::join_all, Future};
     use jf_cap::structs::AssetDefinition;
     use net::client::response_body;
     use portpicker::pick_unused_port;
