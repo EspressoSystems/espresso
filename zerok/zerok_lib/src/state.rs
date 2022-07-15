@@ -39,6 +39,7 @@ use snafu::Snafu;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
+use std::iter::once;
 
 /// Height of the records Merkle tree
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
@@ -341,6 +342,17 @@ impl Committable for Block {
     }
 }
 
+/// A cryptographic commitment to a transaction
+#[ser_test(arbitrary)]
+#[tagged_blob("TXN")]
+#[derive(
+    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize,
+)]
+pub struct TransactionCommitment(pub commit::Commitment<TransactionNote>);
+
+// Implements From<CanonicalBytes>. See serialize.rs in Jellyfish.
+deserialize_canonical_bytes!(TransactionCommitment);
+
 /// Sliding window for transaction freshness
 ///
 /// We keep a fixed number of recent Merkle root hashes here to allow
@@ -423,10 +435,10 @@ impl Committable for RecordMerkleFrontier {
 /// [HISTORY_SIZE](ValidatorState::HISTORY_SIZE) root hashes and the nullifiers that were appended
 /// to each root hash. To check a nullifier non-membership proof, we can walk backwards in time
 /// starting from the most recent root hash until we find a root hash against which the proof is
-/// valid. At each step, we also check that the nullifier is not in the set of nullifiers which were
-/// added at that step in history. This proves that (1) the nullifier in question was not in the
-/// nullifiers set at some recent point in history and (2) it has not been added to the set since
-/// then.
+/// valid. We must also check that the nullifier is not in the set of nullifiers which have been
+/// added since the proof was valid. To do this, we check that the nullifier is not in any of the
+/// deltas associated with each historical snapshot, which we can check efficiently using
+/// [recent_nullifiers](Self::recent_nullifiers).
 ///
 /// [NullifierHistory] also includes, for each historical root hash, nullifier non-membership proofs
 /// for each of the nullifiers which were appended to that root hash. This makes it possible to
@@ -441,7 +453,7 @@ impl Committable for RecordMerkleFrontier {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NullifierHistory {
     current: set_hash::Hash,
-    history: VecDeque<(SetMerkleTree, HashSet<Nullifier>)>,
+    history: VecDeque<(SetMerkleTree, Vec<Nullifier>)>,
 }
 
 impl Default for NullifierHistory {
@@ -458,11 +470,23 @@ impl NullifierHistory {
         self.current
     }
 
+    pub fn recent_nullifiers(&self) -> HashSet<Nullifier> {
+        self.history
+            .iter()
+            .flat_map(|(_, nulls)| nulls)
+            .cloned()
+            .collect()
+    }
+
     /// Check if a nullifier has been spent.
     ///
     /// This function succeeds if `proof` is valid relative to some recent nullifier set (less than
     /// [HISTORY_SIZE](ValidatorState::HISTORY_SIZE) blocks old) and proves that `nullifier` was not
     /// in the set at that time, and if `nullifier` has not been spent since that historical state.
+    ///
+    /// `recent_nullifiers` must be the result of calling [Self::recent_nullifiers]; that is, it
+    /// should contain all of the nullifiers which have been spent during the historical window
+    /// represented by this object.
     ///
     /// If successful, it returns the root hash of the nullifier set for which `proof` is valid.
     ///
@@ -473,38 +497,24 @@ impl NullifierHistory {
     /// spent since `proof` was generated.
     pub fn check_unspent(
         &self,
+        recent_nullifiers: &HashSet<Nullifier>,
         proof: &SetMerkleProof,
         nullifier: Nullifier,
     ) -> Result<set_hash::Hash, ValidationError> {
-        // If the proof is valid relative to the latest root, it will tell us if the nullifier is in
-        // the accumulator or not.
-        if let Ok(res) = proof.check(nullifier, &self.current) {
-            return if res {
-                Err(ValidationError::NullifierAlreadyExists { nullifier })
-            } else {
-                Ok(self.current)
-            };
+        // Make sure the nullifier has not been spent during the sliding window of historical
+        // snapshots. If it hasn't, then it must be unspent as long as `proof` proves it unspent
+        // relative to any of our historical snapshots.
+        if recent_nullifiers.contains(&nullifier) {
+            return Err(ValidationError::NullifierAlreadyExists { nullifier });
         }
 
-        // Look for a historical root which validates the proof, making sure that the nullifier has
-        // not been spent since said proof was valid. We will iterate over the history in reverse
-        // chronological order, most recent additions first. At each snapshot, we check if the
-        // nullifier is in the set of nullifiers appended to the given snapshot. If it is, we can
-        // definitively say that the nullifier has been spent. Otherwise, check the proof relative
-        // to the snapshotted root hash. If it is valid, we have our answer. Otherwise, we will
-        // search farther back in history.
-        for (tree, nulls) in self.history.iter() {
-            // Make sure the nullifier has not been spent since this root hash was valid.
-            if nulls.contains(&nullifier) {
-                return Err(ValidationError::NullifierAlreadyExists { nullifier });
-            }
-
-            // See if the proof is valid relative to this root.
-            if let Ok(res) = proof.check(nullifier, &tree.hash()) {
+        // Find a historical nullifier set root hash which validates the proof.
+        for root in once(self.current).chain(self.history.iter().map(|(tree, _)| tree.hash())) {
+            if let Ok(res) = proof.check(nullifier, &root) {
                 return if res {
                     Err(ValidationError::NullifierAlreadyExists { nullifier })
                 } else {
-                    Ok(tree.hash())
+                    Ok(root)
                 };
             }
         }
@@ -543,7 +553,7 @@ impl NullifierHistory {
         &mut self,
         mut inserts: HashMap<set_hash::Hash, Vec<(Nullifier, SetMerkleProof)>>,
     ) -> Result<SetMerkleTree, ValidationError> {
-        let mut nulls = HashSet::new();
+        let mut nulls = Vec::new();
 
         // Get a sparse representation of the oldest set in the history. We will use this
         // accumulator to incrementally build up a sparse representation of the current set that
@@ -565,7 +575,7 @@ impl NullifierHistory {
                 accum
                     .remember(n, proof)
                     .map_err(|_| ValidationError::BadNullifierProof {})?;
-                nulls.insert(n);
+                nulls.push(n);
             }
             // Insert nullifiers from `delta`, advancing `accum` to the next historical state while
             // updating all of the Merkle paths it currently contains.
@@ -579,7 +589,7 @@ impl NullifierHistory {
             accum
                 .remember(n, proof)
                 .map_err(|_| ValidationError::BadNullifierProof {})?;
-            nulls.insert(n);
+            nulls.push(n);
         }
 
         // At this point, `accum` contains Merkle paths for each of the new nullifiers in `nulls`
@@ -621,20 +631,16 @@ impl NullifierHistory {
 
 impl Committable for NullifierHistory {
     fn commit(&self) -> commit::Commitment<Self> {
-        commit::RawCommitmentBuilder::new("Nullifier Hist Comm")
+        let mut ret = commit::RawCommitmentBuilder::new("Nullifier Hist Comm")
             .field("current", self.current.into())
-            // It is sufficient to commit to the root at each snapshot without the nullifiers added
-            // to that snapshot, since the root at each snapshot combined with the nullifiers added
-            // to it uniquely dtermine the next root in the chain, which we are also committing to.
-            .array_field(
-                "history",
-                &self
-                    .history
-                    .iter()
-                    .map(|(root, _)| root.hash().into())
-                    .collect::<Vec<_>>(),
-            )
-            .finalize()
+            .constant_str("history")
+            .u64(self.history.len() as u64);
+        for (tree, delta) in self.history.iter() {
+            ret = ret
+                .field("root", tree.hash().into())
+                .var_size_bytes(&bincode::serialize(&delta).unwrap())
+        }
+        ret.finalize()
     }
 }
 
@@ -841,6 +847,8 @@ impl ValidatorState {
         let mut nulls = HashSet::new();
         use ValidationError::*;
         let mut sorted_proofs = NullifierProofs::new();
+
+        let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
         for (pf, n) in null_pfs
             .into_iter()
             .zip(txns.0.iter())
@@ -850,7 +858,9 @@ impl ValidatorState {
                 return Err(NullifierAlreadyExists { nullifier: n });
             }
 
-            let root = self.past_nullifiers.check_unspent(&pf, n)?;
+            let root = self
+                .past_nullifiers
+                .check_unspent(&recent_nullifiers, &pf, n)?;
             sorted_proofs.entry(root).or_default().push((n, pf));
             nulls.insert(n);
         }
