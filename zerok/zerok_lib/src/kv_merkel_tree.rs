@@ -54,19 +54,20 @@ where
     }
 
 }
-impl<'a,KVHash> arbitrary::Arbitrary<'a> for KVMerkleTree<KVHash> 
-where
-    KVHash: KVTreeHash + Clone + Copy,
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
-{
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut s = Self::default();
-        for n in u.arbitrary_iter::<(KVHash::Key,KVHash::Value)>()? {
-            s.insert(n?.0.into(),n?.1.into());
-        }
-        Ok(s)
-    }
-}
+//KALEY: need arbitrary?
+// impl<'a,KVHash> arbitrary::Arbitrary<'a> for KVMerkleTree<KVHash> 
+// where
+//     KVHash: KVTreeHash + Clone + Copy,
+//     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
+// {
+//     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+//         let mut s = Self::default();
+//         for n in u.arbitrary_iter::<(KVHash::Key,KVHash::Value)>()? {
+//             s.insert(n?.0.into(),n?.1.into());
+//         }
+//         Ok(s)
+//     }
+// }
 
 impl<KVHash> KVMerkleTree<KVHash>
 where
@@ -188,9 +189,7 @@ where
 
 {
     fn value(&self) -> KVHash::Digest 
-    //where
-    //    Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq  + ArrayLength<KVHash::Digest>,
-    {
+   {
         use KVMerkleTerminalNode::*;
         match self {
             EmptySubtree => KVHash::empty_digest(),
@@ -236,11 +235,9 @@ pub struct KVMerkleProof<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
-
-    //Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq + ArrayLength<KVHash::Digest>,
  {
     terminal_node: KVMerkleTerminalNode<KVHash>,
-    //KALEY: each level of path in the tree includes all but 1 of the siblings,
+    //each level of path in the tree includes all but 1 of the siblings,
     //hence BranchArityMinus1
     path: Vec<GenericArray<KVHash::Digest,KVHash::BranchArityMinus1>>,
 }
@@ -249,8 +246,6 @@ impl<KVHash> KVMerkleProof<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
-
-    //Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq + ArrayLength<KVHash::Digest>,
  {
     pub fn check(&self, key: KVHash::Key, root: KVHash::Digest) -> Result<bool, KVHash::Digest> {
         let mut running_hash = self.terminal_node.value();
@@ -290,7 +285,6 @@ where
     KVHash: KVTreeHash + Clone + Copy,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
 
-    //Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq + ArrayLength<KVHash::Digest>,
  {
     pub fn sparse(root: KVHash::Digest) -> Self {
         Self::ForgottenSubtree { digest: root }
@@ -307,8 +301,7 @@ where
     }
 
     /// Returns `None` if the element is in a forgotten subtree
-    /// Checks if key exists, not specific (k,v) pair
-    pub fn contains(&self, key: KVHash::Key) -> Option<(bool, KVMerkleProof<KVHash>)> {
+    pub fn lookup(&self, key: KVHash::Key) -> Option<(bool, KVMerkleProof<KVHash>)> {
         use KVMerkleTree::*;
         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
         let key_bits = key_bit_vec.into_iter().rev();
@@ -372,8 +365,6 @@ where
         let mut end_height = key_bit_vec.len();
         let key_bits = key_bit_vec.into_iter().rev();
 
-        //KALEY: siblings should be size BranchArityMinus1+1; each level
-        //of the tree is pushed to siblings for each pos in key_bits
         let mut siblings = vec![];
         let mut end_branch = mem::replace(self, EmptySubtree);
         for pos in key_bits {
@@ -403,8 +394,7 @@ where
                     let new_leaf = Self::new_leaf(height - 1, key, value);
                     let (new_end_branch, new_sibs) = if leaf_pos == pos {
                         let mut new_branches = vec![&EmptySubtree; <KVHash::BranchArityMinus1>::to_usize()+1];
-                        //KALEY: if leaf_pos == pos == maxsize, something may get weird?
-                        //also the clone question
+                        //KALEY: clone question
                         new_branches[pos as usize] = &new_leaf;
                         (EmptySubtree, new_branches.into_iter().map(|x| x.clone()).collect::<Vec<_>>())
                     } else {
@@ -437,9 +427,7 @@ where
             } => {
                 assert_eq!(height, end_height);
                 assert_eq!(key, leaf_key);
-                //KALEY: insert rewrites value if (k,v1) exists when
-                //(k,v2) is inserted
-                //assert_eq!(value, leaf_value);
+                //rewrites value if (k,v1) exists and (k,v2) is inserted
                 Leaf {
                     digest,
                     height,
@@ -463,7 +451,6 @@ where
         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
         let key_bits = key_bit_vec.into_iter().rev();
 
-        //same as insert: siblings saves an entire level of the tree
         let mut siblings = vec![];
         let mut end_branch = mem::replace(self, EmptySubtree);
         for pos in key_bits {
@@ -496,7 +483,6 @@ where
             ..
         } = end_branch
         {
-            //KALEY: also test leaf_value == value?
             if leaf_key == key {
                 ret = Some(KVMerkleProof {
                     terminal_node: KVMerkleTerminalNode::Leaf {
@@ -504,7 +490,7 @@ where
                         key: leaf_key,
                         value: leaf_value,
                     },
-                    //KALEY: for each sibling vec, remove the target 
+                    //for each sibling vector, remove the target 
                     //and iterate through remaining elements and get their hashes, then reverse
                     path: {
                         let mut path_vec = vec![];
@@ -523,9 +509,6 @@ where
 
         siblings.reverse();
         for (pos, sibs) in siblings {
-            //sibs.insert(pos as usize, end_branch);
-            //let sibs_arr: GenericArray<KVMerkleTree<KVHash,Arity>,Arity> = GenericArray::from_exact_iter(sibs).unwrap();
-            //end_branch = Self::new_branch(Box::new(sibs_arr));
             sibs[pos as usize] = end_branch;
             let mut all_forgotten = true;
             for s in sibs.into_iter() {
@@ -541,7 +524,6 @@ where
         ret
     }
 
-    //KALEY: value needed for new_leaf()
     pub fn remember(
         &mut self,
         key: KVHash::Key,
@@ -571,7 +553,6 @@ where
                 let mut sibs_vec: Vec<_> = sib_hashes.to_vec();
                 
                 sibs_vec.insert(*sib as usize, running_hash);
-                //let branch_hash = KVHash::hash_branch(GenericArray::from_exact_iter(sibs_vec));
 
                 ret.push((running_hash, sibs_vec));
                 let mut children = vec![];
@@ -603,7 +584,6 @@ where
                     end_branch = children[pos as usize];
                     children
                 }
-                //KALEY: existing key/diff value problem?
                 Leaf {
                     height,
                     key: leaf_key,
@@ -656,8 +636,6 @@ pub fn set_merkle_lw_multi_insert<KVHash,Arity>(
 where
    KVHash: KVTreeHash + Clone + Copy,
    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
-
-  // Arity: ArrayLength<KVMerkleTree<KVHash, Arity>> + Debug + PartialEq + ArrayLength<KVHash::Digest>,
  {
     let mut kvs = vec![];
     let mut s = KVMerkleTree::ForgottenSubtree { digest: root };
@@ -672,7 +650,7 @@ where
         s.hash(),
         kvs
             .into_iter()
-            .map(|(k,_)| s.contains(k).unwrap().1)
+            .map(|(k,_)| s.lookup(k).unwrap().1)
             .collect(),
     ))
 }
@@ -741,19 +719,19 @@ mod tests {
         for (u, elem) in updates.iter().zip(update_elems.iter()) {
             let elem = *elem;
             hset.insert(u);
-            let (in_set, pf) = t.contains(elem).unwrap();
+            let (in_set, pf) = t.lookup(elem).unwrap();
             t.insert(elem,elem);
             assert_eq!(pf.check(elem, &lw_t.hash()).unwrap(), in_set);
             lw_t.remember(elem, pf).unwrap();
             lw_t.insert(elem,elem).unwrap();
-            let (in_new_lw_t, new_lw_pf) = lw_t.contains(elem).unwrap();
+            let (in_new_lw_t, new_lw_pf) = lw_t.lookup(elem).unwrap();
             assert!(in_new_lw_t);
 
-            assert!(t.contains(elem).unwrap().0);
+            assert!(t.lookup(elem).unwrap().0);
 
             assert_eq!(lw_t.hash(), t.hash());
             lw_t.forget(elem).unwrap();
-            assert!(lw_t.contains(elem).is_none());
+            assert!(lw_t.lookup(elem).is_none());
 
             assert!(new_lw_pf.check(elem, &lw_t.hash()).unwrap());
         }
@@ -772,7 +750,7 @@ mod tests {
             };
             let elem = update_vals[&val];
 
-            let (t_contains, pf) = t.contains(elem).unwrap();
+            let (t_contains, pf) = t.lookup(elem).unwrap();
 
             if should_be_there {
                 assert!(hset.contains(&val));
