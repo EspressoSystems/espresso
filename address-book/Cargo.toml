@@ -54,7 +54,7 @@ tide = { version = "0.16.0", default-features = false }
 tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main" }
 tide-websockets = "0.4.0"
 toml = "0.5"
-tracing = "0.1.34"
+tracing = "0.1.35"
 tracing-futures = "0.2"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter", "json"] }
 url = "2.2.2"
