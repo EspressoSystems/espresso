@@ -370,7 +370,9 @@ mod espresso_keystore_tests {
     use std::time::Instant;
     use testing::SystemUnderTest;
 
+    #[cfg(feature = "slow-tests")]
     use testing::generic_keystore_tests;
+    #[cfg(feature = "slow-tests")]
     seahorse::instantiate_generic_keystore_tests!(EspressoTest);
 
     #[async_std::test]

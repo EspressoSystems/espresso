@@ -3,8 +3,15 @@ name = "zerok_client"
 version = "0.1.0"
 authors = ["Joe Doyle <joe@translucence.net>"]
 edition = "2018"
-default-run = "zerok_client"
+default-run = "wallet-cli"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+slow-tests = []
+
+[[bin]]
+name = "wallet-cli"
+path = "src/main.rs"
 
 [dependencies]
 async-std = { version = "1.10.0", features = ["unstable", "attributes"] }

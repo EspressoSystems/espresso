@@ -28,7 +28,7 @@
 // Note that the ledger must be initialized with a balance of native assets for each random keystore
 // by passing the public key of each keystore that should receive funds to each validator with
 // `--keystore`. This requires having the public key before starting `random_keystore`. You can generate
-// a key pair using `zerok_client -g KEY_FILE`, and then pass the public key to the validators with
+// a key pair using `wallet-cli -g KEY_FILE`, and then pass the public key to the validators with
 // `-w KEY_FILE.pub` and pass the key pair to `random_keystore` with `-k KEY_FILE`.
 
 use async_std::task::sleep;
@@ -38,7 +38,7 @@ use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand::{
     distributions::{Distribution, Standard},
-    Rng,
+    Rng, RngCore,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use seahorse::txn_builder::RecordInfo;
@@ -102,7 +102,7 @@ pub async fn find_freezable_records<'a>(freezer: &Keystore, frozen: FreezeFlag) 
         .collect()
 }
 
-#[derive(StructOpt)]
+#[derive(StructOpt, Debug)]
 struct Args {
     /// Path to a private key file to use for the keystore.
     ///
@@ -185,8 +185,12 @@ async fn main() {
         )
         .with_ansi(args.colored_logs)
         .init();
-
-    let mut rng = ChaChaRng::seed_from_u64(args.seed.unwrap_or(0));
+    event!(Level::INFO, "args = {:?}", args);
+    let seed = args
+        .seed
+        .unwrap_or_else(|| ChaChaRng::from_entropy().next_u64());
+    event!(Level::INFO, "Using Seed {}", seed);
+    let mut rng = ChaChaRng::seed_from_u64(seed);
     let tempdir = TempDir::new("keystore").unwrap();
     let storage = args
         .storage
@@ -232,6 +236,14 @@ async fn main() {
         None => {
             keystore
                 .generate_user_key("Random Key".to_string(), None)
+                .await
+                .unwrap();
+            keystore
+                .generate_viewing_key("view key".to_string())
+                .await
+                .unwrap();
+            keystore
+                .generate_freeze_key("freeze key".to_string())
                 .await
                 .unwrap();
         }
