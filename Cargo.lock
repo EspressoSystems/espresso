@@ -2210,6 +2210,8 @@ dependencies = [
  "jf-primitives",
  "jf-utils",
  "key-set",
+ "libp2p",
+ "libp2p-networking",
  "markdown",
  "net",
  "portpicker",
