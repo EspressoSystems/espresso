@@ -59,7 +59,10 @@ async fn round_trip<T: Store + 'static>(store: T) {
         let pub_key_bytes = bincode::serialize(&pub_key).unwrap();
         let sig = user_key.sign(&pub_key_bytes);
         let json_request = InsertPubKey { pub_key_bytes, sig };
-        let response = surf::post(format!("{base_url}/insert_pubkey"))
+        let url = format!("{base_url}/insert_pubkey");
+        println!("{url}");
+        println!("{}", serde_json::to_string(&json_request).unwrap());
+        let response = surf::post(url)
             .content_type(surf::http::mime::JSON)
             .body_json(&json_request)
             .unwrap()
@@ -67,14 +70,18 @@ async fn round_trip<T: Store + 'static>(store: T) {
             .unwrap();
         assert_eq!(response.status(), StatusCode::Ok);
         let address_bytes = bincode::serialize(&pub_key.address()).unwrap();
-        let mut response = surf::post(format!("{base_url}/request_pubkey"))
+        let url = format!("{base_url}/request_pubkey");
+        println!("{url}");
+        println!("{}", serde_json::to_string(&address_bytes).unwrap());
+        let mut response = surf::post(url)
             .content_type(surf::http::mime::BYTE_STREAM)
-            .body_bytes(&address_bytes)
-            .await
-            .unwrap();
+            .body_bytes(&address_bytes);
+        println!("request_pubkey response struct:\n{:?}", &response);
+        let mut response = response.await.unwrap();
         assert_eq!(response.status(), StatusCode::Ok);
         let gotten_pub_key: UserPubKey = response.body_json().await.unwrap();
         assert_eq!(gotten_pub_key, pub_key);
+        println!("{:?}", gotten_pub_key);
         let mut response = surf::get(format!("{base_url}/request_peers"))
             .await
             .unwrap();

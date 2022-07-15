@@ -5368,6 +5368,7 @@ dependencies = [
 [[package]]
 name = "tide-disco"
 version = "0.1.0"
+source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#e9b76a63b18050b06c89026aa5b757e9cbea9f64"
 dependencies = [
  "async-std",
  "async-trait",
