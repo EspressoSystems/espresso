@@ -73,6 +73,17 @@ pub struct ServerState<T: Store> {
     pub store: Arc<T>,
 }
 
+pub fn eq_header_values(req_params: &RequestParams, h: &str, s: &str) -> bool {
+    println!(
+        "content-type: {}",
+        req_params.headers()[h].to_string().trim().to_lowercase()
+    );
+    req_params.headers()[h]
+        .to_string()
+        .to_lowercase()
+        .contains(s)
+}
+
 /// Initialize the web server
 ///
 /// Bind route handlers and documentation
@@ -94,18 +105,38 @@ pub fn init_web_server<T: Store + 'static>(
         "insert_pubkey",
         |req_params: RequestParams, server_state| {
             async move {
-                let insert_request: InsertPubKey = serde_json::from_slice(&req_params.body_bytes())
-                    .map_err(|_e| AddressBookError::Other {
-                        status: StatusCode::BadRequest,
-                        msg: "Unable to deseralize the insert request from the post data"
-                            .to_string(),
-                    })?;
+                if eq_header_values(&req_params, "content-type", "application/json") {
+                    let insert_request: InsertPubKey = req_params.body_json()?;
+                    trace!("/insert_pubkey [json] InsertPubKey: {:?}", &insert_request);
 
-                trace!("/insert_pubkey InsertPubKey: {:?}", &insert_request);
+                    let pub_key = verify_sig_and_get_pub_key(insert_request)?;
+                    (*server_state.store).save(&pub_key.address(), &pub_key)?;
+                    Ok(())
+                } else if eq_header_values(&req_params, "content-type", "application/octet-stream")
+                {
+                    let insert_request: InsertPubKey =
+                        serde_json::from_slice(&req_params.body_bytes()).map_err(|_e| {
+                            AddressBookError::Other {
+                                status: StatusCode::BadRequest,
+                                msg: "Unable to deseralize the insert request from the post data"
+                                    .to_string(),
+                            }
+                        })?;
 
-                let pub_key = verify_sig_and_get_pub_key(insert_request)?;
-                (*server_state.store).save(&pub_key.address(), &pub_key)?;
-                Ok(())
+                    trace!(
+                        "/insert_pubkey [octet-stream] InsertPubKey: {:?}",
+                        &insert_request
+                    );
+
+                    let pub_key = verify_sig_and_get_pub_key(insert_request)?;
+                    (*server_state.store).save(&pub_key.address(), &pub_key)?;
+                    Ok(())
+                } else {
+                    Err(AddressBookError::Other {
+                        status: StatusCode::UnsupportedMediaType,
+                        msg: "Expecting content-type: application/octet-stream".to_string(),
+                    })
+                }
             }
             .boxed()
         },
@@ -116,34 +147,41 @@ pub fn init_web_server<T: Store + 'static>(
     // StatusCode::NotFound.
     api.post("request_pubkey", |req_params, server_state| {
         async move {
-            let address: UserAddress =
-                bincode::deserialize(&req_params.body_bytes()).map_err(|e| {
-                    AddressBookError::DeserializationError {
-                        status: StatusCode::BadRequest,
-                        msg: e.to_string(),
+            if eq_header_values(&req_params, "content-type", "application/octet-stream") {
+                let address: UserAddress =
+                    bincode::deserialize(&req_params.body_bytes()).map_err(|e| {
+                        AddressBookError::DeserializationError {
+                            status: StatusCode::BadRequest,
+                            msg: e.to_string(),
+                        }
+                    })?;
+                match (*server_state.store).load(&address) {
+                    Ok(Some(pub_key)) => {
+                        let upk: UserPubKey = pub_key;
+                        trace!(
+                            "/request_pubkey address: {:?} -> pb_key: {:?}",
+                            &address,
+                            &upk
+                        );
+                        Ok(upk)
                     }
-                })?;
-            match (*server_state.store).load(&address) {
-                Ok(Some(pub_key)) => {
-                    let upk: UserPubKey = pub_key;
-                    trace!(
-                        "/request_pubkey address: {:?} -> pb_key: {:?}",
-                        &address,
-                        &upk
-                    );
-                    Ok(upk)
+                    Ok(None) => {
+                        trace!("/request_pubkey not found: {:?}", &address);
+                        Err(AddressBookError::AddressNotFound {
+                            status: StatusCode::NotFound,
+                            address,
+                        })
+                    }
+                    Err(e) => Err(AddressBookError::Other {
+                        status: StatusCode::InternalServerError,
+                        msg: e.to_string(),
+                    }),
                 }
-                Ok(None) => {
-                    trace!("/request_pubkey not found: {:?}", &address);
-                    Err(AddressBookError::AddressNotFound {
-                        status: StatusCode::NotFound,
-                        address,
-                    })
-                }
-                Err(e) => Err(AddressBookError::Other {
-                    status: StatusCode::InternalServerError,
-                    msg: e.to_string(),
-                }),
+            } else {
+                Err(AddressBookError::Other {
+                    status: StatusCode::UnsupportedMediaType,
+                    msg: "Expecting content-type: application/octet-stream".to_string(),
+                })
             }
         }
         .boxed()

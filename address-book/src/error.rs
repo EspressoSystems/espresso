@@ -87,3 +87,11 @@ impl From<tide::Error> for AddressBookError {
         }
     }
 }
+
+impl From<tide_disco::RequestError> for AddressBookError {
+    fn from(error: tide_disco::RequestError) -> Self {
+        AddressBookError::Config {
+            msg: error.to_string(),
+        }
+    }
+}

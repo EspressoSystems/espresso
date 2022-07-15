@@ -51,6 +51,7 @@ tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", 
 tempdir = "0.3.7"
 tide = { version = "0.16.0", default-features = false }
 tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main" }
+#tide-disco = { path = "../../tide-disco" }
 tide-websockets = "0.4.0"
 toml = "0.5"
 tracing = "0.1.34"
