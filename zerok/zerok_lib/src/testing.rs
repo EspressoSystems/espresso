@@ -1170,11 +1170,14 @@ pub fn crypto_rng_from_seed(seed: [u8; 32]) -> ChaChaRng {
 mod tests {
     use super::*;
     use crate::util::canonical::CanonicalBytes;
-    use jf_cap::structs::NoteType;
+    use commit::Committable;
+    use jf_cap::structs::{NoteType, Nullifier};
     use jf_cap::{utils::compute_universal_param_size, BaseField, MerkleLeafProof, NodeValue};
     use jf_primitives::merkle_tree::LookupResult;
     use quickcheck::QuickCheck;
-    use rand::Rng;
+    use rand::{Rng, RngCore};
+    use std::collections::HashMap;
+    use std::cmp::min;
 
     #[test]
     fn multixfr_setup() {
@@ -1875,5 +1878,124 @@ mod tests {
     #[test]
     fn double_item_insert() {
         test_merkle_tree(vec![Ok(0), Ok(1)]);
+    }
+
+    /// Apply a sequence of blocks of nullifiers to a [NullifierHistory], making a set of
+    /// consistency checks at each step along the way.
+    ///
+    /// `blocks` should be a sequence of blocks. Each block is specified as a list of _proof ages_.
+    /// The proof age for a nullifier is the number of blocks which have been committed since the
+    /// state with the nullifier set used to create the proof. The test will adjust each age to
+    /// avoid overflows, so these can be randomly generated.
+    ///
+    /// For this test, each block should be non-empty (hence the type `(usize, Vec<usize>)` to
+    /// ensure there is at least one nullifier in each block).
+    fn test_nullifier_history(seed: u64, blocks: Vec<(usize, Vec<usize>)>) {
+        let mut rng = ChaChaRng::seed_from_u64(seed);
+        // Past nullifier sets. Each of these Merkle trees is complete -- it contains leaves for
+        // each nullifier in the set.
+        let mut nullifier_sets = vec![SetMerkleTree::default()];
+        // Spent nullifiers and the proofs that were used to spend them.
+        let mut spent_nullifiers = vec![];
+        // Our sliding window of recent nullifiers.
+        let mut history = NullifierHistory::default();
+        for (age, ages) in blocks {
+            let mut nullifier_proofs: HashMap<set_hash::Hash, Vec<(Nullifier, SetMerkleProof)>> =
+                HashMap::new();
+            for proof_age in once(age).chain(ages) {
+                // Use a proof that might be old, but is no older than the sliding window size or
+                // the size of all of history.
+                let proof_age =
+                    proof_age % min(ValidatorState::HISTORY_SIZE + 1, nullifier_sets.len());
+                // Generate a random, fresh nullifier.
+                let n = Nullifier::random_for_test(&mut rng);
+                // Find a recent nullifier set to generate the proof.
+                let set = &nullifier_sets[nullifier_sets.len() - 1 - proof_age];
+                let (contains, proof) = set.contains(n).unwrap();
+                assert!(!contains);
+                nullifier_proofs
+                    .entry(set.hash())
+                    .or_default()
+                    .push((n, proof));
+            }
+
+            // Check the proofs.
+            let recent_nullifiers = history.recent_nullifiers();
+            for (root, nulls) in &nullifier_proofs {
+                for (n, proof) in nulls {
+                    assert_eq!(
+                        *root,
+                        history
+                            .check_unspent(&recent_nullifiers, proof, *n)
+                            .unwrap()
+                    );
+                }
+            }
+
+            if nullifier_sets.len() > ValidatorState::HISTORY_SIZE + 1 {
+                // Check that a proof which is too old fails to validate.
+                let n = Nullifier::random_for_test(&mut rng);
+                let set =
+                    &nullifier_sets[nullifier_sets.len() - 1 - ValidatorState::HISTORY_SIZE - 1];
+                let proof = set.contains(n).unwrap().1;
+                assert!(matches!(
+                    history
+                        .check_unspent(&recent_nullifiers, &proof, n)
+                        .unwrap_err(),
+                    ValidationError::BadNullifierProof {},
+                ));
+            }
+
+            // Check that past nullifiers fail to validate.
+            for (n, proof) in &spent_nullifiers {
+                history
+                    .check_unspent(&recent_nullifiers, proof, *n)
+                    .unwrap_err();
+            }
+
+            // Insert the new nullifiers and make sure the commitment changes.
+            let prev_commit = history.commit();
+            let collected_proofs = history.append_block(nullifier_proofs.clone()).unwrap();
+            assert_ne!(prev_commit, history.commit());
+
+            // Check that it returned all the expected proofs.
+            for (n, _) in nullifier_proofs.values().flatten() {
+                let (contains, _proof) = collected_proofs.contains(*n).unwrap();
+                assert!(!contains);
+            }
+
+            // Generate the new nullifiers set by inserting all of the new nullifiers.
+            let mut set = nullifier_sets.last().unwrap().clone();
+            for (n, proof) in nullifier_proofs.into_values().flatten() {
+                set.insert(n).unwrap();
+                spent_nullifiers.push((n, proof));
+            }
+            assert_eq!(set.hash(), history.current_root());
+            nullifier_sets.push(set);
+        }
+    }
+
+    #[test]
+    fn test_nullifier_history_small() {
+        let mut rng = ChaChaRng::from_seed([1; 32]);
+        let blocks = (0..2 * ValidatorState::HISTORY_SIZE)
+            .into_iter()
+            .map(|_| {
+                let block_size = rng.next_u64() % 100;
+                (rng.next_u64() as usize, (0..block_size)
+                    .into_iter()
+                    .map(|_| rng.next_u64() as usize)
+                    .collect())
+            })
+            .collect();
+        test_nullifier_history(rng.next_u64(), blocks);
+    }
+
+    #[cfg(feature = "slow-tests")]
+    #[test]
+    fn quickcheck_nullifier_history() {
+        QuickCheck::new()
+            .tests(5)
+            .quickcheck(test_nullifier_history as fn(u64, Vec<_>) -> ());
     }
 }
