@@ -76,28 +76,6 @@ pub struct ElaboratedTransaction {
 
 impl TransactionTrait<H_256> for ElaboratedTransaction {}
 
-impl ElaboratedTransaction {
-    /// Compute a cryptographic hash committing to an elaborated
-    /// transaction.
-    pub(crate) fn etxn_hash(&self) -> ElaboratedTransactionHash {
-        ElaboratedTransactionHash(self.commit())
-    }
-}
-
-/// A user-visible notation for a transaction hash, like TXN~bbb
-///
-/// When serialized using [serde_json] or formatted using
-/// [Display](https://doc.rust-lang.org/std/fmt/trait.Display.html),
-/// [ElaboratedTransactionHash] is displayed as a
-/// [TaggedBase64](https://github.com/EspressoSystems/tagged-base64/)
-/// string with "TXN" as the tag.
-#[ser_test(arbitrary)]
-#[tagged_blob("TXN")]
-#[derive(
-    Arbitrary, Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize,
-)]
-pub struct ElaboratedTransactionHash(pub(crate) Commitment<ElaboratedTransaction>);
-
 /// A collection of transactions
 ///
 /// A Block is the collection of transactions to be validated. Usually,
@@ -554,6 +532,9 @@ impl NullifierHistory {
     /// from the history in order to keep the size of the history below
     /// [HISTORY_SIZE](ValidatorState::HISTORY_SIZE).
     ///
+    /// If successful, returns updated non-membership proofs for each nullifier in `inserts`, in the
+    /// form of a sparse representation of a [SetMerkleTree].
+    ///
     /// # Errors
     ///
     /// This function fails if any of the proofs in `inserts` are invalid relative to the
@@ -561,7 +542,7 @@ impl NullifierHistory {
     pub fn append_block(
         &mut self,
         mut inserts: HashMap<set_hash::Hash, Vec<(Nullifier, SetMerkleProof)>>,
-    ) -> Result<(), ValidationError> {
+    ) -> Result<SetMerkleTree, ValidationError> {
         let mut nulls = HashSet::new();
 
         // Get a sparse representation of the oldest set in the history. We will use this
@@ -631,10 +612,10 @@ impl NullifierHistory {
         if self.history.len() >= ValidatorState::HISTORY_SIZE {
             self.history.pop_back();
         }
-        self.history.push_front((current, nulls));
+        self.history.push_front((current.clone(), nulls));
         self.current = accum.hash();
 
-        Ok(())
+        Ok(current)
     }
 }
 
@@ -933,6 +914,12 @@ impl ValidatorState {
 
     /// Performs validation for a block, updating the ValidatorState.
     ///
+    /// If successful, returns
+    /// * the UIDs of the newly created records
+    /// * updated nullifier non-membership proofs for all of the nullifiers in `txns`, relative to
+    ///   the nullifier set at the time this function was invoked, in the form of a sparse
+    ///   reperesentation of a [SetMerkleTree]
+    ///
     /// # Errors
     /// - [ValidationError::BadNullifierProof]
     /// - [ValidationError::BadMerklePath]
@@ -943,7 +930,7 @@ impl ValidatorState {
         now: u64,
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
-    ) -> Result<Vec<u64> /* new uids */, ValidationError> {
+    ) -> Result<(Vec<u64>, SetMerkleTree), ValidationError> {
         // If the block successfully validates, and the nullifier
         // proofs apply correctly, the remaining (mutating) operations
         // cannot fail, as this would result in an inconsistent
@@ -954,14 +941,14 @@ impl ValidatorState {
         let comm = self.commit();
         self.prev_commit_time = now;
         self.prev_block = BlockCommitment(txns.commit());
-        self.past_nullifiers.append_block(null_pfs)?;
+        let null_pfs = self.past_nullifiers.append_block(null_pfs)?;
 
         let mut record_merkle_frontier = MerkleTree::restore_from_frontier(
             self.record_merkle_commitment,
             &self.record_merkle_frontier,
         )
         .ok_or(ValidationError::BadMerklePath {})?;
-        let mut ret = vec![];
+        let mut uids = vec![];
         let mut uid = self.record_merkle_commitment.num_leaves;
         for o in txns
             .0
@@ -972,7 +959,7 @@ impl ValidatorState {
             if uid > 0 {
                 record_merkle_frontier.forget(uid - 1).expect_ok().unwrap();
             }
-            ret.push(uid);
+            uids.push(uid);
             uid += 1;
             assert_eq!(uid, record_merkle_frontier.num_leaves());
         }
@@ -986,7 +973,7 @@ impl ValidatorState {
         self.record_merkle_commitment = record_merkle_frontier.commitment();
         self.record_merkle_frontier = record_merkle_frontier.frontier();
         self.prev_state = Some(comm);
-        Ok(ret)
+        Ok((uids, null_pfs))
     }
 }
 

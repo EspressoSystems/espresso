@@ -1688,7 +1688,8 @@ mod tests {
                 Block(vec![TransactionNote::Transfer(Box::new(txn1))]),
                 vec![nullifier_pfs],
             )
-            .unwrap();
+            .unwrap()
+            .0;
 
         println!(
             "Transfer validated & applied: {}s",

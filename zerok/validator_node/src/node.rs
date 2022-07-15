@@ -379,7 +379,7 @@ impl FullState {
                 state,
                 qcs: _,
             } => {
-                for (block, state) in block.iter().zip(state.iter()).rev() {
+                for (mut block, state) in block.iter().cloned().zip(state.iter()).rev() {
                     // A block has been committed. Update our mirror of the ValidatorState by applying
                     // the new block, and generate a Commit event.
 
@@ -395,12 +395,12 @@ impl FullState {
                             panic!("state is out of sync with validator")
                         }
 
-                        Ok(mut uids) => {
+                        Ok((mut uids, nullifier_proofs)) => {
                             let hist_index = self.full_persisted.state_iter().len();
                             assert!(hist_index > 0);
                             let block_index = hist_index - 1;
 
-                            self.full_persisted.store_for_commit(block, state);
+                            self.full_persisted.store_for_commit(&block, state);
                             self.past_nullifiers
                                 .insert(self.validator.nullifiers_root(), hist_index);
                             self.block_hashes
@@ -442,9 +442,23 @@ impl FullState {
                             self.full_persisted.store_nullifier_set(&nullifiers);
                             self.full_persisted.commit_accepted();
 
+                            // Update the nullifier proofs in the block so that clients do not have
+                            // to worry about out of date nullifier proofs.
+                            block.proofs = block
+                                .block
+                                .0
+                                .iter()
+                                .map(|txn| {
+                                    txn.nullifiers()
+                                        .into_iter()
+                                        .map(|n| nullifier_proofs.contains(n).unwrap().1)
+                                        .collect()
+                                })
+                                .collect();
+
                             // Notify subscribers of the new block.
                             self.send_event(LedgerEvent::Commit {
-                                block: (*block).clone(),
+                                block,
                                 block_id: block_index as u64,
                                 state_comm: self.validator.commit(),
                             });
