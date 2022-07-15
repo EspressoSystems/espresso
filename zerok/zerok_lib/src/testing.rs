@@ -1176,8 +1176,8 @@ mod tests {
     use jf_primitives::merkle_tree::LookupResult;
     use quickcheck::QuickCheck;
     use rand::{Rng, RngCore};
-    use std::collections::HashMap;
     use std::cmp::min;
+    use std::collections::HashMap;
 
     #[test]
     fn multixfr_setup() {
@@ -1982,10 +1982,13 @@ mod tests {
             .into_iter()
             .map(|_| {
                 let block_size = rng.next_u64() % 100;
-                (rng.next_u64() as usize, (0..block_size)
-                    .into_iter()
-                    .map(|_| rng.next_u64() as usize)
-                    .collect())
+                (
+                    rng.next_u64() as usize,
+                    (0..block_size)
+                        .into_iter()
+                        .map(|_| rng.next_u64() as usize)
+                        .collect(),
+                )
             })
             .collect();
         test_nullifier_history(rng.next_u64(), blocks);

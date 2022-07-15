@@ -76,7 +76,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
             block.block.clone(),
             block.proofs.clone(),
         ) {
-            Ok(mut uids) => {
+            Ok((mut uids, _)) => {
                 // Add nullifiers
                 for txn in &block.block.0 {
                     for nullifier in txn.nullifiers() {
@@ -198,7 +198,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                     transactions: Default::default(),
                 },
                 key_state: Default::default(),
-                assets: Default::default(),
                 freezing_accounts: Default::default(),
                 sending_accounts: Default::default(),
                 viewing_accounts: Default::default(),
