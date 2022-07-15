@@ -19,6 +19,7 @@ use futures::{future::pending, StreamExt};
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::Duration;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
@@ -131,7 +132,9 @@ struct KeyInFile {
 impl KeyInFile {
     fn new(private: &PrivKey, public: &PubKey) -> Self {
         Self {
-            private: private.to_string(),
+            private: TaggedBase64::new("PK", &private.to_bytes())
+                .unwrap()
+                .to_string(),
             public: public.to_string(),
         }
     }
@@ -168,7 +171,12 @@ fn get_key_pair_for_node(options: &Options, node_id: u64) -> KeyPair {
     let KeyInFile { private, public } = toml::from_str(&pk_str)
         .unwrap_or_else(|e| panic!("Cannot deserialize key file {}: {:?}", path.display(), e));
 
-    let private = private.parse().expect("Invalid private key");
+    let private = PrivKey::from_bytes(
+        &TaggedBase64::from_str(&private)
+            .expect("Invalid private key")
+            .value(),
+    )
+    .expect("Invalid private key");
     let public = public.parse().expect("Invalid public key");
     KeyPair { private, public }
 }

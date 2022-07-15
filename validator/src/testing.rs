@@ -89,7 +89,7 @@ pub struct TestNetwork {
 }
 
 impl TestNetwork {
-    pub async fn create_wallet(
+    pub async fn create_keystore(
         &self,
         loader: &mut impl KeystoreLoader<EspressoLedger, Meta = MnemonicPasswordLogin>,
     ) -> EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin> {
