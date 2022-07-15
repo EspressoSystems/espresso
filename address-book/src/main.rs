@@ -13,8 +13,9 @@
 
 use address_book::{
     error::AddressBookError, init_web_server, store::address_book_store_path, store::FileStore,
-    AppKey, Args, APP_NAME, ORG_DIR_NAME,
+    AppKey, Args, APP_NAME,
 };
+use espresso_systems_common::brand::ORG_DIR_NAME;
 use std::fs;
 use std::path::PathBuf;
 use tide_disco::{compose_settings, init_logging, DiscoKey};

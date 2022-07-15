@@ -26,18 +26,19 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
+#portpicker = "0.1"
 async-std = { version = "1.8.0", features = ["attributes"] }
 bincode = "1.3.3"
 clap = { version = "3.2.5", features = ["derive"] }
 config = "0.13.1"
 dirs = "4.0.0"
+espresso-systems-common = { git = "ssh://git@github.com/EspressoSystems/espresso-systems-common.git", branch = "main" }
 futures = "0.3.21"
 hex = "0.4.3"
 itertools = "0.10.3"
 jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 net = { git = "https://github.com/EspressoSystems/net.git" }
 once_cell = "1"
-#portpicker = "0.1"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
 serde = { version = "1.0", features = ["derive"] }
@@ -51,7 +52,6 @@ tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", 
 tempdir = "0.3.7"
 tide = { version = "0.16.0", default-features = false }
 tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main" }
-#tide-disco = { path = "../../tide-disco" }
 tide-websockets = "0.4.0"
 toml = "0.5"
 tracing = "0.1.34"

@@ -37,9 +37,6 @@ pub mod signal;
 
 /// Application name used for locating configuration files
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
-// TODO Move ORG_DIR_NAME to another organization-specific crate
-/// Organization name used for locating configuration files
-pub const ORG_DIR_NAME: &str = "espresso";
 
 /// Command line arguments
 #[derive(Parser, Debug)]

@@ -20,6 +20,7 @@ dependencies = [
  "clap 3.2.6",
  "config",
  "dirs",
+ "espresso-systems-common",
  "futures",
  "hex",
  "itertools 0.10.3",
@@ -1971,6 +1972,11 @@ dependencies = [
  "phaselock",
  "zerok_lib",
 ]
+
+[[package]]
+name = "espresso-systems-common"
+version = "0.2.0"
+source = "git+ssh://git@github.com/EspressoSystems/espresso-systems-common.git?branch=main#99b910038e4880a967eb979394e3adcfa526bb26"
 
 [[package]]
 name = "espresso-validator"
