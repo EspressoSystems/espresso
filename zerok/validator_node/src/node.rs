@@ -17,8 +17,12 @@ use arbitrary::Arbitrary;
 use arbitrary_wrappers::*;
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
+use async_std::task::block_on;
 use async_trait::async_trait;
+use commit::Committable;
 use espresso_availability_api::data_source::UpdateAvailabilityData;
+use espresso_availability_api::query_data::BlockQueryData;
+use espresso_availability_api::query_data::StateQueryData;
 use espresso_catchup_api::data_source::UpdateCatchUpData;
 use espresso_metastate_api::data_source::UpdateMetaStateData;
 pub use futures::prelude::*;
@@ -44,6 +48,7 @@ use std::pin::Pin;
 use tracing::{debug, error};
 use zerok_lib::full_persistence::FullPersistence;
 pub use zerok_lib::state::state_comm::LedgerStateCommitment;
+use zerok_lib::state::BlockCommitment;
 use zerok_lib::{
     ledger::EspressoLedger,
     set_merkle_tree::*,
@@ -396,6 +401,11 @@ impl FullState {
                         }
 
                         Ok(mut uids) => {
+                            let records_from = if uids.is_empty() {
+                                self.validator.record_merkle_commitment.num_leaves
+                            } else {
+                                uids[0]
+                            };
                             let hist_index = self.full_persisted.state_iter().len();
                             assert!(hist_index > 0);
                             let block_index = hist_index - 1;
@@ -425,13 +435,23 @@ impl FullState {
                             // Add the results of this block to our current state.
                             let mut nullifiers =
                                 self.full_persisted.get_latest_nullifier_set().unwrap();
-                            for txn in block.block.0.iter() {
+                            let mut txn_hashes = Vec::new();
+                            let mut nullifiers_delta = Vec::new();
+                            for (txn, proofs) in block.block.0.iter().zip(block.proofs.iter()) {
                                 for n in txn.nullifiers() {
                                     nullifiers.insert(n);
+                                    nullifiers_delta.push(n);
                                 }
                                 for o in txn.output_commitments() {
                                     self.records_pending_memos.push(o.to_field_element());
                                 }
+
+                                let hash = ElaboratedTransaction {
+                                    txn: txn.clone(),
+                                    proofs: proofs.clone(),
+                                }
+                                .etxn_hash();
+                                txn_hashes.push(hash);
                             }
                             self.num_txns += block.block.0.len();
                             assert_eq!(nullifiers.hash(), self.validator.nullifiers_root);
@@ -441,6 +461,53 @@ impl FullState {
                             );
                             self.full_persisted.store_nullifier_set(&nullifiers);
                             self.full_persisted.commit_accepted();
+                            let event_index;
+                            {
+                                let mut catchup_store = block_on(self.catchup_store.write());
+                                event_index = catchup_store.event_count() as u64;
+                                if let Err(e) =
+                                    catchup_store.append_events(&mut vec![LedgerEvent::Commit {
+                                        block: (*block).clone(),
+                                        block_id: block_index as u64,
+                                        state_comm: self.validator.commit(),
+                                    }])
+                                {
+                                    // log for now... this should be propagated once we get rid of FullState
+                                    tracing::warn!("append_events returned error {}", e);
+                                }
+                            }
+                            {
+                                let mut availability_store =
+                                    block_on(self.availability_store.write());
+                                if let Err(e) = availability_store.append_blocks(
+                                    &mut vec![BlockQueryData {
+                                        raw_block: block.clone(),
+                                        block_hash: BlockCommitment(block.block.commit()),
+                                        block_id: block_index as u64,
+                                        records_from,
+                                        record_count: uids.len() as u64,
+                                        txn_hashes,
+                                    }],
+                                    &mut vec![StateQueryData {
+                                        state: state.clone(),
+                                        commitment: state.commit(),
+                                        block_id: block_index as u64,
+                                        event_index,
+                                    }],
+                                ) {
+                                    // log for now... this should be propagated once we get rid of FullState
+                                    tracing::warn!("append_blocks returned error {}", e);
+                                }
+                            }
+                            {
+                                let mut meta_state_store = block_on(self.meta_state_store.write());
+                                if let Err(e) = meta_state_store
+                                    .append_block_nullifiers(block_index as u64, nullifiers_delta)
+                                {
+                                    // log for now... this should be propagated once we get rid of FullState
+                                    tracing::warn!("append_block_nullifiers returned error {}", e);
+                                }
+                            }
 
                             // Notify subscribers of the new block.
                             self.send_event(LedgerEvent::Commit {
@@ -1193,6 +1260,9 @@ mod tests {
             _events: &mut Vec<LedgerEvent<EspressoLedger>>,
         ) -> Result<(), Self::Error> {
             Ok(())
+        }
+        fn event_count(&self) -> usize {
+            0
         }
     }
 

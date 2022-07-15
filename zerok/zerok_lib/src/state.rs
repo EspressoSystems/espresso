@@ -79,7 +79,7 @@ impl TransactionTrait<H_256> for ElaboratedTransaction {}
 impl ElaboratedTransaction {
     /// Compute a cryptographic hash committing to an elaborated
     /// transaction.
-    pub(crate) fn etxn_hash(&self) -> ElaboratedTransactionHash {
+    pub fn etxn_hash(&self) -> ElaboratedTransactionHash {
         ElaboratedTransactionHash(self.commit())
     }
 }

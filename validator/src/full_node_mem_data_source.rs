@@ -132,6 +132,12 @@ impl<'a> CatchUpDataSource for &'a QueryData {
     fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType {
         self.events.split_at(n).1
     }
+    fn len(&self) -> usize {
+        self.events.len()
+    }
+    fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
 }
 
 impl UpdateCatchUpData for QueryData {
@@ -142,6 +148,10 @@ impl UpdateCatchUpData for QueryData {
     ) -> Result<(), Self::Error> {
         self.events.append(events);
         Ok(())
+    }
+
+    fn event_count(&self) -> usize {
+        self.events.len()
     }
 }
 
