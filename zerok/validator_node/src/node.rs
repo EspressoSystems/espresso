@@ -52,7 +52,10 @@ use zerok_lib::state::BlockCommitment;
 use zerok_lib::{
     ledger::EspressoLedger,
     set_merkle_tree::*,
-    state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
+    state::{
+        ElaboratedBlock, ElaboratedTransaction, TransactionCommitment, ValidationError,
+        ValidatorState,
+    },
 };
 
 pub trait ConsensusEvent {
@@ -446,11 +449,13 @@ impl FullState {
                                     self.records_pending_memos.push(o.to_field_element());
                                 }
 
-                                let hash = ElaboratedTransaction {
-                                    txn: txn.clone(),
-                                    proofs: proofs.clone(),
-                                }
-                                .etxn_hash();
+                                let hash = TransactionCommitment(
+                                    ElaboratedTransaction {
+                                        txn: txn.clone(),
+                                        proofs: proofs.clone(),
+                                    }
+                                    .hash(),
+                                );
                                 txn_hashes.push(hash);
                             }
                             self.num_txns += block.block.0.len();
@@ -467,7 +472,7 @@ impl FullState {
                                 event_index = catchup_store.event_count() as u64;
                                 if let Err(e) =
                                     catchup_store.append_events(&mut vec![LedgerEvent::Commit {
-                                        block: (*block).clone(),
+                                        block: block.clone(),
                                         block_id: block_index as u64,
                                         state_comm: self.validator.commit(),
                                     }])
