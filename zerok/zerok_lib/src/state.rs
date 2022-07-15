@@ -591,12 +591,6 @@ impl NullifierHistory {
             accum
                 .multi_insert(delta.iter().map(|n| (*n, tree.contains(*n).unwrap().1)))
                 .unwrap();
-            // Once we've advanced `accum`, we no longer need Merkle paths for the nullifiers from
-            // this snapshot's delta. We only care about the paths for the new nullifiers from
-            // `insert`. Therefore, we can forget the historical paths.
-            for n in delta {
-                accum.forget(*n);
-            }
         }
 
         // Finally, add Merkle paths for any nullifiers whose proofs were already current.
@@ -607,14 +601,27 @@ impl NullifierHistory {
             nulls.insert(n);
         }
 
-        // At this point, `accum` contains Merkle paths for each of the new nullifiers in `nulls`,
-        // and not for any of the historical nullifiers. This makes `accum` a sparse representation
-        // of `self.current`, which is exactly what we want to append to the history.
+        // At this point, `accum` contains Merkle paths for each of the new nullifiers in `nulls`
+        // as well as all of the historical nullifiers. We want to do two different things with this
+        // tree:
+        //  * Insert the new nullifiers to derive the next nullifier set commitment. We can do this
+        //    directly.
+        //  * Create a sparse representation that _only_ contains paths for the new nullifiers.
+        //    Unfortunately, this is more complicated. We cannot simply `forget` the historical
+        //    nullifiers, because the new nullifiers are not actually in the set, which means they
+        //    don't necessarily correspond to unique leaves, and therefore forgetting other
+        //    nullifiers may inadvertently cause us to forget part of a path corresponding to a new
+        //    nullifier. Instead, we will create a new sparse representation of the current set by
+        //    starting with the current commitment and remembering paths only for the nullifiers we
+        //    care about. We can get the paths from `accum`.
         assert_eq!(accum.hash(), self.current);
-        let current = accum.clone();
+        let mut current = SetMerkleTree::sparse(self.current);
+        for n in &nulls {
+            current.remember(*n, accum.contains(*n).unwrap().1).unwrap();
+        }
 
-        // Now that we have saved a sparse snapshot of the current nullifiers set, we can insert
-        // the new nullifiers into `accum` to derive the new set.
+        // Now that we have created a sparse snapshot of the current nullifiers set, we can insert
+        // the new nullifiers into `accum` to derive the new commitment.
         for n in &nulls {
             accum.insert(*n).unwrap();
         }

@@ -387,11 +387,7 @@ mod espresso_keystore_tests {
         let (ledger, mut keystores) = t
             .create_test_network(
                 &[(2, 2)],
-                vec![
-                    2,
-                    0,
-                    2 * (ValidatorState::HISTORY_SIZE - 1) as u64,
-                ],
+                vec![2, 0, 2 * (ValidatorState::HISTORY_SIZE - 1) as u64],
                 &mut now,
             )
             .await;
