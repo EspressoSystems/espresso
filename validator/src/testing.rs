@@ -147,8 +147,8 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         seed: seed.into(),
         nodes,
         // NOTE these are arbitrarily chosen.
-        num_bootstrap: MINIMUM_NODES - 2,
-        replication_factor: MINIMUM_NODES - 2,
+        num_bootstrap: 4,
+        replication_factor: 3,
     };
 
     println!("generating public keys");

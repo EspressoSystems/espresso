@@ -84,49 +84,14 @@ pub const MINIMUM_NODES: usize = 5;
 
 const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 
-pub const BOOTSTRAPS: &[(&[u8], &str); 7] = &[
-    (
-        include_bytes!("./private_0.pk8"),
-        "127.0.0.1:9100",
-        // "18.216.113.34:9000",
-        // "0.ap-south-1.cluster.aws.espresso.network:9000",
-    ),
-    (
-        include_bytes!("./private_1.pk8"),
-        "127.0.0.1:9101",
-        // "18.117.245.103:9000",
-        // "1.ap-south-1.cluster.aws.espresso.network:9000",
-    ),
-    (
-        include_bytes!("./private_2.pk8"),
-        "127.0.0.1:9102",
-        // "13.58.161.60:9000",
-        // "0.us-east-2.cluster.aws.espresso.network:9000",
-    ),
-    (
-        include_bytes!("./private_3.pk8"),
-        "127.0.0.1:9103",
-        // "3.111.188.178:9000",
-        // "1.us-east-2.cluster.aws.espresso.network:9000",
-    ),
-    (
-        include_bytes!("./private_4.pk8"),
-        "127.0.0.1:9104",
-        // "52.66.253.105:9000",
-        // "2.us-east-2.cluster.aws.espresso.network:9000",
-    ),
-    (
-        include_bytes!("./private_5.pk8"),
-        "127.0.0.1:9105",
-        // "34.219.31.18:9000",
-        // "0.us-west-2.cluster.aws.espresso.network:9000",
-    ),
-    (
-        include_bytes!("./private_6.pk8"),
-        "127.0.0.1:9106",
-        // "54.184.243.4:9000",
-        // "1.us-west-2.cluster.aws.espresso.network:9000",
-    ),
+pub const BOOTSTRAPS: &[&[u8]; 7] = &[
+    include_bytes!("./private_0.pk8"),
+    include_bytes!("./private_1.pk8"),
+    include_bytes!("./private_2.pk8"),
+    include_bytes!("./private_3.pk8"),
+    include_bytes!("./private_4.pk8"),
+    include_bytes!("./private_5.pk8"),
+    include_bytes!("./private_6.pk8"),
 ];
 
 /// convert "dns_addr:port" into multiaddr
@@ -626,10 +591,7 @@ async fn init_hotshot(
     )
     .await
     .unwrap();
-    debug!("Hotshot launched. Blocking until network is connected to enough nodes.");
 
-    // block until network is ready to go until
-    hotshot.is_ready().await;
     debug!("Hotshot online!");
 
     let validator = if full_node {
@@ -1045,7 +1007,7 @@ pub async fn init_validator(
 
     let num_bootstrap = config.num_bootstrap;
 
-    // we are only set up to handle
+    // we are only set up to handle at MOST 7 bootstrap nodes
     assert!(
         num_bootstrap <= BOOTSTRAPS.len(),
         "Number of bootstrap nodes > 7. We only are set up for 7."
@@ -1053,10 +1015,16 @@ pub async fn init_validator(
 
     let bootstrap_priv: Vec<_> = BOOTSTRAPS
         .iter()
-        .map(|(key_bytes, addr_str)| {
+        .enumerate()
+        .map(|(idx, key_bytes)| {
             let mut key_bytes = <&[u8]>::clone(key_bytes).to_vec();
             let key = Keypair::rsa_from_pkcs8(&mut key_bytes).unwrap();
-            let multiaddr = parse_dns(addr_str).unwrap();
+            let host = if config.nodes[idx].host == "localhost" {
+                "127.0.0.1"
+            } else {
+                &config.nodes[idx].host
+            };
+            let multiaddr = parse_ip(&format!("{}:{}", host, config.nodes[idx].port)).unwrap();
             (key, multiaddr)
         })
         .take(num_bootstrap)
@@ -1070,9 +1038,9 @@ pub async fn init_validator(
 
     let (node_type, own_identity) = if own_id < num_bootstrap {
         // TODO jr when we upgrade to phaselock 0.1.1
-        // we can delete this line. The reason it is here is because
-        // phaselock is overly strict in matching the number of bootstrap nodes.
-        // This is fixed on main right now.
+        // we can delete this line. The reason is because
+        // 0.1.0 HotShot is overly strict in matching the number of bootstrap nodes.
+        // This is fixed on HotShot main
         to_connect_addrs.remove(own_id);
         (
             NetworkNodeType::Bootstrap,

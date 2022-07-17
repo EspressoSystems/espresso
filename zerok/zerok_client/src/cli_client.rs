@@ -272,7 +272,7 @@ impl CliClient {
                 })
                 .collect(),
             // NOTE these are arbitrarily chosen.
-            num_bootstrap: std::cmp::min(ports.len() - 2, 4),
+            num_bootstrap: 4,
             replication_factor: ports.len() - 2,
         };
         let mut config_file = tmp_dir.to_path_buf();
