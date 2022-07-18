@@ -699,15 +699,6 @@ mod tests {
         println!("proofs: {}/1000 in {}s", tot, now.elapsed().as_secs_f32());
     }
 
-    #[test]
-    fn test_set_merkle_unreachable() {
-        let mut t = SetMerkleTree::default();
-        let mut prng = ChaChaRng::from_seed([0u8; 32]);
-        let n = Nullifier::random_for_test(&mut prng);
-
-        t.remember(n, t.contains(n).unwrap().1).unwrap();
-    }
-
     fn test_merkle_tree_set(updates: Vec<u16>, checks: Vec<Result<u16, u8>>) {
         use std::collections::{HashMap, HashSet};
         let mut prng = ChaChaRng::from_seed([0u8; 32]);
