@@ -535,6 +535,7 @@ impl SetMerkleTree {
 
         let mut siblings = vec![];
         let mut end_branch = mem::replace(self, EmptySubtree);
+        dbg!(&end_branch);
 
         // TODO: this is redundant with the checking
         let path_hashes = {
@@ -572,8 +573,10 @@ impl SetMerkleTree {
                     Box::new(ForgottenSubtree { value: *sib_hash })
                 }
                 EmptySubtree => {
+                    // This is unreachable because if there are any steps
+                    // in the non-inclusion path, the tree cannot be empty.
                     unreachable!();
-                } // TODO: is this unreachable?
+                }
                 Branch { l, r, .. } => {
                     let (sib, next) = if sib_is_left { (l, r) } else { (r, l) };
                     end_branch = *next;
@@ -597,8 +600,9 @@ impl SetMerkleTree {
             ForgottenSubtree { value } => {
                 match proof.terminal_node {
                     SetMerkleTerminalNode::EmptySubtree => {
-                        // TODO: should this be possible????? it feels like it
-                        // shouldn't be
+                        // NOTE: this looks unreachable, but in fact can be
+                        // reached by
+                        // `test_merkle_tree_set(vec![0], vec![])`
                         assert_eq!(value, *set_hash::EMPTY_HASH);
                         EmptySubtree
                     }
@@ -695,6 +699,15 @@ mod tests {
         println!("proofs: {}/1000 in {}s", tot, now.elapsed().as_secs_f32());
     }
 
+    #[test]
+    fn test_set_merkle_unreachable() {
+        let mut t = SetMerkleTree::default();
+        let mut prng = ChaChaRng::from_seed([0u8; 32]);
+        let n = Nullifier::random_for_test(&mut prng);
+
+        t.remember(n, t.contains(n).unwrap().1).unwrap();
+    }
+
     fn test_merkle_tree_set(updates: Vec<u16>, checks: Vec<Result<u16, u8>>) {
         use std::collections::{HashMap, HashSet};
         let mut prng = ChaChaRng::from_seed([0u8; 32]);
@@ -763,7 +776,8 @@ mod tests {
     #[test]
     fn quickcheck_merkle_tree_set_regressions() {
         test_merkle_tree_set(vec![20, 0], vec![Ok(20)]);
-        test_merkle_tree_set(vec![0, 38], vec![Err(0), Ok(1), Ok(38)])
+        test_merkle_tree_set(vec![0, 38], vec![Err(0), Ok(1), Ok(38)]);
+        test_merkle_tree_set(vec![0], vec![])
     }
 
     #[test]
