@@ -240,7 +240,7 @@ async fn generate_transactions(
                 let (new_state, mut transactions) = spawn_blocking(move || {
                     let txs = state
                         .generate_transactions(
-                            vec![(true, 0, 0, 0, 0, -2)],
+                            vec![(true, 0, 0, 0, 0, -2, false)],
                             TxnPrintInfo::new_no_time(round as usize, 1),
                         )
                         .unwrap();

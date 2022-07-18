@@ -11,7 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use zerok_lib::state::{
-    state_comm::LedgerStateCommitment, BlockCommitment, ElaboratedBlock, ElaboratedTransactionHash,
+    state_comm::LedgerStateCommitment, BlockCommitment, ElaboratedBlock, TransactionCommitment,
     ValidatorState,
 };
 
@@ -21,7 +21,7 @@ pub struct BlockQueryData {
     pub block_id: u64,
     pub records_from: u64,
     pub record_count: u64,
-    pub txn_hashes: Vec<ElaboratedTransactionHash>,
+    pub txn_hashes: Vec<TransactionCommitment>,
 }
 
 pub struct StateQueryData {

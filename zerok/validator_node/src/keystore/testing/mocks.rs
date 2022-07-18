@@ -76,7 +76,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
             block.block.clone(),
             block.proofs.clone(),
         ) {
-            Ok(mut uids) => {
+            Ok((mut uids, _)) => {
                 // Add nullifiers
                 for txn in &block.block.0 {
                     for nullifier in txn.nullifiers() {
@@ -198,7 +198,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                     transactions: Default::default(),
                 },
                 key_state: Default::default(),
-                assets: Default::default(),
                 freezing_accounts: Default::default(),
                 sending_accounts: Default::default(),
                 viewing_accounts: Default::default(),
@@ -365,106 +364,9 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
 #[cfg(test)]
 mod espresso_keystore_tests {
     use super::*;
-    use jf_cap::structs::AssetCode;
-    use std::time::Instant;
-    use testing::SystemUnderTest;
 
     #[cfg(feature = "slow-tests")]
     use testing::generic_keystore_tests;
     #[cfg(feature = "slow-tests")]
     seahorse::instantiate_generic_keystore_tests!(EspressoTest);
-
-    #[async_std::test]
-    async fn test_resubmit() -> std::io::Result<()> {
-        let mut t = EspressoTest::default();
-        let mut now = Instant::now();
-
-        // The sender keystore (keystores[0]) gets an initial grant of 2 for a transaction fee and a
-        // payment. keystores[1] will act as the receiver, and keystores[2] will be a third party
-        // which generates RECORD_ROOT_HISTORY_SIZE-1 transfers while a transfer from keystores[0] is
-        // pending, after which we will check if the pending transaction can be updated and
-        // resubmitted.
-        let (ledger, mut keystores) = t
-            .create_test_network(
-                &[(2, 2)],
-                vec![
-                    2,
-                    0,
-                    2 * (ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1) as u64,
-                ],
-                &mut now,
-            )
-            .await;
-
-        println!("generating transaction: {}s", now.elapsed().as_secs_f32());
-        now = Instant::now();
-        ledger.lock().await.hold_next_transaction();
-        let receiver = keystores[1].1.clone();
-        keystores[0]
-            .0
-            .transfer(
-                None,
-                &AssetCode::native(),
-                &[(receiver.first().unwrap().clone(), 1)],
-                1,
-            )
-            .await
-            .unwrap();
-        println!("transfer generated: {}s", now.elapsed().as_secs_f32());
-        now = Instant::now();
-
-        // Generate a transaction, invalidating the pending transfer.
-        println!(
-            "generating {} transfers to invalidate the original transfer: {}s",
-            ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1,
-            now.elapsed().as_secs_f32(),
-        );
-        now = Instant::now();
-        for _ in 0..ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1 {
-            keystores[2]
-                .0
-                .transfer(
-                    None,
-                    &AssetCode::native(),
-                    &[(receiver.first().unwrap().clone(), 1)],
-                    1,
-                )
-                .await
-                .unwrap();
-            t.sync(&ledger, &keystores).await;
-        }
-
-        // Check that the pending transaction eventually succeeds, after being automatically
-        // resubmitted by the keystore.
-        println!(
-            "submitting invalid transaction: {}s",
-            now.elapsed().as_secs_f32()
-        );
-        let ledger_time = ledger.lock().await.now();
-        ledger.lock().await.release_held_transaction().unwrap();
-        ledger.lock().await.flush().unwrap();
-        // Wait for the Reject event.
-        t.sync_with(
-            &keystores,
-            ledger_time.add_from_source(EventSource::QueryService, 1),
-        )
-        .await;
-        // Wait for the Commit and Memos events after the keystore resubmits.
-        ledger.lock().await.flush().unwrap();
-        t.sync_with(
-            &keystores,
-            ledger_time.add_from_source(EventSource::QueryService, 3),
-        )
-        .await;
-        assert_eq!(
-            keystores[0].0.balance(&AssetCode::native()).await,
-            0u64.into()
-        );
-        assert_eq!(
-            keystores[1].0.balance(&AssetCode::native()).await,
-            (1 + ValidatorState::RECORD_ROOT_HISTORY_SIZE - 1).into()
-        );
-
-        Ok(())
-    }
 }

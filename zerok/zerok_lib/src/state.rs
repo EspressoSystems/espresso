@@ -36,9 +36,10 @@ use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
+use std::iter::once;
 
 /// Height of the records Merkle tree
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
@@ -75,28 +76,6 @@ pub struct ElaboratedTransaction {
 }
 
 impl TransactionTrait<H_256> for ElaboratedTransaction {}
-
-impl ElaboratedTransaction {
-    /// Compute a cryptographic hash committing to an elaborated
-    /// transaction.
-    pub fn etxn_hash(&self) -> ElaboratedTransactionHash {
-        ElaboratedTransactionHash(self.commit())
-    }
-}
-
-/// A user-visible notation for a transaction hash, like TXN~bbb
-///
-/// When serialized using [serde_json] or formatted using
-/// [Display](https://doc.rust-lang.org/std/fmt/trait.Display.html),
-/// [ElaboratedTransactionHash] is displayed as a
-/// [TaggedBase64](https://github.com/EspressoSystems/tagged-base64/)
-/// string with "TXN" as the tag.
-#[ser_test(arbitrary)]
-#[tagged_blob("TXN")]
-#[derive(
-    Arbitrary, Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize,
-)]
-pub struct ElaboratedTransactionHash(pub(crate) Commitment<ElaboratedTransaction>);
 
 /// A collection of transactions
 ///
@@ -363,6 +342,17 @@ impl Committable for Block {
     }
 }
 
+/// A cryptographic commitment to a transaction
+#[ser_test(arbitrary)]
+#[tagged_blob("TXN")]
+#[derive(
+    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize,
+)]
+pub struct TransactionCommitment(pub commit::Commitment<TransactionNote>);
+
+// Implements From<CanonicalBytes>. See serialize.rs in Jellyfish.
+deserialize_canonical_bytes!(TransactionCommitment);
+
 /// Sliding window for transaction freshness
 ///
 /// We keep a fixed number of recent Merkle root hashes here to allow
@@ -436,6 +426,224 @@ impl Committable for RecordMerkleFrontier {
     }
 }
 
+/// Sliding window for transaction freshness
+///
+/// We keep a fixed number of recent nullifier root hashes and recently added nullifiers to allow
+/// validation of transactions built against recent but not most recent nullifier set commitments.
+///
+/// [NullifierHistory] contains the current nullifier set root hash, as well as the previous
+/// [HISTORY_SIZE](ValidatorState::HISTORY_SIZE) root hashes and the nullifiers that were appended
+/// to each root hash. To check a nullifier non-membership proof, we can walk backwards in time
+/// starting from the most recent root hash until we find a root hash against which the proof is
+/// valid. We must also check that the nullifier is not in the set of nullifiers which have been
+/// added since the proof was valid. To do this, we check that the nullifier is not in any of the
+/// deltas associated with each historical snapshot, which we can check efficiently using
+/// [recent_nullifiers](Self::recent_nullifiers).
+///
+/// [NullifierHistory] also includes, for each historical root hash, nullifier non-membership proofs
+/// for each of the nullifiers which were appended to that root hash. This makes it possible to
+/// iteratively update proofs which were generated against a historical root hash to work with the
+/// most recent root hash. These non-membership proofs are saved in the form of sparse
+/// representations of a [SetMerkleTree] at each point in history; thus, the historical root hashes
+/// and non-membership proofs are stored together using the [SetMerkleTree] data structure.
+///
+/// The ability to update historical proofs also means we can insert new nullifiers into the latest
+/// nullifier set given only historical proofs. The method [append_block](Self::append_block) does
+/// this in batch.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NullifierHistory {
+    current: set_hash::Hash,
+    history: VecDeque<(SetMerkleTree, Vec<Nullifier>)>,
+}
+
+impl Default for NullifierHistory {
+    fn default() -> Self {
+        Self {
+            current: SetMerkleTree::default().hash(),
+            history: VecDeque::with_capacity(ValidatorState::HISTORY_SIZE),
+        }
+    }
+}
+
+impl NullifierHistory {
+    pub fn current_root(&self) -> set_hash::Hash {
+        self.current
+    }
+
+    pub fn recent_nullifiers(&self) -> HashSet<Nullifier> {
+        self.history
+            .iter()
+            .flat_map(|(_, nulls)| nulls)
+            .cloned()
+            .collect()
+    }
+
+    /// Check if a nullifier has been spent.
+    ///
+    /// This function succeeds if `proof` is valid relative to some recent nullifier set (less than
+    /// [HISTORY_SIZE](ValidatorState::HISTORY_SIZE) blocks old) and proves that `nullifier` was not
+    /// in the set at that time, and if `nullifier` has not been spent since that historical state.
+    ///
+    /// `recent_nullifiers` must be the result of calling [Self::recent_nullifiers]; that is, it
+    /// should contain all of the nullifiers which have been spent during the historical window
+    /// represented by this object.
+    ///
+    /// If successful, it returns the root hash of the nullifier set for which `proof` is valid.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `proof` is not valid relative to any recent nullifier set, if `proof` proves that
+    /// `nullifier` _was_ in the set at the time `proof` was generated, or if `nullifier` has been
+    /// spent since `proof` was generated.
+    pub fn check_unspent(
+        &self,
+        recent_nullifiers: &HashSet<Nullifier>,
+        proof: &SetMerkleProof,
+        nullifier: Nullifier,
+    ) -> Result<set_hash::Hash, ValidationError> {
+        // Make sure the nullifier has not been spent during the sliding window of historical
+        // snapshots. If it hasn't, then it must be unspent as long as `proof` proves it unspent
+        // relative to any of our historical snapshots.
+        if recent_nullifiers.contains(&nullifier) {
+            return Err(ValidationError::NullifierAlreadyExists { nullifier });
+        }
+
+        // Find a historical nullifier set root hash which validates the proof.
+        for root in once(self.current).chain(self.history.iter().map(|(tree, _)| tree.hash())) {
+            if let Ok(res) = proof.check(nullifier, &root) {
+                return if res {
+                    Err(ValidationError::NullifierAlreadyExists { nullifier })
+                } else {
+                    Ok(root)
+                };
+            }
+        }
+
+        // The nullifier proof didn't check against any of the past root hashes.
+        Err(ValidationError::BadNullifierProof {})
+    }
+
+    /// Append a block of new nullifiers to the set.
+    ///
+    /// `inserts`, the nullifiers to insert, is structured as a map from a historical root hash to
+    /// the proofs which are to be validated against that hash, and their corresponding nullifiers.
+    /// This method uses the historical sparse [SetMerkleTree] snapshots to update each of the given
+    /// proofs to a proof relative to the current nullifiers set, constructing a sparse view of the
+    /// current set which includes paths to leaves for each of the nullifiers to be inserted. From
+    /// there, the new nullifiers can be directly inserted into the sparse [SetMerkleTree], which
+    /// can then be used to derive a new root hash.
+    ///
+    /// Each nullifier and proof in `inserts` should exist under the [Hash](set_hash::Hash) that was
+    /// returned from [check_unspent](Self::check_unspent) when validating that proof. In addition,
+    /// [append_block](Self::append_block) must not have been called since any of the relevant calls
+    /// to [check_unspent](Self::check_unspent).
+    ///
+    /// If the nullifier proofs are successfully updated, this function may remove the oldest entry
+    /// from the history in order to keep the size of the history below
+    /// [HISTORY_SIZE](ValidatorState::HISTORY_SIZE).
+    ///
+    /// If successful, returns updated non-membership proofs for each nullifier in `inserts`, in the
+    /// form of a sparse representation of a [SetMerkleTree].
+    ///
+    /// # Errors
+    ///
+    /// This function fails if any of the proofs in `inserts` are invalid relative to the
+    /// corresponding [Hash](set_hash::Hash).
+    pub fn append_block(
+        &mut self,
+        mut inserts: HashMap<set_hash::Hash, Vec<(Nullifier, SetMerkleProof)>>,
+    ) -> Result<SetMerkleTree, ValidationError> {
+        let mut nulls = Vec::new();
+
+        // Get a sparse representation of the oldest set in the history. We will use this
+        // accumulator to incrementally build up a sparse representation of the current set that
+        // includes all of the necessary Merkle paths.
+        let mut accum = if let Some((oldest_tree, _)) = self.history.back() {
+            oldest_tree.clone()
+        } else {
+            SetMerkleTree::sparse(self.current)
+        };
+
+        // For each snapshot in the history, add the paths for each nullifier in the delta to
+        // `accum`, add the paths for each nullifier in `inserts` whose proof is relative to this
+        // snapshot, and then advance `accum` to the next historical state by inserting the
+        // nullifiers from the delta.
+        for (tree, delta) in self.history.iter().rev() {
+            assert_eq!(accum.hash(), tree.hash());
+            // Add Merkle paths for new nullifiers whose proofs correspond to this snapshot.
+            for (n, proof) in inserts.remove(&tree.hash()).unwrap_or_default() {
+                accum
+                    .remember(n, proof)
+                    .map_err(|_| ValidationError::BadNullifierProof {})?;
+                nulls.push(n);
+            }
+            // Insert nullifiers from `delta`, advancing `accum` to the next historical state while
+            // updating all of the Merkle paths it currently contains.
+            accum
+                .multi_insert(delta.iter().map(|n| (*n, tree.contains(*n).unwrap().1)))
+                .unwrap();
+        }
+
+        // Finally, add Merkle paths for any nullifiers whose proofs were already current.
+        for (n, proof) in inserts.remove(&accum.hash()).unwrap_or_default() {
+            accum
+                .remember(n, proof)
+                .map_err(|_| ValidationError::BadNullifierProof {})?;
+            nulls.push(n);
+        }
+
+        // At this point, `accum` contains Merkle paths for each of the new nullifiers in `nulls`
+        // as well as all of the historical nullifiers. We want to do two different things with this
+        // tree:
+        //  * Insert the new nullifiers to derive the next nullifier set commitment. We can do this
+        //    directly.
+        //  * Create a sparse representation that _only_ contains paths for the new nullifiers.
+        //    Unfortunately, this is more complicated. We cannot simply `forget` the historical
+        //    nullifiers, because the new nullifiers are not actually in the set, which means they
+        //    don't necessarily correspond to unique leaves, and therefore forgetting other
+        //    nullifiers may inadvertently cause us to forget part of a path corresponding to a new
+        //    nullifier. Instead, we will create a new sparse representation of the current set by
+        //    starting with the current commitment and remembering paths only for the nullifiers we
+        //    care about. We can get the paths from `accum`.
+        assert_eq!(accum.hash(), self.current);
+        let mut current = SetMerkleTree::sparse(self.current);
+        for n in &nulls {
+            current.remember(*n, accum.contains(*n).unwrap().1).unwrap();
+        }
+
+        // Now that we have created a sparse snapshot of the current nullifiers set, we can insert
+        // the new nullifiers into `accum` to derive the new commitment.
+        for n in &nulls {
+            accum.insert(*n).unwrap();
+        }
+
+        // Update the state: append the new historical snapshot, prune an old snapshot if necessary,
+        // and update the current hash.
+        if self.history.len() >= ValidatorState::HISTORY_SIZE {
+            self.history.pop_back();
+        }
+        self.history.push_front((current.clone(), nulls));
+        self.current = accum.hash();
+
+        Ok(current)
+    }
+}
+
+impl Committable for NullifierHistory {
+    fn commit(&self) -> commit::Commitment<Self> {
+        let mut ret = commit::RawCommitmentBuilder::new("Nullifier Hist Comm")
+            .field("current", self.current.into())
+            .constant_str("history")
+            .u64(self.history.len() as u64);
+        for (tree, delta) in self.history.iter() {
+            ret = ret
+                .field("root", tree.hash().into())
+                .var_size_bytes(&bincode::serialize(&delta).unwrap())
+        }
+        ret.finalize()
+    }
+}
+
 /// The ledger state commitment
 ///
 /// Fundamental to a distributed ledger is the notion of a state
@@ -504,7 +712,7 @@ pub mod state_comm {
         /// validators from caching extra past roots and thereby
         /// making it easier to verify transactions, but because root
         /// hashes are small, it should be possible to find a value of
-        /// RECORD_ROOT_HISTORY_SIZE which strikes a balance between
+        /// HISTORY_SIZE which strikes a balance between
         /// small space requirements (so that lightweight validators
         /// can keep up with the cache) and covering enough of history
         /// to make it easy for clients. If this is not possible,
@@ -513,7 +721,7 @@ pub mod state_comm {
         /// cached, they could ask a full validator for a proof that
         /// that hash was once the root of the record Merkle tree.
         pub past_record_merkle_roots: Commitment<RecordMerkleHistory>,
-        pub nullifiers: set_hash::Hash,
+        pub past_nullifiers: Commitment<NullifierHistory>,
         pub prev_block: Commitment<Block>,
     }
 
@@ -534,7 +742,7 @@ pub mod state_comm {
                 .field("record_merkle_commitment", self.record_merkle_commitment)
                 .field("record_merkle_frontier", self.record_merkle_frontier)
                 .field("past_record_merkle_roots", self.past_record_merkle_roots)
-                .field("nullifiers", self.nullifiers.into())
+                .field("past_nullifiers", self.past_nullifiers)
                 .field("prev_block", self.prev_block)
                 .finalize()
         }
@@ -557,21 +765,23 @@ pub struct ValidatorState {
     pub record_merkle_frontier: MerkleFrontier,
     /// A list of recent record Merkle root hashes for validating slightly out-of-date transactions
     pub past_record_merkle_roots: RecordMerkleHistory,
-    pub nullifiers_root: set_hash::Hash,
+    /// Nullifiers from recent blocks, which allows validating slightly out-of-date-transactions
+    pub past_nullifiers: NullifierHistory,
     pub prev_block: BlockCommitment,
 }
+
+/// Nullifier proofs, organized by the root hash for which they are valid.
+pub type NullifierProofs = HashMap<set_hash::Hash, Vec<(Nullifier, SetMerkleProof)>>;
 
 impl ValidatorState {
     /// The number of recent record Merkle tree root hashes the
     /// validator should remember
     ///
     /// Transactions can be validated without resubmitting or regenerating the ZKPs as long as they
-    /// were generated using a validator state that is in the last RECORD_ROOT_HISTORY_SIZE states.
-    pub const RECORD_ROOT_HISTORY_SIZE: usize = 10;
+    /// were generated using a validator state that is in the last HISTORY_SIZE states.
+    pub const HISTORY_SIZE: usize = 10;
 
     pub fn new(verif_crs: VerifierKeySet, record_merkle_frontier: MerkleTree) -> Self {
-        let nullifiers: SetMerkleTree = Default::default();
-
         Self {
             prev_commit_time: 0u64,
             prev_state: None,
@@ -579,9 +789,9 @@ impl ValidatorState {
             record_merkle_commitment: record_merkle_frontier.commitment(),
             record_merkle_frontier: record_merkle_frontier.frontier(),
             past_record_merkle_roots: RecordMerkleHistory(VecDeque::with_capacity(
-                Self::RECORD_ROOT_HISTORY_SIZE,
+                Self::HISTORY_SIZE,
             )),
-            nullifiers_root: nullifiers.hash(),
+            past_nullifiers: NullifierHistory::default(),
             prev_block: BlockCommitment(Block::default().commit()),
         }
     }
@@ -598,10 +808,14 @@ impl ValidatorState {
                 .commit(),
             past_record_merkle_roots: self.past_record_merkle_roots.commit(),
 
-            nullifiers: self.nullifiers_root,
+            past_nullifiers: self.past_nullifiers.commit(),
             prev_block: self.prev_block.0,
         };
         inputs.commit().into()
+    }
+
+    pub fn nullifiers_root(&self) -> set_hash::Hash {
+        self.past_nullifiers.current_root()
     }
 
     /// Validate a block of elaborated transactions
@@ -629,22 +843,25 @@ impl ValidatorState {
         now: u64,
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
-    ) -> Result<(Block, Vec<Vec<SetMerkleProof>>), ValidationError> {
+    ) -> Result<(Block, NullifierProofs), ValidationError> {
         let mut nulls = HashSet::new();
         use ValidationError::*;
+        let mut sorted_proofs = NullifierProofs::new();
+
+        let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
         for (pf, n) in null_pfs
-            .iter()
+            .into_iter()
             .zip(txns.0.iter())
-            .flat_map(|(pfs, txn)| pfs.iter().zip(txn.nullifiers().into_iter()))
+            .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.nullifiers().into_iter()))
         {
-            if nulls.contains(&n)
-                || pf
-                    .check(n, &self.nullifiers_root)
-                    .map_err(|_| BadNullifierProof {})?
-            {
+            if nulls.contains(&n) {
                 return Err(NullifierAlreadyExists { nullifier: n });
             }
 
+            let root = self
+                .past_nullifiers
+                .check_unspent(&recent_nullifiers, &pf, n)?;
+            sorted_proofs.entry(root).or_default().push((n, pf));
             nulls.insert(n);
         }
 
@@ -702,10 +919,16 @@ impl ValidatorState {
             .map_err(|err| CryptoError { err: Ok(err) })?;
         }
 
-        Ok((txns, null_pfs))
+        Ok((txns, sorted_proofs))
     }
 
     /// Performs validation for a block, updating the ValidatorState.
+    ///
+    /// If successful, returns
+    /// * the UIDs of the newly created records
+    /// * updated nullifier non-membership proofs for all of the nullifiers in `txns`, relative to
+    ///   the nullifier set at the time this function was invoked, in the form of a sparse
+    ///   reperesentation of a [SetMerkleTree]
     ///
     /// # Errors
     /// - [ValidationError::BadNullifierProof]
@@ -717,35 +940,25 @@ impl ValidatorState {
         now: u64,
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
-    ) -> Result<Vec<u64> /* new uids */, ValidationError> {
+    ) -> Result<(Vec<u64>, SetMerkleTree), ValidationError> {
         // If the block successfully validates, and the nullifier
         // proofs apply correctly, the remaining (mutating) operations
         // cannot fail, as this would result in an inconsistent
         // state. No operations after the first assignement to a
         // member of self have a possible error; this must remain true
         // if code changes.
-        let (txns, _null_pfs) = self.validate_block_check(now, txns, null_pfs.clone())?;
+        let (txns, null_pfs) = self.validate_block_check(now, txns, null_pfs)?;
         let comm = self.commit();
         self.prev_commit_time = now;
         self.prev_block = BlockCommitment(txns.commit());
-
-        let nullifiers = txns
-            .0
-            .iter()
-            .zip(null_pfs.into_iter())
-            .flat_map(|(txn, null_pfs)| txn.nullifiers().into_iter().zip(null_pfs.into_iter()))
-            .collect();
-
-        self.nullifiers_root = set_merkle_lw_multi_insert(nullifiers, self.nullifiers_root)
-            .map_err(|_| ValidationError::BadNullifierProof {})?
-            .0;
+        let null_pfs = self.past_nullifiers.append_block(null_pfs)?;
 
         let mut record_merkle_frontier = MerkleTree::restore_from_frontier(
             self.record_merkle_commitment,
             &self.record_merkle_frontier,
         )
         .ok_or(ValidationError::BadMerklePath {})?;
-        let mut ret = vec![];
+        let mut uids = vec![];
         let mut uid = self.record_merkle_commitment.num_leaves;
         for o in txns
             .0
@@ -756,12 +969,12 @@ impl ValidatorState {
             if uid > 0 {
                 record_merkle_frontier.forget(uid - 1).expect_ok().unwrap();
             }
-            ret.push(uid);
+            uids.push(uid);
             uid += 1;
             assert_eq!(uid, record_merkle_frontier.num_leaves());
         }
 
-        if self.past_record_merkle_roots.0.len() >= Self::RECORD_ROOT_HISTORY_SIZE {
+        if self.past_record_merkle_roots.0.len() >= Self::HISTORY_SIZE {
             self.past_record_merkle_roots.0.pop_back();
         }
         self.past_record_merkle_roots
@@ -770,7 +983,7 @@ impl ValidatorState {
         self.record_merkle_commitment = record_merkle_frontier.commitment();
         self.record_merkle_frontier = record_merkle_frontier.frontier();
         self.prev_state = Some(comm);
-        Ok(ret)
+        Ok((uids, null_pfs))
     }
 }
 
