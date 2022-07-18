@@ -526,8 +526,10 @@ impl SetMerkleTree {
         elem: Nullifier,
         proof: SetMerkleProof,
     ) -> Result<(), set_hash::Hash> {
-        // Check the proof before we do anything. After checking, we can
-        // safely assume that all the values along the path match.
+        // Check the proof before we do anything. 
+        //After checking, we can safely assume that all the values along the path match. 
+        //This first check can be removed as an optimization opportunity if we really need to, 
+        //but keeping it in is defensive programming
         let elem_in_set = proof.check(elem, &self.hash())?;
 
         use SetMerkleTree::*;
@@ -537,7 +539,6 @@ impl SetMerkleTree {
         let mut end_branch = mem::replace(self, EmptySubtree);
         dbg!(&end_branch);
 
-        // TODO: this is redundant with the checking
         let path_hashes = {
             let mut running_hash = proof.terminal_node.value();
 
