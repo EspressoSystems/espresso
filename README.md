@@ -312,6 +312,8 @@ target/release/faucet
 | ESPRESSO_VALIDATOR_PORT    | u16  | espresso-validator   | Port on which to serve the query service and submit API
 | ESPRESSO_VALIDATOR_SECRET_KEY_SEED | TaggedBase64 (tag="SEED") | espresso-validator | Seed to use for generating threshold signature secret key (overrides the value from `node-config.toml`)
 | ESPRESSO_VALIDATOR_NODES | Vec<Url> | espresso-validator | Comma-separated list of URLs for validators in the network (overrides the value from `node-config.toml`)
+| ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME | u64 | espresso-validator | Minimum time (in seconds) to wait for submitted transactions before proposing a block
+| ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME | u64 | espresso-validator | Maximum time (in seconds) to wait for submitted transactions before proposing a block
 | ESPRESSO_ADDRESS_BOOK_STORE_PATH | Path | address-book   | Path to persistence files for address book service (default `$LOCAL/.espresso/espresso/address-book/store`)
 | ESPRESSO_ADDRESS_BOOK_PORT | u16  | address-book         | Port on which to serve the address book
 | ESPRESSO_ADDRESS_BOOK_URL  | Url  | zerok-client, faucet | URL of the address book service
