@@ -14,6 +14,7 @@ use crate::{
     gen_pub_keys, init_validator, init_web_server, ConsensusConfig, GenesisState, Node, NodeOpt,
     MINIMUM_NODES,
 };
+use address_book::store::FileStore;
 use async_std::task::{block_on, spawn, JoinHandle};
 use futures::{channel::oneshot, future::join_all};
 use jf_cap::keys::UserPubKey;
@@ -25,6 +26,7 @@ use std::mem::take;
 use std::time::Instant;
 use surf::Url;
 use tempdir::TempDir;
+use tide_disco::{wait_for_server, SERVER_STARTUP_RETRIES, SERVER_STARTUP_SLEEP_MS};
 use zerok_lib::{
     keystore::{
         loader::{KeystoreLoader, LoaderMetadata},
@@ -59,15 +61,33 @@ pub struct AddressBook {
 impl AddressBook {
     pub async fn init() -> Self {
         let dir = TempDir::new("address_book").unwrap();
-        let store = address_book::FileStore::new(dir.path().to_owned());
+        let store = FileStore::new(dir.path().to_owned());
         let port = pick_unused_port().unwrap();
-        let join = address_book::init_web_server(port, store).await.unwrap();
-        address_book::wait_for_server(port).await;
-        Self {
+        let base_url: String = format!("http://127.0.0.1:{port}");
+        let api_path = std::env::current_dir()
+            .unwrap()
+            .join("..")
+            .join("address-book")
+            .join("api")
+            .join("api.toml");
+
+        let app = address_book::init_web_server(api_path.to_str().unwrap().to_string(), store)
+            .expect("address_book app");
+        let handle = spawn(app.serve(base_url.clone()));
+        wait_for_server(
+            &Url::parse(&base_url).unwrap(),
+            SERVER_STARTUP_RETRIES,
+            SERVER_STARTUP_SLEEP_MS,
+        )
+        .await;
+
+        let ab = AddressBook {
             port,
             _store: dir,
-            _wait: join,
-        }
+            _wait: handle,
+        };
+        wait_for_server(&ab.url(), SERVER_STARTUP_RETRIES, SERVER_STARTUP_SLEEP_MS).await;
+        ab
     }
 
     pub fn url(&self) -> Url {

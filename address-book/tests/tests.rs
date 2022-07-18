@@ -22,7 +22,8 @@ use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
 use std::collections::HashSet;
 use tide::StatusCode;
-use tide_disco::wait_for_server;
+use tide_disco::{wait_for_server, SERVER_STARTUP_RETRIES, SERVER_STARTUP_SLEEP_MS};
+use url::Url;
 
 const ROUND_TRIP_COUNT: u64 = 100;
 const NOT_FOUND_COUNT: u64 = 100;
@@ -45,7 +46,12 @@ async fn round_trip<T: Store + 'static>(store: T) {
     // Note: we don't want to take base_url from the settings because we want to pick a free port
     // for testing.
     let handle = spawn(app.serve(base_url.clone()));
-    wait_for_server(&base_url).await;
+    wait_for_server(
+        &Url::parse(&base_url).unwrap(),
+        SERVER_STARTUP_RETRIES,
+        SERVER_STARTUP_SLEEP_MS,
+    )
+    .await;
 
     let mut rng = rand_chacha::ChaChaRng::from_seed([0u8; 32]);
     let mut rng2 = rand_chacha::ChaChaRng::from_seed([0u8; 32]);
