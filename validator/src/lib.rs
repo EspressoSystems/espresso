@@ -1,3 +1,15 @@
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 // Copyright © 2021 Translucence Research, Inc. All rights reserved.
 #![deny(warnings)]
 #![allow(clippy::format_push_string)]
@@ -10,8 +22,11 @@ use ark_serialize::*;
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
+use hotshot::traits::implementations::Libp2pNetwork;
+use hotshot::traits::NetworkError;
+use hotshot::types::ed25519::Ed25519Pub;
 use hotshot::{
-    traits::implementations::{AtomicStorage, WNetwork},
+    traits::implementations::AtomicStorage,
     types::{Message, SignatureKey},
     HotShot, HotShotConfig, HotShotError, H_256,
 };
@@ -22,10 +37,14 @@ use jf_cap::{
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
 use key_set::{KeySet, VerifierKeySet};
+use libp2p::identity::Keypair;
+use libp2p::{multiaddr, Multiaddr, PeerId};
+use libp2p_networking::network::{MeshParams, NetworkNodeConfigBuilder, NetworkNodeType};
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
+use std::collections::HashSet;
 use std::io::Read;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -64,6 +83,37 @@ pub mod testing;
 pub const MINIMUM_NODES: usize = 5;
 
 const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
+
+pub const BOOTSTRAPS: &[&[u8]; 7] = &[
+    include_bytes!("./private_0.pk8"),
+    include_bytes!("./private_1.pk8"),
+    include_bytes!("./private_2.pk8"),
+    include_bytes!("./private_3.pk8"),
+    include_bytes!("./private_4.pk8"),
+    include_bytes!("./private_5.pk8"),
+    include_bytes!("./private_6.pk8"),
+];
+
+/// convert "dns_addr:port" into multiaddr
+pub fn parse_dns(s: &str) -> Result<Multiaddr, multiaddr::Error> {
+    let mut i = s.split(':');
+    let ip = i.next().ok_or(multiaddr::Error::InvalidMultiaddr)?;
+    let port = i.next().ok_or(multiaddr::Error::InvalidMultiaddr)?;
+    Multiaddr::from_str(&format!("/dns/{}/tcp/{}", ip, port))
+}
+
+/// convert "ip:port" into multiaddr
+pub fn parse_ip(s: &str) -> Result<Multiaddr, multiaddr::Error> {
+    let mut i = s.split(':');
+    let ip = i.next().ok_or(multiaddr::Error::InvalidMultiaddr)?;
+    let port = i.next().ok_or(multiaddr::Error::InvalidMultiaddr)?;
+    Multiaddr::from_str(&format!("/ip4/{}/tcp/{}", ip, port))
+}
+
+type PLNetwork = Libp2pNetwork<
+    Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
+    Ed25519Pub,
+>;
 
 #[derive(Debug, StructOpt)]
 pub struct NodeOpt {
@@ -193,6 +243,8 @@ impl From<SecretKeySeed> for [u8; 32] {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ConsensusConfigFile {
     seed: [u8; 32],
+    num_bootstrap: usize,
+    replication_factor: usize,
     nodes: Vec<ConsensusConfigFileNode>,
 }
 
@@ -200,6 +252,8 @@ struct ConsensusConfigFile {
 #[serde(from = "ConsensusConfigFile", into = "ConsensusConfigFile")]
 pub struct ConsensusConfig {
     pub seed: SecretKeySeed,
+    pub num_bootstrap: usize,
+    pub replication_factor: usize,
     pub nodes: Vec<NodeConfig>,
 }
 
@@ -220,7 +274,9 @@ impl From<ConsensusConfigFile> for ConsensusConfig {
     fn from(cfg: ConsensusConfigFile) -> Self {
         Self {
             seed: cfg.seed.into(),
+            num_bootstrap: cfg.num_bootstrap,
             nodes: cfg.nodes.into_iter().map(NodeConfig::from).collect(),
+            replication_factor: cfg.replication_factor,
         }
     }
 }
@@ -229,11 +285,13 @@ impl From<ConsensusConfig> for ConsensusConfigFile {
     fn from(cfg: ConsensusConfig) -> Self {
         Self {
             seed: cfg.seed.into(),
+            num_bootstrap: cfg.num_bootstrap,
             nodes: cfg
                 .nodes
                 .into_iter()
                 .map(ConsensusConfigFileNode::from)
                 .collect(),
+            replication_factor: cfg.replication_factor,
         }
     }
 }
@@ -287,40 +345,6 @@ fn reset_store_dir(store_dir: PathBuf) {
     fs::remove_dir_all(path).expect("Failed to remove persistence files");
 }
 
-/// Trys to get a networking implementation with the given id and port number.
-///
-/// Also starts the background task.
-async fn get_networking<
-    T: Clone + Serialize + DeserializeOwned + Send + Sync + std::fmt::Debug + 'static,
->(
-    pub_key: PubKey,
-    listen_addr: &str,
-    port: u16,
-) -> WNetwork<T, PubKey> {
-    debug!(?pub_key);
-    let network = WNetwork::new(pub_key, listen_addr, port, None).await;
-    if let Ok(n) = network {
-        let (c, sync) = futures::channel::oneshot::channel();
-        match n.generate_task(c) {
-            Some(task) => {
-                task.into_iter().for_each(|n| {
-                    async_std::task::spawn(n);
-                });
-                sync.await.expect("sync.await failed");
-            }
-            None => {
-                panic!("Failed to launch networking task");
-            }
-        }
-        return n;
-    }
-    panic!("Failed to open a port");
-}
-
-type PLNetwork = WNetwork<
-    Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
-    PubKey,
->;
 type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
@@ -488,13 +512,11 @@ async fn init_hotshot(
     priv_key: PrivKey,
     threshold: u64,
     node_id: u64,
-    networking: WNetwork<
-        Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
-        PubKey,
-    >,
+    networking: PLNetwork,
     full_node: bool,
     state: GenesisState,
     data_source: Arc<RwLock<QueryData>>,
+    num_bootstrap: usize,
 ) -> Node {
     // Create the initial hotshot
     let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
@@ -510,7 +532,7 @@ async fn init_hotshot(
         start_delay: 1,
         propose_min_round_time: Duration::from_secs(0),
         propose_max_round_time: Duration::from_secs(10),
-        num_bootstrap: 0, // no-op for WSNetwork, will be used by libp2p in the future
+        num_bootstrap,
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
@@ -569,7 +591,8 @@ async fn init_hotshot(
     )
     .await
     .unwrap();
-    debug!("hotshot launched");
+
+    debug!("Hotshot online!");
 
     let validator = if full_node {
         let full_persisted = FullPersistence::new(&node_persistence, "full_node").unwrap();
@@ -916,6 +939,61 @@ pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<PubKey> {
         .collect()
 }
 
+/// Craate a new libp2p network.
+#[allow(clippy::too_many_arguments)]
+pub async fn new_libp2p_network(
+    pubkey: Ed25519Pub,
+    bs: Vec<(Option<PeerId>, Multiaddr)>,
+    node_id: usize,
+    node_type: NetworkNodeType,
+    bound_addr: Multiaddr,
+    replication_factor: usize,
+    identity: Option<Keypair>,
+    num_bootstrap: usize,
+) -> Result<PLNetwork, NetworkError> {
+    let mut config_builder = NetworkNodeConfigBuilder::default();
+    // NOTE we may need to change this as we scale
+    config_builder.replication_factor(NonZeroUsize::new(replication_factor).unwrap());
+    config_builder.to_connect_addrs(HashSet::new());
+    config_builder.node_type(node_type);
+    config_builder.bound_addr(Some(bound_addr));
+
+    if let Some(identity) = identity {
+        config_builder.identity(identity);
+    }
+
+    let mesh_params =
+        // NOTE I'm arbitrarily choosing these.
+        match node_type {
+            NetworkNodeType::Bootstrap => MeshParams {
+                mesh_n_high: 50,
+                mesh_n_low: 10,
+                mesh_outbound_min: 5,
+                mesh_n: 15,
+            },
+            NetworkNodeType::Regular => MeshParams {
+                mesh_n_high: 15,
+                mesh_n_low: 8,
+                mesh_outbound_min: 4,
+                mesh_n: 12,
+            },
+            NetworkNodeType::Conductor => unreachable!(),
+        };
+
+    config_builder.mesh_params(Some(mesh_params));
+
+    let config = config_builder.build().unwrap();
+
+    Libp2pNetwork::new(
+        config,
+        pubkey,
+        Arc::new(RwLock::new(bs)),
+        num_bootstrap,
+        node_id as usize,
+    )
+    .await
+}
+
 pub async fn init_validator(
     options: &NodeOpt,
     config: &ConsensusConfig,
@@ -927,37 +1005,69 @@ pub async fn init_validator(
 ) -> Node {
     debug!("Current node: {}", own_id);
 
+    let num_bootstrap = config.num_bootstrap;
+
+    // we are only set up to handle at MOST 7 bootstrap nodes
+    assert!(
+        num_bootstrap <= BOOTSTRAPS.len(),
+        "Number of bootstrap nodes > 7. We only are set up for 7."
+    );
+
+    let bootstrap_priv: Vec<_> = BOOTSTRAPS
+        .iter()
+        .enumerate()
+        .map(|(idx, key_bytes)| {
+            let mut key_bytes = <&[u8]>::clone(key_bytes).to_vec();
+            let key = Keypair::rsa_from_pkcs8(&mut key_bytes).unwrap();
+            let host = if config.nodes[idx].host == "localhost" {
+                "127.0.0.1"
+            } else {
+                &config.nodes[idx].host
+            };
+            let multiaddr = parse_ip(&format!("{}:{}", host, config.nodes[idx].port)).unwrap();
+            (key, multiaddr)
+        })
+        .take(num_bootstrap)
+        .collect();
+
+    let mut to_connect_addrs: Vec<_> = bootstrap_priv
+        .clone()
+        .into_iter()
+        .map(|(kp, ma)| (Some(PeerId::from_public_key(&kp.public())), ma))
+        .collect();
+
+    let (node_type, own_identity) = if own_id < num_bootstrap {
+        // TODO jr when we upgrade to phaselock 0.1.1
+        // we can delete this line. The reason is because
+        // 0.1.0 HotShot is overly strict in matching the number of bootstrap nodes.
+        // This is fixed on HotShot main
+        to_connect_addrs.remove(own_id);
+        (
+            NetworkNodeType::Bootstrap,
+            Some(bootstrap_priv[own_id].0.clone()),
+        )
+    } else {
+        (NetworkNodeType::Regular, None)
+    };
+
     // hotshot requires this threshold to be at least 2/3rd of the nodes for safety guarantee reasons
     let threshold = ((config.nodes.len() as u64 * 2) / 3) + 1;
 
-    // Get networking information
-    let own_network = get_networking(
+    let own_network = new_libp2p_network(
         pub_keys[own_id].clone(),
-        "0.0.0.0",
-        config.nodes[own_id].port,
+        to_connect_addrs,
+        own_id as usize,
+        node_type,
+        parse_ip(&format!("0.0.0.0:{:?}", config.nodes[own_id].port)).unwrap(),
+        config.replication_factor,
+        own_identity,
+        num_bootstrap,
     )
-    .await;
-    let mut other_nodes = Vec::with_capacity(config.nodes.len() - 1);
-    for (id, node) in config.nodes.iter().enumerate() {
-        if id != own_id {
-            other_nodes.push((id as u64, &pub_keys[id], node.socket_addr()));
-        }
-    }
+    .await
+    .unwrap();
+
     let known_nodes = pub_keys.clone();
 
-    // Connect the networking implementations
-    for (id, pub_key, addr) in other_nodes {
-        while own_network.connect_to(pub_key.clone(), addr).await.is_err() {
-            debug!("  - Retrying");
-            async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
-        }
-        debug!("  - Connected to node {}", id);
-    }
-
-    // Wait for the networking implementations to connect
-    while own_network.connection_table_size().await < config.nodes.len() - 1 {
-        async_std::task::sleep(std::time::Duration::from_millis(10)).await;
-    }
     debug!("All nodes connected to network");
 
     // Initialize the state and hotshot
@@ -971,6 +1081,7 @@ pub async fn init_validator(
         options.full,
         genesis,
         data_source,
+        num_bootstrap,
     )
     .await
 }

@@ -146,6 +146,9 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     let config = ConsensusConfig {
         seed: seed.into(),
         nodes,
+        // NOTE these are arbitrarily chosen.
+        num_bootstrap: 4,
+        replication_factor: 3,
     };
 
     println!("generating public keys");
