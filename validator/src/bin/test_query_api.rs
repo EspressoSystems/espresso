@@ -273,7 +273,7 @@ async fn main() {
         dir: TempDir::new("test_query_api").unwrap(),
     };
     let _keystore = Keystore::new(
-        NetworkBackend::new(&*UNIVERSAL_PARAM, url.clone(), url.clone(), url)
+        NetworkBackend::new(&UNIVERSAL_PARAM, url.clone(), url.clone(), url)
             .await
             .unwrap(),
         &mut loader,

@@ -179,11 +179,11 @@ impl CliClient {
             }
         }
 
-        return Err(format!(
+        Err(format!(
             "regex \"{}\" did not match output:\n{}",
             regex,
             self.prev_output.join("\n")
-        ));
+        ))
     }
 
     pub fn last_output(&self) -> impl Iterator<Item = &String> {
@@ -596,8 +596,8 @@ async fn wait_for_connect(port: u16) -> Result<(), String> {
         sleep(backoff).await;
         backoff *= 2;
     }
-    return Err(format!(
+    Err(format!(
         "failed to connect to port {} in {:?}",
         port, backoff
-    ));
+    ))
 }
