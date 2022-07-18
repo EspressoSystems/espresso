@@ -526,9 +526,9 @@ impl SetMerkleTree {
         elem: Nullifier,
         proof: SetMerkleProof,
     ) -> Result<(), set_hash::Hash> {
-        // Check the proof before we do anything. 
-        //After checking, we can safely assume that all the values along the path match. 
-        //This first check can be removed as an optimization opportunity if we really need to, 
+        // Check the proof before we do anything.
+        //After checking, we can safely assume that all the values along the path match.
+        //This first check can be removed as an optimization opportunity if we really need to,
         //but keeping it in is defensive programming
         let elem_in_set = proof.check(elem, &self.hash())?;
 
