@@ -615,7 +615,7 @@ async fn maintain_enough_records(state: FaucetState, mut wakeup: mpsc::Receiver<
         // drop and reacquisition of the keystore mutex guard.
         loop {
             let keystore = state.keystore.lock().await;
-            let records = spendable_records(&*keystore, state.grant_size)
+            let records = spendable_records(&keystore, state.grant_size)
                 .await
                 .collect::<Vec<_>>();
             if records.len() >= state.num_records {
@@ -674,7 +674,7 @@ async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionReceipt<
             // Holding the lock for too long can unneccessarily slow down faucet requests.
             let mut keystore = state.keystore.lock().await;
             let pub_key = keystore.pub_keys().await[0].clone();
-            let records = spendable_records(&*keystore, state.grant_size)
+            let records = spendable_records(&keystore, state.grant_size)
                 .await
                 .collect::<Vec<_>>();
 
@@ -790,7 +790,7 @@ pub async fn init_web_server(
     }
     let mut loader = RecoveryLoader::new(rng, opt.keystore_path(), opt.mnemonic.clone(), password);
     let backend = NetworkBackend::new(
-        &*UNIVERSAL_PARAM,
+        &UNIVERSAL_PARAM,
         opt.esqs_url.clone(),
         opt.address_book_url.clone(),
         opt.submit_url.clone(),

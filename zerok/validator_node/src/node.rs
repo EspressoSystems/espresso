@@ -152,7 +152,7 @@ impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
 }
 
 #[ser_test(arbitrary, ark(false))]
-#[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LedgerSummary {
     pub num_blocks: usize,
