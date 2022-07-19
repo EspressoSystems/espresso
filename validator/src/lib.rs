@@ -10,7 +10,6 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// Copyright © 2021 Translucence Research, Inc. All rights reserved.
 #![deny(warnings)]
 #![allow(clippy::format_push_string)]
 
@@ -22,6 +21,7 @@ use ark_serialize::*;
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
+use dirs::data_local_dir;
 use hotshot::traits::implementations::Libp2pNetwork;
 use hotshot::traits::NetworkError;
 use hotshot::types::ed25519::Ed25519Pub;
@@ -45,6 +45,7 @@ use serde::{Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
 use std::collections::HashSet;
+use std::env;
 use std::io::Read;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -145,11 +146,44 @@ pub struct NodeOpt {
     /// Port for the query service.
     #[structopt(long, env = "ESPRESSO_VALIDATOR_PORT", default_value = "5000")]
     pub web_server_port: u16,
+
+    /// Minimum time (in seconds) to wait for submitted transactions before proposing a block.
+    ///
+    /// Increasing this trades off latency for throughput: the rate of new block proposals gets
+    /// slower, but each block is proportionally larger. Because of batch verification, larger
+    /// blocks should lead to increased throughput.
+    #[structopt(
+        long = "min-propose-time",
+        env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
+        default_value = "1"
+    )]
+    pub min_propose_time_secs: u64,
+
+    /// Maximum time (in seconds) to wait for submitted transactions before proposing a block.
+    ///
+    /// If a validator has not received any transactions after `min-propose-time`, it will wait up
+    /// to `max-propose-time` before giving up and submitting an empty block.
+    #[structopt(
+        long = "max-propose-time",
+        env = "ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME",
+        default_value = "10"
+    )]
+    pub max_propose_time_secs: u64,
 }
 
 impl Default for NodeOpt {
     fn default() -> Self {
         Self::from_iter(std::iter::empty::<String>())
+    }
+}
+
+impl NodeOpt {
+    pub fn min_propose_time(&self) -> Duration {
+        Duration::from_secs(self.min_propose_time_secs)
+    }
+
+    pub fn max_propose_time(&self) -> Duration {
+        Duration::from_secs(self.max_propose_time_secs)
     }
 }
 
@@ -310,15 +344,12 @@ fn default_web_path() -> PathBuf {
 
 /// Returns the default directory to store persistence files.
 fn default_store_path(node_id: usize) -> PathBuf {
-    const STORE_DIR: &str = "store";
-    let dir = project_path();
-    [
-        &dir,
-        Path::new(STORE_DIR),
-        Path::new(&format!("node{}", node_id)),
-    ]
-    .iter()
-    .collect()
+    let mut data_dir = data_local_dir()
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("./")));
+    data_dir.push("espresso");
+    data_dir.push("validator");
+    data_dir.push(format!("node{}", node_id));
+    data_dir
 }
 
 /// Returns the default path to the API file.
@@ -530,8 +561,8 @@ async fn init_hotshot(
         timeout_ratio: (11, 10),
         round_start_delay: 1,
         start_delay: 1,
-        propose_min_round_time: Duration::from_secs(0),
-        propose_max_round_time: Duration::from_secs(10),
+        propose_min_round_time: options.min_propose_time(),
+        propose_max_round_time: options.max_propose_time(),
         num_bootstrap,
     };
     debug!(?config);

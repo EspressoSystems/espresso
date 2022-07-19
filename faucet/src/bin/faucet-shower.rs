@@ -79,7 +79,7 @@ async fn create_keystore(
     rng.fill_bytes(&mut password);
     let mut loader = CreateLoader::exclusive(rng, dir, mnemonic, hex::encode(password));
     let backend = NetworkBackend::new(
-        &*UNIVERSAL_PARAM,
+        &UNIVERSAL_PARAM,
         opt.esqs_url.clone(),
         opt.esqs_url.clone(),
         opt.esqs_url.clone(),

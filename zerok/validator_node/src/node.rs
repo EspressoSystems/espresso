@@ -15,6 +15,7 @@ use crate::ser_test;
 use crate::validator_node::*;
 use arbitrary::Arbitrary;
 use arbitrary_wrappers::*;
+use ark_serialize::CanonicalSerialize;
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
 use async_std::task::block_on;
@@ -152,13 +153,14 @@ impl<NET: PLNet, STORE: PLStore> Validator for LightWeightNode<NET, STORE> {
 }
 
 #[ser_test(arbitrary, ark(false))]
-#[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LedgerSummary {
     pub num_blocks: usize,
     pub num_txns: usize,
     pub num_records: usize,
     pub num_events: usize,
+    pub total_size: usize,
 }
 
 #[ser_test(arbitrary, ark(false))]
@@ -316,6 +318,9 @@ struct FullState {
     block_hashes: HashMap<Vec<u8>, usize>,
     // Total number of committed transactions, aggregated across all blocks.
     num_txns: usize,
+    // Total network/storage representation size of all transactions and nullifier proofs to date,
+    // aggregated across all blocks.
+    cumulative_size: usize,
     // The last block which was proposed. This is currently used to correllate BadBlock and
     // InconsistentBlock errors from HotShot with the block that caused the error. In the future,
     // HotShot errors will contain the bad block (or some kind of reference to it, perhaps through
@@ -332,13 +337,10 @@ struct FullState {
     // able to remove most of this FullNode/FullState, leaving just the HotShotEvent processing
     // and whatever needs to be added for subscription support.
 
-    // The status updates will need to be elsewhere, because that won't work through dyn. It will require a generic hook-up.
-    #[allow(dead_code)]
+    // The status updates are made elsewhere, because that won't work through dyn.
     catchup_store: Arc<RwLock<dyn UpdateCatchUpData<Error = EspressoError> + Send + Sync>>,
-    #[allow(dead_code)]
     availability_store:
         Arc<RwLock<dyn UpdateAvailabilityData<Error = EspressoError> + Send + Sync>>,
-    #[allow(dead_code)]
     meta_state_store: Arc<RwLock<dyn UpdateMetaStateData<Error = EspressoError> + Send + Sync>>,
 }
 
@@ -459,6 +461,7 @@ impl FullState {
                                 txn_hashes.push(hash);
                             }
                             self.num_txns += block.block.0.len();
+                            self.cumulative_size += block.serialized_size();
                             assert_eq!(nullifiers.hash(), self.validator.nullifiers_root());
                             assert_eq!(
                                 self.records_pending_memos.commitment(),
@@ -830,6 +833,7 @@ impl<'a> HotShotQueryService<'a> {
             full_persisted,
             past_nullifiers: vec![(nullifiers.hash(), 0)].into_iter().collect(),
             num_txns: 0,
+            cumulative_size: 0,
             block_hashes,
             proposed: ElaboratedBlock::default(),
             subscribers: Default::default(),
@@ -902,6 +906,7 @@ impl<'a> QueryService for HotShotQueryService<'a> {
             num_txns: state.num_txns,
             num_records: state.full_persisted.rmt_leaf_iter().len(),
             num_events: state.full_persisted.events_iter().len(),
+            total_size: state.cumulative_size,
         })
     }
 

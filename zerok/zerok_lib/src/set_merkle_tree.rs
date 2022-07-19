@@ -526,8 +526,10 @@ impl SetMerkleTree {
         elem: Nullifier,
         proof: SetMerkleProof,
     ) -> Result<(), set_hash::Hash> {
-        // Check the proof before we do anything. After checking, we can
-        // safely assume that all the values along the path match.
+        // Check the proof before we do anything.
+        //After checking, we can safely assume that all the values along the path match.
+        //This first check can be removed as an optimization opportunity if we really need to,
+        //but keeping it in is defensive programming
         let elem_in_set = proof.check(elem, &self.hash())?;
 
         use SetMerkleTree::*;
@@ -536,7 +538,6 @@ impl SetMerkleTree {
         let mut siblings = vec![];
         let mut end_branch = mem::replace(self, EmptySubtree);
 
-        // TODO: this is redundant with the checking
         let path_hashes = {
             let mut running_hash = proof.terminal_node.value();
 
@@ -572,8 +573,10 @@ impl SetMerkleTree {
                     Box::new(ForgottenSubtree { value: *sib_hash })
                 }
                 EmptySubtree => {
+                    // This is unreachable because if there are any steps
+                    // in the non-inclusion path, the tree cannot be empty.
                     unreachable!();
-                } // TODO: is this unreachable?
+                }
                 Branch { l, r, .. } => {
                     let (sib, next) = if sib_is_left { (l, r) } else { (r, l) };
                     end_branch = *next;
@@ -597,8 +600,9 @@ impl SetMerkleTree {
             ForgottenSubtree { value } => {
                 match proof.terminal_node {
                     SetMerkleTerminalNode::EmptySubtree => {
-                        // TODO: should this be possible????? it feels like it
-                        // shouldn't be
+                        // NOTE: this looks unreachable, but in fact can be
+                        // reached by
+                        // `test_merkle_tree_set(vec![0], vec![])`
                         assert_eq!(value, *set_hash::EMPTY_HASH);
                         EmptySubtree
                     }
@@ -763,7 +767,8 @@ mod tests {
     #[test]
     fn quickcheck_merkle_tree_set_regressions() {
         test_merkle_tree_set(vec![20, 0], vec![Ok(20)]);
-        test_merkle_tree_set(vec![0, 38], vec![Err(0), Ok(1), Ok(38)])
+        test_merkle_tree_set(vec![0, 38], vec![Err(0), Ok(1), Ok(38)]);
+        test_merkle_tree_set(vec![0], vec![])
     }
 
     #[test]

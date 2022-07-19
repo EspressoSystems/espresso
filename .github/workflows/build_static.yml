@@ -65,7 +65,7 @@ jobs:
       - name: Quick Test Static Build
         timeout-minutes: 60
         run: |
-          nix develop .#staticShell --option sandbox relaxed -c cargo run --release --bin multi_machine_automation -- --num-txn 3 --verbose
+          nix develop .#staticShell --option sandbox relaxed -c cargo run --release --bin multi_machine_automation -- --num-txn 3 --verbose --reset-store-state
 
       - name: Compile all executables
         timeout-minutes: 60
