@@ -22,7 +22,7 @@ num_bootstrap = 7
 
 replication_factor = 5
 
-# Node information
+# Bootstrap node information
 [[nodes]]
 ip = "127.0.0.1"
 port = 9100

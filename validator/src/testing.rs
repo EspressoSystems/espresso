@@ -11,7 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    full_node_mem_data_source::QueryData, gen_keys, init_validator, init_web_server,
+    full_node_mem_data_source::QueryData, gen_bootstrap_keys, init_validator, init_web_server,
     ConsensusConfig, GenesisState, Node, NodeOpt, MINIMUM_NODES,
 };
 use async_std::task::{block_on, spawn, JoinHandle};
@@ -153,7 +153,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
 
     println!("generating public keys");
     let start = Instant::now();
-    let keys = gen_keys(&config);
+    let keys = gen_bootstrap_keys(&config);
     let pub_keys = keys
         .iter()
         .map(|key| key.public.clone())

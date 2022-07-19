@@ -19,7 +19,6 @@ use futures::{future::pending, StreamExt};
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::time::Duration;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
@@ -30,7 +29,6 @@ use zerok_lib::testing::MultiXfrRecordSpecTransaction;
 use zerok_lib::{
     state::ElaboratedBlock,
     testing::{MultiXfrTestState, TxnPrintInfo},
-    PrivKey, PubKey,
 };
 
 #[derive(StructOpt)]
@@ -54,30 +52,20 @@ struct Options {
     #[structopt(long, env = "ESPRESSO_VALIDATOR_NODES", value_delimiter = ",")]
     pub nodes: Option<Vec<Url>>,
 
-    /// Whether to generate and store public keys for all nodes.
-    ///
-    /// Public keys will be stored under the directory specified by `pk_path`.
-    ///
-    /// Skip this option if public key files already exist.
-    #[structopt(long, short)]
-    #[structopt(conflicts_with("id"))]
-    pub gen_pk: bool,
-
-    /// Path to public keys.
-    ///
-    /// Public keys will be stored under the specified directory, file names starting
-    /// with `pk_`.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_PUB_KEY_PATH")]
-    pub pk_path: Option<PathBuf>,
-
     /// Id of the current node.
     ///
     /// If the node ID is 0, it will propose and try to add transactions.
     ///
     /// Skip this option if only want to generate public key files.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_ID")]
+    #[structopt(conflicts_with("gen-pk"), requires("num-nodes"))]
+    pub id: Option<usize>,
+
+    /// Number of nodes, including fixed number of bootstrap nodes and dynamic number of non-
+    /// bootstrap nodes.
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
     #[structopt(conflicts_with("gen-pk"))]
-    pub id: Option<u64>,
+    pub num_nodes: Option<usize>,
 
     /// Public key which should own a faucet record in the genesis block.
     ///
@@ -111,79 +99,15 @@ fn default_config_path() -> PathBuf {
     [&dir, Path::new(CONFIG_FILE)].iter().collect()
 }
 
-/// Returns the default directory to store public key files.
-fn default_pk_path() -> PathBuf {
-    const PK_DIR: &str = "src";
-    let dir = project_path();
-    [&dir, Path::new(PK_DIR)].iter().collect()
-}
-
-/// Gets the directory to public key files.
-fn get_pk_dir(options: &Options) -> PathBuf {
-    options.pk_path.clone().unwrap_or_else(default_pk_path)
-}
-
 #[derive(serde::Serialize, serde::Deserialize)]
 struct KeyInFile {
     pub private: String,
     pub public: String,
 }
 
-impl KeyInFile {
-    fn new(private: &PrivKey, public: &PubKey) -> Self {
-        Self {
-            private: TaggedBase64::new("PK", &private.to_bytes())
-                .unwrap()
-                .to_string(),
-            public: public.to_string(),
-        }
-    }
-}
-
-fn generate_keys(options: &Options, config: &ConsensusConfig) {
-    let pk_dir = get_pk_dir(options);
-
-    let keys = gen_keys(config);
-
-    // Generate public key for each node
-    for (node_id, key) in keys.into_iter().enumerate() {
-        let path: PathBuf = [&pk_dir, Path::new(&format!("pk_{}.toml", node_id))]
-            .iter()
-            .collect();
-
-        let contents = toml::to_string_pretty(&KeyInFile::new(&key.private, &key.public))
-            .expect("Could not serialize key file");
-        std::fs::write(path, contents).expect("Could not write keys to file");
-    }
-    info!("Public key files created");
-}
-
-/// Gets public key of a node from its public key file.
-fn get_key_pair_for_node(options: &Options, node_id: u64) -> KeyPair {
-    let path = [
-        &get_pk_dir(options),
-        Path::new(&format!("pk_{}.toml", node_id)),
-    ]
-    .iter()
-    .collect::<PathBuf>();
-    let pk_str = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("Cannot find public key file: {}", path.display()));
-    let KeyInFile { private, public } = toml::from_str(&pk_str)
-        .unwrap_or_else(|e| panic!("Cannot deserialize key file {}: {:?}", path.display(), e));
-
-    let private = PrivKey::from_bytes(
-        &TaggedBase64::from_str(&private)
-            .expect("Invalid private key")
-            .value(),
-    )
-    .expect("Invalid private key");
-    let public = public.parse().expect("Invalid public key");
-    KeyPair { private, public }
-}
-
 async fn generate_transactions(
     num_txn: u64,
-    own_id: u64,
+    own_id: usize,
     mut hotshot: Node,
     mut state: MultiXfrTestState,
 ) {
@@ -377,10 +301,6 @@ async fn main() -> Result<(), std::io::Error> {
         config.nodes = nodes.iter().cloned().map(NodeConfig::from).collect();
     }
 
-    if options.gen_pk {
-        generate_keys(&options, &config);
-    }
-
     let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
 
     if let Some(own_id) = options.id {
@@ -393,11 +313,9 @@ async fn main() -> Result<(), std::io::Error> {
         } else {
             (GenesisState::new(options.faucet_pub_key.clone()), None)
         };
-        let priv_key = get_key_pair_for_node(&options, own_id).private;
-        let known_nodes = (0..config.nodes.len())
-            .into_iter()
-            .map(|i| get_key_pair_for_node(&options, i as u64).public)
-            .collect();
+        let keys = gen_keys(&config, options.num_nodes.expect("Missing `num-nodes`"));
+        let priv_key = keys[own_id].private.clone();
+        let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
 
         let hotshot = init_validator(
             &options.node_opt,
@@ -405,7 +323,7 @@ async fn main() -> Result<(), std::io::Error> {
             priv_key,
             known_nodes,
             genesis,
-            own_id as usize,
+            own_id,
             data_source.clone(),
         )
         .await;

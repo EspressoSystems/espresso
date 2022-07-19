@@ -12,7 +12,7 @@
 
 use async_std::task::{sleep, spawn_blocking};
 use escargot::CargoBuild;
-use espresso_validator::{ConsensusConfig, NodeOpt, SecretKeySeed};
+use espresso_validator::{NodeOpt, SecretKeySeed};
 use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
@@ -43,12 +43,11 @@ struct Options {
     #[structopt(long, env = "ESPRESSO_VALIDATOR_NODES", value_delimiter = ",")]
     pub nodes: Option<Vec<Url>>,
 
-    /// Path to public keys.
-    ///
-    /// Public keys will be stored under the specified directory, file names starting
-    /// with `pk_`.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_PUB_KEY_PATH")]
-    pub pk_path: Option<PathBuf>,
+    /// Number of nodes, including fixed number of bootstrap nodes and dynamic number of non-
+    /// bootstrap nodes.
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
+    #[structopt(conflicts_with("gen-pk"))]
+    pub num_nodes: Option<usize>,
 
     /// Public key which should own a faucet record in the genesis block.
     ///
@@ -77,14 +76,14 @@ struct Options {
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
     #[structopt(long)]
-    num_fail_nodes: Option<u64>,
+    num_fail_nodes: Option<usize>,
 
     /// Number of rounds that all nodes will be running, after which `num_fail_nodes` nodes will be
     /// killed.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
     #[structopt(long, requires("num-fail-nodes"))]
-    fail_after_txn: Option<u64>,
+    fail_after_txn: Option<usize>,
 }
 
 fn cargo_run(bin: impl AsRef<str>) -> Command {
@@ -167,12 +166,11 @@ async fn main() {
         args.push("--nodes");
         args.push(nodes);
     }
-    let pk_path;
-    if let Some(path) = &options.pk_path {
-        pk_path = path.display().to_string();
-        args.push("--pk-path");
-        args.push(&pk_path);
-    }
+    let num_nodes_str = match options.num_nodes {
+        Some(num_nodes) => num_nodes.to_string(),
+        None => "7".to_string(),
+    };
+    let num_nodes = num_nodes_str.parse::<usize>().unwrap();
     let faucet_pub_keys = options
         .faucet_pub_key
         .iter()
@@ -186,18 +184,9 @@ async fn main() {
         Some(num_txn) => num_txn.to_string(),
         None => "".to_string(),
     };
-
-    // Read node info from node configuration file.
-    let num_nodes = match &options.nodes {
-        Some(nodes) => nodes.len(),
-        None => match &options.config {
-            Some(path) => ConsensusConfig::from_file(path).nodes.len(),
-            None => 7,
-        },
-    };
     let (num_fail_nodes, fail_after_txn_str) = match options.num_fail_nodes {
         Some(num_fail_nodes) => {
-            assert!(num_fail_nodes <= num_nodes as u64);
+            assert!(num_fail_nodes <= num_nodes);
             if num_fail_nodes == 0 {
                 (0, "".to_string())
             } else {
@@ -212,14 +201,16 @@ async fn main() {
     };
 
     // Start the consensus for each node.
-    let first_fail_id = num_nodes - num_fail_nodes as usize;
+    let first_fail_id = num_nodes - num_fail_nodes;
     let mut processes: Vec<_> = (0..num_nodes)
         .map(|id| {
             let mut this_args = args.clone();
             let id_str = id.to_string();
             this_args.push("--id");
             this_args.push(&id_str);
-            if id >= first_fail_id as usize {
+            this_args.push("--num-nodes");
+            this_args.push(&num_nodes_str);
+            if id >= first_fail_id {
                 this_args.push("--num-txn");
                 this_args.push(&fail_after_txn_str);
             } else if !num_txn_str.is_empty() {

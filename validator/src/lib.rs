@@ -309,7 +309,7 @@ fn default_web_path() -> PathBuf {
 }
 
 /// Returns the default directory to store persistence files.
-fn default_store_path(node_id: u64) -> PathBuf {
+fn default_store_path(node_id: usize) -> PathBuf {
     const STORE_DIR: &str = "store";
     let dir = project_path();
     [
@@ -332,7 +332,7 @@ fn default_api_path() -> PathBuf {
 ///
 /// The returned path can be passed to `reset_store_dir` to remove the contents, if the
 /// `--reset-store-state` argument is true.
-fn get_store_dir(options: &NodeOpt, node_id: u64) -> PathBuf {
+fn get_store_dir(options: &NodeOpt, node_id: usize) -> PathBuf {
     options
         .store_path
         .clone()
@@ -511,7 +511,7 @@ async fn init_hotshot(
     known_nodes: Vec<PubKey>,
     priv_key: PrivKey,
     threshold: u64,
-    node_id: u64,
+    node_id: usize,
     networking: PLNetwork,
     full_node: bool,
     state: GenesisState,
@@ -520,7 +520,7 @@ async fn init_hotshot(
 ) -> Node {
     // Create the initial hotshot
     let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
-    let pub_key = known_nodes[node_id as usize].clone();
+    let pub_key = known_nodes[node_id].clone();
     let config = HotShotConfig {
         total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
         threshold: NonZeroUsize::new(threshold as usize).unwrap(),
@@ -581,7 +581,7 @@ async fn init_hotshot(
         config.known_nodes.clone(),
         pub_key,
         priv_key,
-        node_id,
+        node_id as u64,
         config,
         state.validator,
         networking,
@@ -913,8 +913,9 @@ pub fn init_web_server(
     Ok(join_handle)
 }
 
-/// Generate a list of private and public keys. Will return exactly `config.nodes.len()` keys, with a given `config.seed` seed.
-pub fn gen_keys(config: &ConsensusConfig) -> Vec<KeyPair> {
+/// Generate a list of private and public keys for `config.nodes.len()` bootstrap keys, with a
+/// given `config.seed` seed.
+pub fn gen_bootstrap_keys(config: &ConsensusConfig) -> Vec<KeyPair> {
     let mut keys = Vec::with_capacity(config.nodes.len());
 
     for node_id in 0..config.nodes.len() {
@@ -926,17 +927,23 @@ pub fn gen_keys(config: &ConsensusConfig) -> Vec<KeyPair> {
     keys
 }
 
+/// Generate a list of private and public keys for the given number of nodes with a given `config.
+/// seed` seed.
+pub fn gen_keys(config: &ConsensusConfig, num_nodes: usize) -> Vec<KeyPair> {
+    let mut keys = Vec::with_capacity(num_nodes);
+
+    for node_id in 0..num_nodes {
+        let private = PrivKey::generated_from_seed_indexed(config.seed.0, node_id as u64);
+        let public = PubKey::from_private(&private);
+
+        keys.push(KeyPair { public, private })
+    }
+    keys
+}
+
 pub struct KeyPair {
     pub public: PubKey,
     pub private: PrivKey,
-}
-
-/// Generate a list of public keys. Will return exactly `config.nodes.len()` keys, with a given `config.seed` seed.
-pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<PubKey> {
-    gen_keys(config)
-        .into_iter()
-        .map(|pair| pair.public)
-        .collect()
 }
 
 /// Craate a new libp2p network.
@@ -1076,7 +1083,7 @@ pub async fn init_validator(
         known_nodes,
         priv_key,
         threshold,
-        own_id as u64,
+        own_id,
         own_network,
         options.full,
         genesis,
