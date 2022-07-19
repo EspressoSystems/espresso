@@ -255,7 +255,7 @@ impl CliClient {
         let (hotshot_ports, server_ports): (Vec<_>, Vec<_>) = ports.iter().cloned().unzip();
         assert!(
             ports.len() >= MINIMUM_NODES,
-            "At least 5 nodes are needed for consensus."
+            "At least {} nodes are needed for consensus. We only have {} nodes", MINIMUM_NODES, ports.len()
         );
         let config = ConsensusConfig {
             seed: [
