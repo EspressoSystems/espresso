@@ -17,10 +17,10 @@ use typenum::{Unsigned, U1};
 /// testing purposes. The implementation tests for logical equality of the represented set, ignoring
 /// sparseness. That is, any two sets with the same root hash will compare equal, even if the
 /// elements retained in memory are different between the two sets.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum KVMerkleTree<KVHash>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     //this seems questionable
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
@@ -49,7 +49,7 @@ where
 
 impl<KVHash> PartialEq<Self> for KVMerkleTree<KVHash>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -74,7 +74,7 @@ where
 
 impl<KVHash> KVMerkleTree<KVHash>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -118,7 +118,7 @@ where
 
 impl<KVHash> Default for KVMerkleTree<KVHash>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -130,7 +130,7 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum KVMerkleTerminalNode<KVHash>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -145,7 +145,7 @@ where
 
 impl<KVHash> CanonicalSerialize for KVMerkleTerminalNode<KVHash>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -175,7 +175,7 @@ where
 
 impl<KVHash> CanonicalDeserialize for KVMerkleTerminalNode<KVHash>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -197,7 +197,7 @@ where
 
 impl<KVHash> KVMerkleTerminalNode<KVHash>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -244,7 +244,7 @@ where
 
 pub struct KVMerkleProof<KVHash>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -256,7 +256,7 @@ where
 
 impl<KVHash> KVMerkleProof<KVHash>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -295,7 +295,7 @@ where
 
 impl<KVHash> KVMerkleTree<KVHash>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -395,7 +395,6 @@ where
                     break;
                 }
                 Branch { children, .. } => {
-                    //KALEY: is clone ok here?
                     let target = children[pos as usize].clone();
                     end_branch = target;
                     children
@@ -415,20 +414,19 @@ where
                     let new_leaf = Self::new_leaf(height - 1, key, value);
                     let (new_end_branch, new_sibs) = if leaf_pos == pos {
                         let mut new_branches =
-                            vec![&EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
-                        //KALEY: clone question
-                        new_branches[pos as usize] = &new_leaf;
+                            vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
+                        new_branches[pos as usize] = new_leaf;
                         (
                             EmptySubtree,
-                            new_branches
-                                .into_iter()
-                                .map(|x| x.clone())
-                                .collect::<Vec<_>>(),
+                            new_branches,
                         )
                     } else {
+                        let mut new_branches =
+                            vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
+                        new_branches[pos as usize] = new_leaf.clone();
                         (
                             new_leaf,
-                            vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1],
+                            new_branches,
                         )
                     };
                     end_branch = new_end_branch;
@@ -687,7 +685,7 @@ pub fn set_merkle_lw_multi_insert<KVHash, Arity>(
     root: KVHash::Digest,
 ) -> Result<(KVHash::Digest, Vec<KVMerkleProof<KVHash>>), KVHash::Digest>
 where
-    KVHash: KVTreeHash + Clone + Copy,
+    KVHash: KVTreeHash + Clone,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -716,6 +714,21 @@ mod tests {
     use rand_chacha::rand_core::SeedableRng;
     use rand_chacha::ChaChaRng;
     use std::time::Instant; //????/
+    use crate::tree_hash::committable_hash::*;
+    use generic_array::arr;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+    struct TestNulls(Nullifier);
+    #[derive(Clone)]
+    struct TestNullsTag();
+
+    impl CommitableHashTag for TestNullsTag {
+        fn commitment_diversifier() -> &'static str {
+            "CAP NullifierTest"
+        }
+    }
+
+    type TestTreeHash = CommitableHash<TestNulls, TestNulls, TestNullsTag>;
 
     #[test]
     fn test_set_merkle_speed() {
@@ -726,16 +739,16 @@ mod tests {
         let pfs = elems
             .into_iter()
             .map(|elem| {
-                let elem_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(elem));
+                let elem_bit_vec = <TestTreeHash as KVTreeHash>::traversal_of_digest(<TestTreeHash as KVTreeHash>::hash_key(TestNulls(elem)));
                 let pf = elem_bit_vec
                     .iter()
-                    .map(|_| KVHash::leaf_hash(Nullifier::random_for_test(&mut prng)))
-                    .collect();
-                let pf = KVMerkleProof {
+                    .map(|_| {let n = Nullifier::random_for_test(&mut prng); arr![<TestTreeHash as KVTreeHash>::Digest; <TestTreeHash as KVTreeHash>::hash_leaf(TestNulls(n),TestNulls(n))]})
+                    .collect::<Vec<_>>();
+                let pf = KVMerkleProof::<TestTreeHash> {
                     terminal_node: KVMerkleTerminalNode::EmptySubtree,
                     path: pf,
                 };
-                let root = pf.check(elem, &KVMerkleTree::default().hash()).unwrap_err();
+                let root = pf.check(TestNulls(elem), KVMerkleTree::<TestTreeHash>::default().hash()).unwrap_err();
                 (elem, pf, root)
             })
             .collect::<Vec<_>>();
@@ -743,7 +756,7 @@ mod tests {
         let now = Instant::now();
         let mut tot = 0;
         for (elem, pf, root) in pfs {
-            let new_root = pf.check(elem, &root);
+            let new_root = pf.check(TestNulls(elem), root);
             if new_root.unwrap() {
                 tot += 1;
             }
@@ -751,7 +764,7 @@ mod tests {
         println!("proofs: {}/1000 in {}s", tot, now.elapsed().as_secs_f32());
     }
 
-    fn test_merkle_tree_set(updates: Vec<u16>, checks: Vec<Result<u16, u8>>) {
+    fn test_merkle_tree_set_kv(updates: Vec<u16>, checks: Vec<Result<u16, u8>>) {
         use std::collections::{HashMap, HashSet};
         let mut prng = ChaChaRng::from_seed([0u8; 32]);
         let update_vals = updates
@@ -761,7 +774,7 @@ mod tests {
             .map(|u| (u, Nullifier::random_for_test(&mut prng)))
             .collect::<HashMap<_, _>>();
         let mut hset = HashSet::new();
-        let mut t = KVMerkleTree::default();
+        let mut t = KVMerkleTree::<TestTreeHash>::default();
         let mut lw_t = KVMerkleTree::ForgottenSubtree { digest: t.hash() };
         assert_eq!(t.hash(), lw_t.hash());
 
@@ -770,21 +783,21 @@ mod tests {
         for (u, elem) in updates.iter().zip(update_elems.iter()) {
             let elem = *elem;
             hset.insert(u);
-            let (in_set, pf) = t.lookup(elem).unwrap();
-            t.insert(elem, elem);
-            assert_eq!(pf.check(elem, &lw_t.hash()).unwrap(), in_set);
-            lw_t.remember(elem, pf).unwrap();
-            lw_t.insert(elem, elem).unwrap();
-            let (in_new_lw_t, new_lw_pf) = lw_t.lookup(elem).unwrap();
+            let (in_set, pf) = t.lookup(TestNulls(elem)).unwrap();
+            t.insert(TestNulls(elem), TestNulls(elem));
+            assert_eq!(pf.check(TestNulls(elem), lw_t.hash()).unwrap(), in_set);
+            lw_t.remember(TestNulls(elem), pf).unwrap();
+            lw_t.insert(TestNulls(elem), TestNulls(elem)).unwrap();
+            let (in_new_lw_t, new_lw_pf) = lw_t.lookup(TestNulls(elem)).unwrap();
             assert!(in_new_lw_t);
 
-            assert!(t.lookup(elem).unwrap().0);
+            assert!(t.lookup(TestNulls(elem)).unwrap().0);
 
             assert_eq!(lw_t.hash(), t.hash());
-            lw_t.forget(elem).unwrap();
-            assert!(lw_t.lookup(elem).is_none());
+            lw_t.forget(TestNulls(elem)).unwrap();
+            assert!(lw_t.lookup(TestNulls(elem)).is_none());
 
-            assert!(new_lw_pf.check(elem, &lw_t.hash()).unwrap());
+            assert!(new_lw_pf.check(TestNulls(elem), lw_t.hash()).unwrap());
         }
 
         for c in checks {
@@ -801,7 +814,7 @@ mod tests {
             };
             let elem = update_vals[&val];
 
-            let (t_contains, pf) = t.lookup(elem).unwrap();
+            let (t_contains, pf) = t.lookup(TestNulls(elem)).unwrap();
 
             if should_be_there {
                 assert!(hset.contains(&val));
@@ -811,21 +824,21 @@ mod tests {
             assert_eq!(hset.contains(&val), t_contains);
             assert_eq!(
                 t_contains,
-                KVMerkleProof::check(&pf, elem, &t.hash()).unwrap()
+                KVMerkleProof::check(&pf, TestNulls(elem), t.hash()).unwrap()
             );
         }
     }
 
     #[test]
-    fn quickcheck_merkle_tree_set_regressions() {
-        test_merkle_tree_set(vec![20, 0], vec![Ok(20)]);
-        test_merkle_tree_set(vec![0, 38], vec![Err(0), Ok(1), Ok(38)])
+    fn quickcheck_merkle_tree_set_regressions_kv() {
+        test_merkle_tree_set_kv(vec![20, 0], vec![Ok(20)]);
+        test_merkle_tree_set_kv(vec![0, 38], vec![Err(0), Ok(1), Ok(38)])
     }
 
     #[test]
-    fn quickcheck_merkle_tree_set() {
+    fn quickcheck_merkle_tree_set_kv() {
         QuickCheck::new()
             .tests(10)
-            .quickcheck(test_merkle_tree_set as fn(Vec<_>, Vec<_>) -> ());
+            .quickcheck(test_merkle_tree_set_kv as fn(Vec<_>, Vec<_>) -> ());
     }
 }
