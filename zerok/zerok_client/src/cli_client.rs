@@ -255,7 +255,9 @@ impl CliClient {
         let (hotshot_ports, server_ports): (Vec<_>, Vec<_>) = ports.iter().cloned().unzip();
         assert!(
             ports.len() >= MINIMUM_NODES,
-            "At least 5 nodes are needed for consensus."
+            "At least {} nodes are needed for consensus. We only have {} nodes",
+            MINIMUM_NODES,
+            ports.len()
         );
         let config = ConsensusConfig {
             seed: [
@@ -274,6 +276,14 @@ impl CliClient {
             // NOTE these are arbitrarily chosen.
             num_bootstrap: 4,
             replication_factor: ports.len() - 2,
+            bootstrap_mesh_n_high: 50,
+            bootstrap_mesh_n_low: 10,
+            bootstrap_mesh_outbound_min: 5,
+            bootstrap_mesh_n: 15,
+            mesh_n_high: 15,
+            mesh_n_low: 8,
+            mesh_outbound_min: 4,
+            mesh_n: 12,
         };
         let mut config_file = tmp_dir.to_path_buf();
         config_file.push("node-config.toml");

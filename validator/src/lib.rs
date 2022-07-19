@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use dirs::data_local_dir;
 use hotshot::traits::implementations::Libp2pNetwork;
 use hotshot::traits::NetworkError;
-use hotshot::types::ed25519::Ed25519Pub;
+use hotshot::types::ed25519::{Ed25519Priv, Ed25519Pub};
 use hotshot::{
     traits::implementations::AtomicStorage,
     types::{Message, SignatureKey},
@@ -37,6 +37,7 @@ use jf_cap::{
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
 use key_set::{KeySet, VerifierKeySet};
+use libp2p::identity::ed25519::SecretKey;
 use libp2p::identity::Keypair;
 use libp2p::{multiaddr, Multiaddr, PeerId};
 use libp2p_networking::network::{MeshParams, NetworkNodeConfigBuilder, NetworkNodeType};
@@ -85,30 +86,23 @@ pub const MINIMUM_NODES: usize = 5;
 
 const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 
-pub const BOOTSTRAPS: &[&[u8]; 7] = &[
-    include_bytes!("./private_0.pk8"),
-    include_bytes!("./private_1.pk8"),
-    include_bytes!("./private_2.pk8"),
-    include_bytes!("./private_3.pk8"),
-    include_bytes!("./private_4.pk8"),
-    include_bytes!("./private_5.pk8"),
-    include_bytes!("./private_6.pk8"),
-];
-
-/// convert "dns_addr:port" into multiaddr
-pub fn parse_dns(s: &str) -> Result<Multiaddr, multiaddr::Error> {
-    let mut i = s.split(':');
-    let ip = i.next().ok_or(multiaddr::Error::InvalidMultiaddr)?;
-    let port = i.next().ok_or(multiaddr::Error::InvalidMultiaddr)?;
-    Multiaddr::from_str(&format!("/dns/{}/tcp/{}", ip, port))
-}
-
-/// convert "ip:port" into multiaddr
-pub fn parse_ip(s: &str) -> Result<Multiaddr, multiaddr::Error> {
-    let mut i = s.split(':');
-    let ip = i.next().ok_or(multiaddr::Error::InvalidMultiaddr)?;
-    let port = i.next().ok_or(multiaddr::Error::InvalidMultiaddr)?;
-    Multiaddr::from_str(&format!("/ip4/{}/tcp/{}", ip, port))
+/// Parse a (url|ip):[0-9]+ into a multiaddr
+pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
+    let (ip, port) = s
+        .split_once(':')
+        .ok_or(multiaddr::Error::InvalidMultiaddr)?;
+    if ip.chars().any(|c| c.is_alphabetic()) {
+        // speecial case localhost
+        if ip == "localhost" {
+            Multiaddr::from_str(&format!("/dns/{}/tcp/{}", "127.0.0.1", port))
+        } else {
+            // is domain
+            Multiaddr::from_str(&format!("/dns/{}/tcp/{}", ip, port))
+        }
+    } else {
+        // is ip address
+        Multiaddr::from_str(&format!("/ip4/{}/tcp/{}", ip, port))
+    }
 }
 
 type PLNetwork = Libp2pNetwork<
@@ -279,6 +273,14 @@ struct ConsensusConfigFile {
     seed: [u8; 32],
     num_bootstrap: usize,
     replication_factor: usize,
+    bootstrap_mesh_n_high: usize,
+    bootstrap_mesh_n_low: usize,
+    bootstrap_mesh_outbound_min: usize,
+    bootstrap_mesh_n: usize,
+    mesh_n_high: usize,
+    mesh_n_low: usize,
+    mesh_outbound_min: usize,
+    mesh_n: usize,
     nodes: Vec<ConsensusConfigFileNode>,
 }
 
@@ -288,6 +290,14 @@ pub struct ConsensusConfig {
     pub seed: SecretKeySeed,
     pub num_bootstrap: usize,
     pub replication_factor: usize,
+    pub bootstrap_mesh_n_high: usize,
+    pub bootstrap_mesh_n_low: usize,
+    pub bootstrap_mesh_outbound_min: usize,
+    pub bootstrap_mesh_n: usize,
+    pub mesh_n_high: usize,
+    pub mesh_n_low: usize,
+    pub mesh_outbound_min: usize,
+    pub mesh_n: usize,
     pub nodes: Vec<NodeConfig>,
 }
 
@@ -311,6 +321,14 @@ impl From<ConsensusConfigFile> for ConsensusConfig {
             num_bootstrap: cfg.num_bootstrap,
             nodes: cfg.nodes.into_iter().map(NodeConfig::from).collect(),
             replication_factor: cfg.replication_factor,
+            bootstrap_mesh_n_high: cfg.bootstrap_mesh_n_high,
+            bootstrap_mesh_n_low: cfg.bootstrap_mesh_n_low,
+            bootstrap_mesh_outbound_min: cfg.bootstrap_mesh_outbound_min,
+            bootstrap_mesh_n: cfg.bootstrap_mesh_n,
+            mesh_n_high: cfg.mesh_n_high,
+            mesh_n_low: cfg.mesh_n_low,
+            mesh_outbound_min: cfg.mesh_outbound_min,
+            mesh_n: cfg.mesh_n,
         }
     }
 }
@@ -326,6 +344,14 @@ impl From<ConsensusConfig> for ConsensusConfigFile {
                 .map(ConsensusConfigFileNode::from)
                 .collect(),
             replication_factor: cfg.replication_factor,
+            bootstrap_mesh_n_high: cfg.bootstrap_mesh_n_high,
+            bootstrap_mesh_n_low: cfg.bootstrap_mesh_n_low,
+            bootstrap_mesh_outbound_min: cfg.bootstrap_mesh_outbound_min,
+            bootstrap_mesh_n: cfg.bootstrap_mesh_n,
+            mesh_n_high: cfg.mesh_n_high,
+            mesh_n_low: cfg.mesh_n_low,
+            mesh_outbound_min: cfg.mesh_outbound_min,
+            mesh_n: cfg.mesh_n,
         }
     }
 }
@@ -985,13 +1011,13 @@ pub async fn new_libp2p_network(
     node_id: usize,
     node_type: NetworkNodeType,
     bound_addr: Multiaddr,
-    replication_factor: usize,
     identity: Option<Keypair>,
-    num_bootstrap: usize,
+    consensus_config: &ConsensusConfig,
 ) -> Result<PLNetwork, NetworkError> {
     let mut config_builder = NetworkNodeConfigBuilder::default();
     // NOTE we may need to change this as we scale
-    config_builder.replication_factor(NonZeroUsize::new(replication_factor).unwrap());
+    config_builder
+        .replication_factor(NonZeroUsize::new(consensus_config.replication_factor).unwrap());
     config_builder.to_connect_addrs(HashSet::new());
     config_builder.node_type(node_type);
     config_builder.bound_addr(Some(bound_addr));
@@ -1000,23 +1026,21 @@ pub async fn new_libp2p_network(
         config_builder.identity(identity);
     }
 
-    let mesh_params =
-        // NOTE I'm arbitrarily choosing these.
-        match node_type {
-            NetworkNodeType::Bootstrap => MeshParams {
-                mesh_n_high: 50,
-                mesh_n_low: 10,
-                mesh_outbound_min: 5,
-                mesh_n: 15,
-            },
-            NetworkNodeType::Regular => MeshParams {
-                mesh_n_high: 15,
-                mesh_n_low: 8,
-                mesh_outbound_min: 4,
-                mesh_n: 12,
-            },
-            NetworkNodeType::Conductor => unreachable!(),
-        };
+    let mesh_params = match node_type {
+        NetworkNodeType::Bootstrap => MeshParams {
+            mesh_n_high: consensus_config.bootstrap_mesh_n_high,
+            mesh_n_low: consensus_config.bootstrap_mesh_n_low,
+            mesh_outbound_min: consensus_config.bootstrap_mesh_outbound_min,
+            mesh_n: consensus_config.bootstrap_mesh_n,
+        },
+        NetworkNodeType::Regular => MeshParams {
+            mesh_n_high: consensus_config.mesh_n_high,
+            mesh_n_low: consensus_config.mesh_n_low,
+            mesh_outbound_min: consensus_config.mesh_outbound_min,
+            mesh_n: consensus_config.mesh_n,
+        },
+        NetworkNodeType::Conductor => unreachable!(),
+    };
 
     config_builder.mesh_params(Some(mesh_params));
 
@@ -1026,7 +1050,7 @@ pub async fn new_libp2p_network(
         config,
         pubkey,
         Arc::new(RwLock::new(bs)),
-        num_bootstrap,
+        consensus_config.num_bootstrap,
         node_id as usize,
     )
     .await
@@ -1045,25 +1069,23 @@ pub async fn init_validator(
 
     let num_bootstrap = config.num_bootstrap;
 
-    // we are only set up to handle at MOST 7 bootstrap nodes
-    assert!(
-        num_bootstrap <= BOOTSTRAPS.len(),
-        "Number of bootstrap nodes > 7. We only are set up for 7."
-    );
+    let mut bootstrap_nodes = vec![];
+    for i in 0..num_bootstrap {
+        let priv_key = Ed25519Priv::generated_from_seed_indexed(config.seed.0, i as u64);
+        let libp2p_priv_key = SecretKey::from_bytes(&mut priv_key.to_bytes()[0..32]).unwrap();
+        bootstrap_nodes.push(libp2p_priv_key);
+    }
 
-    let bootstrap_priv: Vec<_> = BOOTSTRAPS
-        .iter()
+    let bootstrap_priv: Vec<_> = bootstrap_nodes
+        .into_iter()
         .enumerate()
-        .map(|(idx, key_bytes)| {
-            let mut key_bytes = <&[u8]>::clone(key_bytes).to_vec();
-            let key = Keypair::rsa_from_pkcs8(&mut key_bytes).unwrap();
-            let host = if config.nodes[idx].host == "localhost" {
-                "127.0.0.1"
-            } else {
-                &config.nodes[idx].host
-            };
-            let multiaddr = parse_ip(&format!("{}:{}", host, config.nodes[idx].port)).unwrap();
-            (key, multiaddr)
+        .map(|(idx, kp)| {
+            let multiaddr = parse_url(&format!(
+                "{}:{}",
+                config.nodes[idx].host, config.nodes[idx].port
+            ))
+            .unwrap();
+            (libp2p::identity::Keypair::Ed25519(kp.into()), multiaddr)
         })
         .take(num_bootstrap)
         .collect();
@@ -1075,7 +1097,9 @@ pub async fn init_validator(
         .collect();
 
     let (node_type, own_identity) = if own_id < num_bootstrap {
-        // TODO jr when we upgrade to phaselock 0.1.1
+        // TODO jr
+        // <https://github.com/EspressoSystems/espresso/issues/463>
+        // When we upgrade to phaselock 0.1.1,
         // we can delete this line. The reason is because
         // 0.1.0 HotShot is overly strict in matching the number of bootstrap nodes.
         // This is fixed on HotShot main
@@ -1096,10 +1120,9 @@ pub async fn init_validator(
         to_connect_addrs,
         own_id as usize,
         node_type,
-        parse_ip(&format!("0.0.0.0:{:?}", config.nodes[own_id].port)).unwrap(),
-        config.replication_factor,
+        parse_url(&format!("0.0.0.0:{:?}", config.nodes[own_id].port)).unwrap(),
         own_identity,
-        num_bootstrap,
+        config,
     )
     .await
     .unwrap();
