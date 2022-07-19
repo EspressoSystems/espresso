@@ -209,6 +209,13 @@ Espresso system is a combination of a number of interacting services, including:
 Running the system locally basically amounts to building and running each of these services. We also
 provide a `docker-compose.yml` file which makes it easy to run the whole thing at once.
 
+Once you have started the services locally, it is possible to create a wallet to build and submit
+transactions to the local network. See [the wallet README](zerok/zerok_client/README.md) for
+instructions on running the wallet CLI. As an example, after starting the services using `docker-compose`,
+the following command should start the wallet CLI:
+
+    cargo run --release --bin wallet-cli -- --esqs-url http://localhost:60000 --submit-url http://localhost:60000 --address-book-url http://localhost:50000
+
 ## Running with docker-compose
 
 To start the local Docker network, run
