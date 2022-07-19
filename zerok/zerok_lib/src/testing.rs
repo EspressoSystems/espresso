@@ -1165,7 +1165,6 @@ pub fn crypto_rng_from_seed(seed: [u8; 32]) -> ChaChaRng {
     ChaChaRng::from_seed(seed)
 }
 
-// TODO(joe): proper Err returns
 #[cfg(test)]
 mod tests {
     use super::*;
