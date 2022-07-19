@@ -7,25 +7,23 @@ use ark_serialize::*;
 //use bitvec::vec::BitVec;
 use core::mem;
 //use jf_cap::structs::Nullifier;
-use serde::{Deserialize, Serialize};
-use crate::tree_hash::{*};
-use generic_array::{arr::AddLength,GenericArray,ArrayLength};
+use crate::tree_hash::*;
 use core::fmt::Debug;
-use typenum::{U1,Unsigned};
-
-
-
+use generic_array::{arr::AddLength, ArrayLength, GenericArray};
+use serde::{Deserialize, Serialize};
+use typenum::{Unsigned, U1};
 
 /// Note: this type implements PartialEq so that containing types can derive PartialEq, mostly for
 /// testing purposes. The implementation tests for logical equality of the represented set, ignoring
 /// sparseness. That is, any two sets with the same root hash will compare equal, even if the
 /// elements retained in memory are different between the two sets.
 #[derive(Debug, Clone)]
-pub enum KVMerkleTree<KVHash> 
+pub enum KVMerkleTree<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
     //this seems questionable
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
 {
     EmptySubtree,
     ForgottenSubtree {
@@ -40,22 +38,27 @@ where
     },
     Branch {
         digest: KVHash::Digest,
-        children: Box<GenericArray<KVMerkleTree<KVHash>, <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output>>,
+        children: Box<
+            GenericArray<
+                KVMerkleTree<KVHash>,
+                <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output,
+            >,
+        >,
     },
 }
 
 impl<KVHash> PartialEq<Self> for KVMerkleTree<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
- {
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
+{
     fn eq(&self, other: &Self) -> bool {
         self.hash() == other.hash()
     }
-
 }
 //KALEY: need arbitrary?
-// impl<'a,KVHash> arbitrary::Arbitrary<'a> for KVMerkleTree<KVHash> 
+// impl<'a,KVHash> arbitrary::Arbitrary<'a> for KVMerkleTree<KVHash>
 // where
 //     KVHash: KVTreeHash + Clone + Copy,
 //     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
@@ -72,8 +75,9 @@ where
 impl<KVHash> KVMerkleTree<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
- {
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
+{
     fn new_leaf(height: usize, key: KVHash::Key, value: KVHash::Value) -> Self {
         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
         let key_bits = key_bit_vec.into_iter();
@@ -81,10 +85,13 @@ where
         let mut h = KVHash::hash_leaf(key, value);
 
         for sib in key_bits.into_iter().take(height) {
-            let mut children = GenericArray::from_iter(vec![KVHash::empty_digest(); <KVHash::BranchArityMinus1>::to_usize()+1]);
+            let mut children = GenericArray::from_iter(vec![
+                KVHash::empty_digest();
+                <KVHash::BranchArityMinus1>::to_usize()
+                    + 1
+            ]);
             children[sib as usize] = h;
             h = KVHash::hash_branch(&children);
-            
         }
 
         Self::Leaf {
@@ -95,8 +102,13 @@ where
         }
     }
 
-    fn new_branch(children: GenericArray<Self, <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output>) -> Self {
-        let child_hashes = GenericArray::from_iter(children.into_iter().map(|d| d.hash()));
+    fn new_branch(
+        children: GenericArray<
+            Self,
+            <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output,
+        >,
+    ) -> Self {
+        let child_hashes = GenericArray::from_iter(children.clone().into_iter().map(|d| d.hash()));
         Self::Branch {
             digest: KVHash::hash_branch(&child_hashes),
             children: Box::new(children),
@@ -104,10 +116,11 @@ where
     }
 }
 
-impl <KVHash> Default for KVMerkleTree<KVHash> 
+impl<KVHash> Default for KVMerkleTree<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
 {
     fn default() -> Self {
         Self::EmptySubtree
@@ -115,12 +128,12 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum KVMerkleTerminalNode<KVHash> 
+pub enum KVMerkleTerminalNode<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
-
- {
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
+{
     EmptySubtree,
     Leaf {
         /// how far above the "true" leaf level this leaf is
@@ -130,12 +143,12 @@ where
     },
 }
 
-impl<KVHash> CanonicalSerialize for KVMerkleTerminalNode<KVHash> 
+impl<KVHash> CanonicalSerialize for KVMerkleTerminalNode<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
-
- {
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
+{
     fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
         match self {
             KVMerkleTerminalNode::EmptySubtree => {
@@ -144,7 +157,7 @@ where
             KVMerkleTerminalNode::Leaf { height, key, value } => {
                 writer.write_all(&[1]).map_err(SerializationError::from)?;
                 CanonicalSerialize::serialize(height, &mut writer)?;
-                CanonicalSerialize::serialize(key, &mut writer);
+                CanonicalSerialize::serialize(key, &mut writer)?;
                 CanonicalSerialize::serialize(value, &mut writer)
             }
         }
@@ -163,9 +176,9 @@ where
 impl<KVHash> CanonicalDeserialize for KVMerkleTerminalNode<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
-
- {
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
+{
     fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
         let mut flag = [0u8];
         reader.read_exact(&mut flag)?;
@@ -185,11 +198,10 @@ where
 impl<KVHash> KVMerkleTerminalNode<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
-
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
 {
-    fn value(&self) -> KVHash::Digest 
-   {
+    fn value(&self) -> KVHash::Digest {
         use KVMerkleTerminalNode::*;
         match self {
             EmptySubtree => KVHash::empty_digest(),
@@ -204,7 +216,11 @@ where
 
                 // if the height is too large, keep hashing
                 for sib in key_bits.chain(core::iter::repeat(0)).take(*height) {
-                    let mut children = GenericArray::from_iter(vec![KVHash::empty_digest(); <KVHash::BranchArityMinus1>::to_usize()+1]);
+                    let mut children = GenericArray::from_iter(vec![
+                        KVHash::empty_digest();
+                        <KVHash::BranchArityMinus1>::to_usize()
+                            + 1
+                    ]);
                     children[sib as usize] = running_hash;
                     running_hash = KVHash::hash_branch(&children);
                 }
@@ -224,29 +240,26 @@ where
     Serialize,
     Deserialize,
 )] */
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 
-pub struct KVMerkleProof<KVHash> 
+pub struct KVMerkleProof<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
- {
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
+{
     terminal_node: KVMerkleTerminalNode<KVHash>,
     //each level of path in the tree includes all but 1 of the siblings,
     //hence BranchArityMinus1
-    path: Vec<GenericArray<KVHash::Digest,KVHash::BranchArityMinus1>>,
+    path: Vec<GenericArray<KVHash::Digest, KVHash::BranchArityMinus1>>,
 }
 
 impl<KVHash> KVMerkleProof<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
- {
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
+{
     pub fn check(&self, key: KVHash::Key, root: KVHash::Digest) -> Result<bool, KVHash::Digest> {
         let mut running_hash = self.terminal_node.value();
 
@@ -261,7 +274,10 @@ where
             let mut sibs_vec: Vec<_> = sibs.to_vec();
             running_hash = {
                 sibs_vec.insert(sib_position as usize, running_hash);
-                let sibs_arr: GenericArray<KVHash::Digest,<KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output> = GenericArray::from_exact_iter(sibs_vec).unwrap();
+                let sibs_arr: GenericArray<
+                    KVHash::Digest,
+                    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output,
+                > = GenericArray::from_exact_iter(sibs_vec).unwrap();
                 KVHash::hash_branch(&sibs_arr)
             };
         }
@@ -269,10 +285,7 @@ where
         if running_hash == root {
             Ok(match &self.terminal_node {
                 KVMerkleTerminalNode::EmptySubtree {} => false,
-                KVMerkleTerminalNode::Leaf {
-                    key: leaf_key, 
-                    ..
-                } => (leaf_key == &key),
+                KVMerkleTerminalNode::Leaf { key: leaf_key, .. } => (leaf_key == &key),
             })
         } else {
             Err(running_hash)
@@ -283,9 +296,9 @@ where
 impl<KVHash> KVMerkleTree<KVHash>
 where
     KVHash: KVTreeHash + Clone + Copy,
-    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
-
- {
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
+{
     pub fn sparse(root: KVHash::Digest) -> Self {
         Self::ForgottenSubtree { digest: root }
     }
@@ -311,8 +324,14 @@ where
         for sib in key_bits {
             match end_branch {
                 Branch { children, .. } => {
-                    let mut children_l: Vec<_> = children[0..sib as usize].into_iter().map(|d| d.hash()).collect();
-                    let mut children_r: Vec<_> = children[sib as usize + 1 ..].into_iter().map(|d| d.hash()).collect();
+                    let mut children_l: Vec<_> = children[0..sib as usize]
+                        .into_iter()
+                        .map(|d| d.hash())
+                        .collect();
+                    let mut children_r: Vec<_> = children[sib as usize + 1..]
+                        .into_iter()
+                        .map(|d| d.hash())
+                        .collect();
                     children_l.append(&mut children_r);
                     let all_children = GenericArray::from_iter(children_l.into_iter());
                     path.push(all_children);
@@ -377,12 +396,14 @@ where
                 }
                 Branch { children, .. } => {
                     //KALEY: is clone ok here?
-                    let target = children[pos as usize];
+                    let target = children[pos as usize].clone();
                     end_branch = target;
                     children
                 }
 
-                Leaf { height, key, value, .. } => {
+                Leaf {
+                    height, key, value, ..
+                } => {
                     debug_assert_eq!(height, end_height);
                     // Figure out if this leaf is down the same tree or if it's a sibling
                     let leaf_pos = {
@@ -393,15 +414,28 @@ where
 
                     let new_leaf = Self::new_leaf(height - 1, key, value);
                     let (new_end_branch, new_sibs) = if leaf_pos == pos {
-                        let mut new_branches = vec![&EmptySubtree; <KVHash::BranchArityMinus1>::to_usize()+1];
+                        let mut new_branches =
+                            vec![&EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
                         //KALEY: clone question
                         new_branches[pos as usize] = &new_leaf;
-                        (EmptySubtree, new_branches.into_iter().map(|x| x.clone()).collect::<Vec<_>>())
+                        (
+                            EmptySubtree,
+                            new_branches
+                                .into_iter()
+                                .map(|x| x.clone())
+                                .collect::<Vec<_>>(),
+                        )
                     } else {
-                        (new_leaf, vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize()+1])
+                        (
+                            new_leaf,
+                            vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1],
+                        )
                     };
                     end_branch = new_end_branch;
-                    let sibs_arr: GenericArray<KVMerkleTree<KVHash>,<KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output> = GenericArray::from_exact_iter(new_sibs).unwrap();
+                    let sibs_arr: GenericArray<
+                        KVMerkleTree<KVHash>,
+                        <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output,
+                    > = GenericArray::from_exact_iter(new_sibs).unwrap();
                     Box::new(sibs_arr)
                 }
             };
@@ -490,16 +524,26 @@ where
                         key: leaf_key,
                         value: leaf_value,
                     },
-                    //for each sibling vector, remove the target 
+                    //for each sibling vector, remove the target
                     //and iterate through remaining elements and get their hashes, then reverse
                     path: {
                         let mut path_vec = vec![];
-                        for (pos, sibs) in siblings {
-                            path_vec.push(sibs.into_iter().enumerate().filter_map(|(i,dig)|if i != pos as usize { Some(dig.hash()) } else { None }).collect());
+                        for (pos, sibs) in siblings.clone() {
+                            path_vec.push(
+                                sibs.into_iter()
+                                    .enumerate()
+                                    .filter_map(|(i, dig)| {
+                                        if i != pos as usize {
+                                            Some(dig.hash())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect(),
+                            );
                         }
                         path_vec.into_iter().rev().collect()
-                    }
-                    
+                    },
                 });
                 end_branch = ForgottenSubtree {
                     digest: end_branch.hash(),
@@ -508,16 +552,22 @@ where
         }
 
         siblings.reverse();
-        for (pos, sibs) in siblings {
+        for (pos, mut sibs) in siblings.clone() {
             sibs[pos as usize] = end_branch;
             let mut all_forgotten = true;
-            for s in sibs.into_iter() {
-                match s { 
+            for s in sibs.clone().into_iter() {
+                match s {
                     ForgottenSubtree { .. } => (),
                     _ => all_forgotten = false,
                 };
+            }
+            end_branch = if all_forgotten {
+                ForgottenSubtree {
+                    digest: Self::new_branch(*sibs.clone()).hash(),
+                }
+            } else {
+                Self::new_branch(*sibs.clone())
             };
-            end_branch = if all_forgotten {ForgottenSubtree { digest: Self::new_branch(*sibs).hash()}} else {Self::new_branch(*sibs)};
         }
         *self = end_branch;
 
@@ -530,8 +580,8 @@ where
         proof: KVMerkleProof<KVHash>,
     ) -> Result<(), KVHash::Digest> {
         // Check the proof before we do anything. After checking, we can
-        // safely assume that all the values along the path match. This first 
-        //check can be removed as an optimization opportunity if we really need 
+        // safely assume that all the values along the path match. This first
+        //check can be removed as an optimization opportunity if we really need
         //to, but keeping it in is defensive programming
         let key_in_set = proof.check(key, self.hash())?;
 
@@ -547,20 +597,18 @@ where
             let mut ret = vec![];
             ret.reserve(proof.path.len() + 1);
 
-            for (sib, sib_hashes) in
-                key_bit_vec.iter().rev().zip(proof.path.iter().rev()).rev()
-            {
+            for (sib, sib_hashes) in key_bit_vec.iter().rev().zip(proof.path.iter().rev()).rev() {
                 let mut sibs_vec: Vec<_> = sib_hashes.to_vec();
-                
+
                 sibs_vec.insert(*sib as usize, running_hash);
 
                 ret.push((running_hash, sibs_vec));
                 let mut children = vec![];
                 for branch in sib_hashes {
                     children.push(ForgottenSubtree { digest: *branch })
-                };
-                running_hash = Self::new_branch(GenericArray::from_iter(children))
-                .hash();
+                }
+                running_hash =
+                    Self::new_branch(GenericArray::from_exact_iter(children).unwrap()).hash();
             }
 
             ret.reverse();
@@ -574,14 +622,16 @@ where
                 ForgottenSubtree { .. } => {
                     end_branch = ForgottenSubtree { digest: node_hash };
                     let mut sib_branches = vec![];
-                    sib_hashes.iter().map(|s| sib_branches.push(ForgottenSubtree { digest: *s }));
+                    for s in sib_hashes.iter() {
+                        sib_branches.push(ForgottenSubtree { digest: *s });
+                    }
                     Box::new(GenericArray::from_iter(sib_branches))
                 }
                 EmptySubtree => {
                     unreachable!();
                 } // TODO: is this unreachable?
                 Branch { children, .. } => {
-                    end_branch = children[pos as usize];
+                    end_branch = children[pos as usize].clone();
                     children
                 }
                 Leaf {
@@ -593,7 +643,8 @@ where
                     assert!(!key_in_set);
                     end_branch = EmptySubtree;
                     //KALEY: this seems...... not entirely correct
-                    let mut sib_branches = vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize()+1];                
+                    let mut sib_branches =
+                        vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
                     sib_branches[pos as usize] = Self::new_leaf(height - 1, leaf_key, leaf_value);
                     Box::new(GenericArray::from_iter(sib_branches))
                 }
@@ -612,14 +663,16 @@ where
                         EmptySubtree
                     }
 
-                    KVMerkleTerminalNode::Leaf { height, key, value } => Self::new_leaf(height, key, value),
+                    KVMerkleTerminalNode::Leaf { height, key, value } => {
+                        Self::new_leaf(height, key, value)
+                    }
                 }
             }
             _ => end_branch,
         };
 
         siblings.reverse();
-        for (pos, sibs) in siblings {
+        for (pos, mut sibs) in siblings {
             sibs[pos as usize] = end_branch;
             end_branch = Self::new_branch(*sibs);
         }
@@ -629,28 +682,28 @@ where
     }
 }
 
-pub fn set_merkle_lw_multi_insert<KVHash,Arity>(
+pub fn set_merkle_lw_multi_insert<KVHash, Arity>(
     inserts: Vec<(KVHash::Key, KVHash::Value, KVMerkleProof<KVHash>)>,
     root: KVHash::Digest,
-) -> Result<(KVHash::Digest, Vec<KVMerkleProof<KVHash>>), KVHash::Digest> 
+) -> Result<(KVHash::Digest, Vec<KVMerkleProof<KVHash>>), KVHash::Digest>
 where
-   KVHash: KVTreeHash + Clone + Copy,
-   <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
- {
+    KVHash: KVTreeHash + Clone + Copy,
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
+{
     let mut kvs = vec![];
     let mut s = KVMerkleTree::ForgottenSubtree { digest: root };
     for (k, v, proof) in inserts {
         s.remember(k, proof)?;
-        kvs.push((k,v));
+        kvs.push((k, v));
     }
-    for (k,v) in kvs.iter() {
-        s.insert(*k,*v).unwrap();
+    for (k, v) in kvs.iter() {
+        s.insert(*k, *v).unwrap();
     }
     Ok((
         s.hash(),
-        kvs
-            .into_iter()
-            .map(|(k,_)| s.lookup(k).unwrap().1)
+        kvs.into_iter()
+            .map(|(k, _)| s.lookup(k).unwrap().1)
             .collect(),
     ))
 }
@@ -658,11 +711,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jf_cap::structs::Nullifier;
     use quickcheck::QuickCheck;
     use rand_chacha::rand_core::SeedableRng;
     use rand_chacha::ChaChaRng;
     use std::time::Instant; //????/
-    use jf_cap::structs::Nullifier;
 
     #[test]
     fn test_set_merkle_speed() {
@@ -682,9 +735,7 @@ mod tests {
                     terminal_node: KVMerkleTerminalNode::EmptySubtree,
                     path: pf,
                 };
-                let root = pf
-                    .check(elem, &KVMerkleTree::default().hash())
-                    .unwrap_err();
+                let root = pf.check(elem, &KVMerkleTree::default().hash()).unwrap_err();
                 (elem, pf, root)
             })
             .collect::<Vec<_>>();
@@ -720,10 +771,10 @@ mod tests {
             let elem = *elem;
             hset.insert(u);
             let (in_set, pf) = t.lookup(elem).unwrap();
-            t.insert(elem,elem);
+            t.insert(elem, elem);
             assert_eq!(pf.check(elem, &lw_t.hash()).unwrap(), in_set);
             lw_t.remember(elem, pf).unwrap();
-            lw_t.insert(elem,elem).unwrap();
+            lw_t.insert(elem, elem).unwrap();
             let (in_new_lw_t, new_lw_pf) = lw_t.lookup(elem).unwrap();
             assert!(in_new_lw_t);
 
