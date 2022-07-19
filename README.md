@@ -50,7 +50,7 @@ Use at your own risk.
 
 ## Obtaining the source code
 
-    git clone git@github.com:EspressoSystems/cape.git
+    git clone git@github.com:EspressoSystems/espresso.git
 
 # Documentation
 
