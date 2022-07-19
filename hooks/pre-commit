@@ -13,5 +13,5 @@ GIT_ROOT="$(git rev-parse --show-toplevel)"
 pushd $GIT_ROOT >/dev/null
 cargo sort -g -w -c
 cargo fmt --all -- --check
-cargo clippy --workspace
+cargo clippy --workspace -- -D clippy::dbg-macro
 popd >/dev/null
