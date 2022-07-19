@@ -537,7 +537,6 @@ impl SetMerkleTree {
 
         let mut siblings = vec![];
         let mut end_branch = mem::replace(self, EmptySubtree);
-        dbg!(&end_branch);
 
         let path_hashes = {
             let mut running_hash = proof.terminal_node.value();
