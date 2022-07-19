@@ -21,6 +21,7 @@ use ark_serialize::*;
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
+use dirs::data_local_dir;
 use hotshot::{
     traits::implementations::{AtomicStorage, WNetwork},
     types::{Message, SignatureKey},
@@ -37,6 +38,7 @@ use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
+use std::env;
 use std::io::Read;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -296,15 +298,12 @@ fn default_web_path() -> PathBuf {
 
 /// Returns the default directory to store persistence files.
 fn default_store_path(node_id: u64) -> PathBuf {
-    const STORE_DIR: &str = "store";
-    let dir = project_path();
-    [
-        &dir,
-        Path::new(STORE_DIR),
-        Path::new(&format!("node{}", node_id)),
-    ]
-    .iter()
-    .collect()
+    let mut data_dir = data_local_dir()
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("./")));
+    data_dir.push("espresso");
+    data_dir.push("validator");
+    data_dir.push(format!("node{}", node_id));
+    data_dir
 }
 
 /// Returns the default path to the API file.
