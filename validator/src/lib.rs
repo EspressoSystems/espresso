@@ -1020,27 +1020,21 @@ pub async fn new_libp2p_network(
         config_builder.identity(identity);
     }
 
-    let mesh_params =
-        // NOTE I'm arbitrarily choosing these.
-        match node_type {
-            NetworkNodeType::Bootstrap => {
-                MeshParams {
-                    mesh_n_high: consensus_config.bootstrap_mesh_n_high,
-                    mesh_n_low: consensus_config.bootstrap_mesh_n_low,
-                    mesh_outbound_min: consensus_config.bootstrap_mesh_outbound_min,
-                    mesh_n: consensus_config.bootstrap_mesh_n,
-                }
-            }
-            NetworkNodeType::Regular => {
-                MeshParams {
-                    mesh_n_high: consensus_config.mesh_n_high,
-                    mesh_n_low: consensus_config.mesh_n_low,
-                    mesh_outbound_min: consensus_config.mesh_outbound_min,
-                    mesh_n: consensus_config.mesh_n,
-                }
-            },
-            NetworkNodeType::Conductor => unreachable!(),
-        };
+    let mesh_params = match node_type {
+        NetworkNodeType::Bootstrap => MeshParams {
+            mesh_n_high: consensus_config.bootstrap_mesh_n_high,
+            mesh_n_low: consensus_config.bootstrap_mesh_n_low,
+            mesh_outbound_min: consensus_config.bootstrap_mesh_outbound_min,
+            mesh_n: consensus_config.bootstrap_mesh_n,
+        },
+        NetworkNodeType::Regular => MeshParams {
+            mesh_n_high: consensus_config.mesh_n_high,
+            mesh_n_low: consensus_config.mesh_n_low,
+            mesh_outbound_min: consensus_config.mesh_outbound_min,
+            mesh_n: consensus_config.mesh_n,
+        },
+        NetworkNodeType::Conductor => unreachable!(),
+    };
 
     config_builder.mesh_params(Some(mesh_params));
 
