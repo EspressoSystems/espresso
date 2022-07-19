@@ -149,6 +149,14 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         // NOTE these are arbitrarily chosen.
         num_bootstrap: 4,
         replication_factor: 3,
+        bootstrap_mesh_n_high: 7,
+        bootstrap_mesh_n_low: 4,
+        bootstrap_mesh_outbound_min: 3,
+        bootstrap_mesh_n: 6,
+        mesh_n_high: 7,
+        mesh_n_low: 4,
+        mesh_outbound_min: 3,
+        mesh_n: 6,
     };
 
     println!("generating public keys");

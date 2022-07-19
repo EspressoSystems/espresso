@@ -19,8 +19,17 @@ title = "Node Configuration"
 seed = [1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8]
 
 num_bootstrap = 7
-
 replication_factor = 5
+
+mesh_n_high = 15
+mesh_n_low = 8
+mesh_outbound_min = 4
+mesh_n = 12
+
+bootstrap_mesh_n_high = 50
+bootstrap_mesh_n_low = 10
+bootstrap_mesh_outbound_min = 5
+bootstrap_mesh_n = 15
 
 # Node information
 [[nodes]]
