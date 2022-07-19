@@ -338,19 +338,23 @@ mod test {
     use std::time::Instant;
 
     async fn automate(
+        num_nodes: u64,
         num_txn: u64,
         num_fail_nodes: u64,
         fail_after_txn: u64,
         expect_success: bool,
     ) {
         println!(
-            "Testing {} txns with {}/7 nodes failed after txn {}",
-            num_txn, num_fail_nodes, fail_after_txn
+            "Testing {} txns with {}/{} nodes failed after txn {}",
+            num_txn, num_fail_nodes, num_nodes, fail_after_txn
         );
+        let num_nodes = &num_nodes.to_string();
         let num_txn = &num_txn.to_string();
         let num_fail_nodes = &num_fail_nodes.to_string();
         let fail_after_txn = &fail_after_txn.to_string();
         let args = vec![
+            "--num-nodes",
+            num_nodes,
             "--num-txn",
             num_txn,
             "--num-fail-nodes",
@@ -375,8 +379,9 @@ mod test {
 
     #[async_std::test]
     async fn test_automation() {
-        automate(5, 1, 3, true).await;
-        automate(5, 3, 1, false).await;
+        automate(7, 5, 1, 3, true).await;
+        automate(7, 5, 3, 1, false).await;
+        automate(12, 3, 0, 0, true).await;
 
         // Disabling the following test cases to avoid exceeding the time limit.
         // automate(5, 0, 0, true).await;
