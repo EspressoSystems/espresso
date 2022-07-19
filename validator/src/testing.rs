@@ -94,7 +94,7 @@ impl TestNetwork {
         loader: &mut impl KeystoreLoader<EspressoLedger, Meta = MnemonicPasswordLogin>,
     ) -> EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin> {
         let backend = NetworkBackend::new(
-            &*UNIVERSAL_PARAM,
+            &UNIVERSAL_PARAM,
             self.query_api.clone(),
             self.address_book_api.clone(),
             self.submit_api.clone(),

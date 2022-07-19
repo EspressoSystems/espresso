@@ -24,6 +24,7 @@ use async_trait::async_trait;
 use hotshot::traits::implementations::Libp2pNetwork;
 use hotshot::traits::NetworkError;
 use hotshot::types::ed25519::{Ed25519Priv, Ed25519Pub};
+use dirs::data_local_dir;
 use hotshot::{
     traits::implementations::AtomicStorage,
     types::{Message, SignatureKey},
@@ -45,6 +46,7 @@ use serde::{Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
 use std::collections::HashSet;
+use std::env;
 use std::io::Read;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -368,15 +370,12 @@ fn default_web_path() -> PathBuf {
 
 /// Returns the default directory to store persistence files.
 fn default_store_path(node_id: u64) -> PathBuf {
-    const STORE_DIR: &str = "store";
-    let dir = project_path();
-    [
-        &dir,
-        Path::new(STORE_DIR),
-        Path::new(&format!("node{}", node_id)),
-    ]
-    .iter()
-    .collect()
+    let mut data_dir = data_local_dir()
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("./")));
+    data_dir.push("espresso");
+    data_dir.push("validator");
+    data_dir.push(format!("node{}", node_id));
+    data_dir
 }
 
 /// Returns the default path to the API file.

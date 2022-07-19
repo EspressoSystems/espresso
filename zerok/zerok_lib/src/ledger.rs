@@ -199,6 +199,6 @@ impl Ledger for EspressoLedger {
     }
 
     fn srs() -> &'static jf_cap::proof::UniversalParam {
-        &*crate::universal_params::UNIVERSAL_PARAM
+        &crate::universal_params::UNIVERSAL_PARAM
     }
 }

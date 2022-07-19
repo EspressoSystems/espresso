@@ -196,7 +196,7 @@ async fn main() {
         key_tree: KeyTree::random(&mut rng).0,
     };
     let backend = NetworkBackend::new(
-        &*UNIVERSAL_PARAM,
+        &UNIVERSAL_PARAM,
         args.esqs_url.clone(),
         args.address_book_url.clone(),
         args.validator_url.clone(),

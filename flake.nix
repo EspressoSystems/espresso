@@ -38,11 +38,11 @@
         os = (builtins.elemAt (builtins.elemAt info 3) 0);
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        stableToolchain = pkgs.rust-bin.stable."1.62.0".minimal.override {
+        nightlyToolchain = pkgs.rust-bin.nightly."2022-07-17".minimal.override {
           extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
         };
-        stableMuslRustToolchain =
-          pkgs.rust-bin.stable."1.62.0".minimal.override {
+        nightlyMuslRustToolchain =
+          pkgs.rust-bin.nightly."2022-07-17".minimal.override {
             extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
             targets = [ "${arch}-unknown-${os}-musl" ];
           };
@@ -176,10 +176,10 @@
               nixpkgs-fmt
               git
               mdbook # make-doc, documentation generation
-              stableToolchain
+              nightlyToolchain
             ] ++ myPython ++ rustDeps;
 
-          RUST_SRC_PATH = "${stableToolchain}/lib/rustlib/src/rust/library";
+          RUST_SRC_PATH = "${nightlyToolchain}/lib/rustlib/src/rust/library";
           RUST_BACKTRACE = 1;
           RUST_LOG = "info";
         };
@@ -187,7 +187,7 @@
           perfShell = pkgs.mkShell {
             shellHook = shellHook;
             buildInputs = with pkgs;
-              [ cargo-llvm-cov stableToolchain ] ++ rustDeps;
+              [ cargo-llvm-cov nightlyToolchain ] ++ rustDeps;
           };
 
           staticShell = pkgs.mkShell {
@@ -203,7 +203,7 @@
             OPENSSL_LIB_DIR = "${opensslMusl.dev}/lib/";
             CARGO_BUILD_TARGET = "${arch}-unknown-${os}-musl";
             buildInputs = with pkgs;
-              [ stableMuslRustToolchain fd cmake ];
+              [ nightlyMuslRustToolchain fd cmake ];
             meta.broken = if "${os}" == "darwin" then true else false;
           };
         };
