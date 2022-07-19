@@ -11,9 +11,10 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::state::{
-    state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction,
-    ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
+    state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction, SetMerkleProof,
+    SetMerkleTree, ValidationError, ValidatorState,
 };
+use commit::{Commitment, Committable};
 use jf_cap::{
     keys::{ViewerKeyPair, ViewerPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
@@ -61,7 +62,7 @@ impl traits::NullifierSet for SetMerkleTree {
 
 impl traits::Transaction for ElaboratedTransaction {
     type NullifierSet = SetMerkleTree;
-    type Hash = ElaboratedTransactionHash;
+    type Hash = Commitment<TransactionNote>;
     type Kind = cap::TransactionKind;
 
     fn cap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
@@ -97,7 +98,12 @@ impl traits::Transaction for ElaboratedTransaction {
     }
 
     fn hash(&self) -> Self::Hash {
-        self.etxn_hash()
+        // We only commit to the transaction note, not to the nullifier proofs. The nullifier proofs
+        // are auxiliary information meant to aid in validation. They do not contribute to the
+        // fundamental identity of the transaction (i.e. its effect on the ledger state) and they
+        // may even change without changing the identity of the transaction; for example, when the
+        // EsQS updates nullifier proofs to the latest nullifier set root hash.
+        self.txn.commit()
     }
 
     fn kind(&self) -> Self::Kind {
@@ -168,7 +174,9 @@ impl traits::Validator for ValidatorState {
     }
 
     fn validate_and_apply(&mut self, block: Self::Block) -> Result<Vec<u64>, ValidationError> {
-        self.validate_and_apply(self.now() + 1, block.block, block.proofs)
+        Ok(self
+            .validate_and_apply(self.now() + 1, block.block, block.proofs)?
+            .0)
     }
 }
 
@@ -183,7 +191,7 @@ impl Ledger for EspressoLedger {
     }
 
     fn record_root_history() -> usize {
-        ValidatorState::RECORD_ROOT_HISTORY_SIZE
+        ValidatorState::HISTORY_SIZE
     }
 
     fn merkle_height() -> u8 {

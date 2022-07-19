@@ -290,15 +290,15 @@ async fn main() {
         .assets()
         .await
         .into_iter()
-        .find(|info| info.mint_info.is_some())
+        .find(|info| info.mint_info().is_some())
     {
         Some(info) => {
             event!(
                 Level::INFO,
                 "found saved keystore with custom asset type {}",
-                info.definition.code
+                info.code()
             );
-            info.definition
+            info.definition().clone()
         }
         None => {
             let my_asset = keystore
@@ -373,8 +373,8 @@ async fn main() {
         // Get a list of assets for which we have a non-zero balance.
         let mut asset_balances = vec![];
         for info in keystore.assets().await {
-            if keystore.balance(&info.definition.code).await > 0u64.into() {
-                asset_balances.push(info.definition.code);
+            if keystore.balance(&info.code()).await > 0u64.into() {
+                asset_balances.push(info.code());
             }
         }
         // Randomly choose an asset type for the transfer.

@@ -52,7 +52,10 @@ use zerok_lib::state::BlockCommitment;
 use zerok_lib::{
     ledger::EspressoLedger,
     set_merkle_tree::*,
-    state::{ElaboratedBlock, ElaboratedTransaction, ValidationError, ValidatorState},
+    state::{
+        ElaboratedBlock, ElaboratedTransaction, TransactionCommitment, ValidationError,
+        ValidatorState,
+    },
 };
 
 pub trait ConsensusEvent {
@@ -384,7 +387,7 @@ impl FullState {
                 state,
                 qcs: _,
             } => {
-                for (block, state) in block.iter().zip(state.iter()).rev() {
+                for (mut block, state) in block.iter().cloned().zip(state.iter()).rev() {
                     // A block has been committed. Update our mirror of the ValidatorState by applying
                     // the new block, and generate a Commit event.
 
@@ -400,7 +403,7 @@ impl FullState {
                             panic!("state is out of sync with validator")
                         }
 
-                        Ok(mut uids) => {
+                        Ok((mut uids, nullifier_proofs)) => {
                             let records_from = if uids.is_empty() {
                                 self.validator.record_merkle_commitment.num_leaves
                             } else {
@@ -410,9 +413,9 @@ impl FullState {
                             assert!(hist_index > 0);
                             let block_index = hist_index - 1;
 
-                            self.full_persisted.store_for_commit(block, state);
+                            self.full_persisted.store_for_commit(&block, state);
                             self.past_nullifiers
-                                .insert(self.validator.nullifiers_root, hist_index);
+                                .insert(self.validator.nullifiers_root(), hist_index);
                             self.block_hashes
                                 .insert(Vec::from(block.hash().as_ref()), block_index);
                             let block_uids = block
@@ -446,15 +449,17 @@ impl FullState {
                                     self.records_pending_memos.push(o.to_field_element());
                                 }
 
-                                let hash = ElaboratedTransaction {
-                                    txn: txn.clone(),
-                                    proofs: proofs.clone(),
-                                }
-                                .etxn_hash();
+                                let hash = TransactionCommitment(
+                                    ElaboratedTransaction {
+                                        txn: txn.clone(),
+                                        proofs: proofs.clone(),
+                                    }
+                                    .hash(),
+                                );
                                 txn_hashes.push(hash);
                             }
                             self.num_txns += block.block.0.len();
-                            assert_eq!(nullifiers.hash(), self.validator.nullifiers_root);
+                            assert_eq!(nullifiers.hash(), self.validator.nullifiers_root());
                             assert_eq!(
                                 self.records_pending_memos.commitment(),
                                 self.validator.record_merkle_commitment
@@ -467,7 +472,7 @@ impl FullState {
                                 event_index = catchup_store.event_count() as u64;
                                 if let Err(e) =
                                     catchup_store.append_events(&mut vec![LedgerEvent::Commit {
-                                        block: (*block).clone(),
+                                        block: block.clone(),
                                         block_id: block_index as u64,
                                         state_comm: self.validator.commit(),
                                     }])
@@ -509,9 +514,23 @@ impl FullState {
                                 }
                             }
 
+                            // Update the nullifier proofs in the block so that clients do not have
+                            // to worry about out of date nullifier proofs.
+                            block.proofs = block
+                                .block
+                                .0
+                                .iter()
+                                .map(|txn| {
+                                    txn.nullifiers()
+                                        .into_iter()
+                                        .map(|n| nullifier_proofs.contains(n).unwrap().1)
+                                        .collect()
+                                })
+                                .collect();
+
                             // Notify subscribers of the new block.
                             self.send_event(LedgerEvent::Commit {
-                                block: (*block).clone(),
+                                block,
                                 block_id: block_index as u64,
                                 state_comm: self.validator.commit(),
                             });
@@ -1167,7 +1186,7 @@ mod tests {
         let mut history = vec![];
         for (i, block) in txs.into_iter().enumerate() {
             assert_eq!(state.owners.len(), state.memos.len());
-            assert_eq!(state.validator.nullifiers_root, state.nullifiers.hash());
+            assert_eq!(state.validator.nullifiers_root(), state.nullifiers.hash());
             MultiXfrTestState::update_timer(&mut state.outer_timer, |_| {
                 println!(
                     "Block {}/{}, {} candidate txns",
@@ -1179,7 +1198,13 @@ mod tests {
 
             // let block = block.into_iter().take(5).collect::<Vec<_>>();
             let txns = state
-                .generate_transactions(block, TxnPrintInfo::new_no_time(i, num_txs))
+                .generate_transactions(
+                    block
+                        .into_iter()
+                        .map(|tx| (tx.0, tx.1, tx.2, tx.3, tx.4, tx.5, false))
+                        .collect(),
+                    TxnPrintInfo::new_no_time(i, num_txs),
+                )
                 .unwrap();
 
             let mut generation_time: f32 = 0.0;
@@ -1338,11 +1363,11 @@ mod tests {
                         for txn in block.block.0 {
                             for n in txn.nullifiers() {
                                 let (incl, proof) = qs
-                                    .nullifier_proof(hist_state.nullifiers_root, n)
+                                    .nullifier_proof(hist_state.nullifiers_root(), n)
                                     .await
                                     .unwrap();
                                 assert!(incl);
-                                proof.check(n, &hist_state.nullifiers_root).unwrap();
+                                proof.check(n, &hist_state.nullifiers_root()).unwrap();
                             }
                         }
                     }
@@ -1450,9 +1475,12 @@ mod tests {
 
                 // We should be able to get non-inclusion proofs for new nullifiers.
                 let n = Nullifier::random_for_test(&mut rng);
-                let (incl, proof) = qs.nullifier_proof(state.nullifiers_root, n).await.unwrap();
+                let (incl, proof) = qs
+                    .nullifier_proof(state.nullifiers_root(), n)
+                    .await
+                    .unwrap();
                 assert!(!incl);
-                proof.check(n, &state.nullifiers_root).unwrap();
+                proof.check(n, &state.nullifiers_root()).unwrap();
             }
         });
     }

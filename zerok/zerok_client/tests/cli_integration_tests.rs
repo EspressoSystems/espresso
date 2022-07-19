@@ -51,7 +51,7 @@ fn wait_for_native_balance(
     account: &str,
 ) -> Result<usize, String> {
     loop {
-        t.command(keystore, "balance 0")?
+        t.command(keystore, "balance $native")?
             .output(format!("${} (?P<balance>\\d+)", account))?;
         let balance = t.var("balance").unwrap().parse().unwrap();
         if balance > 0 {
@@ -77,7 +77,7 @@ fn cli_basic_info(t: &mut CliClient) -> Result<(), String> {
         .output("$addr1")?
         // `assets`
         .command(0, "assets")?
-        .output("0. (?P<native>ASSET_CODE~.*) \\(native\\)")?;
+        .output("\\d. (?P<native>ASSET_CODE~.*) \\(native\\)")?;
 
     // add keys and check that they are reported
     t.command(0, "gen_key view")?
@@ -99,14 +99,12 @@ fn cli_basic_info(t: &mut CliClient) -> Result<(), String> {
         .output("Freezing keys:")?
         .output("$freezekey")?;
 
-    // native asset info, specified two ways
-    for command in &["asset 0", "asset $native"] {
-        t.command(0, command)?
-            .output("Native $native")?
-            .output("Not viewable")?
-            .output("Not freezeable")?
-            .output("Not mintable")?;
-    }
+    // native asset info
+    t.command(0, "asset $native")?
+        .output("Native $native")?
+        .output("Not viewable")?
+        .output("Not freezeable")?
+        .output("Not mintable")?;
 
     Ok(())
 }
@@ -115,12 +113,12 @@ fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
     let balance = wait_for_starting_balance(t)?;
     t
         // Get the balance of both keystores.
-        .command(0, "balance 0")?
+        .command(0, "balance $native")?
         .output(format!("Total {}", balance))?
-        .command(1, "balance 0")?
+        .command(1, "balance $native")?
         .output("Total 0")?
         // Transfer some native coins from the primary keystore to the secondary.
-        .command(0, "transfer 0 $default_pubkey1 500 1")?
+        .command(0, "transfer $native $default_pubkey1 500 1")?
         .output("(?P<txn>TXN~.*)")?
         // Wait for the transaction to complete in both keystores (just because one keystore has
         // received and processed the completed transaction doesn't mean the other has).
@@ -128,20 +126,20 @@ fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
         .output("accepted")?
         .command(1, "wait $txn")?
         .output("accepted")?
-        .command(0, "balance 0")?
+        .command(0, "balance $native")?
         .output(format!("Total {}", balance - 501))?
-        .command(1, "balance 0")?
+        .command(1, "balance $native")?
         .output("Total 500")?
         // Transfer part of the money back
-        .command(1, "transfer 0 $default_pubkey0 200 2")?
+        .command(1, "transfer $native $default_pubkey0 200 2")?
         .output("(?P<txn>TXN~.*)")?
         .command(0, "wait $txn")?
         .output("accepted")?
         .command(1, "wait $txn")?
         .output("accepted")?
-        .command(1, "balance 0")?
+        .command(1, "balance $native")?
         .output("Total 298")?
-        .command(0, "balance 0")?
+        .command(0, "balance $native")?
         .output(format!("Total {}", balance - 301))?;
     Ok(())
 }
@@ -152,12 +150,12 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         // Define a new asset and mint some for the receiver.
         .command(0, "create_asset asset1")?
         .output("(?P<asset1>ASSET_CODE~.*)")?
-        .command(0, "asset 1")?
+        .command(0, "asset $asset1")?
         .output("asset1 $asset1")?
         .output("Not viewable")?
         .output("Not freezeable")?
         .output("Minter: me")?
-        .command(0, "mint 1 $default_pubkey1 100 1")?
+        .command(0, "mint $asset1 $default_pubkey1 100 1")?
         .output("(?P<txn>TXN~.*)")?
         .command(0, "wait $txn")?
         .output("accepted")?
@@ -166,12 +164,12 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         // Check on the receiving end that
         //  (1) we have learned about the new asset after receiving it
         //  (2) we have a balance of it
-        .command(1, "asset 1")?
+        .command(1, "asset $asset1")?
         .output("Asset $asset1")? // Receiver doesn't know the description "asset1"
         .output("Not viewable")?
         .output("Not freezeable")?
         .output("Minter: unknown")? // Receiver doesn't know who minted the asset for them
-        .command(1, "balance 1")?
+        .command(1, "balance $asset1")?
         .output("$default_addr1 100")?
         // Do it again, this time specifiying view and freeze keys
         .command(0, "gen_key viewing")?
@@ -270,6 +268,8 @@ fn recover_from_mnemonic() {
             .output("Retype password")?
             .command(0, "password")?
             .output("Type 'help' for a list of commands.")?
+            .command(0, "assets")?
+            .output("\\d. (?P<native>ASSET_CODE~.*) \\(native\\)")?
             .command(0, format!("load_key sending {}", key_path))?
             .output("(?P<default_addr0>ADDR~.*)")?
             .output("(?P<default_pubkey0>USERPUBKEY~.*)")?;
@@ -280,8 +280,8 @@ fn recover_from_mnemonic() {
             .output("(?P<pubkey>USERPUBKEY~.*)")?
             .output("(?P<addr>ADDR~.*)")?
             // Give the key some assets
-            .command(0, "transfer 0 $pubkey 100 1 wait=true")?
-            .command(0, "balance 0")?
+            .command(0, "transfer $native $pubkey 100 1 wait=true")?
+            .command(0, "balance $native")?
             .output("$addr 100")?
             // Create a new keystore with the same mnemonic and check that we get the balance.
             .open(1)?

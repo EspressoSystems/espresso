@@ -232,7 +232,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
                 transactions: Default::default(),
             },
             key_state: Default::default(),
-            assets: Default::default(),
             viewing_accounts: Default::default(),
             freezing_accounts: Default::default(),
             sending_accounts: Default::default(),
