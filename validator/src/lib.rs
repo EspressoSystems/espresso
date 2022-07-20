@@ -21,10 +21,10 @@ use ark_serialize::*;
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
+use dirs::data_local_dir;
 use hotshot::traits::implementations::Libp2pNetwork;
 use hotshot::traits::NetworkError;
 use hotshot::types::ed25519::{Ed25519Priv, Ed25519Pub};
-use dirs::data_local_dir;
 use hotshot::{
     traits::implementations::AtomicStorage,
     types::{Message, SignatureKey},
