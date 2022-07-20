@@ -133,7 +133,7 @@ impl Drop for TestNetwork {
 pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKey) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
-    let nodes = iter::from_fn(|| {
+    let bootstrap_nodes = iter::from_fn(|| {
         let port = pick_unused_port().unwrap();
         Some(
             Url::parse(&format!("http://localhost:{}", port))
@@ -145,7 +145,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     .collect();
     let config = ConsensusConfig {
         seed: seed.into(),
-        nodes,
+        bootstrap_nodes,
         // NOTE these are arbitrarily chosen.
         num_bootstrap: 4,
         replication_factor: 3,
@@ -157,6 +157,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         mesh_n_low: 4,
         mesh_outbound_min: 3,
         mesh_n: 6,
+        base_port: 9000,
     };
 
     println!("generating public keys");

@@ -281,7 +281,8 @@ struct ConsensusConfigFile {
     mesh_n_low: usize,
     mesh_outbound_min: usize,
     mesh_n: usize,
-    nodes: Vec<ConsensusConfigFileNode>,
+    base_port: usize,
+    bootstrap_nodes: Vec<ConsensusConfigFileNode>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -298,7 +299,8 @@ pub struct ConsensusConfig {
     pub mesh_n_low: usize,
     pub mesh_outbound_min: usize,
     pub mesh_n: usize,
-    pub nodes: Vec<NodeConfig>,
+    pub base_port: usize,
+    pub bootstrap_nodes: Vec<NodeConfig>,
 }
 
 impl ConsensusConfig {
@@ -319,7 +321,11 @@ impl From<ConsensusConfigFile> for ConsensusConfig {
         Self {
             seed: cfg.seed.into(),
             num_bootstrap: cfg.num_bootstrap,
-            nodes: cfg.nodes.into_iter().map(NodeConfig::from).collect(),
+            bootstrap_nodes: cfg
+                .bootstrap_nodes
+                .into_iter()
+                .map(NodeConfig::from)
+                .collect(),
             replication_factor: cfg.replication_factor,
             bootstrap_mesh_n_high: cfg.bootstrap_mesh_n_high,
             bootstrap_mesh_n_low: cfg.bootstrap_mesh_n_low,
@@ -329,6 +335,7 @@ impl From<ConsensusConfigFile> for ConsensusConfig {
             mesh_n_low: cfg.mesh_n_low,
             mesh_outbound_min: cfg.mesh_outbound_min,
             mesh_n: cfg.mesh_n,
+            base_port: cfg.base_port,
         }
     }
 }
@@ -338,8 +345,8 @@ impl From<ConsensusConfig> for ConsensusConfigFile {
         Self {
             seed: cfg.seed.into(),
             num_bootstrap: cfg.num_bootstrap,
-            nodes: cfg
-                .nodes
+            bootstrap_nodes: cfg
+                .bootstrap_nodes
                 .into_iter()
                 .map(ConsensusConfigFileNode::from)
                 .collect(),
@@ -352,6 +359,7 @@ impl From<ConsensusConfig> for ConsensusConfigFile {
             mesh_n_low: cfg.mesh_n_low,
             mesh_outbound_min: cfg.mesh_outbound_min,
             mesh_n: cfg.mesh_n,
+            base_port: cfg.base_port,
         }
     }
 }
@@ -970,12 +978,12 @@ pub fn init_web_server(
     Ok(join_handle)
 }
 
-/// Generate a list of private and public keys for `config.nodes.len()` bootstrap keys, with a
+/// Generate a list of private and public keys for `config.bootstrap_nodes.len()` bootstrap keys, with a
 /// given `config.seed` seed.
 pub fn gen_bootstrap_keys(config: &ConsensusConfig) -> Vec<KeyPair> {
-    let mut keys = Vec::with_capacity(config.nodes.len());
+    let mut keys = Vec::with_capacity(config.bootstrap_nodes.len());
 
-    for node_id in 0..config.nodes.len() {
+    for node_id in 0..config.bootstrap_nodes.len() {
         let private = PrivKey::generated_from_seed_indexed(config.seed.0, node_id as u64);
         let public = PubKey::from_private(&private);
 
@@ -1003,7 +1011,7 @@ pub struct KeyPair {
     pub private: PrivKey,
 }
 
-/// Craate a new libp2p network.
+/// Create a new libp2p network.
 #[allow(clippy::too_many_arguments)]
 pub async fn new_libp2p_network(
     pubkey: Ed25519Pub,
@@ -1051,7 +1059,7 @@ pub async fn new_libp2p_network(
         pubkey,
         Arc::new(RwLock::new(bs)),
         consensus_config.num_bootstrap,
-        node_id as usize,
+        node_id,
     )
     .await
 }
@@ -1082,7 +1090,8 @@ pub async fn init_validator(
         .map(|(idx, kp)| {
             let multiaddr = parse_url(&format!(
                 "{}:{}",
-                config.nodes[idx].host, config.nodes[idx].port
+                config.bootstrap_nodes[idx].host,
+                config.base_port + idx
             ))
             .unwrap();
             (libp2p::identity::Keypair::Ed25519(kp.into()), multiaddr)
@@ -1113,14 +1122,14 @@ pub async fn init_validator(
     };
 
     // hotshot requires this threshold to be at least 2/3rd of the nodes for safety guarantee reasons
-    let threshold = ((config.nodes.len() as u64 * 2) / 3) + 1;
+    let threshold = ((pub_keys.len() as u64 * 2) / 3) + 1;
 
     let own_network = new_libp2p_network(
         pub_keys[own_id].clone(),
         to_connect_addrs,
-        own_id as usize,
+        own_id,
         node_type,
-        parse_url(&format!("0.0.0.0:{:?}", config.nodes[own_id].port)).unwrap(),
+        parse_url(&format!("0.0.0.0:{:?}", config.base_port + own_id)).unwrap(),
         own_identity,
         config,
     )

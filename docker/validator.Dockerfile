@@ -45,7 +45,7 @@ EXPOSE $ESPRESSO_VALIDATOR_PORT
 
 # Additional configuration not specified here because it must be set per validator:
 # ESPRESSO_VALIDATOR_ID
-# ESPRESSO_VALIDATOR_NODES
+# ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
 
 HEALTHCHECK CMD curl -f 127.0.0.1:$ESPRESSO_VALIDATOR_PORT/healthcheck || exit 1
 

@@ -48,9 +48,13 @@ struct Options {
     #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
     pub secret_key_seed: Option<SecretKeySeed>,
 
-    /// Override `nodes` from the node configuration file.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_NODES", value_delimiter = ",")]
-    pub nodes: Option<Vec<Url>>,
+    /// Override `bootstrap_nodes` from the node configuration file.
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_NODES",
+        value_delimiter = ","
+    )]
+    pub bootstrap_nodes: Option<Vec<Url>>,
 
     /// Id of the current node.
     ///
@@ -297,8 +301,8 @@ async fn main() -> Result<(), std::io::Error> {
     if let Some(secret_key_seed) = &options.secret_key_seed {
         config.seed = *secret_key_seed;
     }
-    if let Some(nodes) = &options.nodes {
-        config.nodes = nodes.iter().cloned().map(NodeConfig::from).collect();
+    if let Some(nodes) = &options.bootstrap_nodes {
+        config.bootstrap_nodes = nodes.iter().cloned().map(NodeConfig::from).collect();
     }
 
     let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
