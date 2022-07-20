@@ -149,7 +149,7 @@ pub struct NodeOpt {
     #[structopt(
         long = "min-propose-time",
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
-        default_value = "1"
+        default_value = "0"
     )]
     pub min_propose_time_secs: u64,
 
