@@ -1026,6 +1026,8 @@ pub async fn new_libp2p_network(
     // NOTE we may need to change this as we scale
     config_builder
         .replication_factor(NonZeroUsize::new(consensus_config.replication_factor).unwrap());
+    // `to_connect_addrs` is an empty field that will be removed. We will pass `bs` into
+    // `Libp2pNetwork::new` as the addresses to connect.
     config_builder.to_connect_addrs(HashSet::new());
     config_builder.node_type(node_type);
     config_builder.bound_addr(Some(bound_addr));
