@@ -383,9 +383,9 @@ mod test {
 
     #[async_std::test]
     async fn test_automation() {
-        // automate(7, 5, 1, 3, true).await;
-        // automate(7, 5, 3, 1, false).await;
-        automate(7, 3, 0, 0, true).await;
+        automate(7, 5, 1, 3, true).await;
+        automate(7, 5, 3, 1, false).await;
+        automate(11, 2, 0, 0, true).await;
 
         // Disabling the following test cases to avoid exceeding the time limit.
         // automate(5, 0, 0, true).await;
