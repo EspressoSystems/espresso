@@ -936,7 +936,7 @@ mod test {
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
         let mut backoff = Duration::from_millis(100);
-        for _ in 0..10 {
+        for _ in 0..13 {
             if f().await {
                 return;
             }
