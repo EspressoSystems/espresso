@@ -13,6 +13,7 @@
 
 use async_std::task::{block_on, sleep, spawn_blocking};
 use escargot::CargoBuild;
+use espresso_validator::MINIMUM_NODES;
 use espresso_validator::{testing::AddressBook, ConsensusConfig};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
@@ -252,6 +253,12 @@ impl CliClient {
         ports: &[(u16, u16)],
     ) -> Result<Vec<Validator>, String> {
         let (hotshot_ports, server_ports): (Vec<_>, Vec<_>) = ports.iter().cloned().unzip();
+        assert!(
+            ports.len() >= MINIMUM_NODES,
+            "At least {} nodes are needed for consensus. We only have {} nodes",
+            MINIMUM_NODES,
+            ports.len()
+        );
         let config = ConsensusConfig {
             seed: [
                 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4,
@@ -266,6 +273,17 @@ impl CliClient {
                         .into()
                 })
                 .collect(),
+            // NOTE these are arbitrarily chosen.
+            num_bootstrap: 4,
+            replication_factor: ports.len() - 2,
+            bootstrap_mesh_n_high: 50,
+            bootstrap_mesh_n_low: 10,
+            bootstrap_mesh_outbound_min: 5,
+            bootstrap_mesh_n: 15,
+            mesh_n_high: 15,
+            mesh_n_low: 8,
+            mesh_outbound_min: 4,
+            mesh_n: 12,
         };
         let mut config_file = tmp_dir.to_path_buf();
         config_file.push("node-config.toml");
