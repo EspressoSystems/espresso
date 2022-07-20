@@ -27,7 +27,10 @@
   inputs.pre-commit-hooks.inputs.flake-utils.follows = "flake-utils";
   inputs.pre-commit-hooks.inputs.nixpkgs.follows = "nixpkgs";
 
-  outputs = { self, nixpkgs, flake-utils, flake-compat, rust-overlay, pre-commit-hooks, ... }:
+  inputs.fenix.url = "github:nix-community/fenix";
+  inputs.fenix.inputs.nixpkgs.follows = "nixpkgs";
+
+  outputs = { self, nixpkgs, flake-utils, flake-compat, rust-overlay, pre-commit-hooks, fenix, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         info = builtins.split "\([a-zA-Z0-9_]+\)" system;
@@ -180,6 +183,7 @@
             + self.checks.${system}.pre-commit-check.shellHook;
           buildInputs = with pkgs;
             [
+              fenix.packages.${system}.rust-analyzer
               nixWithFlakes
               nixpkgs-fmt
               git

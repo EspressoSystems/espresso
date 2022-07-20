@@ -1,4 +1,16 @@
 
+# Copyright (c) 2022 Espresso Systems (espressosys.com)
+# This file is part of the Espresso library.
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# General Public License as published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program. If not,
+# see <https://www.gnu.org/licenses/>.
+
 # TOML file for node configuration.
 
 title = "Node Configuration"
@@ -6,31 +18,44 @@ title = "Node Configuration"
 # Seed number used to generate secret key set for all nodes
 seed = [1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8]
 
+num_bootstrap = 7
+replication_factor = 5
+
+mesh_n_high = 15
+mesh_n_low = 8
+mesh_outbound_min = 4
+mesh_n = 12
+
+bootstrap_mesh_n_high = 50
+bootstrap_mesh_n_low = 10
+bootstrap_mesh_outbound_min = 5
+bootstrap_mesh_n = 15
+
 # Node information
 [[nodes]]
-ip = "localhost"
-port = 19392
+ip = "127.0.0.1"
+port = 9100
 
 [[nodes]]
-ip = "localhost"
-port = 26940
+ip = "127.0.0.1"
+port = 9101
 
 [[nodes]]
-ip = "localhost"
-port = 21396
+ip = "127.0.0.1"
+port = 9102
 
 [[nodes]]
-ip = "localhost"
-port = 14967
+ip = "127.0.0.1"
+port = 9103
 
 [[nodes]]
-ip = "localhost"
-port = 18333
+ip = "127.0.0.1"
+port = 9104
 
 [[nodes]]
-ip = "localhost"
-port = 35254
+ip = "127.0.0.1"
+port = 9105
 
 [[nodes]]
-ip = "localhost"
-port = 47196
+ip = "127.0.0.1"
+port = 9106
