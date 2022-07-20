@@ -914,7 +914,7 @@ async fn main() -> Result<(), std::io::Error> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "slow-tests"))]
 mod test {
     use super::*;
     use async_std::task::{sleep, spawn_blocking};
@@ -1179,21 +1179,18 @@ mod test {
         faucet.stop().await;
     }
 
-    #[cfg(feature = "slow-tests")]
     #[async_std::test]
     #[traced_test]
     async fn test_faucet_transfer() {
         parallel_request(1, false).await;
     }
 
-    #[cfg(feature = "slow-tests")]
     #[async_std::test]
     #[traced_test]
     async fn test_faucet_transfer_restart() {
         parallel_request(1, true).await;
     }
 
-    #[cfg(feature = "slow-tests")]
     #[async_std::test]
     #[traced_test]
     async fn test_faucet_simultaneous_transfer_restart() {

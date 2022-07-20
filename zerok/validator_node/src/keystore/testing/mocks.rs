@@ -361,10 +361,9 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
 }
 
 // Espresso-specific tests
-#[cfg(feature = "slow-tests")]
+#[cfg(all(test, feature = "slow-tests"))]
 mod espresso_keystore_tests {
     use super::*;
     use testing::generic_keystore_tests;
-
     seahorse::instantiate_generic_keystore_tests!(EspressoTest);
 }
