@@ -31,6 +31,9 @@ doc = false
 name = "faucet-shower"
 doc = false
 
+[features]
+slow-tests = []
+
 [dependencies]
 ark-std = "0.3.0"
 
