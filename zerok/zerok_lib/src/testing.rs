@@ -494,6 +494,10 @@ impl MultiXfrTestState {
 
                     let mut in1 = in1 as usize % self.owners.len();
                     let mut in2 = in2 as usize % self.owners.len();
+
+                    // NOTE: This is nearly the same as the loop below. If
+                    // you change either, change both (or refactor them
+                    // into a local closure called twice)
                     for i in (0..(self.owners.len() - in1)).rev() {
                         let memo = &self.memos[i];
                         let kix = self.owners[i];
@@ -565,8 +569,9 @@ impl MultiXfrTestState {
                         }
                     }
 
-                    // TODO; factor this into a local closure or something instead
-                    // of a pasted block
+                    // NOTE: This is nearly the same as the loop above. If
+                    // you change either, change both (or refactor them
+                    // into a local closure called twice)
                     for i in (0..(self.owners.len() - in2)).rev() {
                         if i == in1 {
                             continue;
@@ -1165,7 +1170,6 @@ pub fn crypto_rng_from_seed(seed: [u8; 32]) -> ChaChaRng {
     ChaChaRng::from_seed(seed)
 }
 
-// TODO(joe): proper Err returns
 #[cfg(test)]
 mod tests {
     use super::*;

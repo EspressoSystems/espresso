@@ -129,10 +129,22 @@
           pre-commit-check = pre-commit-hooks.lib.${system}.run {
             src = ./.;
             hooks = {
+              cargo-fmt = {
+                enable = true;
+                description = "Enforce rustfmt";
+                entry = "cargo fmt --all -- --check";
+                pass_filenames = false;
+              };
               cargo-sort = {
                 enable = true;
                 description = "Ensure Cargo.toml are sorted";
-                entry = "cargo sort -w";
+                entry = "cargo sort -g -w -c";
+                pass_filenames = false;
+              };
+              cargo-clippy = {
+                enable = true;
+                description = "Run clippy";
+                entry = "cargo clippy --workspace -- -D clippy::dbg-macro";
                 pass_filenames = false;
               };
               license-header-c-style = {

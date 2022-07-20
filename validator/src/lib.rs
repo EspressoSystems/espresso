@@ -149,7 +149,7 @@ pub struct NodeOpt {
     #[structopt(
         long = "min-propose-time",
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
-        default_value = "1"
+        default_value = "0"
     )]
     pub min_propose_time_secs: u64,
 
@@ -1062,6 +1062,59 @@ pub async fn new_libp2p_network(
         Arc::new(RwLock::new(bs)),
         consensus_config.num_bootstrap,
         node_id,
+    )
+    .await
+}
+
+/// Craate a new libp2p network.
+#[allow(clippy::too_many_arguments)]
+pub async fn new_libp2p_network(
+    pubkey: Ed25519Pub,
+    bs: Vec<(Option<PeerId>, Multiaddr)>,
+    node_id: usize,
+    node_type: NetworkNodeType,
+    bound_addr: Multiaddr,
+    identity: Option<Keypair>,
+    consensus_config: &ConsensusConfig,
+) -> Result<PLNetwork, NetworkError> {
+    let mut config_builder = NetworkNodeConfigBuilder::default();
+    // NOTE we may need to change this as we scale
+    config_builder
+        .replication_factor(NonZeroUsize::new(consensus_config.replication_factor).unwrap());
+    config_builder.to_connect_addrs(HashSet::new());
+    config_builder.node_type(node_type);
+    config_builder.bound_addr(Some(bound_addr));
+
+    if let Some(identity) = identity {
+        config_builder.identity(identity);
+    }
+
+    let mesh_params = match node_type {
+        NetworkNodeType::Bootstrap => MeshParams {
+            mesh_n_high: consensus_config.bootstrap_mesh_n_high,
+            mesh_n_low: consensus_config.bootstrap_mesh_n_low,
+            mesh_outbound_min: consensus_config.bootstrap_mesh_outbound_min,
+            mesh_n: consensus_config.bootstrap_mesh_n,
+        },
+        NetworkNodeType::Regular => MeshParams {
+            mesh_n_high: consensus_config.mesh_n_high,
+            mesh_n_low: consensus_config.mesh_n_low,
+            mesh_outbound_min: consensus_config.mesh_outbound_min,
+            mesh_n: consensus_config.mesh_n,
+        },
+        NetworkNodeType::Conductor => unreachable!(),
+    };
+
+    config_builder.mesh_params(Some(mesh_params));
+
+    let config = config_builder.build().unwrap();
+
+    Libp2pNetwork::new(
+        config,
+        pubkey,
+        Arc::new(RwLock::new(bs)),
+        consensus_config.num_bootstrap,
+        node_id as usize,
     )
     .await
 }

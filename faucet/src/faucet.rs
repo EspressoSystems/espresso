@@ -1179,6 +1179,7 @@ mod test {
         faucet.stop().await;
     }
 
+    #[cfg(feature = "slow-tests")]
     #[async_std::test]
     #[traced_test]
     async fn test_faucet_transfer() {
