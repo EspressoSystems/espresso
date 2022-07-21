@@ -316,7 +316,7 @@ async fn main() -> Result<(), std::io::Error> {
         } else {
             (GenesisState::new(options.faucet_pub_key.clone()), None)
         };
-        let keys = gen_keys(&config, options.num_nodes.expect("Missing `num-nodes`."));
+        let keys = gen_keys(&config, options.num_nodes.expect("Missing `num-nodes`"));
         let priv_key = keys[own_id].private.clone();
         let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
 

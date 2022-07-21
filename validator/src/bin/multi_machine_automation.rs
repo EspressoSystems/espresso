@@ -116,7 +116,8 @@ async fn main() {
     env::remove_var("ESPRESSO_VALIDATOR_STORE_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_WEB_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_API_PATH");
-    env::remove_var("ESPRESSO_VALIDATOR_PORT");
+    env::remove_var("ESPRESSO_VALIDATOR_QUERY_PORT");
+    env::remove_var("ESPRESSO_VALIDATOR_CONSENSUS_PORT");
 
     let mut args = vec![];
     if options.node_opt.reset_store_state {
@@ -169,7 +170,7 @@ async fn main() {
         args.push("--bootstrap-nodes");
         args.push(nodes);
     }
-    let num_nodes_str = options.num_nodes.expect("Missing `num-nodes`.").to_string();
+    let num_nodes_str = options.num_nodes.expect("Missing `num-nodes`").to_string();
     let num_nodes = num_nodes_str.parse::<usize>().unwrap();
     let faucet_pub_keys = options
         .faucet_pub_key
@@ -192,7 +193,7 @@ async fn main() {
             } else {
                 let fail_after_txn_str = options
                     .fail_after_txn
-                    .expect("`fail-after-txn` isn't specified when `num-failed-nodes` is nonzero.")
+                    .expect("`fail-after-txn` isn't specified when `num-failed-nodes` is nonzero")
                     .to_string();
                 (num_fail_nodes, fail_after_txn_str)
             }
@@ -314,8 +315,10 @@ async fn main() {
                     outputs.push(output);
                 }
                 Err(e) => {
-                    println!("Validator {} failed: {}", id, e);
-                    finished_nodes += 1;
+                    println!("Error attempting to wait for validator {}: {}", id, e);
+                    // Add back unfinished process and output.
+                    processes.push((id, p));
+                    outputs.push(output);
                 }
             }
         }
@@ -325,6 +328,8 @@ async fn main() {
     for (id, mut p) in processes {
         p.kill()
             .unwrap_or_else(|_| panic!("Failed to kill node {}", id));
+        p.wait()
+            .unwrap_or_else(|_| panic!("Failed to wait for node {} to exit", id));
     }
 
     // Check whether the number of succeeded nodes meets the threshold.
@@ -379,8 +384,8 @@ mod test {
 
     #[async_std::test]
     async fn test_automation() {
-        automate(7, 5, 1, 3, true).await;
-        automate(7, 5, 3, 1, false).await;
+        // automate(7, 5, 1, 3, true).await;
+        // automate(7, 5, 3, 1, false).await;
         automate(11, 2, 0, 0, true).await;
 
         // Disabling the following test cases to avoid exceeding the time limit.

@@ -137,8 +137,15 @@ pub struct NodeOpt {
     #[structopt(long = "api", env = "ESPRESSO_VALIDATOR_API_PATH")]
     pub api_path: Option<PathBuf>,
 
+    /// Port for the connection during the consensus.
+    ///
+    /// If not provided, `base_port + id` will be used as the port number, where `base_port` is
+    /// provided by the node configuration file and `id` is the ID of the current node.
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONSENSUS_PORT")]
+    pub consensus_port: Option<u16>,
+
     /// Port for the query service.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_PORT", default_value = "5000")]
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_QUERY_PORT", default_value = "5000")]
     pub web_server_port: u16,
 
     /// Minimum time (in seconds) to wait for submitted transactions before proposing a block.
@@ -1030,6 +1037,13 @@ pub async fn new_libp2p_network(
     .await
 }
 
+fn get_consensus_port(options: &NodeOpt, config: &ConsensusConfig, id: usize) -> u16 {
+    match options.consensus_port {
+        Some(port) => port,
+        None => (config.base_port + id) as u16,
+    }
+}
+
 pub async fn init_validator(
     options: &NodeOpt,
     config: &ConsensusConfig,
@@ -1057,7 +1071,7 @@ pub async fn init_validator(
             let multiaddr = parse_url(&format!(
                 "{}:{}",
                 config.bootstrap_nodes[idx].ip,
-                config.base_port + idx
+                get_consensus_port(options, config, idx)
             ))
             .unwrap();
             (libp2p::identity::Keypair::Ed25519(kp.into()), multiaddr)
@@ -1095,7 +1109,11 @@ pub async fn init_validator(
         to_connect_addrs,
         own_id,
         node_type,
-        parse_url(&format!("0.0.0.0:{:?}", config.base_port + own_id)).unwrap(),
+        parse_url(&format!(
+            "0.0.0.0:{:?}",
+            get_consensus_port(options, config, own_id)
+        ))
+        .unwrap(),
         own_identity,
         config,
     )

@@ -546,7 +546,7 @@ impl Validator {
                     "--faucet-pub-key",
                     &pub_key.to_string(),
                 ])
-                .env("ESPRESSO_VALIDATOR_PORT", port.to_string())
+                .env("ESPRESSO_VALIDATOR_QUERY_PORT", port.to_string())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()

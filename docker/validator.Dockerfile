@@ -40,13 +40,13 @@ ENV ESPRESSO_VALIDATOR_WEB_PATH=/public
 ENV ESPRESSO_VALIDATOR_STORE_PATH=/store/atomicstore
 
 # Run a query service at port 50000.
-ENV ESPRESSO_VALIDATOR_PORT=50000
-EXPOSE $ESPRESSO_VALIDATOR_PORT
+ENV ESPRESSO_VALIDATOR_QUERY_PORT=50000
+EXPOSE $ESPRESSO_VALIDATOR_QUERY_PORT
 
 # Additional configuration not specified here because it must be set per validator:
 # ESPRESSO_VALIDATOR_ID
 # ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
 
-HEALTHCHECK CMD curl -f 127.0.0.1:$ESPRESSO_VALIDATOR_PORT/healthcheck || exit 1
+HEALTHCHECK CMD curl -f 127.0.0.1:$ESPRESSO_VALIDATOR_QUERY_PORT/healthcheck || exit 1
 
 CMD [ "/bin/espresso-validator", "--full"]
