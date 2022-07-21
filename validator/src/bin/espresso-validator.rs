@@ -62,13 +62,12 @@ struct Options {
     ///
     /// Skip this option if only want to generate public key files.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_ID")]
-    #[structopt(conflicts_with("gen-pk"), requires("num-nodes"))]
+    #[structopt(requires("num-nodes"))]
     pub id: Option<usize>,
 
     /// Number of nodes, including fixed number of bootstrap nodes and dynamic number of non-
     /// bootstrap nodes.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
-    #[structopt(conflicts_with("gen-pk"))]
     pub num_nodes: Option<usize>,
 
     /// Public key which should own a faucet record in the genesis block.
@@ -198,6 +197,7 @@ async fn generate_transactions(
                     qcs: _,
                 } => {
                     if !state.is_empty() {
+                        succeeded_round += 1;
                         let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                             .unwrap()
                             .to_string();
@@ -206,7 +206,6 @@ async fn generate_transactions(
                             succeeded_round, commitment
                         );
                         final_commitment = Some(commitment);
-                        succeeded_round += 1;
                         break true;
                     }
                 }
@@ -317,7 +316,7 @@ async fn main() -> Result<(), std::io::Error> {
         } else {
             (GenesisState::new(options.faucet_pub_key.clone()), None)
         };
-        let keys = gen_keys(&config, options.num_nodes.expect("Missing `num-nodes`"));
+        let keys = gen_keys(&config, options.num_nodes.expect("Missing `num-nodes`."));
         let priv_key = keys[own_id].private.clone();
         let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
 

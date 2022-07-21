@@ -1,17 +1,3 @@
-<!--
- ~ Copyright (c) 2022 Espresso Systems (espressosys.com)
- ~ This file is part of the Espresso library.
- ~
- ~ This program is free software: you can redistribute it and/or modify it under the terms of the GNU
- ~ General Public License as published by the Free Software Foundation, either version 3 of the
- ~ License, or (at your option) any later version.
- ~ This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
- ~ even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- ~ General Public License for more details.
- ~ You should have received a copy of the GNU General Public License along with this program. If not,
- ~ see <https://www.gnu.org/licenses/>.
- -->
-
 # Espresso Validator
 
 `espresso-validator` is the executable which actually runs a validator and participates in the
@@ -40,13 +26,6 @@ The resulting binary is in `target/x86_64-unknown-linux-musl/release/multi_machi
 
 ## Run demo
 The instructions below assume that the number of nodes is 7. Otherwise, replace numbers accordingly.
-
-### Generate public key files
-* If there are public key files under `validator/src`, skip this section.
-* Otherwise, in a terminal window:
-    * Cd to `target/release/`.
-    * Run `./espresso-validator --config {config} --generate_keys`.
-    * Check that public key files are stored under `validator/src`, file names starting `pk_`.
 
 ### Simulate consensus
 * To simulate the multi-process consensus:

@@ -183,50 +183,14 @@ impl NodeOpt {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NodeConfig {
-    pub url: Url,
-    pub host: String,
-    pub port: u16,
+    pub ip: String,
 }
 
 impl From<Url> for NodeConfig {
     fn from(url: Url) -> Self {
         Self {
-            port: url.port_or_known_default().unwrap(),
-            host: url.host_str().unwrap().to_string(),
-            url,
+            ip: url.host_str().unwrap().to_string(),
         }
-    }
-}
-
-/// The structure of a NodeConfig in a consensus config TOML file.
-///
-/// This struct exists to be deserialized and converted to [NodeConfig].
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ConsensusConfigFileNode {
-    ip: String,
-    port: u16,
-}
-
-impl From<ConsensusConfigFileNode> for NodeConfig {
-    fn from(cfg: ConsensusConfigFileNode) -> Self {
-        Url::parse(&format!("http://{}:{}", cfg.ip, cfg.port))
-            .unwrap()
-            .into()
-    }
-}
-
-impl From<NodeConfig> for ConsensusConfigFileNode {
-    fn from(cfg: NodeConfig) -> Self {
-        Self {
-            ip: cfg.host,
-            port: cfg.port,
-        }
-    }
-}
-
-impl NodeConfig {
-    pub fn socket_addr(&self) -> (&str, u16) {
-        (&self.host, self.port)
     }
 }
 
@@ -282,7 +246,7 @@ struct ConsensusConfigFile {
     mesh_outbound_min: usize,
     mesh_n: usize,
     base_port: usize,
-    bootstrap_nodes: Vec<ConsensusConfigFileNode>,
+    bootstrap_nodes: Vec<NodeConfig>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -348,7 +312,7 @@ impl From<ConsensusConfig> for ConsensusConfigFile {
             bootstrap_nodes: cfg
                 .bootstrap_nodes
                 .into_iter()
-                .map(ConsensusConfigFileNode::from)
+                .map(NodeConfig::from)
                 .collect(),
             replication_factor: cfg.replication_factor,
             bootstrap_mesh_n_high: cfg.bootstrap_mesh_n_high,
@@ -1092,7 +1056,7 @@ pub async fn init_validator(
         .map(|(idx, kp)| {
             let multiaddr = parse_url(&format!(
                 "{}:{}",
-                config.bootstrap_nodes[idx].host,
+                config.bootstrap_nodes[idx].ip,
                 config.base_port + idx
             ))
             .unwrap();

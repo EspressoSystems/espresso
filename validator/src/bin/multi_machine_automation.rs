@@ -50,7 +50,6 @@ struct Options {
     /// Number of nodes, including fixed number of bootstrap nodes and dynamic number of non-
     /// bootstrap nodes.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
-    #[structopt(conflicts_with("gen-pk"))]
     pub num_nodes: Option<usize>,
 
     /// Public key which should own a faucet record in the genesis block.
@@ -170,10 +169,7 @@ async fn main() {
         args.push("--bootstrap-nodes");
         args.push(nodes);
     }
-    let num_nodes_str = match options.num_nodes {
-        Some(num_nodes) => num_nodes.to_string(),
-        None => "7".to_string(),
-    };
+    let num_nodes_str = options.num_nodes.expect("Missing `num-nodes`.").to_string();
     let num_nodes = num_nodes_str.parse::<usize>().unwrap();
     let faucet_pub_keys = options
         .faucet_pub_key
@@ -196,7 +192,7 @@ async fn main() {
             } else {
                 let fail_after_txn_str = options
                     .fail_after_txn
-                    .expect("`fail_after_txn` isn't specified when `num_failed_nodes` is nonzero.")
+                    .expect("`fail-after-txn` isn't specified when `num-failed-nodes` is nonzero.")
                     .to_string();
                 (num_fail_nodes, fail_after_txn_str)
             }

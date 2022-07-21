@@ -36,28 +36,21 @@ base_port = 9000
 # Bootstrap node information
 [[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9100
 
 [[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9101
 
 [[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9102
 
 [[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9103
 
 [[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9104
 
 [[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9105
 
 [[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9106
