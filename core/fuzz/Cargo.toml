@@ -10,22 +10,35 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <https://www.gnu.org/licenses/>.
 
-[workspace]
-resolver = "2"
+[package]
+name = "espresso-core-fuzz"
+version = "0.0.0"
+authors = ["Jeb Bearer <jeb.bearer@translucence.net>"]
+publish = false
+edition = "2018"
 
-members = [
-    "address-book",
-    "faucet",
-    "validator",
-    "apis/availability",
-    "apis/catchup",
-    "apis/metastate",
-    "apis/status",
-    "client",
-    "core",
-  ]
-[profile.dev]
-opt-level = 1
-[profile.release]
-debug = true
-lto = "thin"
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+async-std = { version = "1.10.0", features = ["unstable", "attributes"] }
+
+[dependencies.validator_node]
+path = "../../validator_node"
+
+[dependencies.espresso-core]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release.package."*"]
+opt-level = 3
+
+[[bin]]
+name = "multixfr_keystore"
+path = "fuzz_targets/multixfr_keystore.rs"
+test = false
+doc = false

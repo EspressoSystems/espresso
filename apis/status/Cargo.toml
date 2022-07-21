@@ -10,22 +10,13 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <https://www.gnu.org/licenses/>.
 
-[workspace]
-resolver = "2"
+[package]
+name = "espresso-status-api"
+version = "0.1.0"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-members = [
-    "address-book",
-    "faucet",
-    "validator",
-    "apis/availability",
-    "apis/catchup",
-    "apis/metastate",
-    "apis/status",
-    "client",
-    "core",
-  ]
-[profile.dev]
-opt-level = 1
-[profile.release]
-debug = true
-lto = "thin"
+[dependencies]
+hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
+jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
+espresso-core = { path = "../../core/" }

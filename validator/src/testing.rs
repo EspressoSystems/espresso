@@ -15,6 +15,7 @@ use crate::{
     ConsensusConfig, GenesisState, Node, NodeOpt, MINIMUM_NODES,
 };
 use async_std::task::{block_on, spawn, JoinHandle};
+use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use futures::{channel::oneshot, future::join_all};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
@@ -33,7 +34,6 @@ use validator_node::{
     },
     node::Validator,
 };
-use zerok_lib::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 
 pub struct TestNode {
     pub query_api: Option<Url>,
