@@ -473,7 +473,6 @@ pub mod kv_treehash_tests {
         }
     }
 
-    // type TheTreeHashNode = CommitableHashNode<TestEntry, TestEntry>;
     type TheTreeHash = CommitableHash<TestEntry, TestEntry, TestEntryTag>;
     type TheTreeHash2 = CommitableHash<TestEntry, TestEntry, TestEntryTag2>;
 

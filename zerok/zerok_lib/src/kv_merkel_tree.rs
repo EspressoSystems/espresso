@@ -57,20 +57,6 @@ where
         self.hash() == other.hash()
     }
 }
-//KALEY: need arbitrary?
-// impl<'a,KVHash> arbitrary::Arbitrary<'a> for KVMerkleTree<KVHash>
-// where
-//     KVHash: KVTreeHash + Clone + Copy,
-//     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output: ArrayLength<KVMerkleTree<KVHash>>,
-// {
-//     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-//         let mut s = Self::default();
-//         for n in u.arbitrary_iter::<(KVHash::Key,KVHash::Value)>()? {
-//             s.insert(n?.0.into(),n?.1.into());
-//         }
-//         Ok(s)
-//     }
-// }
 
 impl<KVHash> KVMerkleTree<KVHash>
 where
@@ -362,6 +348,7 @@ where
                 ..
             } => {
                 path.reverse();
+                dbg!("here, lookup leaf");
                 Some((
                     &key == leaf_key,
                     KVMerkleProof {
@@ -408,24 +395,24 @@ where
                     let leaf_pos = {
                         debug_assert!(height > 0);
                         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
-                        !key_bit_vec[height - 1]
+                        key_bit_vec[height - 1]
                     };
 
                     let new_leaf = Self::new_leaf(height - 1, key, value);
                     let (new_end_branch, new_sibs) = if leaf_pos == pos {
                         let mut new_branches =
                             vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
-                        new_branches[pos as usize] = new_leaf;
+                        new_branches[pos as usize] = new_leaf.clone();
                         (
-                            EmptySubtree,
+                            new_leaf,
                             new_branches,
                         )
                     } else {
                         let mut new_branches =
                             vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
-                        new_branches[pos as usize] = new_leaf.clone();
+                        new_branches[leaf_pos as usize] = new_leaf.clone();
                         (
-                            new_leaf,
+                            EmptySubtree,
                             new_branches,
                         )
                     };
@@ -449,7 +436,10 @@ where
                 ret = None;
                 ForgottenSubtree { digest }
             }
-            EmptySubtree => Self::new_leaf(end_height, key, value),
+            EmptySubtree => {   
+                dbg!("inserting, empty subtree");
+                Self::new_leaf(end_height, key, value)
+            },
             Branch { .. } => panic!("This tree has more levels than my hash has bits!"),
             Leaf {
                 digest,
@@ -494,7 +484,6 @@ where
                     break;
                 }
                 Branch { children, .. } => {
-                    //KALEY: clone here too? probably similar answer to other clone question
                     let target = children[pos as usize].clone();
                     end_branch = target;
                     children
@@ -627,7 +616,7 @@ where
                 }
                 EmptySubtree => {
                     unreachable!();
-                } // TODO: is this unreachable?
+                } 
                 Branch { children, .. } => {
                     end_branch = children[pos as usize].clone();
                     children
@@ -640,7 +629,6 @@ where
                 } => {
                     assert!(!key_in_set);
                     end_branch = EmptySubtree;
-                    //KALEY: this seems...... not entirely correct
                     let mut sib_branches =
                         vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
                     sib_branches[pos as usize] = Self::new_leaf(height - 1, leaf_key, leaf_value);
@@ -655,8 +643,6 @@ where
             ForgottenSubtree { digest } => {
                 match proof.terminal_node {
                     KVMerkleTerminalNode::EmptySubtree => {
-                        // TODO: should this be possible????? it feels like it
-                        // shouldn't be
                         assert_eq!(digest, KVHash::empty_digest());
                         EmptySubtree
                     }
@@ -680,7 +666,7 @@ where
     }
 }
 
-pub fn set_merkle_lw_multi_insert<KVHash, Arity>(
+pub fn set_merkle_lw_multi_insert<KVHash>(
     inserts: Vec<(KVHash::Key, KVHash::Value, KVMerkleProof<KVHash>)>,
     root: KVHash::Digest,
 ) -> Result<(KVHash::Digest, Vec<KVMerkleProof<KVHash>>), KVHash::Digest>
@@ -781,6 +767,7 @@ mod tests {
         let update_elems: Vec<_> = updates.iter().map(|u| update_vals[u]).collect();
 
         for (u, elem) in updates.iter().zip(update_elems.iter()) {
+            dbg!("{:?}", elem);
             let elem = *elem;
             hset.insert(u);
             let (in_set, pf) = t.lookup(TestNulls(elem)).unwrap();
