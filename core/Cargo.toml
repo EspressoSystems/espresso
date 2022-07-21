@@ -30,7 +30,7 @@ async-tungstenite = { version = "0.15.0", features = ["async-std-runtime"] }
 async_executors = { version = "0.4.2", features = ["async_std"] }
 atomic_store = { git = "https://github.com/EspressoSystems/atomicstore.git", tag = "0.1.2" }
 bincode = "1.3.3"
-bitvec = "0.20.1"
+bitvec = "1.0.0"
 chacha20 = "0.8.1"
 chrono = "0.4.19"
 commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.1.0" }

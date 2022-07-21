@@ -2195,7 +2195,7 @@ dependencies = [
  "async_executors",
  "atomic_store 0.1.2",
  "bincode",
- "bitvec 0.20.1",
+ "bitvec 1.0.0",
  "chacha20",
  "chrono",
  "commit",
