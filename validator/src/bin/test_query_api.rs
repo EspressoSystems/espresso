@@ -32,6 +32,9 @@
 
 use async_std::future::timeout;
 use async_tungstenite::async_std::connect_async;
+use espresso_core::{
+    ledger::EspressoLedger, state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM,
+};
 use futures::prelude::*;
 use hotshot::traits::BlockContents;
 use itertools::izip;
@@ -51,9 +54,6 @@ use validator_node::{
     api::*,
     keystore::network::{NetworkBackend, Url},
     node::{LedgerSummary, QueryServiceError},
-};
-use zerok_lib::{
-    ledger::EspressoLedger, state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM,
 };
 
 #[derive(StructOpt)]

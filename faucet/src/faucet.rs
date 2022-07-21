@@ -21,6 +21,7 @@ use async_std::{
 use atomic_store::{
     load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
 };
+use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use futures::{channel::mpsc, future::join_all, stream::StreamExt};
 use jf_cap::{
     keys::{UserKeyPair, UserPubKey},
@@ -53,7 +54,6 @@ use validator_node::keystore::{
     txn_builder::{RecordInfo, TransactionReceipt, TransactionStatus},
     EspressoKeystore, EspressoKeystoreError, RecordAmount,
 };
-use zerok_lib::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 
 #[derive(Debug, StructOpt)]
 #[structopt(

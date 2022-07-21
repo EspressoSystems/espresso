@@ -2130,17 +2130,120 @@ name = "espresso-availability-api"
 version = "0.1.0"
 dependencies = [
  "commit",
+ "espresso-core",
  "jf-cap",
- "zerok_lib",
 ]
 
 [[package]]
 name = "espresso-catchup-api"
 version = "0.1.0"
 dependencies = [
+ "espresso-core",
  "jf-cap",
  "seahorse",
- "zerok_lib",
+]
+
+[[package]]
+name = "espresso-client"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "async-trait",
+ "bincode",
+ "escargot",
+ "espresso-core",
+ "espresso-validator",
+ "futures",
+ "jf-cap",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-utils",
+ "lazy_static",
+ "portpicker",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "regex",
+ "rustyline",
+ "seahorse",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "snafu",
+ "structopt",
+ "surf",
+ "tagged-base64",
+ "tempdir",
+ "toml",
+ "tracing",
+ "tracing-subscriber 0.3.14",
+ "validator_node",
+]
+
+[[package]]
+name = "espresso-core"
+version = "0.1.0"
+dependencies = [
+ "arbitrary",
+ "arbitrary-wrappers",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
+ "async-scoped",
+ "async-std",
+ "async-trait",
+ "async-tungstenite 0.15.0",
+ "async_executors",
+ "atomic_store 0.1.2",
+ "bincode",
+ "bitvec 0.20.1",
+ "chacha20",
+ "chrono",
+ "commit",
+ "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git)",
+ "futures",
+ "generic-array",
+ "hex",
+ "hmac 0.12.1",
+ "hotshot",
+ "hotshot-types",
+ "itertools 0.10.3",
+ "jf-cap",
+ "jf-plonk",
+ "jf-primitives",
+ "jf-utils",
+ "key-set",
+ "lazy_static",
+ "mnemonic",
+ "net",
+ "num-bigint 0.4.3",
+ "procfs",
+ "proptest",
+ "quickcheck",
+ "quickcheck_macros",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "rand_xoshiro",
+ "rayon",
+ "reef",
+ "rpassword 6.0.1",
+ "rust-argon2 0.8.3",
+ "rustyline",
+ "seahorse",
+ "serde",
+ "serde_cbor",
+ "serde_derive",
+ "serde_json",
+ "serde_with",
+ "sha3 0.9.1",
+ "snafu",
+ "strum 0.20.0",
+ "strum_macros",
+ "surf",
+ "tagged-base64",
+ "tempdir",
+ "tide",
+ "tracing",
+ "zeroize",
 ]
 
 [[package]]
@@ -2167,17 +2270,17 @@ dependencies = [
 name = "espresso-metastate-api"
 version = "0.1.0"
 dependencies = [
+ "espresso-core",
  "jf-cap",
- "zerok_lib",
 ]
 
 [[package]]
 name = "espresso-status-api"
 version = "0.1.0"
 dependencies = [
+ "espresso-core",
  "hotshot",
  "jf-cap",
- "zerok_lib",
 ]
 
 [[package]]
@@ -2200,6 +2303,7 @@ dependencies = [
  "escargot",
  "espresso-availability-api",
  "espresso-catchup-api",
+ "espresso-core",
  "espresso-metastate-api",
  "espresso-status-api",
  "futures",
@@ -2239,7 +2343,6 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber 0.3.14",
  "validator_node",
- "zerok_lib",
 ]
 
 [[package]]
@@ -2338,6 +2441,7 @@ dependencies = [
  "bincode",
  "dirs",
  "escargot",
+ "espresso-core",
  "espresso-validator",
  "futures",
  "hex",
@@ -2363,7 +2467,6 @@ dependencies = [
  "tracing-subscriber 0.3.14",
  "tracing-test",
  "validator_node",
- "zerok_lib",
 ]
 
 [[package]]
@@ -7027,6 +7130,7 @@ dependencies = [
  "commit",
  "espresso-availability-api",
  "espresso-catchup-api",
+ "espresso-core",
  "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git)",
  "espresso-metastate-api",
  "espresso-status-api",
@@ -7054,7 +7158,6 @@ dependencies = [
  "tempdir",
  "tide",
  "tracing",
- "zerok_lib",
 ]
 
 [[package]]
@@ -7528,108 +7631,4 @@ dependencies = [
  "quote",
  "syn",
  "synstructure",
-]
-
-[[package]]
-name = "zerok_client"
-version = "0.1.0"
-dependencies = [
- "async-std",
- "async-trait",
- "bincode",
- "escargot",
- "espresso-validator",
- "futures",
- "jf-cap",
- "jf-plonk",
- "jf-primitives",
- "jf-utils",
- "lazy_static",
- "portpicker",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "regex",
- "rustyline",
- "seahorse",
- "serde",
- "serde_derive",
- "serde_json",
- "snafu",
- "structopt",
- "surf",
- "tagged-base64",
- "tempdir",
- "toml",
- "tracing",
- "tracing-subscriber 0.3.14",
- "validator_node",
- "zerok_lib",
-]
-
-[[package]]
-name = "zerok_lib"
-version = "0.1.0"
-dependencies = [
- "address-book",
- "arbitrary",
- "arbitrary-wrappers",
- "ark-ff",
- "ark-serialize",
- "ark-std",
- "async-scoped",
- "async-std",
- "async-trait",
- "async-tungstenite 0.15.0",
- "async_executors",
- "atomic_store 0.1.2",
- "bincode",
- "bitvec 0.20.1",
- "chacha20",
- "chrono",
- "commit",
- "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git)",
- "futures",
- "generic-array",
- "hex",
- "hmac 0.12.1",
- "hotshot",
- "hotshot-types",
- "itertools 0.10.3",
- "jf-cap",
- "jf-plonk",
- "jf-primitives",
- "jf-utils",
- "key-set",
- "lazy_static",
- "mnemonic",
- "net",
- "num-bigint 0.4.3",
- "procfs",
- "proptest",
- "quickcheck",
- "quickcheck_macros",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "rand_xoshiro",
- "rayon",
- "reef",
- "rpassword 6.0.1",
- "rust-argon2 0.8.3",
- "rustyline",
- "seahorse",
- "serde",
- "serde_cbor",
- "serde_derive",
- "serde_json",
- "serde_with",
- "sha3 0.9.1",
- "snafu",
- "strum 0.20.0",
- "strum_macros",
- "surf",
- "tagged-base64",
- "tempdir",
- "tide",
- "tracing",
- "zeroize",
 ]
