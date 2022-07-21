@@ -193,13 +193,15 @@
 
           RUST_SRC_PATH = "${nightlyToolchain}/lib/rustlib/src/rust/library";
           RUST_BACKTRACE = 1;
-          RUST_LOG = "info";
+          RUST_LOG = "info,libp2p=off";
         };
         devShells = {
           perfShell = pkgs.mkShell {
             shellHook = shellHook;
             buildInputs = with pkgs;
               [ cargo-llvm-cov nightlyToolchain ] ++ rustDeps;
+
+            RUST_LOG = "info,libp2p=off";
           };
 
           staticShell = pkgs.mkShell {
@@ -217,6 +219,8 @@
             buildInputs = with pkgs;
               [ nightlyMuslRustToolchain fd cmake ];
             meta.broken = if "${os}" == "darwin" then true else false;
+
+            RUST_LOG = "info,libp2p=off";
           };
         };
 
