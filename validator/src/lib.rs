@@ -22,6 +22,16 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
 use dirs::data_local_dir;
+use espresso_core::{
+    committee::Committee,
+    state::{
+        ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, SetMerkleTree,
+        ValidatorState, MERKLE_HEIGHT,
+    },
+    testing::{MultiXfrRecordSpec, MultiXfrTestState},
+    universal_params::UNIVERSAL_PARAM,
+};
+use espresso_core::{PrivKey, PubKey};
 use hotshot::traits::implementations::Libp2pNetwork;
 use hotshot::traits::NetworkError;
 use hotshot::types::ed25519::{Ed25519Priv, Ed25519Pub};
@@ -63,16 +73,6 @@ use validator_node::{
     node,
     node::{EventStream, HotShotEvent, QueryService, Validator},
 };
-use zerok_lib::{
-    committee::Committee,
-    state::{
-        ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, SetMerkleTree,
-        ValidatorState, MERKLE_HEIGHT,
-    },
-    testing::{MultiXfrRecordSpec, MultiXfrTestState},
-    universal_params::UNIVERSAL_PARAM,
-};
-use zerok_lib::{PrivKey, PubKey};
 
 mod disco;
 pub mod full_node_mem_data_source;

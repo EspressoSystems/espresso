@@ -50,7 +50,7 @@ Use at your own risk.
 
 ## Obtaining the source code
 
-    git clone git@github.com:EspressoSystems/cape.git
+    git clone git@github.com:EspressoSystems/espresso.git
 
 # Documentation
 
@@ -210,7 +210,7 @@ Running the system locally basically amounts to building and running each of the
 provide a `docker-compose.yml` file which makes it easy to run the whole thing at once.
 
 Once you have started the services locally, it is possible to create a wallet to build and submit
-transactions to the local network. See [the wallet README](zerok/zerok_client/README.md) for
+transactions to the local network. See [the wallet README](client/README.md) for
 instructions on running the wallet CLI. As an example, after starting the services using `docker-compose`,
 the following command should start the wallet CLI:
 
@@ -323,9 +323,9 @@ target/release/faucet
 | ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME | u64 | espresso-validator | Maximum time (in seconds) to wait for submitted transactions before proposing a block
 | ESPRESSO_ADDRESS_BOOK_STORE_PATH | Path | address-book   | Path to persistence files for address book service (default `$LOCAL/.espresso/espresso/address-book/store`)
 | ESPRESSO_ADDRESS_BOOK_PORT | u16  | address-book         | Port on which to serve the address book
-| ESPRESSO_ADDRESS_BOOK_URL  | Url  | zerok-client, faucet | URL of the address book service
-| ESPRESSO_ESQS_URL          | Url  | zerok-client, faucet | URL of the EsQS
-| ESPRESSO_SUBMIT_URL        | Url  | zerok-client, faucet | URL of the validator to submit transactions to
+| ESPRESSO_ADDRESS_BOOK_URL  | Url  | wallet-cli, faucet | URL of the address book service
+| ESPRESSO_ESQS_URL          | Url  | wallet-cli, faucet | URL of the EsQS
+| ESPRESSO_SUBMIT_URL        | Url  | wallet-cli, faucet | URL of the validator to submit transactions to
 | ESPRESSO_FAUCET_MANAGER_MNEMONIC | String | faucet-keystore-test-setup | Mnemonic phrase to generate the master faucet public key
 | ESPRESSO_FAUCET_PUB_KEYS | Vec<UserPubKey> | espresso-validator | Comma-separated list of public keys owning records in the genesis block
 | ESPRESSO_FAUCET_WALLET_MNEMONIC | String | faucet        | Mnemonic phrase to generate the faucet public key

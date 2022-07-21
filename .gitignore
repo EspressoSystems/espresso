@@ -21,8 +21,6 @@ Cargo.lock
 *~
 \#*\#
 .\#*
-# TODO: should this be ignored?
-#.envrc
 
 # Python Files
 integration-tests/.pytest_cache

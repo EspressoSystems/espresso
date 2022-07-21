@@ -13,6 +13,12 @@
 #![deny(warnings)]
 
 use async_std::task::{sleep, spawn_blocking};
+use espresso_core::testing::MultiXfrRecordSpecTransaction;
+use espresso_core::{
+    state::ElaboratedBlock,
+    testing::{MultiXfrTestState, TxnPrintInfo},
+    PrivKey, PubKey,
+};
 use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
@@ -25,11 +31,6 @@ use tagged_base64::TaggedBase64;
 use tide::http::Url;
 use tracing::info;
 use validator_node::node::{QueryService, Validator};
-use zerok_lib::testing::MultiXfrRecordSpecTransaction;
-use zerok_lib::{
-    state::ElaboratedBlock,
-    testing::{MultiXfrTestState, TxnPrintInfo},
-};
 
 #[derive(StructOpt)]
 #[structopt(

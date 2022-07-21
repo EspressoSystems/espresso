@@ -1,3 +1,17 @@
+<!--
+ ~ Copyright (c) 2022 Espresso Systems (espressosys.com)
+ ~ This file is part of the Espresso library.
+ ~
+ ~ This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+ ~ General Public License as published by the Free Software Foundation, either version 3 of the
+ ~ License, or (at your option) any later version.
+ ~ This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+ ~ even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ ~ General Public License for more details.
+ ~ You should have received a copy of the GNU General Public License along with this program. If not,
+ ~ see <https://www.gnu.org/licenses/>.
+ -->
+
 # Espresso Validator
 
 `espresso-validator` is the executable which actually runs a validator and participates in the
@@ -84,8 +98,7 @@ start the demo as you normally would, but pass the extra argument `--faucet-pub-
 
 In a separate terminal, you can now enter the interactive keystore REPL:
 ```
-cd zerok/zerok_client
-cargo run -- localhost:$port
+cargo run --bin wallet-cli -- localhost:$port
 ```
 where $port is the port number where the full node is serving (50000 + node id, by default). It will take a while to connect (actually, most of that time is deserializing the universal parameters and generating proving keys) and will prompt you when it is ready to process commands.
 

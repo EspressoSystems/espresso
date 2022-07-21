@@ -16,6 +16,8 @@ use std::convert::From;
 use espresso_availability_api::data_source::{AvailabilityDataSource, UpdateAvailabilityData};
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
 use espresso_catchup_api::data_source::{CatchUpDataSource, UpdateCatchUpData};
+use espresso_core::ledger::EspressoLedger;
+use espresso_core::state::{BlockCommitment, SetMerkleProof, SetMerkleTree, TransactionCommitment};
 use espresso_metastate_api::data_source::{MetaStateDataSource, UpdateMetaStateData};
 use espresso_status_api::data_source::{StatusDataSource, UpdateStatusData};
 use espresso_status_api::query_data::ValidatorStatus;
@@ -24,8 +26,6 @@ use jf_cap::MerkleTree;
 use seahorse::events::LedgerEvent;
 use validator_node::api::EspressoError;
 use validator_node::node::QueryServiceError;
-use zerok_lib::ledger::EspressoLedger;
-use zerok_lib::state::{BlockCommitment, SetMerkleProof, SetMerkleTree, TransactionCommitment};
 
 #[derive(Default)]
 pub struct QueryData {
