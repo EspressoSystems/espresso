@@ -2236,7 +2236,7 @@ dependencies = [
  "serde_with",
  "sha3 0.9.1",
  "snafu",
- "strum 0.20.0",
+ "strum",
  "strum_macros",
  "surf",
  "tagged-base64",
@@ -2330,7 +2330,7 @@ dependencies = [
  "shellexpand",
  "snafu",
  "structopt",
- "strum 0.24.0",
+ "strum",
  "strum_macros",
  "surf",
  "tagged-base64",
@@ -5822,7 +5822,7 @@ dependencies = [
  "sha3 0.9.1",
  "snafu",
  "structopt",
- "strum 0.24.0",
+ "strum",
  "strum_macros",
  "surf",
  "tagged-base64",
@@ -6362,15 +6362,9 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.20.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7318c509b5ba57f18533982607f24070a55d353e90d4cae30c467cdb2ad5ac5c"
-
-[[package]]
-name = "strum"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e96acfc1b70604b8b2f1ffa4c57e59176c7dbb05d556c71ecd2f5498a1dee7f8"
+checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
 
 [[package]]
 name = "strum_macros"
