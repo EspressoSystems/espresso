@@ -51,7 +51,7 @@ struct Options {
     /// Override `bootstrap_nodes` from the node configuration file.
     #[structopt(
         long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_NODES",
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS",
         value_delimiter = ","
     )]
     pub bootstrap_nodes: Option<Vec<Url>>,
