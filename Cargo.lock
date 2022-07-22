@@ -36,7 +36,7 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "tracing-log",
- "tracing-subscriber 0.3.14",
+ "tracing-subscriber 0.3.15",
 ]
 
 [[package]]
@@ -2175,7 +2175,7 @@ dependencies = [
  "tempdir",
  "toml",
  "tracing",
- "tracing-subscriber 0.3.14",
+ "tracing-subscriber 0.3.15",
  "validator_node",
 ]
 
@@ -2341,7 +2341,7 @@ dependencies = [
  "tracing",
  "tracing-distributed",
  "tracing-futures",
- "tracing-subscriber 0.3.14",
+ "tracing-subscriber 0.3.15",
  "validator_node",
 ]
 
@@ -2403,7 +2403,7 @@ checksum = "d4badb9489a465cb2c555af1f00f0bfd8cecd6fc12ac11da9d5b40c5dd5f0200"
 dependencies = [
  "bit_field",
  "deflate",
- "flume 0.10.12",
+ "flume 0.10.14",
  "half",
  "inflate",
  "lebe",
@@ -2464,7 +2464,7 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "tracing-log",
- "tracing-subscriber 0.3.14",
+ "tracing-subscriber 0.3.15",
  "tracing-test",
  "validator_node",
 ]
@@ -2540,9 +2540,9 @@ dependencies = [
 
 [[package]]
 name = "flume"
-version = "0.10.12"
+version = "0.10.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "843c03199d0c0ca54bc1ea90ac0d507274c28abcc4f691ae8b4eaa375087c76a"
+checksum = "1657b4441c3403d9f7b3409e47575237dac27b1b5726df654a6ecbf92f0f7577"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -2932,8 +2932,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot"
-version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.0#fe28bea5802e5a4de83fcbae4790b2578d4c0acd"
+version = "0.1.1"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
 dependencies = [
  "async-std",
  "async-trait",
@@ -2945,7 +2945,7 @@ dependencies = [
  "custom_debug",
  "dashmap 5.3.4",
  "embed-doc-image",
- "flume 0.10.12",
+ "flume 0.10.14",
  "futures",
  "hotshot-consensus",
  "hotshot-types",
@@ -2964,7 +2964,7 @@ dependencies = [
 [[package]]
 name = "hotshot-consensus"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.0#fe28bea5802e5a4de83fcbae4790b2578d4c0acd"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
 dependencies = [
  "async-trait",
  "custom_debug",
@@ -2977,7 +2977,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.0#fe28bea5802e5a4de83fcbae4790b2578d4c0acd"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3001,16 +3001,17 @@ dependencies = [
 [[package]]
 name = "hotshot-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.0#fe28bea5802e5a4de83fcbae4790b2578d4c0acd"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
 dependencies = [
  "async-std",
  "async-trait",
+ "bincode",
  "color-eyre",
- "flume 0.10.12",
+ "flume 0.10.14",
  "futures",
  "tracing",
  "tracing-error",
- "tracing-subscriber 0.3.14",
+ "tracing-subscriber 0.3.15",
 ]
 
 [[package]]
@@ -3807,7 +3808,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.0#fe28bea5802e5a4de83fcbae4790b2578d4c0acd"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3818,7 +3819,7 @@ dependencies = [
  "custom_debug",
  "derive_builder",
  "either",
- "flume 0.10.12",
+ "flume 0.10.14",
  "futures",
  "hotshot-types",
  "hotshot-utils",
@@ -5872,9 +5873,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.139"
+version = "1.0.140"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0171ebb889e45aa68b44aee0859b3eede84c6f5f5c228e6f140c0b2a0a46cad6"
+checksum = "fc855a42c7967b7c369eb5860f7164ef1f6f81c20c7cc1141f2a604e18723b03"
 dependencies = [
  "serde_derive",
 ]
@@ -5909,9 +5910,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.139"
+version = "1.0.140"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc1d3230c1de7932af58ad8ffbe1d784bd55efd5a9d84ac24f69c72d83543dfb"
+checksum = "6f2122636b9fe3b81f1cb25099fcf2d3f542cdb1d45940d56c713158884a05da"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6764,7 +6765,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d686ec1c0f384b1277f097b2f279a2ecc11afe8c133c1aabf036a27cb4cd206e"
 dependencies = [
  "tracing",
- "tracing-subscriber 0.3.14",
+ "tracing-subscriber 0.3.15",
 ]
 
 [[package]]
@@ -6822,9 +6823,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.14"
+version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a713421342a5a666b7577783721d3117f1b69a393df803ee17bb73b1e122a59"
+checksum = "60db860322da191b40952ad9affe65ea23e7dd6a5c442c2c42865810c6ab8e6b"
 dependencies = [
  "ansi_term",
  "matchers 0.1.0",
@@ -6849,7 +6850,7 @@ checksum = "f6992d8a98f570be1c729fe8b6f464fb18c4117054c10f1f952c22d533b48a74"
 dependencies = [
  "lazy_static",
  "tracing-core",
- "tracing-subscriber 0.3.14",
+ "tracing-subscriber 0.3.15",
  "tracing-test-macro",
 ]
 
