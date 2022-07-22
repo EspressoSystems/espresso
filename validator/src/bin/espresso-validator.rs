@@ -48,13 +48,13 @@ struct Options {
     #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
     pub secret_key_seed: Option<SecretKeySeed>,
 
-    /// Override `bootstrap_nodes` from the node configuration file.
+    /// IPs of the bootstrap nodes.
     #[structopt(
         long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_NODES",
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_IPS",
         value_delimiter = ","
     )]
-    pub bootstrap_nodes: Option<Vec<Url>>,
+    pub bootstrap_ips: Option<Vec<String>>,
 
     /// Id of the current node.
     ///
