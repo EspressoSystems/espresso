@@ -31,6 +31,9 @@ doc = false
 name = "faucet-shower"
 doc = false
 
+[features]
+slow-tests = []
+
 [dependencies]
 ark-std = "0.3.0"
 
@@ -61,11 +64,11 @@ tracing = "0.1.35"
 tracing-futures = "0.2"
 tracing-log = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-validator_node = { path = "../zerok/validator_node/" }
-zerok_lib = { path = "../zerok/zerok_lib/" }
+validator_node = { path = "../validator_node/" }
+espresso-core = { path = "../core/" }
 
 [dev-dependencies]
 escargot = "0.5"
 espresso-validator = { path = "../validator", features = ["testing"] }
 portpicker = "0.1"
-tracing-test = "0.2" 
+tracing-test = "0.2"

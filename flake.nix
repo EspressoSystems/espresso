@@ -27,7 +27,10 @@
   inputs.pre-commit-hooks.inputs.flake-utils.follows = "flake-utils";
   inputs.pre-commit-hooks.inputs.nixpkgs.follows = "nixpkgs";
 
-  outputs = { self, nixpkgs, flake-utils, flake-compat, rust-overlay, pre-commit-hooks, ... }:
+  inputs.fenix.url = "github:nix-community/fenix";
+  inputs.fenix.inputs.nixpkgs.follows = "nixpkgs";
+
+  outputs = { self, nixpkgs, flake-utils, flake-compat, rust-overlay, pre-commit-hooks, fenix, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         info = builtins.split "\([a-zA-Z0-9_]+\)" system;
@@ -126,10 +129,22 @@
           pre-commit-check = pre-commit-hooks.lib.${system}.run {
             src = ./.;
             hooks = {
+              cargo-fmt = {
+                enable = true;
+                description = "Enforce rustfmt";
+                entry = "cargo fmt --all -- --check";
+                pass_filenames = false;
+              };
               cargo-sort = {
                 enable = true;
                 description = "Ensure Cargo.toml are sorted";
-                entry = "cargo sort -w";
+                entry = "cargo sort -g -w -c";
+                pass_filenames = false;
+              };
+              cargo-clippy = {
+                enable = true;
+                description = "Run clippy";
+                entry = "cargo clippy --workspace -- -D clippy::dbg-macro";
                 pass_filenames = false;
               };
               license-header-c-style = {
@@ -168,6 +183,7 @@
             + self.checks.${system}.pre-commit-check.shellHook;
           buildInputs = with pkgs;
             [
+              fenix.packages.${system}.rust-analyzer
               nixWithFlakes
               nixpkgs-fmt
               git
@@ -177,13 +193,15 @@
 
           RUST_SRC_PATH = "${nightlyToolchain}/lib/rustlib/src/rust/library";
           RUST_BACKTRACE = 1;
-          RUST_LOG = "info";
+          RUST_LOG = "info,libp2p=off";
         };
         devShells = {
           perfShell = pkgs.mkShell {
             shellHook = shellHook;
             buildInputs = with pkgs;
               [ cargo-llvm-cov nightlyToolchain ] ++ rustDeps;
+
+            RUST_LOG = "info,libp2p=off";
           };
 
           staticShell = pkgs.mkShell {
@@ -201,6 +219,8 @@
             buildInputs = with pkgs;
               [ nightlyMuslRustToolchain fd cmake ];
             meta.broken = if "${os}" == "darwin" then true else false;
+
+            RUST_LOG = "info,libp2p=off";
           };
         };
 

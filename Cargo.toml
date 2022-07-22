@@ -17,12 +17,12 @@ members = [
     "address-book",
     "faucet",
     "validator",
-    "zerok/apis/availability",
-    "zerok/apis/catchup",
-    "zerok/apis/metastate",
-    "zerok/apis/status",
-    "zerok/zerok_client",
-    "zerok/zerok_lib",
+    "apis/availability",
+    "apis/catchup",
+    "apis/metastate",
+    "apis/status",
+    "client",
+    "core",
   ]
 [profile.dev]
 opt-level = 1

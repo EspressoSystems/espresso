@@ -28,10 +28,10 @@ async-tungstenite = { version = "0.15.0", features = ["async-std-runtime"] }
 bincode = "1.3.3"
 dirs = "4.0"
 escargot = "0.5.2"
-espresso-availability-api = { path = "../zerok/apis/availability" }
-espresso-catchup-api = { path = "../zerok/apis/catchup" }
-espresso-metastate-api = { path = "../zerok/apis/metastate" }
-espresso-status-api = { path = "../zerok/apis/status" }
+espresso-availability-api = { path = "../apis/availability" }
+espresso-catchup-api = { path = "../apis/catchup" }
+espresso-metastate-api = { path = "../apis/metastate" }
+espresso-status-api = { path = "../apis/status" }
 futures = "0.3.0"
 futures-util = "0.3.8"
 hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
@@ -41,6 +41,8 @@ jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jelly
 jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
 jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
 key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
+libp2p = "0.46.1"
+libp2p-networking = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
 markdown = "0.3"
 net = { git = "https://github.com/EspressoSystems/net.git" }
 portpicker = { version = "0.1", optional = true }
@@ -65,8 +67,8 @@ tracing = "0.1.35"
 tracing-distributed = "0.3.1"
 tracing-futures = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-validator_node = { path = "../zerok/validator_node/" }
-zerok_lib = { path = "../zerok/zerok_lib/" }
+validator_node = { path = "../validator_node/" }
+espresso-core = { path = "../core/" }
 
 [features]
 slow-tests = []

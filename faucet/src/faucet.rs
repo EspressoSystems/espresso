@@ -21,6 +21,7 @@ use async_std::{
 use atomic_store::{
     load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
 };
+use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use futures::{channel::mpsc, future::join_all, stream::StreamExt};
 use jf_cap::{
     keys::{UserKeyPair, UserPubKey},
@@ -53,7 +54,6 @@ use validator_node::keystore::{
     txn_builder::{RecordInfo, TransactionReceipt, TransactionStatus},
     EspressoKeystore, EspressoKeystoreError, RecordAmount,
 };
-use zerok_lib::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -914,7 +914,7 @@ async fn main() -> Result<(), std::io::Error> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "slow-tests"))]
 mod test {
     use super::*;
     use async_std::task::{sleep, spawn_blocking};
@@ -936,7 +936,7 @@ mod test {
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
         let mut backoff = Duration::from_millis(100);
-        for _ in 0..10 {
+        for _ in 0..13 {
             if f().await {
                 return;
             }
@@ -1185,14 +1185,12 @@ mod test {
         parallel_request(1, false).await;
     }
 
-    #[cfg(feature = "slow-tests")]
     #[async_std::test]
     #[traced_test]
     async fn test_faucet_transfer_restart() {
         parallel_request(1, true).await;
     }
 
-    #[cfg(feature = "slow-tests")]
     #[async_std::test]
     #[traced_test]
     async fn test_faucet_simultaneous_transfer_restart() {
