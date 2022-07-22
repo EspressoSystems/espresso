@@ -40,11 +40,7 @@ use espresso_metastate_api::data_source::UpdateMetaStateData;
 pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::{channel::mpsc, future::RemoteHandle, select, task::SpawnExt};
-use hotshot::{
-    traits::BlockContents,
-    types::{EventType, HotShotHandle},
-    HotShotError, H_256,
-};
+use hotshot::{traits::BlockContents, types::HotShotHandle, HotShotError, H_256};
 use itertools::izip;
 use jf_cap::{
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
@@ -59,14 +55,15 @@ use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use tracing::{debug, error};
 
+pub type HotShotEventType = hotshot::types::EventType<ElaboratedBlock, ValidatorState, H_256>;
+pub type HotShotEvent = hotshot::types::Event<ElaboratedBlock, ValidatorState, H_256>;
+
 pub trait ConsensusEvent {
-    fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState>;
+    fn into_event(self) -> HotShotEventType;
 }
 
-pub type HotShotEvent = hotshot::types::Event<ElaboratedBlock, ValidatorState>;
-
 impl ConsensusEvent for HotShotEvent {
-    fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState> {
+    fn into_event(self) -> HotShotEventType {
         self.event
     }
 }
@@ -101,15 +98,15 @@ pub trait Validator {
                         return;
                     }
                     Some(event) => match event.into_event() {
-                        EventType::Decide { state, block: _, qcs: _ } => {
+                        HotShotEventType::Decide { state, block: _, qcs: _ } => {
                             if let Some(state) = state.last() {
                                 debug!(". - Committed state {}", state.commit());
                             }
                         }
-                        EventType::ViewTimeout { view_number } => {
+                        HotShotEventType::ViewTimeout { view_number } => {
                             debug!("  - Round {:?} timed out.", view_number);
                         }
-                        EventType::Error { error } => {
+                        HotShotEventType::Error { error } => {
                             error!("  - HotShot error: {}", error);
                         }
                         event => {
@@ -346,9 +343,8 @@ struct FullState {
 
 impl FullState {
     fn update(&mut self, event: impl ConsensusEvent) {
-        use EventType::*;
         match event.into_event() {
-            Error { error } => {
+            HotShotEventType::Error { error } => {
                 if matches!(
                     *error,
                     HotShotError::BadBlock { .. } | HotShotError::InconsistentBlock { .. }
@@ -380,11 +376,11 @@ impl FullState {
                 // network errors, etc.) do not correspond to LedgerEvents.
             }
 
-            Propose { block } => {
+            HotShotEventType::Propose { block } => {
                 self.proposed = (*block).clone();
             }
 
-            Decide {
+            HotShotEventType::Decide {
                 block,
                 state,
                 qcs: _,
@@ -1123,11 +1119,11 @@ mod tests {
 
     #[derive(Debug)]
     struct MockConsensusEvent {
-        event: EventType<ElaboratedBlock, ValidatorState>,
+        event: HotShotEventType,
     }
 
     impl ConsensusEvent for MockConsensusEvent {
-        fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState> {
+        fn into_event(self) -> HotShotEventType {
             self.event
         }
     }
@@ -1331,7 +1327,7 @@ mod tests {
             assert_eq!(initial_state.0.commit(), history[0].0.commit());
             let events = Box::pin(stream::iter(history.clone().into_iter().map(
                 |(_, block, _, state, quorum_certificate)| MockConsensusEvent {
-                    event: EventType::Decide {
+                    event: HotShotEventType::Decide {
                         block: Arc::new(vec![block]),
                         state: Arc::new(vec![state]),
                         qcs: Arc::new(vec![quorum_certificate]),

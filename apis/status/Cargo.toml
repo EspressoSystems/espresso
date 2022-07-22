@@ -17,6 +17,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
-jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 espresso-core = { path = "../../core/" }
+hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.1" }
+jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }

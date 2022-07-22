@@ -15,14 +15,14 @@ resolver = "2"
 
 members = [
     "address-book",
-    "faucet",
-    "validator",
     "apis/availability",
     "apis/catchup",
     "apis/metastate",
     "apis/status",
     "client",
     "core",
+    "faucet",
+    "validator",
   ]
 [profile.dev]
 opt-level = 1
