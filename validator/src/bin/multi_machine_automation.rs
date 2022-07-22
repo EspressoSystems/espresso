@@ -47,8 +47,8 @@ struct Options {
     )]
     pub bootstrap_nodes: Option<Vec<Url>>,
 
-    /// Number of nodes, including fixed number of bootstrap nodes and dynamic number of non-
-    /// bootstrap nodes.
+    /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of
+    /// non-bootstrap nodes.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
     pub num_nodes: Option<usize>,
 
@@ -384,8 +384,8 @@ mod test {
 
     #[async_std::test]
     async fn test_automation() {
-        // automate(7, 5, 1, 3, true).await;
-        // automate(7, 5, 3, 1, false).await;
+        automate(7, 5, 1, 3, true).await;
+        automate(7, 5, 3, 1, false).await;
         automate(11, 2, 0, 0, true).await;
 
         // Disabling the following test cases to avoid exceeding the time limit.

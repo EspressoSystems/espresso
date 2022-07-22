@@ -17,7 +17,6 @@ use espresso_core::testing::MultiXfrRecordSpecTransaction;
 use espresso_core::{
     state::ElaboratedBlock,
     testing::{MultiXfrTestState, TxnPrintInfo},
-    PrivKey, PubKey,
 };
 use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
@@ -66,7 +65,7 @@ struct Options {
     #[structopt(requires("num-nodes"))]
     pub id: Option<usize>,
 
-    /// Number of nodes, including fixed number of bootstrap nodes and dynamic number of non-
+    /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
     /// bootstrap nodes.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
     pub num_nodes: Option<usize>,
