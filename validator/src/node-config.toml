@@ -31,31 +31,26 @@ bootstrap_mesh_n_low = 10
 bootstrap_mesh_outbound_min = 5
 bootstrap_mesh_n = 15
 
-# Node information
-[[nodes]]
-ip = "127.0.0.1"
-port = 9100
+base_port = 9000
 
-[[nodes]]
+# Bootstrap node information
+[[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9101
 
-[[nodes]]
+[[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9102
 
-[[nodes]]
+[[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9103
 
-[[nodes]]
+[[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9104
 
-[[nodes]]
+[[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9105
 
-[[nodes]]
+[[bootstrap_nodes]]
 ip = "127.0.0.1"
-port = 9106
+
+[[bootstrap_nodes]]
+ip = "127.0.0.1"

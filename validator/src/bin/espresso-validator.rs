@@ -17,7 +17,6 @@ use espresso_core::testing::MultiXfrRecordSpecTransaction;
 use espresso_core::{
     state::ElaboratedBlock,
     testing::{MultiXfrTestState, TxnPrintInfo},
-    PrivKey, PubKey,
 };
 use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
@@ -25,7 +24,6 @@ use futures::{future::pending, StreamExt};
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::time::Duration;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
@@ -50,34 +48,25 @@ struct Options {
     #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
     pub secret_key_seed: Option<SecretKeySeed>,
 
-    /// Override `nodes` from the node configuration file.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_NODES", value_delimiter = ",")]
-    pub nodes: Option<Vec<Url>>,
-
-    /// Whether to generate and store public keys for all nodes.
-    ///
-    /// Public keys will be stored under the directory specified by `pk_path`.
-    ///
-    /// Skip this option if public key files already exist.
-    #[structopt(long, short)]
-    #[structopt(conflicts_with("id"))]
-    pub gen_pk: bool,
-
-    /// Path to public keys.
-    ///
-    /// Public keys will be stored under the specified directory, file names starting
-    /// with `pk_`.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_PUB_KEY_PATH")]
-    pub pk_path: Option<PathBuf>,
+    /// Override `bootstrap_nodes` from the node configuration file.
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS",
+        value_delimiter = ","
+    )]
+    pub bootstrap_nodes: Option<Vec<Url>>,
 
     /// Id of the current node.
     ///
     /// If the node ID is 0, it will propose and try to add transactions.
-    ///
-    /// Skip this option if only want to generate public key files.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_ID")]
-    #[structopt(conflicts_with("gen-pk"))]
-    pub id: Option<u64>,
+    #[structopt(requires("num-nodes"))]
+    pub id: usize,
+
+    /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
+    /// bootstrap nodes.
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
+    pub num_nodes: usize,
 
     /// Public key which should own a faucet record in the genesis block.
     ///
@@ -111,79 +100,9 @@ fn default_config_path() -> PathBuf {
     [&dir, Path::new(CONFIG_FILE)].iter().collect()
 }
 
-/// Returns the default directory to store public key files.
-fn default_pk_path() -> PathBuf {
-    const PK_DIR: &str = "src";
-    let dir = project_path();
-    [&dir, Path::new(PK_DIR)].iter().collect()
-}
-
-/// Gets the directory to public key files.
-fn get_pk_dir(options: &Options) -> PathBuf {
-    options.pk_path.clone().unwrap_or_else(default_pk_path)
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct KeyInFile {
-    pub private: String,
-    pub public: String,
-}
-
-impl KeyInFile {
-    fn new(private: &PrivKey, public: &PubKey) -> Self {
-        Self {
-            private: TaggedBase64::new("PK", &private.to_bytes())
-                .unwrap()
-                .to_string(),
-            public: public.to_string(),
-        }
-    }
-}
-
-fn generate_keys(options: &Options, config: &ConsensusConfig) {
-    let pk_dir = get_pk_dir(options);
-
-    let keys = gen_keys(config);
-
-    // Generate public key for each node
-    for (node_id, key) in keys.into_iter().enumerate() {
-        let path: PathBuf = [&pk_dir, Path::new(&format!("pk_{}.toml", node_id))]
-            .iter()
-            .collect();
-
-        let contents = toml::to_string_pretty(&KeyInFile::new(&key.private, &key.public))
-            .expect("Could not serialize key file");
-        std::fs::write(path, contents).expect("Could not write keys to file");
-    }
-    info!("Public key files created");
-}
-
-/// Gets public key of a node from its public key file.
-fn get_key_pair_for_node(options: &Options, node_id: u64) -> KeyPair {
-    let path = [
-        &get_pk_dir(options),
-        Path::new(&format!("pk_{}.toml", node_id)),
-    ]
-    .iter()
-    .collect::<PathBuf>();
-    let pk_str = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("Cannot find public key file: {}", path.display()));
-    let KeyInFile { private, public } = toml::from_str(&pk_str)
-        .unwrap_or_else(|e| panic!("Cannot deserialize key file {}: {:?}", path.display(), e));
-
-    let private = PrivKey::from_bytes(
-        &TaggedBase64::from_str(&private)
-            .expect("Invalid private key")
-            .value(),
-    )
-    .expect("Invalid private key");
-    let public = public.parse().expect("Invalid public key");
-    KeyPair { private, public }
-}
-
 async fn generate_transactions(
     num_txn: u64,
-    own_id: u64,
+    own_id: usize,
     mut hotshot: Node,
     mut state: MultiXfrTestState,
 ) {
@@ -270,6 +189,7 @@ async fn generate_transactions(
                     qcs: _,
                 } => {
                     if !state.is_empty() {
+                        succeeded_round += 1;
                         let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
                             .unwrap()
                             .to_string();
@@ -278,7 +198,6 @@ async fn generate_transactions(
                             succeeded_round, commitment
                         );
                         final_commitment = Some(commitment);
-                        succeeded_round += 1;
                         break true;
                     }
                 }
@@ -373,65 +292,58 @@ async fn main() -> Result<(), std::io::Error> {
     if let Some(secret_key_seed) = &options.secret_key_seed {
         config.seed = *secret_key_seed;
     }
-    if let Some(nodes) = &options.nodes {
-        config.nodes = nodes.iter().cloned().map(NodeConfig::from).collect();
-    }
-
-    if options.gen_pk {
-        generate_keys(&options, &config);
+    if let Some(nodes) = &options.bootstrap_nodes {
+        config.bootstrap_nodes = nodes.iter().cloned().map(NodeConfig::from).collect();
     }
 
     let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
 
-    if let Some(own_id) = options.id {
-        // Initialize the state and hotshot
-        let (genesis, state) = if options.num_txn.is_some() {
-            // If we are going to generate transactions, we need to initialize the ledger with a
-            // test state.
-            let (genesis, state) = GenesisState::new_for_test();
-            (genesis, Some(state))
-        } else {
-            (GenesisState::new(options.faucet_pub_key.clone()), None)
-        };
-        let priv_key = get_key_pair_for_node(&options, own_id).private;
-        let known_nodes = (0..config.nodes.len())
-            .into_iter()
-            .map(|i| get_key_pair_for_node(&options, i as u64).public)
-            .collect();
+    let own_id = options.id;
+    // Initialize the state and hotshot
+    let (genesis, state) = if options.num_txn.is_some() {
+        // If we are going to generate transactions, we need to initialize the ledger with a
+        // test state.
+        let (genesis, state) = GenesisState::new_for_test();
+        (genesis, Some(state))
+    } else {
+        (GenesisState::new(options.faucet_pub_key.clone()), None)
+    };
+    let keys = gen_keys(&config, options.num_nodes);
+    let priv_key = keys[own_id].private.clone();
+    let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
 
-        let hotshot = init_validator(
-            &options.node_opt,
-            &config,
-            priv_key,
-            known_nodes,
-            genesis,
-            own_id as usize,
-            data_source.clone(),
+    let hotshot = init_validator(
+        &options.node_opt,
+        &config,
+        priv_key,
+        known_nodes,
+        genesis,
+        own_id,
+        data_source.clone(),
+    )
+    .await;
+
+    // If we are running a full node, also host a query API to inspect the accumulated state.
+    let web_server = if let Node::Full(node) = &hotshot {
+        Some(
+            init_web_server(&options.node_opt, node.clone())
+                .expect("Failed to initialize web server"),
         )
-        .await;
+    } else {
+        None
+    };
 
-        // If we are running a full node, also host a query API to inspect the accumulated state.
-        let web_server = if let Node::Full(node) = &hotshot {
-            Some(
-                init_web_server(&options.node_opt, node.clone())
-                    .expect("Failed to initialize web server"),
-            )
-        } else {
-            None
-        };
+    if let Some(num_txn) = options.num_txn {
+        generate_transactions(num_txn, own_id, hotshot, state.unwrap()).await;
+    } else {
+        hotshot.run(pending::<()>()).await;
+    }
 
-        if let Some(num_txn) = options.num_txn {
-            generate_transactions(num_txn, own_id, hotshot, state.unwrap()).await;
-        } else {
-            hotshot.run(pending::<()>()).await;
-        }
-
-        if options.wait {
-            if let Some(join_handle) = web_server {
-                join_handle.await.unwrap_or_else(|err| {
-                    panic!("web server exited with an error: {}", err);
-                });
-            }
+    if options.wait {
+        if let Some(join_handle) = web_server {
+            join_handle.await.unwrap_or_else(|err| {
+                panic!("web server exited with an error: {}", err);
+            });
         }
     }
 

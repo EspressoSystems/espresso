@@ -265,7 +265,7 @@ impl CliClient {
                 5, 6, 7, 8,
             ]
             .into(),
-            nodes: hotshot_ports
+            bootstrap_nodes: hotshot_ports
                 .into_iter()
                 .map(|port| {
                     Url::parse(&format!("http://localhost:{}", port))
@@ -284,6 +284,7 @@ impl CliClient {
             mesh_n_low: 8,
             mesh_outbound_min: 4,
             mesh_n: 12,
+            base_port: 9000,
         };
         let mut config_file = tmp_dir.to_path_buf();
         config_file.push("node-config.toml");
@@ -545,7 +546,7 @@ impl Validator {
                     "--faucet-pub-key",
                     &pub_key.to_string(),
                 ])
-                .env("ESPRESSO_VALIDATOR_PORT", port.to_string())
+                .env("ESPRESSO_VALIDATOR_QUERY_PORT", port.to_string())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
