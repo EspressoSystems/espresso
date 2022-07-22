@@ -17,17 +17,17 @@ version: '2'
 services:
   # Configure the validators. Each validator exposes 2 ports: the validation port that other
   # validators use to connect to it during consensus, and a port where it hosts a query service.
-  # The validation ports are numbered 4000x while the query service ports are numbered 6000x.
   validator0:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - $ESPRESSO_VALIDATOR_CONSENSUS_PORT:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
-      - 60000:50000/tcp
+      - 40000:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
+      - 60000:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=0
       - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
       - ESPRESSO_VALIDATOR_NUM_NODES
       - ESPRESSO_VALIDATOR_CONSENSUS_PORT
+      - ESPRESSO_VALIDATOR_QUERY_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
     volumes:
@@ -35,13 +35,14 @@ services:
   validator1:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - $ESPRESSO_VALIDATOR_CONSENSUS_PORT:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
-      - 60001:50000/tcp
+      - 40000:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
+      - 60001:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=1
       - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
       - ESPRESSO_VALIDATOR_NUM_NODES
       - ESPRESSO_VALIDATOR_CONSENSUS_PORT
+      - ESPRESSO_VALIDATOR_QUERY_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
     volumes:
@@ -49,13 +50,14 @@ services:
   validator2:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - $ESPRESSO_VALIDATOR_CONSENSUS_PORT:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
-      - 60002:50000/tcp
+      - 40000:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
+      - 60002:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=2
       - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
       - ESPRESSO_VALIDATOR_NUM_NODES
       - ESPRESSO_VALIDATOR_CONSENSUS_PORT
+      - ESPRESSO_VALIDATOR_QUERY_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
     volumes:
@@ -63,13 +65,14 @@ services:
   validator3:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - $ESPRESSO_VALIDATOR_CONSENSUS_PORT:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
-      - 60003:50000/tcp
+      - 40000:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
+      - 60003:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=3
       - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
       - ESPRESSO_VALIDATOR_NUM_NODES
       - ESPRESSO_VALIDATOR_CONSENSUS_PORT
+      - ESPRESSO_VALIDATOR_QUERY_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
     volumes:
@@ -77,13 +80,14 @@ services:
   validator4:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - $ESPRESSO_VALIDATOR_CONSENSUS_PORT:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
-      - 60004:50000/tcp
+      - 40000:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
+      - 60004:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=4
       - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
       - ESPRESSO_VALIDATOR_NUM_NODES
       - ESPRESSO_VALIDATOR_CONSENSUS_PORT
+      - ESPRESSO_VALIDATOR_QUERY_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
     volumes:
@@ -91,13 +95,14 @@ services:
   validator5:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - $ESPRESSO_VALIDATOR_CONSENSUS_PORT:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
-      - 60005:50000/tcp
+      - 40000:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
+      - 60005:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=5
       - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
       - ESPRESSO_VALIDATOR_NUM_NODES
       - ESPRESSO_VALIDATOR_CONSENSUS_PORT
+      - ESPRESSO_VALIDATOR_QUERY_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
     volumes:
@@ -105,13 +110,14 @@ services:
   validator6:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - $ESPRESSO_VALIDATOR_CONSENSUS_PORT:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
-      - 60006:50000/tcp
+      - 40000:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
+      - 60006:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=6
       - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
       - ESPRESSO_VALIDATOR_NUM_NODES
       - ESPRESSO_VALIDATOR_CONSENSUS_PORT
+      - ESPRESSO_VALIDATOR_QUERY_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - RUST_LOG
     volumes:

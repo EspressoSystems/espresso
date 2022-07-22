@@ -266,6 +266,7 @@ environment variables which can be shared by all of the services. Set the follow
 variables in each terminal where you intend to start a service:
 ```bash
 export ESPRESSO_VALIDATOR_CONFIG_PATH="/path/to/node-config.toml"
+export ESPRESSO_VALIDATOR_CONSENSUS_PORT="50076"
 export ESPRESSO_VALIDATOR_QUERY_PORT="50077"
 export ESPRESSO_ADDRESS_BOOK_PORT="50078"
 export ESPRESSO_ADDRESS_BOOK_URL="http://localhost:$ESPRESSO_ADDRESS_BOOK_PORT"

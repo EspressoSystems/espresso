@@ -59,16 +59,14 @@ struct Options {
     /// Id of the current node.
     ///
     /// If the node ID is 0, it will propose and try to add transactions.
-    ///
-    /// Skip this option if only want to generate public key files.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_ID")]
     #[structopt(requires("num-nodes"))]
-    pub id: Option<usize>,
+    pub id: usize,
 
     /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
     /// bootstrap nodes.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
-    pub num_nodes: Option<usize>,
+    pub num_nodes: usize,
 
     /// Public key which should own a faucet record in the genesis block.
     ///
@@ -100,12 +98,6 @@ fn default_config_path() -> PathBuf {
     const CONFIG_FILE: &str = "src/node-config.toml";
     let dir = project_path();
     [&dir, Path::new(CONFIG_FILE)].iter().collect()
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct KeyInFile {
-    pub private: String,
-    pub public: String,
 }
 
 async fn generate_transactions(
@@ -306,53 +298,52 @@ async fn main() -> Result<(), std::io::Error> {
 
     let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
 
-    if let Some(own_id) = options.id {
-        // Initialize the state and hotshot
-        let (genesis, state) = if options.num_txn.is_some() {
-            // If we are going to generate transactions, we need to initialize the ledger with a
-            // test state.
-            let (genesis, state) = GenesisState::new_for_test();
-            (genesis, Some(state))
-        } else {
-            (GenesisState::new(options.faucet_pub_key.clone()), None)
-        };
-        let keys = gen_keys(&config, options.num_nodes.expect("Missing `num-nodes`"));
-        let priv_key = keys[own_id].private.clone();
-        let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
+    let own_id = options.id;
+    // Initialize the state and hotshot
+    let (genesis, state) = if options.num_txn.is_some() {
+        // If we are going to generate transactions, we need to initialize the ledger with a
+        // test state.
+        let (genesis, state) = GenesisState::new_for_test();
+        (genesis, Some(state))
+    } else {
+        (GenesisState::new(options.faucet_pub_key.clone()), None)
+    };
+    let keys = gen_keys(&config, options.num_nodes);
+    let priv_key = keys[own_id].private.clone();
+    let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
 
-        let hotshot = init_validator(
-            &options.node_opt,
-            &config,
-            priv_key,
-            known_nodes,
-            genesis,
-            own_id,
-            data_source.clone(),
+    let hotshot = init_validator(
+        &options.node_opt,
+        &config,
+        priv_key,
+        known_nodes,
+        genesis,
+        own_id,
+        data_source.clone(),
+    )
+    .await;
+
+    // If we are running a full node, also host a query API to inspect the accumulated state.
+    let web_server = if let Node::Full(node) = &hotshot {
+        Some(
+            init_web_server(&options.node_opt, node.clone())
+                .expect("Failed to initialize web server"),
         )
-        .await;
+    } else {
+        None
+    };
 
-        // If we are running a full node, also host a query API to inspect the accumulated state.
-        let web_server = if let Node::Full(node) = &hotshot {
-            Some(
-                init_web_server(&options.node_opt, node.clone())
-                    .expect("Failed to initialize web server"),
-            )
-        } else {
-            None
-        };
+    if let Some(num_txn) = options.num_txn {
+        generate_transactions(num_txn, own_id, hotshot, state.unwrap()).await;
+    } else {
+        hotshot.run(pending::<()>()).await;
+    }
 
-        if let Some(num_txn) = options.num_txn {
-            generate_transactions(num_txn, own_id, hotshot, state.unwrap()).await;
-        } else {
-            hotshot.run(pending::<()>()).await;
-        }
-
-        if options.wait {
-            if let Some(join_handle) = web_server {
-                join_handle.await.unwrap_or_else(|err| {
-                    panic!("web server exited with an error: {}", err);
-                });
-            }
+    if options.wait {
+        if let Some(join_handle) = web_server {
+            join_handle.await.unwrap_or_else(|err| {
+                panic!("web server exited with an error: {}", err);
+            });
         }
     }
 
