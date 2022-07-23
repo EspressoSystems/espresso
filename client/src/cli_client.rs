@@ -19,6 +19,7 @@ use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use regex::Regex;
 use std::collections::HashMap;
+use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
@@ -117,11 +118,12 @@ impl CliClient {
     }
 
     pub fn open_validator(&mut self, v: usize) -> Result<&mut Self, String> {
+        let num_nodes = self.validators.len();
         block_on(
             self.validators
                 .get_mut(v)
                 .ok_or_else(|| format!("no such validator {}", v))?
-                .open(),
+                .open(num_nodes),
         )?;
         Ok(self)
     }
@@ -297,7 +299,7 @@ impl CliClient {
             server_ports.into_iter().enumerate().map(|(i, port)| {
                 let mut v = Validator::new(&config_file, pub_key.clone(), i, port);
                 async move {
-                    v.open().await?;
+                    v.open(ports.len()).await?;
                     Ok(v)
                 }
             }),
@@ -522,7 +524,7 @@ impl Validator {
         }
     }
 
-    async fn open(&mut self) -> Result<(), String> {
+    async fn open(&mut self, num_nodes: usize) -> Result<(), String> {
         if self.process.is_some() {
             return Err(format!("validator {} is already open", self.id));
         }
@@ -532,6 +534,11 @@ impl Validator {
         let pub_key = self.pub_key.clone();
         let id = self.id;
         let port = self.port;
+
+        // Clear the environment variable corresponding to the consensus port to avoid all
+        // validators having the same address.
+        env::remove_var("ESPRESSO_VALIDATOR_CONSENSUS_PORT");
+
         let mut child = spawn_blocking(move || {
             cargo_run("espresso-validator", "espresso-validator")
                 .map_err(err)?
@@ -543,6 +550,8 @@ impl Validator {
                     "--full",
                     "--id",
                     &id.to_string(),
+                    "--num-nodes",
+                    &num_nodes.to_string(),
                     "--faucet-pub-key",
                     &pub_key.to_string(),
                 ])
