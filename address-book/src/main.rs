@@ -40,17 +40,14 @@ async fn main() -> Result<(), AddressBookError> {
         .join("api")
         .join("api.toml");
     let settings = compose_settings::<Args>(
-        &ORG_DIR_NAME,
-        &APP_NAME,
+        ORG_DIR_NAME,
+        APP_NAME,
         &[
-            (
-                DiscoKey::api_toml.as_ref(),
-                &api_path.to_str().unwrap().to_string(),
-            ),
+            (DiscoKey::api_toml.as_ref(), api_path.to_str().unwrap()),
             (DiscoKey::base_url.as_ref(), "http://127.0.0.1:50078"),
             (
                 AppKey::store_path.as_ref(),
-                &address_book_store_path().to_str().unwrap(),
+                address_book_store_path().to_str().unwrap(),
             ),
         ],
     )?;
