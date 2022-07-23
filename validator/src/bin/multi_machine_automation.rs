@@ -12,7 +12,7 @@
 
 use async_std::task::{sleep, spawn_blocking};
 use escargot::CargoBuild;
-use espresso_validator::{ConsensusConfig, NodeOpt, SecretKeySeed};
+use espresso_validator::{NodeOpt, SecretKeySeed};
 use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
@@ -39,16 +39,18 @@ struct Options {
     #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
     pub secret_key_seed: Option<SecretKeySeed>,
 
-    /// Override `nodes` from the node configuration file.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_NODES", value_delimiter = ",")]
-    pub nodes: Option<Vec<Url>>,
+    /// Override `bootstrap_nodes` from the node configuration file.
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS",
+        value_delimiter = ","
+    )]
+    pub bootstrap_nodes: Option<Vec<Url>>,
 
-    /// Path to public keys.
-    ///
-    /// Public keys will be stored under the specified directory, file names starting
-    /// with `pk_`.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_PUB_KEY_PATH")]
-    pub pk_path: Option<PathBuf>,
+    /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of
+    /// non-bootstrap nodes.
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
+    pub num_nodes: usize,
 
     /// Public key which should own a faucet record in the genesis block.
     ///
@@ -77,14 +79,14 @@ struct Options {
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
     #[structopt(long)]
-    num_fail_nodes: Option<u64>,
+    num_fail_nodes: Option<usize>,
 
     /// Number of rounds that all nodes will be running, after which `num_fail_nodes` nodes will be
     /// killed.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
     #[structopt(long, requires("num-fail-nodes"))]
-    fail_after_txn: Option<u64>,
+    fail_after_txn: Option<usize>,
 }
 
 fn cargo_run(bin: impl AsRef<str>) -> Command {
@@ -108,13 +110,14 @@ async fn main() {
     // that we will set explicitly in the command line.
     env::remove_var("ESPRESSO_VALIDATOR_CONFIG_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_SECRET_KEY_SEED");
-    env::remove_var("ESPRESSO_VALIDATOR_NODES");
+    env::remove_var("ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS");
     env::remove_var("ESPRESSO_VALIDATOR_PUB_KEY_PATH");
     env::remove_var("ESPRESSO_FAUCET_PUB_KEY");
     env::remove_var("ESPRESSO_VALIDATOR_STORE_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_WEB_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_API_PATH");
-    env::remove_var("ESPRESSO_VALIDATOR_PORT");
+    env::remove_var("ESPRESSO_VALIDATOR_QUERY_PORT");
+    env::remove_var("ESPRESSO_VALIDATOR_CONSENSUS_PORT");
 
     let mut args = vec![];
     if options.node_opt.reset_store_state {
@@ -156,23 +159,19 @@ async fn main() {
         args.push("--secret-key-seed");
         args.push(&secret_key_seed);
     }
-    let nodes = options.nodes.as_ref().map(|nodes| {
+    let bootstrap_nodes = options.bootstrap_nodes.as_ref().map(|nodes| {
         nodes
             .iter()
             .map(|node| node.to_string())
             .collect::<Vec<_>>()
             .join(",")
     });
-    if let Some(nodes) = &nodes {
-        args.push("--nodes");
+    if let Some(nodes) = &bootstrap_nodes {
+        args.push("--bootstrap-nodes");
         args.push(nodes);
     }
-    let pk_path;
-    if let Some(path) = &options.pk_path {
-        pk_path = path.display().to_string();
-        args.push("--pk-path");
-        args.push(&pk_path);
-    }
+    let num_nodes_str = options.num_nodes.to_string();
+    let num_nodes = num_nodes_str.parse::<usize>().unwrap();
     let faucet_pub_keys = options
         .faucet_pub_key
         .iter()
@@ -186,24 +185,15 @@ async fn main() {
         Some(num_txn) => num_txn.to_string(),
         None => "".to_string(),
     };
-
-    // Read node info from node configuration file.
-    let num_nodes = match &options.nodes {
-        Some(nodes) => nodes.len(),
-        None => match &options.config {
-            Some(path) => ConsensusConfig::from_file(path).nodes.len(),
-            None => 7,
-        },
-    };
     let (num_fail_nodes, fail_after_txn_str) = match options.num_fail_nodes {
         Some(num_fail_nodes) => {
-            assert!(num_fail_nodes <= num_nodes as u64);
+            assert!(num_fail_nodes <= num_nodes);
             if num_fail_nodes == 0 {
                 (0, "".to_string())
             } else {
                 let fail_after_txn_str = options
                     .fail_after_txn
-                    .expect("`fail_after_txn` isn't specified when `num_failed_nodes` is nonzero.")
+                    .expect("`fail-after-txn` isn't specified when `num-failed-nodes` is nonzero")
                     .to_string();
                 (num_fail_nodes, fail_after_txn_str)
             }
@@ -212,14 +202,16 @@ async fn main() {
     };
 
     // Start the consensus for each node.
-    let first_fail_id = num_nodes - num_fail_nodes as usize;
+    let first_fail_id = num_nodes - num_fail_nodes;
     let mut processes: Vec<_> = (0..num_nodes)
         .map(|id| {
             let mut this_args = args.clone();
             let id_str = id.to_string();
             this_args.push("--id");
             this_args.push(&id_str);
-            if id >= first_fail_id as usize {
+            this_args.push("--num-nodes");
+            this_args.push(&num_nodes_str);
+            if id >= first_fail_id {
                 this_args.push("--num-txn");
                 this_args.push(&fail_after_txn_str);
             } else if !num_txn_str.is_empty() {
@@ -323,8 +315,10 @@ async fn main() {
                     outputs.push(output);
                 }
                 Err(e) => {
-                    println!("Validator {} failed: {}", id, e);
-                    finished_nodes += 1;
+                    println!("Error attempting to wait for validator {}: {}", id, e);
+                    // Add back unfinished process and output.
+                    processes.push((id, p));
+                    outputs.push(output);
                 }
             }
         }
@@ -334,6 +328,8 @@ async fn main() {
     for (id, mut p) in processes {
         p.kill()
             .unwrap_or_else(|_| panic!("Failed to kill node {}", id));
+        p.wait()
+            .unwrap_or_else(|_| panic!("Failed to wait for node {} to exit", id));
     }
 
     // Check whether the number of succeeded nodes meets the threshold.
@@ -347,19 +343,23 @@ mod test {
     use std::time::Instant;
 
     async fn automate(
+        num_nodes: u64,
         num_txn: u64,
         num_fail_nodes: u64,
         fail_after_txn: u64,
         expect_success: bool,
     ) {
         println!(
-            "Testing {} txns with {}/7 nodes failed after txn {}",
-            num_txn, num_fail_nodes, fail_after_txn
+            "Testing {} txns with {}/{} nodes failed after txn {}",
+            num_txn, num_fail_nodes, num_nodes, fail_after_txn
         );
+        let num_nodes = &num_nodes.to_string();
         let num_txn = &num_txn.to_string();
         let num_fail_nodes = &num_fail_nodes.to_string();
         let fail_after_txn = &fail_after_txn.to_string();
         let args = vec![
+            "--num-nodes",
+            num_nodes,
             "--num-txn",
             num_txn,
             "--num-fail-nodes",
@@ -384,8 +384,9 @@ mod test {
 
     #[async_std::test]
     async fn test_automation() {
-        automate(5, 1, 3, true).await;
-        automate(5, 3, 1, false).await;
+        automate(7, 5, 1, 3, true).await;
+        automate(7, 5, 3, 1, false).await;
+        automate(11, 2, 0, 0, true).await;
 
         // Disabling the following test cases to avoid exceeding the time limit.
         // automate(5, 0, 0, true).await;

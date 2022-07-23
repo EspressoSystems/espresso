@@ -1,3 +1,15 @@
+# Copyright (c) 2022 Espresso Systems (espressosys.com)
+# This file is part of the Espresso library.
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# General Public License as published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program. If not,
+# see <https://www.gnu.org/licenses/>.
+
 {
   description = "A devShell example";
 
@@ -10,7 +22,15 @@
 
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
 
-  outputs = { self, nixpkgs, flake-utils, flake-compat, rust-overlay, ... }:
+  inputs.pre-commit-hooks.url = "github:cachix/pre-commit-hooks.nix";
+  # See https://github.com/cachix/pre-commit-hooks.nix/pull/122
+  inputs.pre-commit-hooks.inputs.flake-utils.follows = "flake-utils";
+  inputs.pre-commit-hooks.inputs.nixpkgs.follows = "nixpkgs";
+
+  inputs.fenix.url = "github:nix-community/fenix";
+  inputs.fenix.inputs.nixpkgs.follows = "nixpkgs";
+
+  outputs = { self, nixpkgs, flake-utils, flake-compat, rust-overlay, pre-commit-hooks, fenix, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         info = builtins.split "\([a-zA-Z0-9_]+\)" system;
@@ -18,14 +38,11 @@
         os = (builtins.elemAt (builtins.elemAt info 3) 0);
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        stableToolchain = pkgs.rust-bin.stable."1.59.0".minimal.override {
+        nightlyToolchain = pkgs.rust-bin.nightly."2022-07-17".minimal.override {
           extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
         };
-        sixtyStableToolchain = pkgs.rust-bin.stable."1.60.0".minimal.override {
-          extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
-        };
-        stableMuslRustToolchain =
-          pkgs.rust-bin.stable."1.59.0".minimal.override {
+        nightlyMuslRustToolchain =
+          pkgs.rust-bin.nightly."2022-07-17".minimal.override {
             extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
             targets = [ "${arch}-unknown-${os}-musl" ];
           };
@@ -45,6 +62,7 @@
             # required to compile ethers-rs
             darwin.apple_sdk.frameworks.Security
             darwin.apple_sdk.frameworks.CoreFoundation
+            darwin.apple_sdk.frameworks.SystemConfiguration
 
             # https://github.com/NixOS/nixpkgs/issues/126182
             libiconv
@@ -107,27 +125,83 @@
           export PATH=''${my_pwd}/bin:$PATH
         '';
       in {
+        checks = {
+          pre-commit-check = pre-commit-hooks.lib.${system}.run {
+            src = ./.;
+            hooks = {
+              cargo-fmt = {
+                enable = true;
+                description = "Enforce rustfmt";
+                entry = "cargo fmt --all -- --check";
+                pass_filenames = false;
+              };
+              cargo-sort = {
+                enable = true;
+                description = "Ensure Cargo.toml are sorted";
+                entry = "cargo sort -g -w -c";
+                pass_filenames = false;
+              };
+              cargo-clippy = {
+                enable = true;
+                description = "Run clippy";
+                entry = "cargo clippy --workspace -- -D clippy::dbg-macro";
+                pass_filenames = false;
+              };
+              license-header-c-style = {
+                enable = true;
+                description =
+                  "Ensure files with c-style comments have license header";
+                entry = ''
+                  insert_license --license-filepath .license-header.txt  --comment-style "//"'';
+                types_or = [ "rust" ];
+                pass_filenames = true;
+              };
+              license-header-hash = {
+                enable = true;
+                description =
+                  "Ensure files with hash style comments have license header";
+                entry = ''
+                  insert_license --license-filepath .license-header.txt --comment-style "#"'';
+                types_or = [ "bash" "python" "toml" "nix" ];
+                excludes = [ "poetry.lock" ];
+                pass_filenames = true;
+              };
+              license-header-html = {
+                enable = true;
+                description = "Ensure markdown files have license header";
+                entry = ''
+                  insert_license --license-filepath .license-header.txt --comment-style "<!--| ~| -->"'';
+                types_or = [ "markdown" ];
+                pass_filenames = true;
+              };
+            };
+          };
+        };
         devShell = pkgs.mkShell {
-          shellHook = shellHook;
+          shellHook = shellHook
+            # install pre-commit hooks
+            + self.checks.${system}.pre-commit-check.shellHook;
           buildInputs = with pkgs;
             [
+              fenix.packages.${system}.rust-analyzer
               nixWithFlakes
               nixpkgs-fmt
-              addlicense
               git
               mdbook # make-doc, documentation generation
-              stableToolchain
+              nightlyToolchain
             ] ++ myPython ++ rustDeps;
 
-          RUST_SRC_PATH = "${stableToolchain}/lib/rustlib/src/rust/library";
+          RUST_SRC_PATH = "${nightlyToolchain}/lib/rustlib/src/rust/library";
           RUST_BACKTRACE = 1;
-          RUST_LOG = "info";
+          RUST_LOG = "info,libp2p=off";
         };
         devShells = {
           perfShell = pkgs.mkShell {
             shellHook = shellHook;
             buildInputs = with pkgs;
-              [ cargo-llvm-cov sixtyStableToolchain ] ++ rustDeps;
+              [ cargo-llvm-cov nightlyToolchain ] ++ rustDeps;
+
+            RUST_LOG = "info,libp2p=off";
           };
 
           staticShell = pkgs.mkShell {
@@ -143,8 +217,10 @@
             OPENSSL_LIB_DIR = "${opensslMusl.dev}/lib/";
             CARGO_BUILD_TARGET = "${arch}-unknown-${os}-musl";
             buildInputs = with pkgs;
-              [ stableMuslRustToolchain fd cmake ];
+              [ nightlyMuslRustToolchain fd cmake ];
             meta.broken = if "${os}" == "darwin" then true else false;
+
+            RUST_LOG = "info,libp2p=off";
           };
         };
 

@@ -1,3 +1,17 @@
+<!--
+ ~ Copyright (c) 2022 Espresso Systems (espressosys.com)
+ ~ This file is part of the Espresso library.
+ ~
+ ~ This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+ ~ General Public License as published by the Free Software Foundation, either version 3 of the
+ ~ License, or (at your option) any later version.
+ ~ This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+ ~ even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ ~ General Public License for more details.
+ ~ You should have received a copy of the GNU General Public License along with this program. If not,
+ ~ see <https://www.gnu.org/licenses/>.
+ -->
+
 # Espresso Validator
 
 `espresso-validator` is the executable which actually runs a validator and participates in the
@@ -27,25 +41,17 @@ The resulting binary is in `target/x86_64-unknown-linux-musl/release/multi_machi
 ## Run demo
 The instructions below assume that the number of nodes is 7. Otherwise, replace numbers accordingly.
 
-### Generate public key files
-* If there are public key files under `validator/src`, skip this section.
-* Otherwise, in a terminal window:
-    * Cd to `target/release/`.
-    * Run `./espresso-validator --config {config} --generate_keys`.
-    * Check that public key files are stored under `validator/src`, file names starting `pk_`.
-
 ### Simulate consensus
 * To simulate the multi-process consensus:
     * Open 7 terminal windows (or split a window into 7 sessions using tmux). Let them be `window 0, 1, ..., 6`, each representing a node.
     * In each window:
         * Cd to `target/release/`.
-        * Run `./espresso-validator --config {config} --pk-path {pk_path} --id {id} --num-txn {num_txn}`.
+        * Run `./espresso-validator --config {config} --id {id} --num-nodes {num_nodes} --num-txn {num_txn}`.
             * `config` is the path to the node config file.
                 * Skip this option if using the default file, `validator/src/node-config.toml`.
-            * `pk_path` is the directory where publik key files are stored.
-                * Skip this option if using the default directory, `validator/src`.
             * `id` is the ID of the current node, starting from `0` to `6`.
                 * `Node 0` is going to propose all transactions, but not necessarily the leader in each round.
+            * `num_nodes` is the number of nodes, including the bootstrap nodes in the node config file, and non-bootstrap nodes.
             * `num_txn` is the number of transactions to generate.
                 * If skipped, the consensus will keep running till the process is killed. For easier manual testing, do not skip it.
             * Add `--full` to run a full node.
@@ -55,13 +61,12 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
 * To automate a single-command consensus:
     * In a terminal window:
         * Cd to `target/release/`.
-        * Run `./multi_machine_automation --num-txn {num_txn} --config {config} --pk-path {pk_path}`.
-            * `num_txn` is the number of transactions to generate.
-                * If skipped, the consensus will keep running till the process is killed. For easier manual testing, do not skip it.
+        * Run `./multi_machine_automation --config {config} --num-nodes {num_nodes} --num-txn {num_txn}`.
             * `config` is the path to the node config file.
                 * Skip this option if using the default file, `validator/src/node-config.toml`.
-            * `pk_path` is the directory where publik key files are stored.
-                * Skip this option if using the default directory, `validator/src`.
+            * `num_nodes` is the number of nodes, including the bootstrap nodes in the node config file, and non-bootstrap nodes.
+            * `num_txn` is the number of transactions to generate.
+                * If skipped, the consensus will keep running till the process is killed. For easier manual testing, do not skip it.
     * Unlike the multi-process simulation, the single-command simulation will automatically check if the final commitments are the same and the number of succeeded nodes meets the threshold.
 
 ### Initialize web server
@@ -93,8 +98,7 @@ start the demo as you normally would, but pass the extra argument `--faucet-pub-
 
 In a separate terminal, you can now enter the interactive keystore REPL:
 ```
-cd zerok/zerok_client
-cargo run -- localhost:$port
+cargo run --bin wallet-cli -- localhost:$port
 ```
 where $port is the port number where the full node is serving (50000 + node id, by default). It will take a while to connect (actually, most of that time is deserializing the universal parameters and generating proving keys) and will prompt you when it is ready to process commands.
 

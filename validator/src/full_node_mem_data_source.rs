@@ -16,23 +16,23 @@ use std::convert::From;
 use espresso_availability_api::data_source::{AvailabilityDataSource, UpdateAvailabilityData};
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
 use espresso_catchup_api::data_source::{CatchUpDataSource, UpdateCatchUpData};
+use espresso_core::ledger::EspressoLedger;
+use espresso_core::state::{BlockCommitment, SetMerkleProof, SetMerkleTree, TransactionCommitment};
 use espresso_metastate_api::data_source::{MetaStateDataSource, UpdateMetaStateData};
 use espresso_status_api::data_source::{StatusDataSource, UpdateStatusData};
 use espresso_status_api::query_data::ValidatorStatus;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use seahorse::events::LedgerEvent;
-use zerok_lib::api::EspressoError;
-use zerok_lib::ledger::EspressoLedger;
-use zerok_lib::node::QueryServiceError;
-use zerok_lib::state::{BlockCommitment, ElaboratedTransactionHash, SetMerkleProof, SetMerkleTree};
+use validator_node::api::EspressoError;
+use validator_node::node::QueryServiceError;
 
 #[derive(Default)]
-struct QueryData {
+pub struct QueryData {
     blocks: Vec<BlockQueryData>,
     states: Vec<StateQueryData>,
     index_by_block_hash: HashMap<BlockCommitment, u64>,
-    index_by_txn_hash: HashMap<ElaboratedTransactionHash, (u64, u64)>,
+    index_by_txn_hash: HashMap<TransactionCommitment, (u64, u64)>,
     events: Vec<LedgerEvent<EspressoLedger>>,
     cached_nullifier_sets: BTreeMap<u64, SetMerkleTree>,
     node_status: ValidatorStatus,
@@ -51,7 +51,7 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
     fn get_block_index_by_hash(self, hash: BlockCommitment) -> Option<u64> {
         self.index_by_block_hash.get(&hash).cloned()
     }
-    fn get_txn_index_by_hash(self, hash: ElaboratedTransactionHash) -> Option<(u64, u64)> {
+    fn get_txn_index_by_hash(self, hash: TransactionCommitment) -> Option<(u64, u64)> {
         self.index_by_txn_hash.get(&hash).cloned()
     }
     fn get_record_index_by_uid(self, uid: u64) -> Option<(u64, u64, u64)> {
@@ -118,7 +118,7 @@ impl UpdateAvailabilityData for QueryData {
                 .insert(block.block_hash, block_index);
             for (index, txn_hash) in block.txn_hashes.iter().enumerate() {
                 self.index_by_txn_hash
-                    .insert(txn_hash.clone(), (block_index, index as u64));
+                    .insert(*txn_hash, (block_index, index as u64));
             }
         }
         self.blocks.append(blocks);
@@ -132,6 +132,12 @@ impl<'a> CatchUpDataSource for &'a QueryData {
     fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType {
         self.events.split_at(n).1
     }
+    fn len(&self) -> usize {
+        self.events.len()
+    }
+    fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
 }
 
 impl UpdateCatchUpData for QueryData {
@@ -142,6 +148,10 @@ impl UpdateCatchUpData for QueryData {
     ) -> Result<(), Self::Error> {
         self.events.append(events);
         Ok(())
+    }
+
+    fn event_count(&self) -> usize {
+        self.events.len()
     }
 }
 
@@ -213,7 +223,6 @@ impl UpdateMetaStateData for QueryData {
             nullifier_set
         })?;
         self.cached_nullifier_sets.insert(block_id, nullifier_set);
-        // TODO: thin out older entries (every other, geometric) when the total gets too large
         Ok(())
     }
 }
@@ -238,5 +247,19 @@ impl UpdateStatusData for QueryData {
     {
         op(&mut self.node_status).map_err(EspressoError::from)?;
         Ok(())
+    }
+}
+
+impl QueryData {
+    pub fn new() -> QueryData {
+        QueryData {
+            blocks: Vec::new(),
+            states: Vec::new(),
+            index_by_block_hash: HashMap::new(),
+            index_by_txn_hash: HashMap::new(),
+            events: Vec::new(),
+            cached_nullifier_sets: BTreeMap::new(),
+            node_status: ValidatorStatus::default(),
+        }
     }
 }

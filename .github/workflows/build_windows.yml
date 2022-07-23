@@ -17,15 +17,11 @@ on:
     branches:
       - main
       - release-*
-  pull_request:
-    branches:
-      - main
-      - release-*
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: windows-2022 
+  windows:
+    runs-on: windows-2022
     steps:
       - name: Configure Git
         run: |

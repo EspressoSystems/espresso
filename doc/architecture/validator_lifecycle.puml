@@ -1,0 +1,77 @@
+@startuml
+
+partition Validator {
+
+(*) --> "Start Validator"
+if "P.L.I. exists?" then
+  -left->[yes] "Load P.L.I."
+  --> "Start P.L.I"
+else
+  ->[no] "Create P.L.I"
+  --> "Start P.L.I"
+endif
+
+--> "Wait for P.L.I. to catchup"
+
+"Wait for P.L.I. to catchup" --> ===B1====
+
+if "EsQS Instance exists?" then
+  -left->[yes] "Load EsQS Instance"
+  --> "Start EsQS Instance"
+else
+  ->[no] "Create EsQS Instance"
+  --> "Start EsQS Instance"
+endif
+
+--> Wait for EsQS Instance to catchup
+--> ===B2====
+
+===B2==== --> "EsQS instance running..."
+===B2====  --> "Start Web Services"
+
+--> "Web services running..."
+
+
+'--> ===B1===
+'===B1=== --> WS 1
+'===B1=== --> WS 2
+'===B1=== --> WS 3
+'===B1=== --> "..."
+'===B1=== --> WS n
+'
+'"WS 1" --> ===B2===
+'"WS 2" --> ===B2===
+'"WS 3" --> ===B2===
+'"..." --> ===B2===
+'"WS n" --> ===B2===
+
+
+
+===B1=== --> "P.L.I running..."
+
+
+"P.L.I running..." -.-> ===B3===
+"EsQS instance running..." -.-> ===B3===
+"Web services running..." -.-> ===B3===
+
+--> Shutdown Validator
+
+--> Shutdown Web services
+
+--> Shutdown EsQS Instance
+
+--> Shutdown P.L.I
+
+}
+
+partition Client {
+
+    Start --> Requests
+    Requests --> "Web services running..."
+    "Web services running..." --> Requests
+    Requests --> Stop
+
+
+}
+
+@enduml

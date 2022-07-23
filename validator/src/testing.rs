@@ -11,11 +11,12 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    gen_pub_keys, init_validator, init_web_server, ConsensusConfig, GenesisState, Node, NodeOpt,
-    MINIMUM_NODES,
+    full_node_mem_data_source::QueryData, gen_bootstrap_keys, init_validator, init_web_server,
+    ConsensusConfig, GenesisState, Node, NodeOpt, MINIMUM_NODES,
 };
 use address_book::store::FileStore;
 use async_std::task::{block_on, spawn, JoinHandle};
+use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use futures::{channel::oneshot, future::join_all};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
@@ -27,15 +28,13 @@ use std::time::Instant;
 use surf::Url;
 use tempdir::TempDir;
 use tide_disco::{wait_for_server, SERVER_STARTUP_RETRIES, SERVER_STARTUP_SLEEP_MS};
-use zerok_lib::{
+use validator_node::{
     keystore::{
-        loader::{KeystoreLoader, LoaderMetadata},
+        loader::{KeystoreLoader, MnemonicPasswordLogin},
         network::NetworkBackend,
         EspressoKeystore,
     },
-    ledger::EspressoLedger,
     node::Validator,
-    universal_params::UNIVERSAL_PARAM,
 };
 
 pub struct TestNode {
@@ -110,12 +109,12 @@ pub struct TestNetwork {
 }
 
 impl TestNetwork {
-    pub async fn create_wallet(
+    pub async fn create_keystore(
         &self,
-        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = LoaderMetadata>,
-    ) -> EspressoKeystore<'static, NetworkBackend<'static>, LoaderMetadata> {
+        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = MnemonicPasswordLogin>,
+    ) -> EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin> {
         let backend = NetworkBackend::new(
-            &*UNIVERSAL_PARAM,
+            &UNIVERSAL_PARAM,
             self.query_api.clone(),
             self.address_book_api.clone(),
             self.submit_api.clone(),
@@ -154,7 +153,7 @@ impl Drop for TestNetwork {
 pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKey) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
-    let nodes = iter::from_fn(|| {
+    let bootstrap_nodes = iter::from_fn(|| {
         let port = pick_unused_port().unwrap();
         Some(
             Url::parse(&format!("http://localhost:{}", port))
@@ -166,12 +165,28 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     .collect();
     let config = ConsensusConfig {
         seed: seed.into(),
-        nodes,
+        bootstrap_nodes,
+        // NOTE these are arbitrarily chosen.
+        num_bootstrap: 4,
+        replication_factor: 3,
+        bootstrap_mesh_n_high: 7,
+        bootstrap_mesh_n_low: 4,
+        bootstrap_mesh_outbound_min: 3,
+        bootstrap_mesh_n: 6,
+        mesh_n_high: 7,
+        mesh_n_low: 4,
+        mesh_outbound_min: 3,
+        mesh_n: 6,
+        base_port: 9000,
     };
 
     println!("generating public keys");
     let start = Instant::now();
-    let pub_keys = gen_pub_keys(&config);
+    let keys = gen_bootstrap_keys(&config);
+    let pub_keys = keys
+        .iter()
+        .map(|key| key.public.clone())
+        .collect::<Vec<_>>();
     println!("generated public keys in {:?}", start.elapsed());
 
     let store = TempDir::new("minimal_test_network_store").unwrap();
@@ -181,6 +196,8 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         let genesis = genesis.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
+        let priv_key = keys[i].private.clone();
+
         store_path.push(i.to_string());
         async move {
             let mut opt = NodeOpt {
@@ -191,7 +208,19 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 opt.full = true;
                 opt.web_server_port = pick_unused_port().unwrap();
             }
-            let node = init_validator(&opt, &config, pub_keys, genesis, i).await;
+            let data_source =
+                async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
+
+            let node = init_validator(
+                &opt,
+                &config,
+                priv_key,
+                pub_keys,
+                genesis,
+                i,
+                data_source.clone(),
+            )
+            .await;
 
             // If applicable, run a query service.
             let url = if let Node::Full(node) = &node {

@@ -32,9 +32,12 @@
 
 use async_std::future::timeout;
 use async_tungstenite::async_std::connect_async;
+use espresso_core::{
+    ledger::EspressoLedger, state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM,
+};
 use futures::prelude::*;
+use hotshot::traits::BlockContents;
 use itertools::izip;
-use phaselock::traits::BlockContents;
 use seahorse::{
     events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnafu, Keystore, KeystoreError,
 };
@@ -46,14 +49,11 @@ use std::time::Duration;
 use structopt::StructOpt;
 use tempdir::TempDir;
 use tracing::{event, Level};
-use zerok_lib::{
+use validator_node::{
     api::client::*,
     api::*,
     keystore::network::{NetworkBackend, Url},
-    ledger::EspressoLedger,
     node::{LedgerSummary, QueryServiceError},
-    state::ElaboratedBlock,
-    universal_params::UNIVERSAL_PARAM,
 };
 
 #[derive(StructOpt)]
@@ -208,7 +208,6 @@ impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
 #[async_std::main]
 async fn main() {
     tracing_subscriber::fmt()
-        .compact()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
@@ -274,7 +273,7 @@ async fn main() {
         dir: TempDir::new("test_query_api").unwrap(),
     };
     let _keystore = Keystore::new(
-        NetworkBackend::new(&*UNIVERSAL_PARAM, url.clone(), url.clone(), url)
+        NetworkBackend::new(&UNIVERSAL_PARAM, url.clone(), url.clone(), url)
             .await
             .unwrap(),
         &mut loader,
