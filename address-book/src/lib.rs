@@ -21,7 +21,6 @@ use futures::FutureExt;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::Signature;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::fs;
 use std::path::PathBuf;
 use strum_macros::AsRefStr;
@@ -37,6 +36,8 @@ pub mod signal;
 
 /// Application name used for locating configuration files
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
+
+pub type Result<T> = std::result::Result<T, AddressBookError>;
 
 /// Command line arguments
 #[derive(Parser, Debug)]
@@ -71,14 +72,16 @@ pub struct ServerState<T: Store> {
 }
 
 pub fn eq_header_values(req_params: &RequestParams, h: &str, s: &str) -> bool {
-    println!(
-        "content-type: {}",
-        req_params.headers()[h].to_string().trim().to_lowercase()
-    );
     req_params.headers()[h]
         .to_string()
         .to_lowercase()
         .contains(s)
+}
+
+pub fn insert_pubkey<T: Store + 'static>(insert_request: InsertPubKey, store: &T) -> Result<()> {
+    let pub_key = verify_sig_and_get_pub_key(insert_request)?;
+    store.save(&pub_key.address(), &pub_key)?;
+    Ok(())
 }
 
 /// Initialize the web server
@@ -87,7 +90,7 @@ pub fn eq_header_values(req_params: &RequestParams, h: &str, s: &str) -> bool {
 pub fn init_web_server<T: Store + 'static>(
     api_toml: String,
     store: T,
-) -> Result<App<RwLock<ServerState<T>>, AddressBookError>, AddressBookError> {
+) -> Result<App<RwLock<ServerState<T>>, AddressBookError>> {
     let server_state = ServerState {
         store: Arc::new(store),
     };
@@ -98,46 +101,22 @@ pub fn init_web_server<T: Store + 'static>(
     .unwrap();
 
     // Insert or update the public key at the given address.
-    api.post(
-        "insert_pubkey",
-        |req_params: RequestParams, server_state| {
-            async move {
-                if eq_header_values(&req_params, "content-type", "application/json") {
-                    let insert_request: InsertPubKey = req_params.body_json()?;
-                    trace!("/insert_pubkey [json] InsertPubKey: {:?}", &insert_request);
-
-                    let pub_key = verify_sig_and_get_pub_key(insert_request)?;
-                    (*server_state.store).save(&pub_key.address(), &pub_key)?;
-                    Ok(())
-                } else if eq_header_values(&req_params, "content-type", "application/octet-stream")
-                {
-                    let insert_request: InsertPubKey =
-                        serde_json::from_slice(&req_params.body_bytes()).map_err(|_e| {
-                            AddressBookError::Other {
-                                status: StatusCode::BadRequest,
-                                msg: "Unable to deseralize the insert request from the post data"
-                                    .to_string(),
-                            }
-                        })?;
-
-                    trace!(
-                        "/insert_pubkey [octet-stream] InsertPubKey: {:?}",
-                        &insert_request
-                    );
-
-                    let pub_key = verify_sig_and_get_pub_key(insert_request)?;
-                    (*server_state.store).save(&pub_key.address(), &pub_key)?;
-                    Ok(())
-                } else {
-                    Err(AddressBookError::Other {
-                        status: StatusCode::UnsupportedMediaType,
-                        msg: "Expecting content-type: application/octet-stream".to_string(),
-                    })
-                }
+    api.post("insert_pubkey", |req_params, server_state| {
+        async move {
+            if eq_header_values(&req_params, "content-type", "application/json") {
+                let insert_request: InsertPubKey = req_params.body_json()?;
+                trace!("/insert_pubkey [json] InsertPubKey: {:?}", &insert_request);
+                insert_pubkey(insert_request, &*server_state.store)?;
+                Ok(())
+            } else {
+                Err(AddressBookError::Other {
+                    status: StatusCode::UnsupportedMediaType,
+                    msg: "Expecting content-type: application/json".to_string(),
+                })
             }
-            .boxed()
-        },
-    )
+        }
+        .boxed()
+    })
     .unwrap();
 
     // Fetch the public key for the given address. If not found, return
@@ -200,68 +179,14 @@ pub fn init_web_server<T: Store + 'static>(
     Ok(app)
 }
 
-// TODO Verify that externally observable behavior change didn't change and delete old code
-//---- Old route handlers below.
-
 /// Lookup a user public key from a signed public key address. Fail with
 /// tide::StatusCode::BadRequest if key deserialization or the signature check
 /// fail.
-pub fn verify_sig_and_get_pub_key(
-    insert_request: InsertPubKey,
-) -> Result<UserPubKey, AddressBookError> {
+pub fn verify_sig_and_get_pub_key(insert_request: InsertPubKey) -> Result<UserPubKey> {
     let pub_key: UserPubKey = bincode::deserialize(&insert_request.pub_key_bytes)
         .map_err(|e| tide::Error::new(tide::StatusCode::BadRequest, e))?;
     pub_key
         .verify_sig(&insert_request.pub_key_bytes, &insert_request.sig)
         .map_err(|e| tide::Error::new(tide::StatusCode::BadRequest, e))?;
     Ok(pub_key)
-}
-
-/// Insert or update the public key at the given address.
-pub async fn insert_pubkey<T: Store>(
-    mut req: tide::Request<ServerState<T>>,
-) -> Result<tide::Response, AddressBookError> {
-    let insert_request: InsertPubKey = net::server::request_body(&mut req).await?;
-    let pub_key = verify_sig_and_get_pub_key(insert_request)?;
-    req.state().store.save(&pub_key.address(), &pub_key)?;
-    Ok(tide::Response::new(StatusCode::Ok))
-}
-
-/// Fetch the public key for the given address. If not found, return
-/// StatusCode::NotFound.
-pub async fn request_pubkey<T: Store>(
-    mut req: tide::Request<ServerState<T>>,
-) -> Result<tide::Response, tide::Error> {
-    let address: UserAddress = net::server::request_body(&mut req).await?;
-    match req.state().store.load(&address) {
-        Ok(pub_key) => match pub_key {
-            Some(value) => {
-                let bytes = bincode::serialize(&value).unwrap();
-                let response = tide::Response::builder(StatusCode::Ok)
-                    .body(bytes)
-                    .content_type(tide::http::mime::BYTE_STREAM)
-                    .build();
-                Ok(response)
-            }
-            _ => Ok(tide::Response::new(StatusCode::NotFound)),
-        },
-        Err(_) => Ok(tide::Response::new(StatusCode::InternalServerError)),
-    }
-}
-
-/// Fetch all the public key bundles for all peers.
-pub async fn request_peers<T: Store>(
-    req: tide::Request<ServerState<T>>,
-) -> Result<tide::Response, tide::Error> {
-    match req.state().store.list() {
-        Ok(pk_list) => {
-            let bytes = bincode::serialize(&pk_list).unwrap();
-            let response = tide::Response::builder(StatusCode::Ok)
-                .body(bytes)
-                .content_type(tide::http::mime::BYTE_STREAM)
-                .build();
-            Ok(response)
-        }
-        Err(_) => Ok(tide::Response::new(StatusCode::InternalServerError)),
-    }
 }

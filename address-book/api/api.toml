@@ -17,33 +17,27 @@ FORMAT_VERSION = "0.1.0"
 [route.insert_pubkey]
 PATH = ["/insert_pubkey"]
 METHOD = "POST"
-# TODO Replace the example with a real example of the JSON serialization
 DOC = """
 Insert a user public key for a signed public key address. Fails with status 400 Bad Request if
 key deserialization or the signature check fail.
 
-The request body must be a JSON serialization of struct InsertPubKey, e.g.
-{ pub_key_bytes = [ 221, 132, 0, ... ], sig = [ 67, 24, 153, 251, ... ] }
+The request body must be a JSON serialization of struct InsertPubKey.
 """
 
 [route.request_pubkey]
 PATH = ["/request_pubkey"]
 METHOD = "POST"
-# TODO Replace the example with a real example of the JSON serialization
 DOC = """
 Lookup a user public key from a Jellyfish CAP user address. Responds with status 404 Not Found if no
 public key has been inserted for the given address. Fails with status 400 Bad Request if key
 deserialization or the signature check fail.
 
-The request body must be a JSON serialization of Jellyfish CAP Signature, e.g.
-{ }
+The request body must be a JSON serialization of Jellyfish CAP UserAddress.
 """
 
 [route.request_peers]
 PATH = ["/request_peers"]
 METHOD = "GET"
-# TODO Describe the purpose of this route.
-# TODO Describe the response of this route.
 DOC = """
 Fetch all the public key bundles for all peers. Fails with status 500 Internal Server Error if
 storage cannot be read.

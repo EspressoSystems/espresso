@@ -1,4 +1,4 @@
-// COPYRIGHT100 (c) 2022 Espresso Systems (espressosys.com)
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
 //
 // This program is free software: you can redistribute it and/or modify it under the terms of the
 // GNU General Public License as published by the Free Software Foundation, either version 3 of the
@@ -20,32 +20,8 @@ use std::fs;
 use std::path::PathBuf;
 use tide_disco::{compose_settings, init_logging, DiscoKey};
 
-#[cfg(windows)]
-async fn register_interrupt_signals() {
-    // Signals aren't properly supported on Windows so we'll just complain.
-    trace!("Custom signal handlers are not supported on Windows.");
-}
-
-#[cfg(not(windows))]
-fn register_interrupt_signals() -> impl std::future::Future<Output = ()> {
-    use address_book::signal::handle_signals;
-    use signal_hook::consts::{SIGINT, SIGTERM};
-    use signal_hook_async_std::Signals;
-
-    let signals = Signals::new(&[SIGINT, SIGTERM]).expect("Failed to create signals.");
-    let handle = signals.handle();
-    let signals_task = async_std::task::spawn(handle_signals(signals));
-
-    async move {
-        handle.close();
-        signals_task.await;
-    }
-}
-
 #[async_std::main]
 async fn main() -> Result<(), AddressBookError> {
-    let cleanup_signals = register_interrupt_signals();
-
     // Combine settings from multiple sources.
     let api_path = std::env::current_dir()
         .unwrap()
@@ -80,6 +56,7 @@ async fn main() -> Result<(), AddressBookError> {
     let store = FileStore::new(PathBuf::from(store_path));
 
     let app = init_web_server(api_toml, store)?;
+
     app.serve(base_url)
         .await
         .map_err(|err| AddressBookError::Config {
@@ -87,7 +64,5 @@ async fn main() -> Result<(), AddressBookError> {
         })
         .unwrap();
 
-    #[cfg(not(windows))]
-    cleanup_signals.await;
     Ok(())
 }

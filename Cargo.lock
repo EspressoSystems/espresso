@@ -38,10 +38,10 @@ dependencies = [
  "strum 0.20.0",
  "strum_macros",
  "surf",
- "tagged-base64 0.1.0",
+ "tagged-base64 0.2.0",
  "tempdir",
  "tide",
- "tide-disco",
+ "tide-disco 0.1.0",
  "tide-websockets",
  "toml",
  "tracing",
@@ -1976,7 +1976,7 @@ dependencies = [
 [[package]]
 name = "espresso-systems-common"
 version = "0.2.0"
-source = "git+ssh://git@github.com/EspressoSystems/espresso-systems-common.git?branch=main#99b910038e4880a967eb979394e3adcfa526bb26"
+source = "git+ssh://git@github.com/EspressoSystems/espresso-systems-common.git?tag=0.2.0#99b910038e4880a967eb979394e3adcfa526bb26"
 
 [[package]]
 name = "espresso-validator"
@@ -2025,7 +2025,7 @@ dependencies = [
  "tempdir",
  "threshold_crypto",
  "tide",
- "tide-disco",
+ "tide-disco 0.1.0 (git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main)",
  "tide-websockets",
  "toml",
  "tracing",
@@ -5372,6 +5372,49 @@ dependencies = [
  "route-recognizer",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "tide-disco"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "async-trait",
+ "bincode",
+ "clap 3.2.12",
+ "config",
+ "derive_more",
+ "dirs",
+ "edit-distance",
+ "futures",
+ "futures-util",
+ "http",
+ "lazy_static",
+ "libc",
+ "markdown",
+ "parking_lot",
+ "routefinder",
+ "semver 1.0.7",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "shellexpand",
+ "signal-hook",
+ "signal-hook-async-std",
+ "snafu",
+ "strum 0.20.0",
+ "strum_macros",
+ "surf",
+ "tagged-base64 0.1.0",
+ "tide",
+ "tide-websockets",
+ "toml",
+ "tracing",
+ "tracing-distributed 0.4.0",
+ "tracing-futures",
+ "tracing-log",
+ "tracing-subscriber 0.3.14",
+ "url",
 ]
 
 [[package]]
