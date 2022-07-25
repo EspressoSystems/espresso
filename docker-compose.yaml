@@ -122,6 +122,51 @@ services:
       - RUST_LOG
     volumes:
       - validator6-store:/store
+  validator7:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - 40000:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
+      - 60006:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
+    environment:
+      - ESPRESSO_VALIDATOR_ID=7
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_CONSENSUS_PORT
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator7-store:/store
+  validator8:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - 40000:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
+      - 60006:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
+    environment:
+      - ESPRESSO_VALIDATOR_ID=8
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_CONSENSUS_PORT
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator8-store:/store
+  validator9:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - 40000:$ESPRESSO_VALIDATOR_CONSENSUS_PORT/tcp
+      - 60006:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
+    environment:
+      - ESPRESSO_VALIDATOR_ID=9
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_CONSENSUS_PORT
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator9-store:/store
 
   # Configure services. Services run at ports starting at 50000.
   faucet:

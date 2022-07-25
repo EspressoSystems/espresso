@@ -11,8 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    full_node_mem_data_source::QueryData, gen_bootstrap_keys, init_validator, init_web_server,
-    ConsensusConfig, GenesisState, Node, NodeOpt, MINIMUM_NODES,
+    full_node_mem_data_source::QueryData, gen_keys, init_validator, init_web_server,
+    ConsensusConfig, GenesisState, Node, NodeConfig, NodeOpt, MINIMUM_NODES,
 };
 use async_std::task::{block_on, spawn, JoinHandle};
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
@@ -133,21 +133,14 @@ impl Drop for TestNetwork {
 pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKey) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
-    let bootstrap_nodes = iter::from_fn(|| {
-        let port = pick_unused_port().unwrap();
-        Some(
-            Url::parse(&format!("http://localhost:{}", port))
-                .unwrap()
-                .into(),
-        )
-    })
-    .take(MINIMUM_NODES)
-    .collect();
+    let bootstrap_nodes = vec![NodeConfig {
+        ip: "localhost".to_string(),
+    }];
     let config = ConsensusConfig {
         seed: seed.into(),
         bootstrap_nodes,
         // NOTE these are arbitrarily chosen.
-        num_bootstrap: 4,
+        num_bootstrap: 1,
         replication_factor: 3,
         bootstrap_mesh_n_high: 7,
         bootstrap_mesh_n_low: 4,
@@ -157,12 +150,12 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         mesh_n_low: 4,
         mesh_outbound_min: 3,
         mesh_n: 6,
-        base_port: 9000,
+        base_port: pick_unused_port().expect("No available port") as usize,
     };
 
     println!("generating public keys");
     let start = Instant::now();
-    let keys = gen_bootstrap_keys(&config);
+    let keys = gen_keys(&config, MINIMUM_NODES);
     let pub_keys = keys
         .iter()
         .map(|key| key.public.clone())
