@@ -450,7 +450,7 @@ impl Committable for RecordMerkleFrontier {
 /// The ability to update historical proofs also means we can insert new nullifiers into the latest
 /// nullifier set given only historical proofs. The method [append_block](Self::append_block) does
 /// this in batch.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct NullifierHistory {
     current: set_hash::Hash,
     history: VecDeque<(SetMerkleTree, Vec<Nullifier>)>,
@@ -525,18 +525,20 @@ impl NullifierHistory {
 
     /// Append a block of new nullifiers to the set.
     ///
-    /// `inserts`, the nullifiers to insert, is structured as a map from a historical root hash to
-    /// the proofs which are to be validated against that hash, and their corresponding nullifiers.
+    /// `inserts` is a list of nullifiers to insert, in order, along with their proofs and the
+    /// historical root hash which their proof should be validated against. Note that inserting
+    /// nullifiers in different orders may yield different [NullifierHistory]s, so `inserts` must be
+    /// given in a canonical order -- the order in which the nullifiers appear in the block. Each
+    /// nullifier and proof in `inserts` should be labeled with the [Hash](set_hash::Hash) that was
+    /// returned from [check_unspent](Self::check_unspent) when validating that proof. In addition,
+    /// [append_block](Self::append_block) must not have been called since any of the relevant calls
+    /// to [check_unspent](Self::check_unspent).
+    ///
     /// This method uses the historical sparse [SetMerkleTree] snapshots to update each of the given
     /// proofs to a proof relative to the current nullifiers set, constructing a sparse view of the
     /// current set which includes paths to leaves for each of the nullifiers to be inserted. From
     /// there, the new nullifiers can be directly inserted into the sparse [SetMerkleTree], which
     /// can then be used to derive a new root hash.
-    ///
-    /// Each nullifier and proof in `inserts` should exist under the [Hash](set_hash::Hash) that was
-    /// returned from [check_unspent](Self::check_unspent) when validating that proof. In addition,
-    /// [append_block](Self::append_block) must not have been called since any of the relevant calls
-    /// to [check_unspent](Self::check_unspent).
     ///
     /// If the nullifier proofs are successfully updated, this function may remove the oldest entry
     /// from the history in order to keep the size of the history below
@@ -551,9 +553,16 @@ impl NullifierHistory {
     /// corresponding [Hash](set_hash::Hash).
     pub fn append_block(
         &mut self,
-        mut inserts: HashMap<set_hash::Hash, Vec<(Nullifier, SetMerkleProof)>>,
+        inserts: NullifierProofs,
     ) -> Result<SetMerkleTree, ValidationError> {
-        let mut nulls = Vec::new();
+        let nulls = inserts.iter().map(|(n, _, _)| *n).collect::<Vec<_>>();
+
+        // A map from a historical root hash to the proofs which are to be validated against that
+        // hash
+        let mut proofs_by_root = HashMap::<set_hash::Hash, Vec<_>>::new();
+        for (n, proof, root) in inserts {
+            proofs_by_root.entry(root).or_default().push((n, proof));
+        }
 
         // Get a sparse representation of the oldest set in the history. We will use this
         // accumulator to incrementally build up a sparse representation of the current set that
@@ -571,11 +580,10 @@ impl NullifierHistory {
         for (tree, delta) in self.history.iter().rev() {
             assert_eq!(accum.hash(), tree.hash());
             // Add Merkle paths for new nullifiers whose proofs correspond to this snapshot.
-            for (n, proof) in inserts.remove(&tree.hash()).unwrap_or_default() {
+            for (n, proof) in proofs_by_root.remove(&tree.hash()).unwrap_or_default() {
                 accum
                     .remember(n, proof)
                     .map_err(|_| ValidationError::BadNullifierProof {})?;
-                nulls.push(n);
             }
             // Insert nullifiers from `delta`, advancing `accum` to the next historical state while
             // updating all of the Merkle paths it currently contains.
@@ -585,11 +593,10 @@ impl NullifierHistory {
         }
 
         // Finally, add Merkle paths for any nullifiers whose proofs were already current.
-        for (n, proof) in inserts.remove(&accum.hash()).unwrap_or_default() {
+        for (n, proof) in proofs_by_root.remove(&accum.hash()).unwrap_or_default() {
             accum
                 .remember(n, proof)
                 .map_err(|_| ValidationError::BadNullifierProof {})?;
-            nulls.push(n);
         }
 
         // At this point, `accum` contains Merkle paths for each of the new nullifiers in `nulls`
@@ -638,7 +645,7 @@ impl Committable for NullifierHistory {
         for (tree, delta) in self.history.iter() {
             ret = ret
                 .field("root", tree.hash().into())
-                .var_size_bytes(&bincode::serialize(&delta).unwrap())
+                .var_size_bytes(&canonical::serialize(delta).unwrap())
         }
         ret.finalize()
     }
@@ -771,7 +778,7 @@ pub struct ValidatorState {
 }
 
 /// Nullifier proofs, organized by the root hash for which they are valid.
-pub type NullifierProofs = HashMap<set_hash::Hash, Vec<(Nullifier, SetMerkleProof)>>;
+pub type NullifierProofs = Vec<(Nullifier, SetMerkleProof, set_hash::Hash)>;
 
 impl ValidatorState {
     /// The number of recent record Merkle tree root hashes the
@@ -846,7 +853,7 @@ impl ValidatorState {
     ) -> Result<(Block, NullifierProofs), ValidationError> {
         let mut nulls = HashSet::new();
         use ValidationError::*;
-        let mut sorted_proofs = NullifierProofs::new();
+        let mut proofs = NullifierProofs::new();
 
         let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
         for (pf, n) in null_pfs
@@ -861,7 +868,7 @@ impl ValidatorState {
             let root = self
                 .past_nullifiers
                 .check_unspent(&recent_nullifiers, &pf, n)?;
-            sorted_proofs.entry(root).or_default().push((n, pf));
+            proofs.push((n, pf, root));
             nulls.insert(n);
         }
 
@@ -919,7 +926,7 @@ impl ValidatorState {
             .map_err(|err| CryptoError { err: Ok(err) })?;
         }
 
-        Ok((txns, sorted_proofs))
+        Ok((txns, proofs))
     }
 
     /// Performs validation for a block, updating the ValidatorState.
