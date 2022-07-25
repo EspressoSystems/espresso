@@ -286,7 +286,7 @@ impl CliClient {
             .unwrap();
 
         let ret = block_on(futures::future::join_all(
-            server_ports.into_iter().enumerate().map(|(i, port)| {
+            server_ports.iter().enumerate().map(|(i, port)| {
                 let mut v = Validator::new(&config_file, pub_key.clone(), i, *port);
                 async move {
                     v.open(server_ports.len()).await?;
