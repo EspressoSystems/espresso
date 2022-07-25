@@ -225,6 +225,9 @@ volumes:
   validator4-store:
   validator5-store:
   validator6-store:
+  validator7-store:
+  validator8-store:
+  validator9-store:
   faucet-store:
   address-book-store:
   random-wallet0-store:
