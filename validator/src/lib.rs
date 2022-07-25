@@ -1,5 +1,17 @@
-// Copyright © 2021 Translucence Research, Inc. All rights reserved.
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 #![deny(warnings)]
+#![allow(clippy::format_push_string)]
 
 use crate::full_node_mem_data_source::QueryData;
 use crate::routes::{
@@ -9,39 +21,8 @@ use ark_serialize::*;
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
-use jf_cap::{
-    structs::{Amount, AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
-    MerkleTree, TransactionVerifyingKey,
-};
-use jf_primitives::merkle_tree::FilledMTBuilder;
-use jf_utils::tagged_blob;
-use key_set::{KeySet, VerifierKeySet};
-use phaselock::{
-    traits::implementations::{AtomicStorage, WNetwork},
-    types::Message,
-    PhaseLock, PhaseLockConfig, PhaseLockError, PubKey, H_256,
-};
-use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
-use rand_chacha_02::{rand_core::SeedableRng as _, ChaChaRng as ChaChaRng02};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use server::request_body;
-use std::collections::hash_map::HashMap;
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::{fs, fs::File};
-use structopt::StructOpt;
-use threshold_crypto as tc;
-use tide::{http::Url, StatusCode};
-use tide_websockets::{WebSocket, WebSocketConnection};
-use tracing::{debug, event, Level};
-use validator_node::{
-    api::EspressoError,
-    api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
-    node,
-    node::{EventStream, PhaseLockEvent, QueryService, Validator},
-};
-use zerok_lib::{
+use dirs::data_local_dir;
+use espresso_core::{
     committee::Committee,
     state::{
         ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, SetMerkleTree,
@@ -49,6 +30,48 @@ use zerok_lib::{
     },
     testing::{MultiXfrRecordSpec, MultiXfrTestState},
     universal_params::UNIVERSAL_PARAM,
+};
+use espresso_core::{PrivKey, PubKey};
+use hotshot::traits::implementations::Libp2pNetwork;
+use hotshot::traits::NetworkError;
+use hotshot::types::ed25519::{Ed25519Priv, Ed25519Pub};
+use hotshot::{
+    traits::implementations::AtomicStorage,
+    types::{Message, SignatureKey},
+    HotShot, HotShotConfig, HotShotError, H_256,
+};
+use jf_cap::{
+    structs::{Amount, AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
+    MerkleTree, TransactionVerifyingKey,
+};
+use jf_primitives::merkle_tree::FilledMTBuilder;
+use jf_utils::tagged_blob;
+use key_set::{KeySet, VerifierKeySet};
+use libp2p::identity::ed25519::SecretKey;
+use libp2p::identity::Keypair;
+use libp2p::{multiaddr, Multiaddr, PeerId};
+use libp2p_networking::network::{MeshParams, NetworkNodeConfigBuilder, NetworkNodeType};
+use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
+use serde::{Deserialize, Serialize};
+use server::request_body;
+use std::collections::hash_map::HashMap;
+use std::collections::HashSet;
+use std::env;
+use std::io::Read;
+use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use std::{fs, fs::File};
+use structopt::StructOpt;
+use tide::{http::Url, StatusCode};
+use tide_websockets::{WebSocket, WebSocketConnection};
+use tracing::{debug, event, Level};
+use validator_node::{
+    api::EspressoError,
+    api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
+    node,
+    node::{EventStream, HotShotEvent, QueryService, Validator},
 };
 
 mod disco;
@@ -62,6 +85,30 @@ pub mod testing;
 pub const MINIMUM_NODES: usize = 5;
 
 const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
+
+/// Parse a (url|ip):[0-9]+ into a multiaddr
+pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
+    let (ip, port) = s
+        .split_once(':')
+        .ok_or(multiaddr::Error::InvalidMultiaddr)?;
+    if ip.chars().any(|c| c.is_alphabetic()) {
+        // speecial case localhost
+        if ip == "localhost" {
+            Multiaddr::from_str(&format!("/dns/{}/tcp/{}", "127.0.0.1", port))
+        } else {
+            // is domain
+            Multiaddr::from_str(&format!("/dns/{}/tcp/{}", ip, port))
+        }
+    } else {
+        // is ip address
+        Multiaddr::from_str(&format!("/ip4/{}/tcp/{}", ip, port))
+    }
+}
+
+type PLNetwork = Libp2pNetwork<
+    Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
+    Ed25519Pub,
+>;
 
 #[derive(Debug, StructOpt)]
 pub struct NodeOpt {
@@ -90,9 +137,39 @@ pub struct NodeOpt {
     #[structopt(long = "api", env = "ESPRESSO_VALIDATOR_API_PATH")]
     pub api_path: Option<PathBuf>,
 
+    /// Port for the connection during the consensus.
+    ///
+    /// If not provided, `base_port + id` will be used as the port number, where `base_port` is
+    /// provided by the node configuration file and `id` is the ID of the current node.
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONSENSUS_PORT")]
+    pub consensus_port: Option<u16>,
+
     /// Port for the query service.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_PORT", default_value = "5000")]
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_QUERY_PORT", default_value = "5000")]
     pub web_server_port: u16,
+
+    /// Minimum time (in seconds) to wait for submitted transactions before proposing a block.
+    ///
+    /// Increasing this trades off latency for throughput: the rate of new block proposals gets
+    /// slower, but each block is proportionally larger. Because of batch verification, larger
+    /// blocks should lead to increased throughput.
+    #[structopt(
+        long = "min-propose-time",
+        env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
+        default_value = "0"
+    )]
+    pub min_propose_time_secs: u64,
+
+    /// Maximum time (in seconds) to wait for submitted transactions before proposing a block.
+    ///
+    /// If a validator has not received any transactions after `min-propose-time`, it will wait up
+    /// to `max-propose-time` before giving up and submitting an empty block.
+    #[structopt(
+        long = "max-propose-time",
+        env = "ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME",
+        default_value = "10"
+    )]
+    pub max_propose_time_secs: u64,
 }
 
 impl Default for NodeOpt {
@@ -101,52 +178,26 @@ impl Default for NodeOpt {
     }
 }
 
+impl NodeOpt {
+    pub fn min_propose_time(&self) -> Duration {
+        Duration::from_secs(self.min_propose_time_secs)
+    }
+
+    pub fn max_propose_time(&self) -> Duration {
+        Duration::from_secs(self.max_propose_time_secs)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NodeConfig {
-    pub url: Url,
-    pub host: String,
-    pub port: u16,
+    pub ip: String,
 }
 
 impl From<Url> for NodeConfig {
     fn from(url: Url) -> Self {
         Self {
-            port: url.port_or_known_default().unwrap(),
-            host: url.host_str().unwrap().to_string(),
-            url,
+            ip: url.host_str().unwrap().to_string(),
         }
-    }
-}
-
-/// The structure of a NodeConfig in a consensus config TOML file.
-///
-/// This struct exists to be deserialized and converted to [NodeConfig].
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ConsensusConfigFileNode {
-    ip: String,
-    port: u16,
-}
-
-impl From<ConsensusConfigFileNode> for NodeConfig {
-    fn from(cfg: ConsensusConfigFileNode) -> Self {
-        Url::parse(&format!("http://{}:{}", cfg.ip, cfg.port))
-            .unwrap()
-            .into()
-    }
-}
-
-impl From<NodeConfig> for ConsensusConfigFileNode {
-    fn from(cfg: NodeConfig) -> Self {
-        Self {
-            ip: cfg.host,
-            port: cfg.port,
-        }
-    }
-}
-
-impl NodeConfig {
-    pub fn socket_addr(&self) -> (&str, u16) {
-        (&self.host, self.port)
     }
 }
 
@@ -191,14 +242,36 @@ impl From<SecretKeySeed> for [u8; 32] {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ConsensusConfigFile {
     seed: [u8; 32],
-    nodes: Vec<ConsensusConfigFileNode>,
+    num_bootstrap: usize,
+    replication_factor: usize,
+    bootstrap_mesh_n_high: usize,
+    bootstrap_mesh_n_low: usize,
+    bootstrap_mesh_outbound_min: usize,
+    bootstrap_mesh_n: usize,
+    mesh_n_high: usize,
+    mesh_n_low: usize,
+    mesh_outbound_min: usize,
+    mesh_n: usize,
+    base_port: usize,
+    bootstrap_nodes: Vec<NodeConfig>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(from = "ConsensusConfigFile", into = "ConsensusConfigFile")]
 pub struct ConsensusConfig {
     pub seed: SecretKeySeed,
-    pub nodes: Vec<NodeConfig>,
+    pub num_bootstrap: usize,
+    pub replication_factor: usize,
+    pub bootstrap_mesh_n_high: usize,
+    pub bootstrap_mesh_n_low: usize,
+    pub bootstrap_mesh_outbound_min: usize,
+    pub bootstrap_mesh_n: usize,
+    pub mesh_n_high: usize,
+    pub mesh_n_low: usize,
+    pub mesh_outbound_min: usize,
+    pub mesh_n: usize,
+    pub base_port: usize,
+    pub bootstrap_nodes: Vec<NodeConfig>,
 }
 
 impl ConsensusConfig {
@@ -218,7 +291,22 @@ impl From<ConsensusConfigFile> for ConsensusConfig {
     fn from(cfg: ConsensusConfigFile) -> Self {
         Self {
             seed: cfg.seed.into(),
-            nodes: cfg.nodes.into_iter().map(NodeConfig::from).collect(),
+            num_bootstrap: cfg.num_bootstrap,
+            bootstrap_nodes: cfg
+                .bootstrap_nodes
+                .into_iter()
+                .map(NodeConfig::from)
+                .collect(),
+            replication_factor: cfg.replication_factor,
+            bootstrap_mesh_n_high: cfg.bootstrap_mesh_n_high,
+            bootstrap_mesh_n_low: cfg.bootstrap_mesh_n_low,
+            bootstrap_mesh_outbound_min: cfg.bootstrap_mesh_outbound_min,
+            bootstrap_mesh_n: cfg.bootstrap_mesh_n,
+            mesh_n_high: cfg.mesh_n_high,
+            mesh_n_low: cfg.mesh_n_low,
+            mesh_outbound_min: cfg.mesh_outbound_min,
+            mesh_n: cfg.mesh_n,
+            base_port: cfg.base_port,
         }
     }
 }
@@ -227,11 +315,22 @@ impl From<ConsensusConfig> for ConsensusConfigFile {
     fn from(cfg: ConsensusConfig) -> Self {
         Self {
             seed: cfg.seed.into(),
-            nodes: cfg
-                .nodes
+            num_bootstrap: cfg.num_bootstrap,
+            bootstrap_nodes: cfg
+                .bootstrap_nodes
                 .into_iter()
-                .map(ConsensusConfigFileNode::from)
+                .map(NodeConfig::from)
                 .collect(),
+            replication_factor: cfg.replication_factor,
+            bootstrap_mesh_n_high: cfg.bootstrap_mesh_n_high,
+            bootstrap_mesh_n_low: cfg.bootstrap_mesh_n_low,
+            bootstrap_mesh_outbound_min: cfg.bootstrap_mesh_outbound_min,
+            bootstrap_mesh_n: cfg.bootstrap_mesh_n,
+            mesh_n_high: cfg.mesh_n_high,
+            mesh_n_low: cfg.mesh_n_low,
+            mesh_outbound_min: cfg.mesh_outbound_min,
+            mesh_n: cfg.mesh_n,
+            base_port: cfg.base_port,
         }
     }
 }
@@ -249,16 +348,13 @@ fn default_web_path() -> PathBuf {
 }
 
 /// Returns the default directory to store persistence files.
-fn default_store_path(node_id: u64) -> PathBuf {
-    const STORE_DIR: &str = "store";
-    let dir = project_path();
-    [
-        &dir,
-        Path::new(STORE_DIR),
-        Path::new(&format!("node{}", node_id)),
-    ]
-    .iter()
-    .collect()
+fn default_store_path(node_id: usize) -> PathBuf {
+    let mut data_dir = data_local_dir()
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("./")));
+    data_dir.push("espresso");
+    data_dir.push("validator");
+    data_dir.push(format!("node{}", node_id));
+    data_dir
 }
 
 /// Returns the default path to the API file.
@@ -272,7 +368,7 @@ fn default_api_path() -> PathBuf {
 ///
 /// The returned path can be passed to `reset_store_dir` to remove the contents, if the
 /// `--reset-store-state` argument is true.
-fn get_store_dir(options: &NodeOpt, node_id: u64) -> PathBuf {
+fn get_store_dir(options: &NodeOpt, node_id: usize) -> PathBuf {
     options
         .store_path
         .clone()
@@ -285,37 +381,6 @@ fn reset_store_dir(store_dir: PathBuf) {
     fs::remove_dir_all(path).expect("Failed to remove persistence files");
 }
 
-/// Trys to get a networking implementation with the given id and port number.
-///
-/// Also starts the background task.
-async fn get_networking<
-    T: Clone + Serialize + DeserializeOwned + Send + Sync + std::fmt::Debug + 'static,
->(
-    pub_key: PubKey,
-    listen_addr: &str,
-    port: u16,
-) -> WNetwork<T> {
-    debug!(?pub_key);
-    let network = WNetwork::new(pub_key, listen_addr, port, None).await;
-    if let Ok(n) = network {
-        let (c, sync) = futures::channel::oneshot::channel();
-        match n.generate_task(c) {
-            Some(task) => {
-                task.into_iter().for_each(|n| {
-                    async_std::task::spawn(n);
-                });
-                sync.await.expect("sync.await failed");
-            }
-            None => {
-                panic!("Failed to launch networking task");
-            }
-        }
-        return n;
-    }
-    panic!("Failed to open a port");
-}
-
-type PLNetwork = WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>;
 type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
@@ -328,9 +393,9 @@ pub enum Node {
 
 #[async_trait]
 impl Validator for Node {
-    type Event = PhaseLockEvent;
+    type Event = HotShotEvent;
 
-    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), PhaseLockError> {
+    async fn submit_transaction(&self, tx: ElaboratedTransaction) -> Result<(), HotShotError> {
         match self {
             Node::Light(n) => <LWNode as Validator>::submit_transaction(n, tx).await,
             Node::Full(n) => n.read().await.submit_transaction(tx).await,
@@ -344,7 +409,7 @@ impl Validator for Node {
         }
     }
 
-    async fn current_state(&self) -> Arc<ValidatorState> {
+    async fn current_state(&self) -> Result<Option<ValidatorState>, HotShotError> {
         match self {
             Node::Light(n) => n.current_state().await,
             Node::Full(n) => n.read().await.current_state().await,
@@ -475,31 +540,35 @@ impl GenesisState {
     }
 }
 
-/// Creates the initial state and phaselock for simulation.
+/// Creates the initial state and hotshot for simulation.
 #[allow(clippy::too_many_arguments)]
-async fn init_phaselock(
+async fn init_hotshot(
     options: &NodeOpt,
-    public_keys: tc::PublicKeySet,
-    secret_key_share: tc::SecretKeyShare,
     known_nodes: Vec<PubKey>,
+    priv_key: PrivKey,
     threshold: u64,
-    node_id: u64,
-    networking: WNetwork<Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, H_256>>,
+    node_id: usize,
+    networking: PLNetwork,
     full_node: bool,
     state: GenesisState,
     data_source: Arc<RwLock<QueryData>>,
+    num_bootstrap: usize,
 ) -> Node {
-    // Create the initial phaselock
+    // Create the initial hotshot
     let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
-    let config = PhaseLockConfig {
-        total_nodes: known_nodes.len() as u32,
-        threshold: threshold as u32,
-        max_transactions: 100,
+    let pub_key = known_nodes[node_id].clone();
+    let config = HotShotConfig {
+        total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
+        threshold: NonZeroUsize::new(threshold as usize).unwrap(),
+        max_transactions: NonZeroUsize::new(100).unwrap(),
         known_nodes,
         next_view_timeout: 10_000,
         timeout_ratio: (11, 10),
         round_start_delay: 1,
         start_delay: 1,
+        propose_min_round_time: options.min_propose_time(),
+        propose_max_round_time: options.max_propose_time(),
+        num_bootstrap,
     };
     debug!(?config);
     let genesis = ElaboratedBlock::default();
@@ -536,27 +605,30 @@ async fn init_phaselock(
         None
     };
 
-    let phaselock_persistence = [storage_path, Path::new("phaselock")]
+    let hotshot_persistence = [storage_path, Path::new("hotshot")]
         .iter()
         .collect::<PathBuf>();
     let node_persistence = [storage_path, Path::new("node")]
         .iter()
         .collect::<PathBuf>();
-    let phaselock = PhaseLock::init(
+
+    let hotshot = HotShot::init(
         genesis,
-        public_keys,
-        secret_key_share,
-        node_id,
+        config.known_nodes.clone(),
+        pub_key,
+        priv_key,
+        node_id as u64,
         config,
         state.validator,
         networking,
-        AtomicStorage::open(&phaselock_persistence).unwrap(),
+        AtomicStorage::open(&hotshot_persistence).unwrap(),
         lw_persistence,
         Committee::new(stake_table),
     )
     .await
     .unwrap();
-    debug!("phaselock launched");
+
+    debug!("Hotshot online!");
 
     let validator = if full_node {
         let full_persisted = FullPersistence::new(&node_persistence, "full_node").unwrap();
@@ -578,7 +650,7 @@ async fn init_phaselock(
                 .unwrap_or_else(|_| Default::default())
         };
         let node = FullNode::new(
-            phaselock,
+            hotshot,
             univ_param.unwrap(),
             stored_state,
             records,
@@ -591,7 +663,7 @@ async fn init_phaselock(
         );
         Node::Full(Arc::new(RwLock::new(node)))
     } else {
-        Node::Light(phaselock)
+        Node::Light(hotshot)
     };
 
     validator
@@ -877,84 +949,193 @@ pub fn init_web_server(
     Ok(join_handle)
 }
 
-fn secret_keys(config: &ConsensusConfig) -> (u64, tc::SecretKeySet) {
-    // Generate key sets
-    let threshold = ((config.nodes.len() as u64 * 2) / 3) + 1;
-    (
-        threshold,
-        tc::SecretKeySet::random(
-            threshold as usize - 1,
-            &mut ChaChaRng02::from_seed(config.seed.into()),
-        ),
-    )
+/// Generate a list of private and public keys for `config.bootstrap_nodes.len()` bootstrap keys, with a
+/// given `config.seed` seed.
+pub fn gen_bootstrap_keys(config: &ConsensusConfig) -> Vec<KeyPair> {
+    let mut keys = Vec::with_capacity(config.bootstrap_nodes.len());
+
+    for node_id in 0..config.bootstrap_nodes.len() {
+        let private = PrivKey::generated_from_seed_indexed(config.seed.0, node_id as u64);
+        let public = PubKey::from_private(&private);
+
+        keys.push(KeyPair { public, private })
+    }
+    keys
 }
 
-pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<PubKey> {
-    let (_, secret_keys) = secret_keys(config);
+/// Generate a list of private and public keys for the given number of nodes with a given `config.
+/// seed` seed.
+pub fn gen_keys(config: &ConsensusConfig, num_nodes: usize) -> Vec<KeyPair> {
+    let mut keys = Vec::with_capacity(num_nodes);
 
-    // Generate public key for each node
-    config
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(node_id, _)| PubKey::from_secret_key_set_escape_hatch(&secret_keys, node_id as u64))
-        .collect()
+    for node_id in 0..num_nodes {
+        let private = PrivKey::generated_from_seed_indexed(config.seed.0, node_id as u64);
+        let public = PubKey::from_private(&private);
+
+        keys.push(KeyPair { public, private })
+    }
+    keys
+}
+
+pub struct KeyPair {
+    pub public: PubKey,
+    pub private: PrivKey,
+}
+
+/// Create a new libp2p network.
+#[allow(clippy::too_many_arguments)]
+pub async fn new_libp2p_network(
+    pubkey: Ed25519Pub,
+    bs: Vec<(Option<PeerId>, Multiaddr)>,
+    node_id: usize,
+    node_type: NetworkNodeType,
+    bound_addr: Multiaddr,
+    identity: Option<Keypair>,
+    consensus_config: &ConsensusConfig,
+) -> Result<PLNetwork, NetworkError> {
+    let mut config_builder = NetworkNodeConfigBuilder::default();
+    // NOTE we may need to change this as we scale
+    config_builder
+        .replication_factor(NonZeroUsize::new(consensus_config.replication_factor).unwrap());
+    // `to_connect_addrs` is an empty field that will be removed. We will pass `bs` into
+    // `Libp2pNetwork::new` as the addresses to connect.
+    config_builder.to_connect_addrs(HashSet::new());
+    config_builder.node_type(node_type);
+    config_builder.bound_addr(Some(bound_addr));
+
+    if let Some(identity) = identity {
+        config_builder.identity(identity);
+    }
+
+    let mesh_params = match node_type {
+        NetworkNodeType::Bootstrap => MeshParams {
+            mesh_n_high: consensus_config.bootstrap_mesh_n_high,
+            mesh_n_low: consensus_config.bootstrap_mesh_n_low,
+            mesh_outbound_min: consensus_config.bootstrap_mesh_outbound_min,
+            mesh_n: consensus_config.bootstrap_mesh_n,
+        },
+        NetworkNodeType::Regular => MeshParams {
+            mesh_n_high: consensus_config.mesh_n_high,
+            mesh_n_low: consensus_config.mesh_n_low,
+            mesh_outbound_min: consensus_config.mesh_outbound_min,
+            mesh_n: consensus_config.mesh_n,
+        },
+        NetworkNodeType::Conductor => unreachable!(),
+    };
+
+    config_builder.mesh_params(Some(mesh_params));
+
+    let config = config_builder.build().unwrap();
+
+    Libp2pNetwork::new(
+        config,
+        pubkey,
+        Arc::new(RwLock::new(bs)),
+        consensus_config.num_bootstrap,
+        node_id,
+    )
+    .await
+}
+
+fn get_consensus_port(options: &NodeOpt, config: &ConsensusConfig, id: usize) -> u16 {
+    match options.consensus_port {
+        Some(port) => port,
+        None => (config.base_port + id) as u16,
+    }
 }
 
 pub async fn init_validator(
     options: &NodeOpt,
     config: &ConsensusConfig,
+    priv_key: PrivKey,
     pub_keys: Vec<PubKey>,
     genesis: GenesisState,
     own_id: usize,
     data_source: Arc<RwLock<QueryData>>,
 ) -> Node {
     debug!("Current node: {}", own_id);
-    let (threshold, secret_keys) = secret_keys(config);
-    let secret_key_share = secret_keys.secret_key_share(own_id);
 
-    // Get networking information
-    let own_network = get_networking(
+    let num_bootstrap = config.num_bootstrap;
+
+    let mut bootstrap_nodes = vec![];
+    for i in 0..num_bootstrap {
+        let priv_key = Ed25519Priv::generated_from_seed_indexed(config.seed.0, i as u64);
+        let libp2p_priv_key = SecretKey::from_bytes(&mut priv_key.to_bytes()[0..32]).unwrap();
+        bootstrap_nodes.push(libp2p_priv_key);
+    }
+
+    let bootstrap_priv: Vec<_> = bootstrap_nodes
+        .into_iter()
+        .enumerate()
+        .map(|(idx, kp)| {
+            let multiaddr = parse_url(&format!(
+                "{}:{}",
+                config.bootstrap_nodes[idx].ip,
+                get_consensus_port(options, config, idx)
+            ))
+            .unwrap();
+            (libp2p::identity::Keypair::Ed25519(kp.into()), multiaddr)
+        })
+        .take(num_bootstrap)
+        .collect();
+
+    let mut to_connect_addrs: Vec<_> = bootstrap_priv
+        .clone()
+        .into_iter()
+        .map(|(kp, ma)| (Some(PeerId::from_public_key(&kp.public())), ma))
+        .collect();
+
+    let (node_type, own_identity) = if own_id < num_bootstrap {
+        // TODO jr
+        // <https://github.com/EspressoSystems/espresso/issues/463>
+        // When we upgrade to phaselock 0.1.1,
+        // we can delete this line. The reason is because
+        // 0.1.0 HotShot is overly strict in matching the number of bootstrap nodes.
+        // This is fixed on HotShot main
+        to_connect_addrs.remove(own_id);
+        (
+            NetworkNodeType::Bootstrap,
+            Some(bootstrap_priv[own_id].0.clone()),
+        )
+    } else {
+        (NetworkNodeType::Regular, None)
+    };
+
+    // hotshot requires this threshold to be at least 2/3rd of the nodes for safety guarantee reasons
+    let threshold = ((pub_keys.len() as u64 * 2) / 3) + 1;
+
+    let own_network = new_libp2p_network(
         pub_keys[own_id].clone(),
-        "0.0.0.0",
-        config.nodes[own_id].port,
+        to_connect_addrs,
+        own_id,
+        node_type,
+        parse_url(&format!(
+            "0.0.0.0:{:?}",
+            get_consensus_port(options, config, own_id)
+        ))
+        .unwrap(),
+        own_identity,
+        config,
     )
-    .await;
-    #[allow(clippy::type_complexity)]
-    let mut other_nodes = Vec::new();
-    for (id, node) in config.nodes.iter().enumerate() {
-        if id != own_id {
-            other_nodes.push((id as u64, &pub_keys[id], node.socket_addr()));
-        }
-    }
+    .await
+    .unwrap();
 
-    // Connect the networking implementations
-    for (id, pub_key, addr) in other_nodes {
-        while own_network.connect_to(pub_key.clone(), addr).await.is_err() {
-            debug!("  - Retrying");
-            async_std::task::sleep(std::time::Duration::from_millis(10_000)).await;
-        }
-        debug!("  - Connected to node {}", id);
-    }
+    let known_nodes = pub_keys.clone();
 
-    // Wait for the networking implementations to connect
-    while own_network.connection_table_size().await < config.nodes.len() - 1 {
-        async_std::task::sleep(std::time::Duration::from_millis(10)).await;
-    }
     debug!("All nodes connected to network");
 
-    // Initialize the state and phaselock
-    init_phaselock(
+    // Initialize the state and hotshot
+    init_hotshot(
         options,
-        secret_keys.public_keys(),
-        secret_key_share,
-        pub_keys,
+        known_nodes,
+        priv_key,
         threshold,
-        own_id as u64,
+        own_id,
         own_network,
         options.full,
         genesis,
         data_source,
+        num_bootstrap,
     )
     .await
 }

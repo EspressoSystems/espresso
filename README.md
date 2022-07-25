@@ -50,7 +50,7 @@ Use at your own risk.
 
 ## Obtaining the source code
 
-    git clone git@github.com:EspressoSystems/cape.git
+    git clone git@github.com:EspressoSystems/espresso.git
 
 # Documentation
 
@@ -209,6 +209,13 @@ Espresso system is a combination of a number of interacting services, including:
 Running the system locally basically amounts to building and running each of these services. We also
 provide a `docker-compose.yml` file which makes it easy to run the whole thing at once.
 
+Once you have started the services locally, it is possible to create a wallet to build and submit
+transactions to the local network. See [the wallet README](client/README.md) for
+instructions on running the wallet CLI. As an example, after starting the services using `docker-compose`,
+the following command should start the wallet CLI:
+
+    cargo run --release --bin wallet-cli -- --esqs-url http://localhost:60000 --submit-url http://localhost:60000 --address-book-url http://localhost:50000
+
 ## Running with docker-compose
 
 To start the local Docker network, run
@@ -259,11 +266,12 @@ environment variables which can be shared by all of the services. Set the follow
 variables in each terminal where you intend to start a service:
 ```bash
 export ESPRESSO_VALIDATOR_CONFIG_PATH="/path/to/node-config.toml"
-export ESPRESSO_VALIDATOR_PORT="50077"
+export ESPRESSO_VALIDATOR_CONSENSUS_PORT="50076"
+export ESPRESSO_VALIDATOR_QUERY_PORT="50077"
 export ESPRESSO_ADDRESS_BOOK_PORT="50078"
 export ESPRESSO_ADDRESS_BOOK_URL="http://localhost:$ESPRESSO_ADDRESS_BOOK_PORT"
-export ESPRESSO_ESQS_URL="http://localhost:$ESPRESSO_VALIDATOR_PORT"
-export ESPRESSO_SUBMIT_URL="http://localhost:$ESPRESSO_VALIDATOR_PORT"
+export ESPRESSO_ESQS_URL="http://localhost:$ESPRESSO_VALIDATOR_QUERY_PORT"
+export ESPRESSO_SUBMIT_URL="http://localhost:$ESPRESSO_VALIDATOR_QUERY_PORT"
 export ESPRESSO_FAUCET_WALLET_MNEMONIC="$ESPRESSO_FAUCET_MANAGER_MNEMONIC"
 export ESPRESSO_FAUCET_PORT="50079"
 export ESPRESSO_FAUCET_URL="http://localhost:$ESPRESSO_FAUCET_PORT"
@@ -275,8 +283,8 @@ listed in the table below.
 Now we are ready to start the services. First, the validators. The validator executable is in
 `target/release/espresso-validator`. You must use `--full` for _exactly_ one of the validators.
 (Since earlier we configured all validators to run their web servers on the same port with
-`ESPRESSO_VALIDATOR_PORT=50077`, it will cause problems if more than one validator is running a web
-server. You can also set `ESPRESSO_VALIDATOR_PORT` to something unique for each validator and use
+`ESPRESSO_VALIDATOR_QUERY_PORT=50077`, it will cause problems if more than one validator is running a web
+server. You can also set `ESPRESSO_VALIDATOR_QUERY_PORT` to something unique for each validator and use
 `--full` for all of them, if you want.) You may also want to use `--reset-store-state` for all of
 the validators, if you have run a local testnet before and your intention is to overwrite that
 ledger with a fresh one.
@@ -309,14 +317,16 @@ target/release/faucet
 | ESPRESSO_VALIDATOR_WEB_PATH | Path | espresso-validator | Path to validator assets including web server files.
 | ESPRESSO_VALIDATOR_API_PATH | Path | espresso-validator | Path to validator API specification
 | ESPRESSO_VALIDATOR_PUB_KEY_PATH | Path | espresso-validator | Path to validator public keys
-| ESPRESSO_VALIDATOR_PORT    | u16  | espresso-validator   | Port on which to serve the query service and submit API
+| ESPRESSO_VALIDATOR_QUERY_PORT    | u16  | espresso-validator   | Port on which to serve the query service and submit API
 | ESPRESSO_VALIDATOR_SECRET_KEY_SEED | TaggedBase64 (tag="SEED") | espresso-validator | Seed to use for generating threshold signature secret key (overrides the value from `node-config.toml`)
-| ESPRESSO_VALIDATOR_NODES | Vec<Url> | espresso-validator | Comma-separated list of URLs for validators in the network (overrides the value from `node-config.toml`)
+| ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS | Vec<Url> | espresso-validator | Comma-separated list of URLs for bootstrap validators in the network (overrides the value from `node-config.toml`)
+| ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME | u64 | espresso-validator | Minimum time (in seconds) to wait for submitted transactions before proposing a block
+| ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME | u64 | espresso-validator | Maximum time (in seconds) to wait for submitted transactions before proposing a block
 | ESPRESSO_ADDRESS_BOOK_STORE_PATH | Path | address-book   | Path to persistence files for address book service (default `$LOCAL/.espresso/espresso/address-book/store`)
 | ESPRESSO_ADDRESS_BOOK_PORT | u16  | address-book         | Port on which to serve the address book
-| ESPRESSO_ADDRESS_BOOK_URL  | Url  | zerok-client, faucet | URL of the address book service
-| ESPRESSO_ESQS_URL          | Url  | zerok-client, faucet | URL of the EsQS
-| ESPRESSO_SUBMIT_URL        | Url  | zerok-client, faucet | URL of the validator to submit transactions to
+| ESPRESSO_ADDRESS_BOOK_URL  | Url  | wallet-cli, faucet | URL of the address book service
+| ESPRESSO_ESQS_URL          | Url  | wallet-cli, faucet | URL of the EsQS
+| ESPRESSO_SUBMIT_URL        | Url  | wallet-cli, faucet | URL of the validator to submit transactions to
 | ESPRESSO_FAUCET_MANAGER_MNEMONIC | String | faucet-keystore-test-setup | Mnemonic phrase to generate the master faucet public key
 | ESPRESSO_FAUCET_PUB_KEYS | Vec<UserPubKey> | espresso-validator | Comma-separated list of public keys owning records in the genesis block
 | ESPRESSO_FAUCET_WALLET_MNEMONIC | String | faucet        | Mnemonic phrase to generate the faucet public key

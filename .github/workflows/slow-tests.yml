@@ -11,12 +11,13 @@ on:
 
 env:
   RUST_TEST_THREADS: 4
+  RUST_LOG: info,libp2p=off
 
 jobs:
   slow-tests:
     runs-on: [self-hosted, X64]
     container:
-      image: ghcr.io/espressosystems/devops-rust:1.62
+      image: ghcr.io/espressosystems/devops-rust:nightly
     steps:
       - uses: styfle/cancel-workflow-action@0.10.0
         name: Cancel Outdated Builds
@@ -39,4 +40,6 @@ jobs:
         name: Enable Rust Caching
 
       - name: Run Tests
-        run: cargo test --release --features=slow-tests
+        run: |
+          ulimit -n 4096
+          cargo test --release --features=slow-tests

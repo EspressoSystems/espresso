@@ -28,11 +28,14 @@ on:
     - cron: "0 0 * * 1"
   workflow_dispatch:
 
+env:
+  RUST_LOG: info,libp2p=off
+
 jobs:
   build:
     runs-on: [self-hosted, X64]
     container:
-      image: ghcr.io/espressosystems/devops-rust:1.62
+      image: ghcr.io/espressosystems/devops-rust:nightly
     steps:
       - uses: styfle/cancel-workflow-action@0.10.0
         name: Cancel Outdated Builds

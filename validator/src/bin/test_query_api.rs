@@ -32,9 +32,12 @@
 
 use async_std::future::timeout;
 use async_tungstenite::async_std::connect_async;
+use espresso_core::{
+    ledger::EspressoLedger, state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM,
+};
 use futures::prelude::*;
+use hotshot::traits::BlockContents;
 use itertools::izip;
-use phaselock::traits::BlockContents;
 use seahorse::{
     events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnafu, Keystore, KeystoreError,
 };
@@ -51,9 +54,6 @@ use validator_node::{
     api::*,
     keystore::network::{NetworkBackend, Url},
     node::{LedgerSummary, QueryServiceError},
-};
-use zerok_lib::{
-    ledger::EspressoLedger, state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM,
 };
 
 #[derive(StructOpt)]
@@ -273,7 +273,7 @@ async fn main() {
         dir: TempDir::new("test_query_api").unwrap(),
     };
     let _keystore = Keystore::new(
-        NetworkBackend::new(&*UNIVERSAL_PARAM, url.clone(), url.clone(), url)
+        NetworkBackend::new(&UNIVERSAL_PARAM, url.clone(), url.clone(), url)
             .await
             .unwrap(),
         &mut loader,

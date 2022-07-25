@@ -47,7 +47,7 @@ jobs:
       - uses: cachix/cachix-action@v10
         with:
           name: espresso-systems-private
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Cache cargo
         uses: actions/cache@v2
@@ -65,7 +65,8 @@ jobs:
       - name: Quick Test Static Build
         timeout-minutes: 60
         run: |
-          nix develop .#staticShell --option sandbox relaxed -c cargo run --release --bin multi_machine_automation -- --num-txn 3 --verbose
+          ulimit -n 4096
+          nix develop .#staticShell --option sandbox relaxed -c cargo run --release --bin multi_machine_automation -- --num-nodes 7 --num-txn 3 --verbose --reset-store-state
 
       - name: Compile all executables
         timeout-minutes: 60
@@ -82,7 +83,6 @@ jobs:
       #    skip-recent: 5
       #    GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_PAT }}
       #    age: '0 day'
-
 
       - name: Upload address book artifact
         uses: actions/upload-artifact@v3
