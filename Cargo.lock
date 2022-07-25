@@ -613,9 +613,9 @@ dependencies = [
 
 [[package]]
 name = "async-std"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52580991739c5cdb36cde8b2a516371c0a3b70dda36d916cc08b82372916808c"
+checksum = "62565bb4402e926b29953c785397c6dc0391b7b446e45008b0049eb43cec6f5d"
 dependencies = [
  "async-attributes",
  "async-channel",
@@ -632,7 +632,6 @@ dependencies = [
  "kv-log-macro",
  "log",
  "memchr",
- "num_cpus",
  "once_cell",
  "pin-project-lite 0.2.8",
  "pin-utils",
@@ -2933,7 +2932,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.2#d5861fb97b44df1e384b7f987a99e66c9db2d7e4"
 dependencies = [
  "async-std",
  "async-trait",
@@ -2964,7 +2963,7 @@ dependencies = [
 [[package]]
 name = "hotshot-consensus"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.2#d5861fb97b44df1e384b7f987a99e66c9db2d7e4"
 dependencies = [
  "async-trait",
  "custom_debug",
@@ -2977,7 +2976,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.2#d5861fb97b44df1e384b7f987a99e66c9db2d7e4"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3001,7 +3000,7 @@ dependencies = [
 [[package]]
 name = "hotshot-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.2#d5861fb97b44df1e384b7f987a99e66c9db2d7e4"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3808,7 +3807,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.2#d5861fb97b44df1e384b7f987a99e66c9db2d7e4"
 dependencies = [
  "async-std",
  "async-trait",
