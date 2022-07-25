@@ -40,7 +40,7 @@ itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
 jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
-jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
+jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
 key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 libp2p = "0.46.1"
 libp2p-networking = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.2" }

@@ -47,7 +47,7 @@ jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSys
 # however, the fact that the workspace subpath specifications do not match the expected package name may present a problem
 jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
 jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
-jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
+jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
 key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 lazy_static = "1.4.0"
 mnemonic = "1.0.1"
