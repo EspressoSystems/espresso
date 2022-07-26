@@ -127,7 +127,7 @@ impl TestTxSpec {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 impl quickcheck::Arbitrary for TestTxSpec {
     fn shrink(&self) -> Box<(dyn Iterator<Item = TestTxSpec> + 'static)> {
         match self {
