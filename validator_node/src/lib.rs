@@ -14,6 +14,7 @@ pub mod api;
 pub mod keystore;
 pub mod node;
 mod serializers;
+pub mod update_query_data_source;
 pub mod validator_node;
 
 #[cfg(test)]

@@ -404,7 +404,8 @@ fn reset_store_dir(store_dir: PathBuf) {
 
 type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
-type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage>;
+type FullNode<'a> =
+    node::FullNode<'a, PLNetwork, PLStorage, QueryData, QueryData, QueryData, QueryData>;
 
 #[derive(Clone)]
 pub enum Node {
@@ -678,6 +679,7 @@ async fn init_hotshot(
             nullifiers,
             state.memos,
             full_persisted,
+            data_source.clone(),
             data_source.clone(),
             data_source.clone(),
             data_source.clone(),
