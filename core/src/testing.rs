@@ -554,7 +554,6 @@ impl MultiXfrTestState {
     ///     (receiver memos, receiver indices)
     ///     receiver memos signature
     ///     transaction
-    #[allow(clippy::type_complexity)]
     pub fn generate_transactions(
         &mut self,
         block: Vec<(TestTxSpec, bool)>,
@@ -814,9 +813,6 @@ impl MultiXfrTestState {
                     FreezeFlag::Unfrozen,
                 );
 
-                // self.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec1, &[]).unwrap());
-                // self.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec2, &[]).unwrap());
-
                 println!(
                     "Txn {}.{}/{} inputs chosen: {}s",
                     print_info.round + 1,
@@ -960,7 +956,6 @@ impl MultiXfrTestState {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::type_complexity)]
     fn generate_single_record_transfer(
         &self,
         prng: &mut ChaChaRng,
@@ -1301,7 +1296,6 @@ mod tests {
      *      - build a transaction
      *      - apply that transaction
      */
-    #[allow(clippy::type_complexity)]
     fn test_multixfr(
         /*
          * multi_input (if false, generates smaller transaction and rec2 is ignored),
