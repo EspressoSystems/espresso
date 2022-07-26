@@ -13,7 +13,7 @@
 
 pub mod committee;
 pub mod full_persistence;
-pub mod kv_merkel_tree;
+pub mod kv_merkle_tree;
 pub mod ledger;
 pub mod lw_persistence;
 pub mod set_merkle_tree;
