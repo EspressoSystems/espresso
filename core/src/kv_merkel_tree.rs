@@ -332,6 +332,7 @@ where
         match end_branch {
             ForgottenSubtree { .. } => None,
             EmptySubtree => {
+                dbg!("empty subtree in lookup");
                 path.reverse();
                 Some((
                     false,
@@ -348,7 +349,7 @@ where
                 ..
             } => {
                 path.reverse();
-                dbg!("here, lookup leaf");
+                dbg!("lookup leaf: {:?}", &key == leaf_key);
                 Some((
                     &key == leaf_key,
                     KVMerkleProof {
@@ -382,29 +383,32 @@ where
                     break;
                 }
                 Branch { children, .. } => {
+                    dbg!("matched on branch");
                     let target = children[pos as usize].clone();
                     end_branch = target;
                     children
                 }
 
                 Leaf {
-                    height, key, value, ..
+                    height, key:leaf_key, value: _leaf_value, ..
                 } => {
+                    //dbg!("395 sanity check, height = {:?}, end height = {?:}", height, end_height);
                     debug_assert_eq!(height, end_height);
                     // Figure out if this leaf is down the same tree or if it's a sibling
                     let leaf_pos = {
+                        //KALEY: should root be 0 or 1 height?
                         debug_assert!(height > 0);
-                        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
-                        key_bit_vec[height - 1]
+                        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(leaf_key));
+                        key_bit_vec[height-1]
                     };
 
-                    let new_leaf = Self::new_leaf(height - 1, key, value);
+                    let new_leaf = Self::new_leaf(height-1, key, value);
                     let (new_end_branch, new_sibs) = if leaf_pos == pos {
                         let mut new_branches =
                             vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
-                        new_branches[pos as usize] = new_leaf.clone();
+                        new_branches[leaf_pos as usize] = new_leaf.clone();
                         (
-                            new_leaf,
+                            EmptySubtree,
                             new_branches,
                         )
                     } else {
@@ -412,7 +416,7 @@ where
                             vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
                         new_branches[leaf_pos as usize] = new_leaf.clone();
                         (
-                            EmptySubtree,
+                            new_leaf,
                             new_branches,
                         )
                     };
@@ -437,7 +441,7 @@ where
                 ForgottenSubtree { digest }
             }
             EmptySubtree => {   
-                dbg!("inserting, empty subtree");
+                //dbg!("inserting, empty subtree height: {:?}", end_height);
                 Self::new_leaf(end_height, key, value)
             },
             Branch { .. } => panic!("This tree has more levels than my hash has bits!"),
@@ -447,6 +451,7 @@ where
                 key: leaf_key,
                 ..
             } => {
+                //dbg!("end branch is leaf");
                 assert_eq!(height, end_height);
                 assert_eq!(key, leaf_key);
                 //rewrites value if (k,v1) exists and (k,v2) is inserted
@@ -529,6 +534,7 @@ where
                                     .collect(),
                             );
                         }
+                        //KALEY: path reverse
                         path_vec.into_iter().rev().collect()
                     },
                 });
@@ -631,7 +637,7 @@ where
                     end_branch = EmptySubtree;
                     let mut sib_branches =
                         vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
-                    sib_branches[pos as usize] = Self::new_leaf(height - 1, leaf_key, leaf_value);
+                    sib_branches[pos as usize] = Self::new_leaf(height, leaf_key, leaf_value);
                     Box::new(GenericArray::from_iter(sib_branches))
                 }
             };
@@ -761,19 +767,22 @@ mod tests {
             .collect::<HashMap<_, _>>();
         let mut hset = HashSet::new();
         let mut t = KVMerkleTree::<TestTreeHash>::default();
-        let mut lw_t = KVMerkleTree::ForgottenSubtree { digest: t.hash() };
+        let mut lw_t = KVMerkleTree::<TestTreeHash>::ForgottenSubtree { digest: t.hash() };
         assert_eq!(t.hash(), lw_t.hash());
 
         let update_elems: Vec<_> = updates.iter().map(|u| update_vals[u]).collect();
 
         for (u, elem) in updates.iter().zip(update_elems.iter()) {
-            dbg!("{:?}", elem);
             let elem = *elem;
             hset.insert(u);
+            //dbg!("lookup1 test");
             let (in_set, pf) = t.lookup(TestNulls(elem)).unwrap();
+            //dbg!("insert1 test");
             t.insert(TestNulls(elem), TestNulls(elem));
             assert_eq!(pf.check(TestNulls(elem), lw_t.hash()).unwrap(), in_set);
+            //dbg!("remember test");
             lw_t.remember(TestNulls(elem), pf).unwrap();
+            //dbg!("insert2 test");
             lw_t.insert(TestNulls(elem), TestNulls(elem)).unwrap();
             let (in_new_lw_t, new_lw_pf) = lw_t.lookup(TestNulls(elem)).unwrap();
             assert!(in_new_lw_t);
@@ -807,7 +816,7 @@ mod tests {
                 assert!(hset.contains(&val));
                 assert!(t_contains);
             }
-
+            //dbg!("hset.contains: {:?}, t_contains: {:?}", hset.contains(&val), t_contains);
             assert_eq!(hset.contains(&val), t_contains);
             assert_eq!(
                 t_contains,
