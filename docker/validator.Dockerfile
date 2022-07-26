@@ -37,7 +37,7 @@ ENV ESPRESSO_VALIDATOR_QUERY_PORT=50000
 EXPOSE $ESPRESSO_VALIDATOR_QUERY_PORT
 
 # Set a default number of nodes.
-ENV ESPRESSO_VALIDATOR_NUM_NODES=20
+ENV ESPRESSO_VALIDATOR_NUM_NODES=10
 
 # Additional configuration not specified here because it must be set per validator:
 # ESPRESSO_VALIDATOR_ID

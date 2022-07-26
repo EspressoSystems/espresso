@@ -13,12 +13,12 @@
 
 use async_std::task::{block_on, sleep, spawn_blocking};
 use escargot::CargoBuild;
-use espresso_validator::MINIMUM_NODES;
-use espresso_validator::{testing::AddressBook, ConsensusConfig};
+use espresso_validator::{testing::AddressBook, ConsensusConfig, NodeConfig, MINIMUM_NODES};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use regex::Regex;
 use std::collections::HashMap;
+use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
@@ -64,22 +64,19 @@ impl CliClient {
         pub_key_path.set_extension("pub");
         let pub_key = bincode::deserialize(&fs::read(&pub_key_path).unwrap()).unwrap();
 
-        // Each validator gets two ports: one for its HotShot node and one for the web sever.
-        let mut ports = [(0, 0); 6];
-        for p in &mut ports {
-            *p = (
-                pick_unused_port().ok_or_else(|| "no available ports".to_owned())?,
-                pick_unused_port().ok_or_else(|| "no available ports".to_owned())?,
-            );
+        // Set each validator's port for the web sever.
+        let mut server_ports = [0; 6];
+        for p in &mut server_ports {
+            *p = pick_unused_port().ok_or_else(|| "no available ports".to_owned())?;
         }
 
         let mut state = Self {
             keystores: Default::default(),
             variables: Default::default(),
             prev_output: Default::default(),
-            validators: Self::start_validators(tmp_dir.path(), pub_key, &ports)?,
+            validators: Self::start_validators(tmp_dir.path(), pub_key, &server_ports)?,
             address_book: block_on(AddressBook::init()),
-            server_port: ports[0].1,
+            server_port: server_ports[0],
             _tmp_dir: tmp_dir,
         };
         state.load(Some(key_path))?;
@@ -117,11 +114,12 @@ impl CliClient {
     }
 
     pub fn open_validator(&mut self, v: usize) -> Result<&mut Self, String> {
+        let num_nodes = self.validators.len();
         block_on(
             self.validators
                 .get_mut(v)
                 .ok_or_else(|| format!("no such validator {}", v))?
-                .open(),
+                .open(num_nodes),
         )?;
         Ok(self)
     }
@@ -250,14 +248,13 @@ impl CliClient {
     fn start_validators(
         tmp_dir: &Path,
         pub_key: UserPubKey,
-        ports: &[(u16, u16)],
+        server_ports: &[u16],
     ) -> Result<Vec<Validator>, String> {
-        let (hotshot_ports, server_ports): (Vec<_>, Vec<_>) = ports.iter().cloned().unzip();
         assert!(
-            ports.len() >= MINIMUM_NODES,
+            server_ports.len() >= MINIMUM_NODES,
             "At least {} nodes are needed for consensus. We only have {} nodes",
             MINIMUM_NODES,
-            ports.len()
+            server_ports.len()
         );
         let config = ConsensusConfig {
             seed: [
@@ -265,17 +262,12 @@ impl CliClient {
                 5, 6, 7, 8,
             ]
             .into(),
-            bootstrap_nodes: hotshot_ports
-                .into_iter()
-                .map(|port| {
-                    Url::parse(&format!("http://localhost:{}", port))
-                        .unwrap()
-                        .into()
-                })
-                .collect(),
+            bootstrap_nodes: vec![NodeConfig {
+                ip: "localhost".to_string(),
+            }],
             // NOTE these are arbitrarily chosen.
-            num_bootstrap: 4,
-            replication_factor: ports.len() - 2,
+            num_bootstrap: 1,
+            replication_factor: server_ports.len() - 2,
             bootstrap_mesh_n_high: 50,
             bootstrap_mesh_n_low: 10,
             bootstrap_mesh_outbound_min: 5,
@@ -284,7 +276,7 @@ impl CliClient {
             mesh_n_low: 8,
             mesh_outbound_min: 4,
             mesh_n: 12,
-            base_port: 9000,
+            base_port: pick_unused_port().expect("No available port") as usize,
         };
         let mut config_file = tmp_dir.to_path_buf();
         config_file.push("node-config.toml");
@@ -294,10 +286,10 @@ impl CliClient {
             .unwrap();
 
         let ret = block_on(futures::future::join_all(
-            server_ports.into_iter().enumerate().map(|(i, port)| {
-                let mut v = Validator::new(&config_file, pub_key.clone(), i, port);
+            server_ports.iter().enumerate().map(|(i, port)| {
+                let mut v = Validator::new(&config_file, pub_key.clone(), i, *port);
                 async move {
-                    v.open().await?;
+                    v.open(server_ports.len()).await?;
                     Ok(v)
                 }
             }),
@@ -522,7 +514,7 @@ impl Validator {
         }
     }
 
-    async fn open(&mut self) -> Result<(), String> {
+    async fn open(&mut self, num_nodes: usize) -> Result<(), String> {
         if self.process.is_some() {
             return Err(format!("validator {} is already open", self.id));
         }
@@ -532,6 +524,11 @@ impl Validator {
         let pub_key = self.pub_key.clone();
         let id = self.id;
         let port = self.port;
+
+        // Clear the environment variable corresponding to the consensus port to avoid all
+        // validators having the same address.
+        env::remove_var("ESPRESSO_VALIDATOR_CONSENSUS_PORT");
+
         let mut child = spawn_blocking(move || {
             cargo_run("espresso-validator", "espresso-validator")
                 .map_err(err)?
@@ -543,6 +540,8 @@ impl Validator {
                     "--full",
                     "--id",
                     &id.to_string(),
+                    "--num-nodes",
+                    &num_nodes.to_string(),
                     "--faucet-pub-key",
                     &pub_key.to_string(),
                 ])

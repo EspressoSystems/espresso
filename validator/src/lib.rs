@@ -92,7 +92,7 @@ pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
         .split_once(':')
         .ok_or(multiaddr::Error::InvalidMultiaddr)?;
     if ip.chars().any(|c| c.is_alphabetic()) {
-        // speecial case localhost
+        // special case localhost
         if ip == "localhost" {
             Multiaddr::from_str(&format!("/dns/{}/tcp/{}", "127.0.0.1", port))
         } else {

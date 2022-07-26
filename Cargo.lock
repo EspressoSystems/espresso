@@ -2416,7 +2416,6 @@ dependencies = [
  "espresso-status-api",
  "futures",
  "futures-util",
- "hex",
  "hotshot",
  "itertools 0.10.3",
  "jf-cap",
@@ -3060,7 +3059,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.2#d5861fb97b44df1e384b7f987a99e66c9db2d7e4"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3091,7 +3090,7 @@ dependencies = [
 [[package]]
 name = "hotshot-consensus"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.2#d5861fb97b44df1e384b7f987a99e66c9db2d7e4"
 dependencies = [
  "async-trait",
  "custom_debug",
@@ -3104,7 +3103,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.2#d5861fb97b44df1e384b7f987a99e66c9db2d7e4"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3128,7 +3127,7 @@ dependencies = [
 [[package]]
 name = "hotshot-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.2#d5861fb97b44df1e384b7f987a99e66c9db2d7e4"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3938,7 +3937,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.1#ff9d528c49c25ada43de48c83534a9fcd77f066b"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.1.2#d5861fb97b44df1e384b7f987a99e66c9db2d7e4"
 dependencies = [
  "async-std",
  "async-trait",
