@@ -390,7 +390,10 @@ where
                 }
 
                 Leaf {
-                    height, key:leaf_key, value: _leaf_value, ..
+                    height,
+                    key: leaf_key,
+                    value: _leaf_value,
+                    ..
                 } => {
                     //dbg!("395 sanity check, height = {:?}, end height = {?:}", height, end_height);
                     debug_assert_eq!(height, end_height);
@@ -399,26 +402,20 @@ where
                         //KALEY: should root be 0 or 1 height?
                         debug_assert!(height > 0);
                         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(leaf_key));
-                        key_bit_vec[height-1]
+                        key_bit_vec[height - 1]
                     };
 
-                    let new_leaf = Self::new_leaf(height-1, key, value);
+                    let new_leaf = Self::new_leaf(height - 1, key, value);
                     let (new_end_branch, new_sibs) = if leaf_pos == pos {
                         let mut new_branches =
                             vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
                         new_branches[leaf_pos as usize] = new_leaf.clone();
-                        (
-                            EmptySubtree,
-                            new_branches,
-                        )
+                        (EmptySubtree, new_branches)
                     } else {
                         let mut new_branches =
                             vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
                         new_branches[leaf_pos as usize] = new_leaf.clone();
-                        (
-                            new_leaf,
-                            new_branches,
-                        )
+                        (new_leaf, new_branches)
                     };
                     end_branch = new_end_branch;
                     let sibs_arr: GenericArray<
@@ -440,10 +437,10 @@ where
                 ret = None;
                 ForgottenSubtree { digest }
             }
-            EmptySubtree => {   
+            EmptySubtree => {
                 //dbg!("inserting, empty subtree height: {:?}", end_height);
                 Self::new_leaf(end_height, key, value)
-            },
+            }
             Branch { .. } => panic!("This tree has more levels than my hash has bits!"),
             Leaf {
                 digest,
@@ -621,8 +618,10 @@ where
                     Box::new(GenericArray::from_iter(sib_branches))
                 }
                 EmptySubtree => {
+                    // This is unreachable because if there are any steps
+                    // in the non-inclusion path, the tree cannot be empty.
                     unreachable!();
-                } 
+                }
                 Branch { children, .. } => {
                     end_branch = children[pos as usize].clone();
                     children
@@ -646,18 +645,16 @@ where
         }
 
         end_branch = match end_branch {
-            ForgottenSubtree { digest } => {
-                match proof.terminal_node {
-                    KVMerkleTerminalNode::EmptySubtree => {
-                        assert_eq!(digest, KVHash::empty_digest());
-                        EmptySubtree
-                    }
-
-                    KVMerkleTerminalNode::Leaf { height, key, value } => {
-                        Self::new_leaf(height, key, value)
-                    }
+            ForgottenSubtree { digest } => match proof.terminal_node {
+                KVMerkleTerminalNode::EmptySubtree => {
+                    assert_eq!(digest, KVHash::empty_digest());
+                    EmptySubtree
                 }
-            }
+
+                KVMerkleTerminalNode::Leaf { height, key, value } => {
+                    Self::new_leaf(height, key, value)
+                }
+            },
             _ => end_branch,
         };
 
@@ -701,13 +698,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree_hash::committable_hash::*;
+    use generic_array::arr;
     use jf_cap::structs::Nullifier;
     use quickcheck::QuickCheck;
     use rand_chacha::rand_core::SeedableRng;
     use rand_chacha::ChaChaRng;
     use std::time::Instant; //????/
-    use crate::tree_hash::committable_hash::*;
-    use generic_array::arr;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
     struct TestNulls(Nullifier);
