@@ -35,6 +35,7 @@ espresso-metastate-api = { path = "../apis/metastate" }
 espresso-status-api = { path = "../apis/status" }
 futures = "0.3.0"
 futures-util = "0.3.8"
+#hex = "0.4.3"
 hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.2" }
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
@@ -47,6 +48,7 @@ libp2p-networking = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", 
 markdown = "0.3"
 net = { git = "https://github.com/EspressoSystems/net.git" }
 portpicker = { version = "0.1", optional = true }
+rand = "0.8.5"
 rand_chacha = { package = "rand_chacha", version = "0.3.1" }
 rand_chacha_02 = { package = "rand_chacha", version = "0.2.2" }
 seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
@@ -62,6 +64,7 @@ surf = "2.3.1"
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.2.0" }
 tempdir = "0.3.7"
 tide = { version = "0.16.0", default-features = false }
+tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main" }
 tide-websockets = "0.4.0"
 toml = "0.5"
 tracing = "0.1.35"
