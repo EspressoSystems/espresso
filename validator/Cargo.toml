@@ -30,6 +30,7 @@ dirs = "4.0"
 escargot = "0.5.2"
 espresso-availability-api = { path = "../apis/availability" }
 espresso-catchup-api = { path = "../apis/catchup" }
+espresso-core = { path = "../core/" }
 espresso-metastate-api = { path = "../apis/metastate" }
 espresso-status-api = { path = "../apis/status" }
 futures = "0.3.0"
@@ -68,7 +69,6 @@ tracing-distributed = "0.3.1"
 tracing-futures = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 validator_node = { path = "../validator_node/" }
-espresso-core = { path = "../core/" }
 
 [features]
 slow-tests = []
