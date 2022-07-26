@@ -92,7 +92,7 @@ pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
         .split_once(':')
         .ok_or(multiaddr::Error::InvalidMultiaddr)?;
     if ip.chars().any(|c| c.is_alphabetic()) {
-        // speecial case localhost
+        // special case localhost
         if ip == "localhost" {
             Multiaddr::from_str(&format!("/dns/{}/tcp/{}", "127.0.0.1", port))
         } else {
@@ -137,8 +137,15 @@ pub struct NodeOpt {
     #[structopt(long = "api", env = "ESPRESSO_VALIDATOR_API_PATH")]
     pub api_path: Option<PathBuf>,
 
+    /// Port for the connection during the consensus.
+    ///
+    /// If not provided, `base_port + id` will be used as the port number, where `base_port` is
+    /// provided by the node configuration file and `id` is the ID of the current node.
+    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONSENSUS_PORT")]
+    pub consensus_port: Option<u16>,
+
     /// Port for the query service.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_PORT", default_value = "5000")]
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_QUERY_PORT", default_value = "5000")]
     pub web_server_port: u16,
 
     /// Minimum time (in seconds) to wait for submitted transactions before proposing a block.
@@ -183,50 +190,14 @@ impl NodeOpt {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NodeConfig {
-    pub url: Url,
-    pub host: String,
-    pub port: u16,
+    pub ip: String,
 }
 
 impl From<Url> for NodeConfig {
     fn from(url: Url) -> Self {
         Self {
-            port: url.port_or_known_default().unwrap(),
-            host: url.host_str().unwrap().to_string(),
-            url,
+            ip: url.host_str().unwrap().to_string(),
         }
-    }
-}
-
-/// The structure of a NodeConfig in a consensus config TOML file.
-///
-/// This struct exists to be deserialized and converted to [NodeConfig].
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ConsensusConfigFileNode {
-    ip: String,
-    port: u16,
-}
-
-impl From<ConsensusConfigFileNode> for NodeConfig {
-    fn from(cfg: ConsensusConfigFileNode) -> Self {
-        Url::parse(&format!("http://{}:{}", cfg.ip, cfg.port))
-            .unwrap()
-            .into()
-    }
-}
-
-impl From<NodeConfig> for ConsensusConfigFileNode {
-    fn from(cfg: NodeConfig) -> Self {
-        Self {
-            ip: cfg.host,
-            port: cfg.port,
-        }
-    }
-}
-
-impl NodeConfig {
-    pub fn socket_addr(&self) -> (&str, u16) {
-        (&self.host, self.port)
     }
 }
 
@@ -281,7 +252,8 @@ struct ConsensusConfigFile {
     mesh_n_low: usize,
     mesh_outbound_min: usize,
     mesh_n: usize,
-    nodes: Vec<ConsensusConfigFileNode>,
+    base_port: usize,
+    bootstrap_nodes: Vec<NodeConfig>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -298,7 +270,8 @@ pub struct ConsensusConfig {
     pub mesh_n_low: usize,
     pub mesh_outbound_min: usize,
     pub mesh_n: usize,
-    pub nodes: Vec<NodeConfig>,
+    pub base_port: usize,
+    pub bootstrap_nodes: Vec<NodeConfig>,
 }
 
 impl ConsensusConfig {
@@ -319,29 +292,10 @@ impl From<ConsensusConfigFile> for ConsensusConfig {
         Self {
             seed: cfg.seed.into(),
             num_bootstrap: cfg.num_bootstrap,
-            nodes: cfg.nodes.into_iter().map(NodeConfig::from).collect(),
-            replication_factor: cfg.replication_factor,
-            bootstrap_mesh_n_high: cfg.bootstrap_mesh_n_high,
-            bootstrap_mesh_n_low: cfg.bootstrap_mesh_n_low,
-            bootstrap_mesh_outbound_min: cfg.bootstrap_mesh_outbound_min,
-            bootstrap_mesh_n: cfg.bootstrap_mesh_n,
-            mesh_n_high: cfg.mesh_n_high,
-            mesh_n_low: cfg.mesh_n_low,
-            mesh_outbound_min: cfg.mesh_outbound_min,
-            mesh_n: cfg.mesh_n,
-        }
-    }
-}
-
-impl From<ConsensusConfig> for ConsensusConfigFile {
-    fn from(cfg: ConsensusConfig) -> Self {
-        Self {
-            seed: cfg.seed.into(),
-            num_bootstrap: cfg.num_bootstrap,
-            nodes: cfg
-                .nodes
+            bootstrap_nodes: cfg
+                .bootstrap_nodes
                 .into_iter()
-                .map(ConsensusConfigFileNode::from)
+                .map(NodeConfig::from)
                 .collect(),
             replication_factor: cfg.replication_factor,
             bootstrap_mesh_n_high: cfg.bootstrap_mesh_n_high,
@@ -352,6 +306,31 @@ impl From<ConsensusConfig> for ConsensusConfigFile {
             mesh_n_low: cfg.mesh_n_low,
             mesh_outbound_min: cfg.mesh_outbound_min,
             mesh_n: cfg.mesh_n,
+            base_port: cfg.base_port,
+        }
+    }
+}
+
+impl From<ConsensusConfig> for ConsensusConfigFile {
+    fn from(cfg: ConsensusConfig) -> Self {
+        Self {
+            seed: cfg.seed.into(),
+            num_bootstrap: cfg.num_bootstrap,
+            bootstrap_nodes: cfg
+                .bootstrap_nodes
+                .into_iter()
+                .map(NodeConfig::from)
+                .collect(),
+            replication_factor: cfg.replication_factor,
+            bootstrap_mesh_n_high: cfg.bootstrap_mesh_n_high,
+            bootstrap_mesh_n_low: cfg.bootstrap_mesh_n_low,
+            bootstrap_mesh_outbound_min: cfg.bootstrap_mesh_outbound_min,
+            bootstrap_mesh_n: cfg.bootstrap_mesh_n,
+            mesh_n_high: cfg.mesh_n_high,
+            mesh_n_low: cfg.mesh_n_low,
+            mesh_outbound_min: cfg.mesh_outbound_min,
+            mesh_n: cfg.mesh_n,
+            base_port: cfg.base_port,
         }
     }
 }
@@ -369,7 +348,7 @@ fn default_web_path() -> PathBuf {
 }
 
 /// Returns the default directory to store persistence files.
-fn default_store_path(node_id: u64) -> PathBuf {
+fn default_store_path(node_id: usize) -> PathBuf {
     let mut data_dir = data_local_dir()
         .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("./")));
     data_dir.push("espresso");
@@ -389,7 +368,7 @@ fn default_api_path() -> PathBuf {
 ///
 /// The returned path can be passed to `reset_store_dir` to remove the contents, if the
 /// `--reset-store-state` argument is true.
-fn get_store_dir(options: &NodeOpt, node_id: u64) -> PathBuf {
+fn get_store_dir(options: &NodeOpt, node_id: usize) -> PathBuf {
     options
         .store_path
         .clone()
@@ -568,7 +547,7 @@ async fn init_hotshot(
     known_nodes: Vec<PubKey>,
     priv_key: PrivKey,
     threshold: u64,
-    node_id: u64,
+    node_id: usize,
     networking: PLNetwork,
     full_node: bool,
     state: GenesisState,
@@ -577,7 +556,7 @@ async fn init_hotshot(
 ) -> Node {
     // Create the initial hotshot
     let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
-    let pub_key = known_nodes[node_id as usize].clone();
+    let pub_key = known_nodes[node_id].clone();
     let config = HotShotConfig {
         total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
         threshold: NonZeroUsize::new(threshold as usize).unwrap(),
@@ -638,7 +617,7 @@ async fn init_hotshot(
         config.known_nodes.clone(),
         pub_key,
         priv_key,
-        node_id,
+        node_id as u64,
         config,
         state.validator,
         networking,
@@ -970,11 +949,26 @@ pub fn init_web_server(
     Ok(join_handle)
 }
 
-/// Generate a list of private and public keys. Will return exactly `config.nodes.len()` keys, with a given `config.seed` seed.
-pub fn gen_keys(config: &ConsensusConfig) -> Vec<KeyPair> {
-    let mut keys = Vec::with_capacity(config.nodes.len());
+/// Generate a list of private and public keys for `config.bootstrap_nodes.len()` bootstrap keys, with a
+/// given `config.seed` seed.
+pub fn gen_bootstrap_keys(config: &ConsensusConfig) -> Vec<KeyPair> {
+    let mut keys = Vec::with_capacity(config.bootstrap_nodes.len());
 
-    for node_id in 0..config.nodes.len() {
+    for node_id in 0..config.bootstrap_nodes.len() {
+        let private = PrivKey::generated_from_seed_indexed(config.seed.0, node_id as u64);
+        let public = PubKey::from_private(&private);
+
+        keys.push(KeyPair { public, private })
+    }
+    keys
+}
+
+/// Generate a list of private and public keys for the given number of nodes with a given `config.
+/// seed` seed.
+pub fn gen_keys(config: &ConsensusConfig, num_nodes: usize) -> Vec<KeyPair> {
+    let mut keys = Vec::with_capacity(num_nodes);
+
+    for node_id in 0..num_nodes {
         let private = PrivKey::generated_from_seed_indexed(config.seed.0, node_id as u64);
         let public = PubKey::from_private(&private);
 
@@ -988,15 +982,7 @@ pub struct KeyPair {
     pub private: PrivKey,
 }
 
-/// Generate a list of public keys. Will return exactly `config.nodes.len()` keys, with a given `config.seed` seed.
-pub fn gen_pub_keys(config: &ConsensusConfig) -> Vec<PubKey> {
-    gen_keys(config)
-        .into_iter()
-        .map(|pair| pair.public)
-        .collect()
-}
-
-/// Craate a new libp2p network.
+/// Create a new libp2p network.
 #[allow(clippy::too_many_arguments)]
 pub async fn new_libp2p_network(
     pubkey: Ed25519Pub,
@@ -1011,6 +997,8 @@ pub async fn new_libp2p_network(
     // NOTE we may need to change this as we scale
     config_builder
         .replication_factor(NonZeroUsize::new(consensus_config.replication_factor).unwrap());
+    // `to_connect_addrs` is an empty field that will be removed. We will pass `bs` into
+    // `Libp2pNetwork::new` as the addresses to connect.
     config_builder.to_connect_addrs(HashSet::new());
     config_builder.node_type(node_type);
     config_builder.bound_addr(Some(bound_addr));
@@ -1044,9 +1032,16 @@ pub async fn new_libp2p_network(
         pubkey,
         Arc::new(RwLock::new(bs)),
         consensus_config.num_bootstrap,
-        node_id as usize,
+        node_id,
     )
     .await
+}
+
+fn get_consensus_port(options: &NodeOpt, config: &ConsensusConfig, id: usize) -> u16 {
+    match options.consensus_port {
+        Some(port) => port,
+        None => (config.base_port + id) as u16,
+    }
 }
 
 pub async fn init_validator(
@@ -1075,7 +1070,8 @@ pub async fn init_validator(
         .map(|(idx, kp)| {
             let multiaddr = parse_url(&format!(
                 "{}:{}",
-                config.nodes[idx].host, config.nodes[idx].port
+                config.bootstrap_nodes[idx].ip,
+                get_consensus_port(options, config, idx)
             ))
             .unwrap();
             (libp2p::identity::Keypair::Ed25519(kp.into()), multiaddr)
@@ -1106,14 +1102,18 @@ pub async fn init_validator(
     };
 
     // hotshot requires this threshold to be at least 2/3rd of the nodes for safety guarantee reasons
-    let threshold = ((config.nodes.len() as u64 * 2) / 3) + 1;
+    let threshold = ((pub_keys.len() as u64 * 2) / 3) + 1;
 
     let own_network = new_libp2p_network(
         pub_keys[own_id].clone(),
         to_connect_addrs,
-        own_id as usize,
+        own_id,
         node_type,
-        parse_url(&format!("0.0.0.0:{:?}", config.nodes[own_id].port)).unwrap(),
+        parse_url(&format!(
+            "0.0.0.0:{:?}",
+            get_consensus_port(options, config, own_id)
+        ))
+        .unwrap(),
         own_identity,
         config,
     )
@@ -1130,7 +1130,7 @@ pub async fn init_validator(
         known_nodes,
         priv_key,
         threshold,
-        own_id as u64,
+        own_id,
         own_network,
         options.full,
         genesis,

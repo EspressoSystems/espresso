@@ -39,8 +39,8 @@ futures = "0.3.16"
 generic-array = { version = "0.14.4", features = ["serde"] }
 hex = "0.4.3"
 hmac = "0.12.1"
-hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
-hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.0" }
+hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.2" }
+hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.2" }
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace
