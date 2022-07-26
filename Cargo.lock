@@ -41,7 +41,7 @@ dependencies = [
  "tagged-base64 0.2.0",
  "tempdir",
  "tide",
- "tide-disco 0.1.0 (git+ssh://git@github.com/EspressoSystems/tide-disco.git?tag=0.1.0)",
+ "tide-disco 0.1.0 (git+ssh://git@github.com/EspressoSystems/tide-disco.git?tag=0.2.0)",
  "tide-websockets",
  "toml",
  "tracing",
@@ -6897,7 +6897,7 @@ dependencies = [
 [[package]]
 name = "tide-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?tag=0.1.0#dfde0102ea1155240a03557aff0a962072dfcba0"
+source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?tag=0.2.0#6a80f2e5adb8bc8789fcb7eed79cc463921443a0"
 dependencies = [
  "async-std",
  "async-trait",
