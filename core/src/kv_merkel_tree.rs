@@ -332,7 +332,7 @@ where
         match end_branch {
             ForgottenSubtree { .. } => None,
             EmptySubtree => {
-                dbg!("empty subtree in lookup");
+                //dbg!("empty subtree in lookup");
                 path.reverse();
                 Some((
                     false,
@@ -349,7 +349,7 @@ where
                 ..
             } => {
                 path.reverse();
-                dbg!("lookup leaf: {:?}", &key == leaf_key);
+                //dbg!("lookup leaf: {:?}", &key == leaf_key);
                 Some((
                     &key == leaf_key,
                     KVMerkleProof {
@@ -770,6 +770,7 @@ mod tests {
         let update_elems: Vec<_> = updates.iter().map(|u| update_vals[u]).collect();
 
         for (u, elem) in updates.iter().zip(update_elems.iter()) {
+            dbg!("starting new loop");
             let elem = *elem;
             hset.insert(u);
             //dbg!("lookup1 test");
