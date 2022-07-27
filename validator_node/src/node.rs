@@ -902,7 +902,7 @@ where
 {
     validator: LightWeightNode<NET, STORE>,
     #[allow(dead_code)]
-    data_source_updater: UpdateQueryDataSource<CU, AV, MS, ST>,
+    data_source_updater: Arc<RwLock<UpdateQueryDataSource<CU, AV, MS, ST>>>,
     query_service: HotShotQueryService<'a>,
 }
 
@@ -910,10 +910,10 @@ impl<'a, NET, STORE, CU, AV, MS, ST> FullNode<'a, NET, STORE, CU, AV, MS, ST>
 where
     NET: PLNet,
     STORE: PLStore,
-    CU: UpdateCatchUpData + Sized + Send + Sync,
-    AV: UpdateAvailabilityData + Sized + Send + Sync,
-    MS: UpdateMetaStateData + Sized + Send + Sync,
-    ST: UpdateStatusData + Sized + Send + Sync,
+    CU: UpdateCatchUpData + Sized + Send + Sync + 'static,
+    AV: UpdateAvailabilityData + Sized + Send + Sync + 'static,
+    MS: UpdateMetaStateData + Sized + Send + Sync + 'static,
+    ST: UpdateStatusData + Sized + Send + Sync + 'static,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -934,18 +934,20 @@ where
         let query_service = HotShotQueryService::new(
             validator.subscribe(),
             univ_param,
-            state,
+            state.clone(),
             record_merkle_tree,
             nullifiers,
             unspent_memos,
             full_persisted,
         );
-        let data_source_updater = UpdateQueryDataSource {
+        let data_source_updater = UpdateQueryDataSource::new(
+            validator.subscribe(),
             catchup_store,
             availability_store,
             meta_state_store,
             status_store,
-        };
+            state,
+        );
         Self {
             validator,
             data_source_updater,
@@ -974,10 +976,10 @@ impl<'a, NET, STORE, CU, AV, MS, ST> Validator for FullNode<'a, NET, STORE, CU, 
 where
     NET: PLNet,
     STORE: PLStore,
-    CU: UpdateCatchUpData + Sized + Send + Sync,
-    AV: UpdateAvailabilityData + Sized + Send + Sync,
-    MS: UpdateMetaStateData + Sized + Send + Sync,
-    ST: UpdateStatusData + Sized + Send + Sync,
+    CU: UpdateCatchUpData + Sized + Send + Sync + 'static,
+    AV: UpdateAvailabilityData + Sized + Send + Sync + 'static,
+    MS: UpdateMetaStateData + Sized + Send + Sync + 'static,
+    ST: UpdateStatusData + Sized + Send + Sync + 'static,
 {
     type Event = <LightWeightNode<NET, STORE> as Validator>::Event;
 
@@ -1003,10 +1005,10 @@ impl<'a, NET, STORE, CU, AV, MS, ST> QueryService for FullNode<'a, NET, STORE, C
 where
     NET: PLNet,
     STORE: PLStore,
-    CU: UpdateCatchUpData + Sized + Send + Sync,
-    AV: UpdateAvailabilityData + Sized + Send + Sync,
-    MS: UpdateMetaStateData + Sized + Send + Sync,
-    ST: UpdateStatusData + Sized + Send + Sync,
+    CU: UpdateCatchUpData + Sized + Send + Sync + 'static,
+    AV: UpdateAvailabilityData + Sized + Send + Sync + 'static,
+    MS: UpdateMetaStateData + Sized + Send + Sync + 'static,
+    ST: UpdateStatusData + Sized + Send + Sync + 'static,
 {
     async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError> {
         self.as_query_service().get_summary().await

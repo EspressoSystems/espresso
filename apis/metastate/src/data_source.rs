@@ -12,6 +12,8 @@
 
 use espresso_core::state::SetMerkleProof;
 use jf_cap::structs::Nullifier;
+use std::error::Error;
+use std::fmt::Debug;
 
 pub trait MetaStateDataSource {
     fn get_nullifier_proof_for(
@@ -22,7 +24,7 @@ pub trait MetaStateDataSource {
 }
 
 pub trait UpdateMetaStateData {
-    type Error;
+    type Error: Error + Debug;
 
     fn append_block_nullifiers(
         &mut self,

@@ -12,13 +12,15 @@
 
 use crate::query_data::ValidatorStatus;
 use core::convert::From;
+use std::error::Error;
+use std::fmt::Debug;
 
 pub trait StatusDataSource<'a> {
     fn get_validator_status(self) -> &'a ValidatorStatus;
 }
 
 pub trait UpdateStatusData {
-    type Error;
+    type Error: Error + Debug;
     fn set_status(&mut self, status: ValidatorStatus) -> Result<(), Self::Error>;
     fn edit_status<U, F>(&mut self, op: F) -> Result<(), Self::Error>
     where
