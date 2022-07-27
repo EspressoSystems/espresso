@@ -1,3 +1,15 @@
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 #![deny(warnings)]
 #![allow(dead_code)]
 
@@ -17,6 +29,7 @@ use typenum::{Unsigned, U1};
 /// testing purposes. The implementation tests for logical equality of the represented set, ignoring
 /// sparseness. That is, any two sets with the same root hash will compare equal, even if the
 /// elements retained in memory are different between the two sets.
+#[allow(clippy::type_complexity)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum KVMerkleTree<KVHash>
 where
@@ -226,11 +239,11 @@ where
     Serialize,
     Deserialize,
 )] */
-#[derive(Debug, Clone, PartialEq, Eq)]
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KVMerkleProof<KVHash>
 where
-    KVHash: KVTreeHash + Clone,
+    KVHash: KVTreeHash,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -242,7 +255,7 @@ where
 
 impl<KVHash> KVMerkleProof<KVHash>
 where
-    KVHash: KVTreeHash + Clone,
+    KVHash: KVTreeHash,
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -310,12 +323,10 @@ where
         for sib in key_bits {
             match end_branch {
                 Branch { children, .. } => {
-                    let mut children_l: Vec<_> = children[0..sib as usize]
-                        .into_iter()
-                        .map(|d| d.hash())
-                        .collect();
+                    let mut children_l: Vec<_> =
+                        children[0..sib as usize].iter().map(|d| d.hash()).collect();
                     let mut children_r: Vec<_> = children[sib as usize + 1..]
-                        .into_iter()
+                        .iter()
                         .map(|d| d.hash())
                         .collect();
                     children_l.append(&mut children_r);
@@ -383,7 +394,7 @@ where
                     break;
                 }
                 Branch { children, .. } => {
-                    dbg!("matched on branch");
+                    // dbg!("matched on branch");
                     let target = children[pos as usize].clone();
                     end_branch = target;
                     children
@@ -392,7 +403,7 @@ where
                 Leaf {
                     height,
                     key: leaf_key,
-                    value: _leaf_value,
+                    value: leaf_value,
                     ..
                 } => {
                     //dbg!("395 sanity check, height = {:?}, end height = {?:}", height, end_height);
@@ -405,16 +416,15 @@ where
                         key_bit_vec[height - 1]
                     };
 
-                    let new_leaf = Self::new_leaf(height - 1, key, value);
-                    let (new_end_branch, new_sibs) = if leaf_pos == pos {
+                    let new_leaf = Self::new_leaf(height - 1, leaf_key, leaf_value);
+                    let (new_end_branch, new_sibs) = if leaf_pos != pos {
                         let mut new_branches =
                             vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
                         new_branches[leaf_pos as usize] = new_leaf.clone();
                         (EmptySubtree, new_branches)
                     } else {
-                        let mut new_branches =
+                        let new_branches =
                             vec![EmptySubtree; <KVHash::BranchArityMinus1>::to_usize() + 1];
-                        new_branches[leaf_pos as usize] = new_leaf.clone();
                         (new_leaf, new_branches)
                     };
                     end_branch = new_end_branch;
@@ -462,7 +472,8 @@ where
         };
 
         siblings.reverse();
-        for (_, sibs) in siblings {
+        for (pos, mut sibs) in siblings {
+            sibs[pos as usize] = end_branch;
             end_branch = Self::new_branch(*sibs);
         }
         *self = end_branch;
@@ -592,10 +603,10 @@ where
 
                 sibs_vec.insert(*sib as usize, running_hash);
 
-                ret.push((running_hash, sibs_vec));
+                ret.push((running_hash, sibs_vec.clone()));
                 let mut children = vec![];
-                for branch in sib_hashes {
-                    children.push(ForgottenSubtree { digest: *branch })
+                for branch in sibs_vec {
+                    children.push(ForgottenSubtree { digest: branch })
                 }
                 running_hash =
                     Self::new_branch(GenericArray::from_exact_iter(children).unwrap()).hash();
@@ -669,6 +680,7 @@ where
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn set_merkle_lw_multi_insert<KVHash>(
     inserts: Vec<(KVHash::Key, KVHash::Value, KVMerkleProof<KVHash>)>,
     root: KVHash::Digest,
@@ -708,7 +720,7 @@ mod tests {
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
     struct TestNulls(Nullifier);
-    #[derive(Clone)]
+    #[derive(Clone, Debug, Copy, PartialEq, Eq)]
     struct TestNullsTag();
 
     impl CommitableHashTag for TestNullsTag {
@@ -770,7 +782,7 @@ mod tests {
         let update_elems: Vec<_> = updates.iter().map(|u| update_vals[u]).collect();
 
         for (u, elem) in updates.iter().zip(update_elems.iter()) {
-            dbg!("starting new loop");
+            // dbg!("starting new loop");
             let elem = *elem;
             hset.insert(u);
             //dbg!("lookup1 test");
@@ -826,7 +838,8 @@ mod tests {
     #[test]
     fn quickcheck_merkle_tree_set_regressions_kv() {
         test_merkle_tree_set_kv(vec![20, 0], vec![Ok(20)]);
-        test_merkle_tree_set_kv(vec![0, 38], vec![Err(0), Ok(1), Ok(38)])
+        test_merkle_tree_set_kv(vec![0, 38], vec![Err(0), Ok(1), Ok(38)]);
+        test_merkle_tree_set_kv(vec![0, 0, 0], vec![])
     }
 
     #[test]

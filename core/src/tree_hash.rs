@@ -8,8 +8,8 @@ use typenum::U1;
 
 /// A hash function usable for sparse merkle tree implementations.
 ///
-///
-pub trait KVTreeHash {
+/// Inherits several other traits for `#[derive]` ergonomics
+pub trait KVTreeHash: Copy + Clone + PartialEq + Eq + Debug {
     /// The output of the hash function
     type Digest: core::hash::Hash
         + Debug
@@ -52,6 +52,7 @@ pub trait KVTreeHash {
 
     /// Hash a branch's children: the number of siblings in a branch is one greater than the
     /// AddLength<Self::BranchArityMinus1,U1>
+    #[allow(clippy::type_complexity)]
     fn hash_branch(
         children: &GenericArray<
             Self::Digest,
@@ -267,11 +268,11 @@ pub mod committable_hash {
     use core::marker::PhantomData;
     use typenum::Unsigned;
 
-    pub trait CommitableHashTag {
+    pub trait CommitableHashTag: Copy + Clone + Debug + PartialEq + Eq {
         fn commitment_diversifier() -> &'static str;
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug, PartialEq, Eq, Copy)]
     pub struct CommitableHash<K, V, T>
     where
         K: Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
@@ -457,6 +458,7 @@ pub mod kv_treehash_tests {
         }
     }
 
+    #[derive(Clone, Debug, Copy, PartialEq, Eq)]
     struct TestEntryTag();
 
     impl CommitableHashTag for TestEntryTag {
@@ -465,6 +467,7 @@ pub mod kv_treehash_tests {
         }
     }
 
+    #[derive(Clone, Debug, Copy, PartialEq, Eq)]
     struct TestEntryTag2();
 
     impl CommitableHashTag for TestEntryTag2 {
