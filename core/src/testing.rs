@@ -97,6 +97,91 @@ impl TxnPrintInfo {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum TestTxSpec {
+    OneInput {
+        rec: u16,
+        key: u8,
+    },
+    TwoInput {
+        rec0: u16,
+        rec1: u16,
+        key0: u8,
+        key1: u8,
+        diff: i32,
+    },
+}
+
+impl TestTxSpec {
+    fn into_tuple(self) -> (bool, u16, u16, u8, u8, i32) {
+        match self {
+            Self::OneInput { rec, key } => (false, rec, rec, key, key, 0),
+            Self::TwoInput {
+                rec0,
+                rec1,
+                key0,
+                key1,
+                diff,
+            } => (true, rec0, rec1, key0, key1, diff),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl quickcheck::Arbitrary for TestTxSpec {
+    fn shrink(&self) -> Box<(dyn Iterator<Item = TestTxSpec> + 'static)> {
+        match self {
+            Self::OneInput { rec, key } => Box::new(
+                (*rec, *key)
+                    .shrink()
+                    .map(|(rec, key)| Self::OneInput { rec, key }),
+            ),
+            Self::TwoInput {
+                rec0,
+                rec1,
+                key0,
+                key1,
+                diff,
+            } => Box::new(
+                once(Self::OneInput {
+                    rec: *rec0,
+                    key: *key0,
+                })
+                .chain(once(Self::OneInput {
+                    rec: *rec1,
+                    key: *key1,
+                }))
+                .chain((*rec0, *rec1, *key0, *key1, *diff).shrink().map(
+                    |(rec0, rec1, key0, key1, diff)| Self::TwoInput {
+                        rec0,
+                        rec1,
+                        key0,
+                        key1,
+                        diff,
+                    },
+                )),
+            ),
+        }
+    }
+
+    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+        if <bool as quickcheck::Arbitrary>::arbitrary(g) {
+            Self::OneInput {
+                rec: quickcheck::Arbitrary::arbitrary(g),
+                key: quickcheck::Arbitrary::arbitrary(g),
+            }
+        } else {
+            Self::TwoInput {
+                rec0: quickcheck::Arbitrary::arbitrary(g),
+                rec1: quickcheck::Arbitrary::arbitrary(g),
+                key0: quickcheck::Arbitrary::arbitrary(g),
+                key1: quickcheck::Arbitrary::arbitrary(g),
+                diff: quickcheck::Arbitrary::arbitrary(g),
+            }
+        }
+    }
+}
+
 #[derive(Arbitrary, Debug, Clone, Copy)]
 pub struct MultiXfrRecordSpec {
     pub asset_def_ix: u8,
@@ -402,7 +487,8 @@ impl MultiXfrTestState {
                         ReceiverMemo::from_ro(&mut prng, &rec, &[]).unwrap(),
                     ];
 
-                    // TODO: use and check the ReceiverMemo signature
+                    // NOTE: we don't check the receiver memos here, but
+                    // there are other tests that rely on that behavior.
                     let (note, _memo_kp) = MintNote::generate(
                         &mut prng,
                         rec,
@@ -468,10 +554,9 @@ impl MultiXfrTestState {
     ///     (receiver memos, receiver indices)
     ///     receiver memos signature
     ///     transaction
-    #[allow(clippy::type_complexity)]
     pub fn generate_transactions(
         &mut self,
-        block: Vec<(bool, u16, u16, u8, u8, i32, bool)>,
+        block: Vec<(TestTxSpec, bool)>,
         print_info: TxnPrintInfo,
     ) -> Result<Vec<MultiXfrRecordSpecTransaction>, Box<dyn std::error::Error>> {
         let splits = block
@@ -482,52 +567,136 @@ impl MultiXfrTestState {
 
         let mut txns = splits
             .into_par_iter()
-            .map(
-                |((ix, (multi_input, in1, in2, k1, k2, amt_diff, expire)), mut prng)| {
-                    let now = Instant::now();
+            .map(|((ix, (tx_spec, expire)), mut prng)| {
+                let (multi_input, in1, in2, k1, k2, amt_diff) = tx_spec.into_tuple();
+                let now = Instant::now();
 
-                    println!("Txn {}.{}/{}", print_info.round + 1, ix, print_info.num_txs);
+                println!("Txn {}.{}/{}", print_info.round + 1, ix, print_info.num_txs);
 
-                    let mut fee_rec = None;
-                    let mut rec1 = None;
-                    let mut rec2 = None;
+                let mut fee_rec = None;
+                let mut rec1 = None;
+                let mut rec2 = None;
 
-                    let mut in1 = in1 as usize % self.owners.len();
-                    let mut in2 = in2 as usize % self.owners.len();
+                let mut in1 = in1 as usize % self.owners.len();
+                let mut in2 = in2 as usize % self.owners.len();
 
-                    // NOTE: This is nearly the same as the loop below. If
-                    // you change either, change both (or refactor them
-                    // into a local closure called twice)
-                    for i in (0..(self.owners.len() - in1)).rev() {
-                        let memo = &self.memos[i];
-                        let kix = self.owners[i];
-                        // it's their fee keystore
-                        if i as u64 == self.fee_records[kix] {
+                // NOTE: This is nearly the same as the loop below. If
+                // you change either, change both (or refactor them
+                // into a local closure called twice)
+                for i in (0..(self.owners.len() - in1)).rev() {
+                    let memo = &self.memos[i];
+                    let kix = self.owners[i];
+                    // it's their fee keystore
+                    if i as u64 == self.fee_records[kix] {
+                        continue;
+                    }
+
+                    let key = &self.keys[kix];
+
+                    let comm = RecordCommitment::from_field_element(
+                        self.record_merkle_tree
+                            .get_leaf(i as u64)
+                            .expect_ok()
+                            .unwrap()
+                            .1
+                            .leaf
+                            .0,
+                    );
+
+                    let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
+
+                    let nullifier = key.nullify(
+                        open_rec.asset_def.policy_ref().freezer_pub_key(),
+                        i as u64,
+                        &comm,
+                    );
+                    if !self.nullifiers.contains(nullifier).unwrap().0 {
+                        in1 = i;
+                        rec1 = Some((open_rec, kix));
+                        let fee_ix = self.fee_records[kix];
+                        fee_rec = Some((fee_ix, {
+                            let comm = RecordCommitment::from_field_element(
+                                self.record_merkle_tree
+                                    .get_leaf(fee_ix as u64)
+                                    .expect_ok()
+                                    .unwrap()
+                                    .1
+                                    .leaf
+                                    .0,
+                            );
+                            let memo = self.memos[fee_ix as usize].clone();
+                            let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
+                            let nullifier = key.nullify(
+                                open_rec.asset_def.policy_ref().freezer_pub_key(),
+                                fee_ix as u64,
+                                &comm,
+                            );
+                            assert!(!self.nullifiers.contains(nullifier).unwrap().0);
+                            open_rec
+                        }));
+                        break;
+                    }
+                }
+
+                if !multi_input {
+                    if let Some((rec1, in_key1)) = &rec1 {
+                        return self.generate_single_record_transfer(
+                            &mut prng,
+                            in1,
+                            rec1.clone(),
+                            *in_key1,
+                            fee_rec,
+                            k1,
+                            ix,
+                            expire,
+                            TxnPrintInfo::new(print_info.round, print_info.num_txs, now),
+                        );
+                    }
+                }
+
+                // NOTE: This is nearly the same as the loop above. If
+                // you change either, change both (or refactor them
+                // into a local closure called twice)
+                for i in (0..(self.owners.len() - in2)).rev() {
+                    if i == in1 {
+                        continue;
+                    }
+
+                    let memo = &self.memos[i];
+                    let kix = self.owners[i];
+                    let key = &self.keys[kix];
+
+                    if i as u64 == self.fee_records[kix] {
+                        continue;
+                    }
+
+                    let comm = RecordCommitment::from_field_element(
+                        self.record_merkle_tree
+                            .get_leaf(i as u64)
+                            .expect_ok()
+                            .unwrap()
+                            .1
+                            .leaf
+                            .0,
+                    );
+
+                    let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
+
+                    if let Some((rec1, _)) = &rec1 {
+                        if open_rec.asset_def != rec1.asset_def {
                             continue;
                         }
+                    }
 
-                        let key = &self.keys[kix];
-
-                        let comm = RecordCommitment::from_field_element(
-                            self.record_merkle_tree
-                                .get_leaf(i as u64)
-                                .expect_ok()
-                                .unwrap()
-                                .1
-                                .leaf
-                                .0,
-                        );
-
-                        let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
-
-                        let nullifier = key.nullify(
-                            open_rec.asset_def.policy_ref().freezer_pub_key(),
-                            i as u64,
-                            &comm,
-                        );
-                        if !self.nullifiers.contains(nullifier).unwrap().0 {
-                            in1 = i;
-                            rec1 = Some((open_rec, kix));
+                    let nullifier = key.nullify(
+                        open_rec.asset_def.policy_ref().freezer_pub_key(),
+                        i as u64,
+                        &comm,
+                    );
+                    if !self.nullifiers.contains(nullifier).unwrap().0 {
+                        in2 = i;
+                        rec2 = Some((open_rec, kix));
+                        if fee_rec.is_none() {
                             let fee_ix = self.fee_records[kix];
                             fee_rec = Some((fee_ix, {
                                 let comm = RecordCommitment::from_field_element(
@@ -549,324 +718,236 @@ impl MultiXfrTestState {
                                 assert!(!self.nullifiers.contains(nullifier).unwrap().0);
                                 open_rec
                             }));
-                            break;
                         }
+                        break;
                     }
+                }
 
-                    if !multi_input {
-                        if let Some((rec1, in_key1)) = &rec1 {
-                            return self.generate_single_record_transfer(
-                                &mut prng,
-                                in1,
-                                rec1.clone(),
-                                *in_key1,
-                                fee_rec,
-                                k1,
-                                ix,
-                                expire,
-                                TxnPrintInfo::new(print_info.round, print_info.num_txs, now),
-                            );
-                        }
-                    }
-
-                    // NOTE: This is nearly the same as the loop above. If
-                    // you change either, change both (or refactor them
-                    // into a local closure called twice)
-                    for i in (0..(self.owners.len() - in2)).rev() {
-                        if i == in1 {
-                            continue;
-                        }
-
-                        let memo = &self.memos[i];
-                        let kix = self.owners[i];
-                        let key = &self.keys[kix];
-
-                        if i as u64 == self.fee_records[kix] {
-                            continue;
-                        }
-
-                        let comm = RecordCommitment::from_field_element(
-                            self.record_merkle_tree
-                                .get_leaf(i as u64)
-                                .expect_ok()
-                                .unwrap()
-                                .1
-                                .leaf
-                                .0,
-                        );
-
-                        let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
-
-                        if let Some((rec1, _)) = &rec1 {
-                            if open_rec.asset_def != rec1.asset_def {
-                                continue;
-                            }
-                        }
-
-                        let nullifier = key.nullify(
-                            open_rec.asset_def.policy_ref().freezer_pub_key(),
-                            i as u64,
-                            &comm,
-                        );
-                        if !self.nullifiers.contains(nullifier).unwrap().0 {
-                            in2 = i;
-                            rec2 = Some((open_rec, kix));
-                            if fee_rec.is_none() {
-                                let fee_ix = self.fee_records[kix];
-                                fee_rec = Some((fee_ix, {
-                                    let comm = RecordCommitment::from_field_element(
-                                        self.record_merkle_tree
-                                            .get_leaf(fee_ix as u64)
-                                            .expect_ok()
-                                            .unwrap()
-                                            .1
-                                            .leaf
-                                            .0,
-                                    );
-                                    let memo = self.memos[fee_ix as usize].clone();
-                                    let open_rec = memo.decrypt(key, &comm, &[]).unwrap();
-                                    let nullifier = key.nullify(
-                                        open_rec.asset_def.policy_ref().freezer_pub_key(),
-                                        fee_ix as u64,
-                                        &comm,
-                                    );
-                                    assert!(!self.nullifiers.contains(nullifier).unwrap().0);
-                                    open_rec
-                                }));
-                            }
-                            break;
-                        }
-                    }
-
-                    if !multi_input {
-                        if let Some((rec2, in_key2)) = &rec2 {
-                            return self.generate_single_record_transfer(
-                                &mut prng,
-                                in2,
-                                rec2.clone(),
-                                *in_key2,
-                                fee_rec,
-                                k1,
-                                ix,
-                                expire,
-                                TxnPrintInfo::new(print_info.round, print_info.num_txs, now),
-                            );
-                        }
-                    }
-
-                    if rec1.is_none() || rec2.is_none() {
-                        println!(
-                            "Txn {}.{}/{}: No records found, {}s",
-                            print_info.round + 1,
+                if !multi_input {
+                    if let Some((rec2, in_key2)) = &rec2 {
+                        return self.generate_single_record_transfer(
+                            &mut prng,
+                            in2,
+                            rec2.clone(),
+                            *in_key2,
+                            fee_rec,
+                            k1,
                             ix,
-                            print_info.num_txs,
-                            now.elapsed().as_secs_f32()
+                            expire,
+                            TxnPrintInfo::new(print_info.round, print_info.num_txs, now),
                         );
-                        return None;
                     }
+                }
 
-                    let (fee_ix, fee_rec) = fee_rec?;
-                    let ((rec1, in_key1), (rec2, in_key2)) = (rec1?, rec2?);
-                    let in_key1_ix = in_key1;
-                    let in_key1 = &self.keys[in_key1];
-                    let in_key2 = &self.keys[in_key2];
-
-                    assert!(fee_ix != in1 as u64);
-                    assert!(fee_ix != in2 as u64);
-
-                    let k1 = k1 as usize % self.keys.len();
-                    let k1_ix = k1;
-                    let k1 = &self.keys[k1];
-                    let k2 = k2 as usize % self.keys.len();
-                    let k2_ix = k2;
-                    let k2 = &self.keys[k2];
-
-                    let out_def1 = rec1.asset_def.clone();
-                    let out_def2 = rec2.asset_def.clone();
-
-                    let (out_amt1, out_amt2) = {
-                        if out_def1 == out_def2 {
-                            let total = BigInt::from(u128::from(rec1.amount))
-                                + BigInt::from(u128::from(rec2.amount));
-                            let offset = BigInt::from(amt_diff) / BigInt::from(2u64);
-                            let midval = total.clone() / BigInt::from(2u64);
-                            let amt1 = midval + offset;
-                            let amt1 = if amt1 < BigInt::from(1u64) {
-                                BigInt::from(1u64)
-                            } else if amt1 >= total {
-                                total.clone() - BigInt::from(1u64)
-                            } else {
-                                amt1
-                            };
-                            let amt2 = total - amt1.clone();
-                            (
-                                RecordAmount::try_from(amt1).unwrap().into(),
-                                RecordAmount::try_from(amt2).unwrap().into(),
-                            )
-                        } else {
-                            (rec1.amount, rec2.amount)
-                        }
-                    };
-
-                    // dbg!(&out_amt1);
-                    // dbg!(&out_amt2);
-                    // dbg!(&fee_rec.amount);
-
-                    let out_rec1 = RecordOpening::new(
-                        &mut prng,
-                        out_amt1,
-                        out_def1,
-                        k1.pub_key(),
-                        FreezeFlag::Unfrozen,
-                    );
-
-                    let out_rec2 = RecordOpening::new(
-                        &mut prng,
-                        out_amt2,
-                        out_def2,
-                        k2.pub_key(),
-                        FreezeFlag::Unfrozen,
-                    );
-
-                    // self.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec1, &[]).unwrap());
-                    // self.memos.push(ReceiverMemo::from_ro(&mut prng, &out_rec2, &[]).unwrap());
-
+                if rec1.is_none() || rec2.is_none() {
                     println!(
-                        "Txn {}.{}/{} inputs chosen: {}s",
+                        "Txn {}.{}/{}: No records found, {}s",
                         print_info.round + 1,
                         ix,
                         print_info.num_txs,
                         now.elapsed().as_secs_f32()
                     );
-                    let now = Instant::now();
+                    return None;
+                }
 
-                    let fee_input = FeeInput {
-                        ro: fee_rec,
-                        owner_keypair: in_key1,
-                        acc_member_witness: AccMemberWitness {
-                            merkle_path: self
-                                .record_merkle_tree
-                                .get_leaf(fee_ix)
-                                .expect_ok()
-                                .unwrap()
-                                .1
-                                .path,
-                            root: self.validator.record_merkle_commitment.root_value,
-                            uid: fee_ix,
-                        },
-                    };
+                let (fee_ix, fee_rec) = fee_rec?;
+                let ((rec1, in_key1), (rec2, in_key2)) = (rec1?, rec2?);
+                let in_key1_ix = in_key1;
+                let in_key1 = &self.keys[in_key1];
+                let in_key2 = &self.keys[in_key2];
 
-                    let input1 = TransferNoteInput {
-                        ro: rec1,
-                        owner_keypair: in_key1,
-                        cred: None,
-                        acc_member_witness: AccMemberWitness {
-                            merkle_path: self
-                                .record_merkle_tree
-                                .get_leaf(in1 as u64)
-                                .expect_ok()
-                                .unwrap()
-                                .1
-                                .path,
-                            root: self.validator.record_merkle_commitment.root_value,
-                            uid: in1 as u64,
-                        },
-                    };
+                assert!(fee_ix != in1 as u64);
+                assert!(fee_ix != in2 as u64);
 
-                    let input2 = TransferNoteInput {
-                        ro: rec2,
-                        owner_keypair: in_key2,
-                        cred: None,
-                        acc_member_witness: AccMemberWitness {
-                            merkle_path: self
-                                .record_merkle_tree
-                                .get_leaf(in2 as u64)
-                                .expect_ok()
-                                .unwrap()
-                                .1
-                                .path,
-                            root: self.validator.record_merkle_commitment.root_value,
-                            uid: in2 as u64,
-                        },
-                    };
+                let k1 = k1 as usize % self.keys.len();
+                let k1_ix = k1;
+                let k1 = &self.keys[k1];
+                let k2 = k2 as usize % self.keys.len();
+                let k2_ix = k2;
+                let k2 = &self.keys[k2];
 
-                    println!(
-                        "Txn {}.{}/{} inputs generated: {}s",
-                        print_info.round + 1,
-                        ix,
-                        print_info.num_txs,
-                        now.elapsed().as_secs_f32()
-                    );
-                    let now = Instant::now();
+                let out_def1 = rec1.asset_def.clone();
+                let out_def2 = rec2.asset_def.clone();
 
-                    let (fee_info, fee_out_rec) =
-                        TxnFeeInfo::new(&mut prng, fee_input, Amount::from(1u64)).unwrap();
-
-                    let owner_memos = vec![&fee_out_rec, &out_rec1, &out_rec2]
-                        .into_iter()
-                        .map(|r| ReceiverMemo::from_ro(&mut prng, r, &[]))
-                        .collect::<Result<Vec<_>, _>>()
-                        .unwrap();
-
-                    let (txn, owner_memo_kp) = TransferNote::generate_non_native(
-                        &mut prng,
-                        vec![input1, input2],
-                        &[out_rec1, out_rec2],
-                        fee_info,
-                        if expire {
-                            self.validator.prev_commit_time + 1
+                let (out_amt1, out_amt2) = {
+                    if out_def1 == out_def2 {
+                        let total = BigInt::from(u128::from(rec1.amount))
+                            + BigInt::from(u128::from(rec2.amount));
+                        let offset = BigInt::from(amt_diff) / BigInt::from(2u64);
+                        let midval = total.clone() / BigInt::from(2u64);
+                        let amt1 = midval + offset;
+                        let amt1 = if amt1 < BigInt::from(1u64) {
+                            BigInt::from(1u64)
+                        } else if amt1 >= total {
+                            total.clone() - BigInt::from(1u64)
                         } else {
-                            2u64.pow(jf_cap::constants::MAX_TIMESTAMP_LEN as u32) - 1
-                        },
-                        self.prove_keys.xfr.key_for_size(3, 3).unwrap(),
-                        vec![],
-                    )
+                            amt1
+                        };
+                        let amt2 = total - amt1.clone();
+                        (
+                            RecordAmount::try_from(amt1).unwrap().into(),
+                            RecordAmount::try_from(amt2).unwrap().into(),
+                        )
+                    } else {
+                        (rec1.amount, rec2.amount)
+                    }
+                };
+
+                // dbg!(&out_amt1);
+                // dbg!(&out_amt2);
+                // dbg!(&fee_rec.amount);
+
+                let out_rec1 = RecordOpening::new(
+                    &mut prng,
+                    out_amt1,
+                    out_def1,
+                    k1.pub_key(),
+                    FreezeFlag::Unfrozen,
+                );
+
+                let out_rec2 = RecordOpening::new(
+                    &mut prng,
+                    out_amt2,
+                    out_def2,
+                    k2.pub_key(),
+                    FreezeFlag::Unfrozen,
+                );
+
+                println!(
+                    "Txn {}.{}/{} inputs chosen: {}s",
+                    print_info.round + 1,
+                    ix,
+                    print_info.num_txs,
+                    now.elapsed().as_secs_f32()
+                );
+                let now = Instant::now();
+
+                let fee_input = FeeInput {
+                    ro: fee_rec,
+                    owner_keypair: in_key1,
+                    acc_member_witness: AccMemberWitness {
+                        merkle_path: self
+                            .record_merkle_tree
+                            .get_leaf(fee_ix)
+                            .expect_ok()
+                            .unwrap()
+                            .1
+                            .path,
+                        root: self.validator.record_merkle_commitment.root_value,
+                        uid: fee_ix,
+                    },
+                };
+
+                let input1 = TransferNoteInput {
+                    ro: rec1,
+                    owner_keypair: in_key1,
+                    cred: None,
+                    acc_member_witness: AccMemberWitness {
+                        merkle_path: self
+                            .record_merkle_tree
+                            .get_leaf(in1 as u64)
+                            .expect_ok()
+                            .unwrap()
+                            .1
+                            .path,
+                        root: self.validator.record_merkle_commitment.root_value,
+                        uid: in1 as u64,
+                    },
+                };
+
+                let input2 = TransferNoteInput {
+                    ro: rec2,
+                    owner_keypair: in_key2,
+                    cred: None,
+                    acc_member_witness: AccMemberWitness {
+                        merkle_path: self
+                            .record_merkle_tree
+                            .get_leaf(in2 as u64)
+                            .expect_ok()
+                            .unwrap()
+                            .1
+                            .path,
+                        root: self.validator.record_merkle_commitment.root_value,
+                        uid: in2 as u64,
+                    },
+                };
+
+                println!(
+                    "Txn {}.{}/{} inputs generated: {}s",
+                    print_info.round + 1,
+                    ix,
+                    print_info.num_txs,
+                    now.elapsed().as_secs_f32()
+                );
+                let now = Instant::now();
+
+                let (fee_info, fee_out_rec) =
+                    TxnFeeInfo::new(&mut prng, fee_input, Amount::from(1u64)).unwrap();
+
+                let owner_memos = vec![&fee_out_rec, &out_rec1, &out_rec2]
+                    .into_iter()
+                    .map(|r| ReceiverMemo::from_ro(&mut prng, r, &[]))
+                    .collect::<Result<Vec<_>, _>>()
                     .unwrap();
-                    let sig = sign_receiver_memos(&owner_memo_kp, &owner_memos).unwrap();
 
-                    // owner_memos_key
-                    // .verify(&helpers::get_owner_memos_digest(&owner_memos),
-                    //     &owner_memos_sig)?;
-                    println!(
-                        "Txn {}.{}/{} note generated: {}s",
-                        print_info.round + 1,
-                        ix,
-                        print_info.num_txs,
-                        now.elapsed().as_secs_f32()
-                    );
-                    let now = Instant::now();
+                let (txn, owner_memo_kp) = TransferNote::generate_non_native(
+                    &mut prng,
+                    vec![input1, input2],
+                    &[out_rec1, out_rec2],
+                    fee_info,
+                    if expire {
+                        self.validator.prev_commit_time + 1
+                    } else {
+                        2u64.pow(jf_cap::constants::MAX_TIMESTAMP_LEN as u32) - 1
+                    },
+                    self.prove_keys.xfr.key_for_size(3, 3).unwrap(),
+                    vec![],
+                )
+                .unwrap();
+                let sig = sign_receiver_memos(&owner_memo_kp, &owner_memos).unwrap();
 
-                    let nullifier_pfs = txn
-                        .inputs_nullifiers
-                        .iter()
-                        .map(|n| self.nullifiers.contains(*n).unwrap().1)
-                        .collect();
+                // owner_memos_key
+                // .verify(&helpers::get_owner_memos_digest(&owner_memos),
+                //     &owner_memos_sig)?;
+                println!(
+                    "Txn {}.{}/{} note generated: {}s",
+                    print_info.round + 1,
+                    ix,
+                    print_info.num_txs,
+                    now.elapsed().as_secs_f32()
+                );
+                let now = Instant::now();
 
-                    println!(
-                        "Txn {}.{}/{} nullifier proofs generated: {}s",
-                        print_info.round + 1,
-                        ix,
-                        print_info.num_txs,
-                        now.elapsed().as_secs_f32()
-                    );
+                let nullifier_pfs = txn
+                    .inputs_nullifiers
+                    .iter()
+                    .map(|n| self.nullifiers.contains(*n).unwrap().1)
+                    .collect();
 
-                    assert_eq!(owner_memos.len(), 3);
-                    let keys_and_memos = vec![in_key1_ix, k1_ix, k2_ix]
-                        .into_iter()
-                        .zip(owner_memos.into_iter())
-                        .collect();
+                println!(
+                    "Txn {}.{}/{} nullifier proofs generated: {}s",
+                    print_info.round + 1,
+                    ix,
+                    print_info.num_txs,
+                    now.elapsed().as_secs_f32()
+                );
 
-                    Some(MultiXfrRecordSpecTransaction {
-                        index: ix,
-                        keys_and_memos,
-                        signature: sig,
-                        transaction: ElaboratedTransaction {
-                            txn: TransactionNote::Transfer(Box::new(txn)),
-                            proofs: nullifier_pfs,
-                        },
-                    })
-                },
-            )
+                assert_eq!(owner_memos.len(), 3);
+                let keys_and_memos = vec![in_key1_ix, k1_ix, k2_ix]
+                    .into_iter()
+                    .zip(owner_memos.into_iter())
+                    .collect();
+
+                Some(MultiXfrRecordSpecTransaction {
+                    index: ix,
+                    keys_and_memos,
+                    signature: sig,
+                    transaction: ElaboratedTransaction {
+                        txn: TransactionNote::Transfer(Box::new(txn)),
+                        proofs: nullifier_pfs,
+                    },
+                })
+            })
             .filter_map(|x| x)
             .collect::<Vec<_>>();
 
@@ -875,7 +956,6 @@ impl MultiXfrTestState {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::type_complexity)]
     fn generate_single_record_transfer(
         &self,
         prng: &mut ChaChaRng,
@@ -1181,7 +1261,6 @@ mod tests {
     use quickcheck::QuickCheck;
     use rand::{Rng, RngCore};
     use std::cmp::min;
-    use std::collections::HashMap;
 
     #[test]
     fn multixfr_setup() {
@@ -1217,7 +1296,6 @@ mod tests {
      *      - build a transaction
      *      - apply that transaction
      */
-    #[allow(clippy::type_complexity)] //todo replace (bool, u16, u16, u8, u8, i32) with a struct TransactionSpec
     fn test_multixfr(
         /*
          * multi_input (if false, generates smaller transaction and rec2 is ignored),
@@ -1226,7 +1304,7 @@ mod tests {
          * can't be achieved with those records, it will
          * saturate the other to zero.
          */
-        txs: Vec<Vec<(bool, u16, u16, u8, u8, i32)>>,
+        txs: Vec<Vec<TestTxSpec>>,
         nkeys: u8,
         ndefs: u8,
         init_rec: (u8, u8, u64),
@@ -1277,10 +1355,7 @@ mod tests {
             // let block = block.into_iter().take(5).collect::<Vec<_>>();
             let txns = state
                 .generate_transactions(
-                    block
-                        .into_iter()
-                        .map(|tx| (tx.0, tx.1, tx.2, tx.3, tx.4, tx.5, true))
-                        .collect(),
+                    block.into_iter().map(|tx| (tx, true)).collect(),
                     TxnPrintInfo::new_no_time(i, num_txs),
                 )
                 .unwrap();
@@ -1470,8 +1545,14 @@ mod tests {
         let txns = state
             .generate_transactions(
                 vec![
-                    (false, 0, 0, 1, 1, 0, true),
-                    (false, if double_spend { 0 } else { 2 }, 0, 1, 1, 0, false),
+                    (TestTxSpec::OneInput { rec: 0, key: 1 }, true),
+                    (
+                        TestTxSpec::OneInput {
+                            rec: if double_spend { 0 } else { 2 },
+                            key: 1,
+                        },
+                        false,
+                    ),
                 ],
                 TxnPrintInfo::new_no_time(0, 2),
             )
@@ -1801,7 +1882,22 @@ mod tests {
     #[test]
     fn quickcheck_multixfr_regression2() {
         test_multixfr(
-            vec![vec![(true, 0, 0, 0, 0, -2), (true, 0, 0, 0, 0, 0)]],
+            vec![vec![
+                TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 0,
+                    key1: 0,
+                    diff: -2,
+                },
+                TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 0,
+                    key1: 0,
+                    diff: 0,
+                },
+            ]],
             0,
             0,
             (0, 0, 0),
@@ -1816,13 +1912,40 @@ mod tests {
 
     #[test]
     fn quickcheck_multixfr_regression4() {
-        test_multixfr(vec![vec![(true, 3, 0, 0, 0, 0)]], 0, 0, (0, 0, 0), vec![])
+        test_multixfr(
+            vec![vec![TestTxSpec::TwoInput {
+                rec0: 3,
+                rec1: 0,
+                key0: 0,
+                key1: 0,
+                diff: 0,
+            }]],
+            0,
+            0,
+            (0, 0, 0),
+            vec![],
+        )
     }
 
     #[test]
     fn quickcheck_multixfr_regression5() {
         test_multixfr(
-            vec![vec![(true, 0, 0, 1, 1, 0)], vec![(true, 0, 0, 0, 0, 0)]],
+            vec![
+                vec![TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 1,
+                    key1: 1,
+                    diff: 0,
+                }],
+                vec![TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 0,
+                    key1: 0,
+                    diff: 0,
+                }],
+            ],
             1,
             0,
             (0, 0, 0),
@@ -1837,9 +1960,9 @@ mod tests {
         // tries to compute output amounts that are separated by a non-zero amt_diff and sum to 0.
         test_multixfr(
             vec![
-                vec![(false, 0, 0, 1, 1, 0)],
-                vec![(false, 0, 0, 1, 1, 0)],
-                vec![(false, 0, 0, 1, 1, 0)],
+                vec![TestTxSpec::OneInput { rec: 0, key: 1 }],
+                vec![TestTxSpec::OneInput { rec: 0, key: 1 }],
+                vec![TestTxSpec::OneInput { rec: 0, key: 1 }],
             ],
             2,
             1,
@@ -1851,7 +1974,16 @@ mod tests {
     #[test]
     fn test_multixfr_multi_arity() {
         test_multixfr(
-            vec![vec![(true, 0, 1, 1, 1, 0)], vec![(false, 5, 0, 1, 1, 0)]],
+            vec![
+                vec![TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 1,
+                    key0: 1,
+                    key1: 1,
+                    diff: 0,
+                }],
+                vec![TestTxSpec::OneInput { rec: 5, key: 1 }],
+            ],
             2,
             1,
             (0, 0, 2),
@@ -1904,8 +2036,7 @@ mod tests {
         // Our sliding window of recent nullifiers.
         let mut history = NullifierHistory::default();
         for (age, ages) in blocks {
-            let mut nullifier_proofs: HashMap<set_hash::Hash, Vec<(Nullifier, SetMerkleProof)>> =
-                HashMap::new();
+            let mut nullifier_proofs = NullifierProofs::default();
             for proof_age in once(age).chain(ages) {
                 // Use a proof that might be old, but is no older than the sliding window size or
                 // the size of all of history.
@@ -1917,23 +2048,18 @@ mod tests {
                 let set = &nullifier_sets[nullifier_sets.len() - 1 - proof_age];
                 let (contains, proof) = set.contains(n).unwrap();
                 assert!(!contains);
-                nullifier_proofs
-                    .entry(set.hash())
-                    .or_default()
-                    .push((n, proof));
+                nullifier_proofs.push((n, proof, set.hash()));
             }
 
             // Check the proofs.
             let recent_nullifiers = history.recent_nullifiers();
-            for (root, nulls) in &nullifier_proofs {
-                for (n, proof) in nulls {
-                    assert_eq!(
-                        *root,
-                        history
-                            .check_unspent(&recent_nullifiers, proof, *n)
-                            .unwrap()
-                    );
-                }
+            for (n, proof, root) in &nullifier_proofs {
+                assert_eq!(
+                    *root,
+                    history
+                        .check_unspent(&recent_nullifiers, proof, *n)
+                        .unwrap()
+                );
             }
 
             if nullifier_sets.len() > ValidatorState::HISTORY_SIZE + 1 {
@@ -1963,14 +2089,14 @@ mod tests {
             assert_ne!(prev_commit, history.commit());
 
             // Check that it returned all the expected proofs.
-            for (n, _) in nullifier_proofs.values().flatten() {
+            for (n, _, _) in &nullifier_proofs {
                 let (contains, _proof) = collected_proofs.contains(*n).unwrap();
                 assert!(!contains);
             }
 
             // Generate the new nullifiers set by inserting all of the new nullifiers.
             let mut set = nullifier_sets.last().unwrap().clone();
-            for (n, proof) in nullifier_proofs.into_values().flatten() {
+            for (n, proof, _) in nullifier_proofs.into_iter() {
                 set.insert(n).unwrap();
                 spent_nullifiers.push((n, proof));
             }
@@ -2004,5 +2130,74 @@ mod tests {
         QuickCheck::new()
             .tests(5)
             .quickcheck(test_nullifier_history as fn(u64, Vec<_>) -> ());
+    }
+
+    /// Test that applying equivalent blocks to the same [NullifierHistory] yields equal histories
+    /// with equal commitments. The blocks can have different nullifier proofs -- as long as the
+    /// nullifiers in both blocks are the same and all of the proofs are acceptable, they can be
+    /// relative to different historical root hashes, and the blocks are still equivalent.
+    ///
+    /// `blocks` is a sequence of non-empty lists of nullifier proof ages, similar to the format
+    /// accepted by `test_nullifier_history`, except that each proof has a pair of ages. This
+    /// defines two equivalent blocks which differ in the ages of their nullifier proofs. The test
+    /// applies each sequence of blocks to the same initial state, checking at each step that the
+    /// states and their commitments are equal.
+    fn test_nullifier_history_commitment(
+        seed: u64,
+        blocks: Vec<((usize, usize), Vec<(usize, usize)>)>,
+    ) {
+        let mut rng = ChaChaRng::seed_from_u64(seed);
+        // Past nullifier sets. Each of these Merkle trees is complete -- it contains leaves for
+        // each nullifier in the set.
+        let mut nullifier_sets = vec![SetMerkleTree::default()];
+        // Our sliding windows of recent nullifiers. These should always remain equal.
+        let mut history1 = NullifierHistory::default();
+        let mut history2 = NullifierHistory::default();
+        for (age, ages) in blocks {
+            let mut proofs1 = NullifierProofs::default();
+            let mut proofs2 = NullifierProofs::default();
+            for (age1, age2) in once(age).chain(ages) {
+                // Generate a random, fresh nullifier.
+                let n = Nullifier::random_for_test(&mut rng);
+                for (age, proofs) in [(age1, &mut proofs1), (age2, &mut proofs2)] {
+                    // Use a proof that might be old, but is no older than the sliding window size
+                    // or the size of all of history.
+                    let age = age % min(ValidatorState::HISTORY_SIZE + 1, nullifier_sets.len());
+                    // Find a recent nullifier set to generate the proof.
+                    let set = &nullifier_sets[nullifier_sets.len() - 1 - age];
+                    let (contains, proof) = set.contains(n).unwrap();
+                    assert!(!contains);
+                    proofs.push((n, proof, set.hash()));
+                }
+            }
+
+            // Insert the new nullifiers and make sure the effect on both histories is the same.
+            history1.append_block(proofs1.clone()).unwrap();
+            history2.append_block(proofs2).unwrap();
+            assert_eq!(history1, history2);
+            assert_eq!(history1.commit(), history2.commit());
+
+            // Generate the new nullifiers set by inserting all of the new nullifiers.
+            let mut set = nullifier_sets.last().unwrap().clone();
+            for (n, _, _) in proofs1.into_iter() {
+                set.insert(n).unwrap();
+            }
+            assert_eq!(set.hash(), history1.current_root());
+            assert_eq!(set.hash(), history2.current_root());
+            nullifier_sets.push(set);
+        }
+    }
+
+    #[test]
+    fn test_nullifier_history_commitment_regression() {
+        test_nullifier_history_commitment(0, vec![((0, 0), vec![]), ((0, 0), vec![(1, 0)])]);
+    }
+
+    #[cfg(feature = "slow-tests")]
+    #[test]
+    fn quickcheck_nullifier_history_commitment() {
+        QuickCheck::new()
+            .tests(5)
+            .quickcheck(test_nullifier_history_commitment as fn(u64, Vec<_>) -> ());
     }
 }

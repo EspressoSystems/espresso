@@ -16,7 +16,7 @@ use async_std::task::{sleep, spawn_blocking};
 use espresso_core::testing::MultiXfrRecordSpecTransaction;
 use espresso_core::{
     state::ElaboratedBlock,
-    testing::{MultiXfrTestState, TxnPrintInfo},
+    testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo},
 };
 use espresso_validator::full_node_mem_data_source::QueryData;
 use espresso_validator::*;
@@ -51,10 +51,10 @@ struct Options {
     /// IPs of the bootstrap nodes.
     #[structopt(
         long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_IPS",
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS",
         value_delimiter = ","
     )]
-    pub bootstrap_ips: Option<Vec<String>>,
+    pub bootstrap_nodes: Option<Vec<String>>,
 
     /// Id of the current node.
     ///
@@ -159,7 +159,16 @@ async fn generate_transactions(
                 let (new_state, mut transactions) = spawn_blocking(move || {
                     let txs = state
                         .generate_transactions(
-                            vec![(true, 0, 0, 0, 0, -2, false)],
+                            vec![(
+                                TestTxSpec::TwoInput {
+                                    rec0: 0,
+                                    rec1: 0,
+                                    key0: 0,
+                                    key1: 0,
+                                    diff: -2,
+                                },
+                                false,
+                            )],
                             TxnPrintInfo::new_no_time(round as usize, 1),
                         )
                         .unwrap();

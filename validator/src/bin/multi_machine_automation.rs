@@ -42,7 +42,7 @@ struct Options {
     /// Override `bootstrap_nodes` from the node configuration file.
     #[structopt(
         long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_NODES",
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS",
         value_delimiter = ","
     )]
     pub bootstrap_nodes: Option<Vec<Url>>,
@@ -110,7 +110,7 @@ async fn main() {
     // that we will set explicitly in the command line.
     env::remove_var("ESPRESSO_VALIDATOR_CONFIG_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_SECRET_KEY_SEED");
-    env::remove_var("ESPRESSO_VALIDATOR_BOOTSTRAP_NODES");
+    env::remove_var("ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS");
     env::remove_var("ESPRESSO_VALIDATOR_PUB_KEY_PATH");
     env::remove_var("ESPRESSO_FAUCET_PUB_KEY");
     env::remove_var("ESPRESSO_VALIDATOR_STORE_PATH");

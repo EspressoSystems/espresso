@@ -92,9 +92,9 @@ pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
         .split_once(':')
         .ok_or(multiaddr::Error::InvalidMultiaddr)?;
     if ip.chars().any(|c| c.is_alphabetic()) {
-        // speecial case localhost
+        // special case localhost
         if ip == "localhost" {
-            Multiaddr::from_str(&format!("/dns/{}/tcp/{}", "127.0.0.1", port))
+            Multiaddr::from_str(&format!("/ip4/{}/tcp/{}", "127.0.0.1", port))
         } else {
             // is domain
             Multiaddr::from_str(&format!("/dns/{}/tcp/{}", ip, port))
@@ -1079,20 +1079,13 @@ pub async fn init_validator(
         .take(num_bootstrap)
         .collect();
 
-    let mut to_connect_addrs: Vec<_> = bootstrap_priv
+    let to_connect_addrs: Vec<_> = bootstrap_priv
         .clone()
         .into_iter()
         .map(|(kp, ma)| (Some(PeerId::from_public_key(&kp.public())), ma))
         .collect();
 
     let (node_type, own_identity) = if own_id < num_bootstrap {
-        // TODO jr
-        // <https://github.com/EspressoSystems/espresso/issues/463>
-        // When we upgrade to phaselock 0.1.1,
-        // we can delete this line. The reason is because
-        // 0.1.0 HotShot is overly strict in matching the number of bootstrap nodes.
-        // This is fixed on HotShot main
-        to_connect_addrs.remove(own_id);
         (
             NetworkNodeType::Bootstrap,
             Some(bootstrap_priv[own_id].0.clone()),

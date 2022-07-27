@@ -40,11 +40,7 @@ use espresso_metastate_api::data_source::UpdateMetaStateData;
 pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::{channel::mpsc, future::RemoteHandle, select, task::SpawnExt};
-use hotshot::{
-    traits::BlockContents,
-    types::{EventType, HotShotHandle},
-    HotShotError, H_256,
-};
+use hotshot::{traits::BlockContents, types::HotShotHandle, HotShotError, H_256};
 use itertools::izip;
 use jf_cap::{
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
@@ -59,14 +55,15 @@ use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use tracing::{debug, error};
 
+pub type HotShotEventType = hotshot::types::EventType<ElaboratedBlock, ValidatorState, H_256>;
+pub type HotShotEvent = hotshot::types::Event<ElaboratedBlock, ValidatorState, H_256>;
+
 pub trait ConsensusEvent {
-    fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState>;
+    fn into_event(self) -> HotShotEventType;
 }
 
-pub type HotShotEvent = hotshot::types::Event<ElaboratedBlock, ValidatorState>;
-
 impl ConsensusEvent for HotShotEvent {
-    fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState> {
+    fn into_event(self) -> HotShotEventType {
         self.event
     }
 }
@@ -101,15 +98,15 @@ pub trait Validator {
                         return;
                     }
                     Some(event) => match event.into_event() {
-                        EventType::Decide { state, block: _, qcs: _ } => {
+                        HotShotEventType::Decide { state, block: _, qcs: _ } => {
                             if let Some(state) = state.last() {
                                 debug!(". - Committed state {}", state.commit());
                             }
                         }
-                        EventType::ViewTimeout { view_number } => {
+                        HotShotEventType::ViewTimeout { view_number } => {
                             debug!("  - Round {:?} timed out.", view_number);
                         }
-                        EventType::Error { error } => {
+                        HotShotEventType::Error { error } => {
                             error!("  - HotShot error: {}", error);
                         }
                         event => {
@@ -346,9 +343,8 @@ struct FullState {
 
 impl FullState {
     fn update(&mut self, event: impl ConsensusEvent) {
-        use EventType::*;
         match event.into_event() {
-            Error { error } => {
+            HotShotEventType::Error { error } => {
                 if matches!(
                     *error,
                     HotShotError::BadBlock { .. } | HotShotError::InconsistentBlock { .. }
@@ -380,11 +376,11 @@ impl FullState {
                 // network errors, etc.) do not correspond to LedgerEvents.
             }
 
-            Propose { block } => {
+            HotShotEventType::Propose { block } => {
                 self.proposed = (*block).clone();
             }
 
-            Decide {
+            HotShotEventType::Decide {
                 block,
                 state,
                 qcs: _,
@@ -1112,7 +1108,7 @@ mod tests {
     use async_std::task::block_on;
     use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
     use espresso_core::{
-        testing::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo},
+        testing::{MultiXfrRecordSpec, MultiXfrTestState, TestTxSpec, TxnPrintInfo},
         universal_params::UNIVERSAL_PARAM,
     };
     use hotshot::data::VecQuorumCertificate;
@@ -1123,18 +1119,17 @@ mod tests {
 
     #[derive(Debug)]
     struct MockConsensusEvent {
-        event: EventType<ElaboratedBlock, ValidatorState>,
+        event: HotShotEventType,
     }
 
     impl ConsensusEvent for MockConsensusEvent {
-        fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState> {
+        fn into_event(self) -> HotShotEventType {
             self.event
         }
     }
 
-    #[allow(clippy::type_complexity)]
     fn generate_valid_history(
-        txs: Vec<Vec<(bool, u16, u16, u8, u8, i32)>>,
+        txs: Vec<Vec<TestTxSpec>>,
         nkeys: u8,
         ndefs: u8,
         init_rec: (u8, u8, u64),
@@ -1201,13 +1196,9 @@ mod tests {
                 )
             });
 
-            // let block = block.into_iter().take(5).collect::<Vec<_>>();
             let txns = state
                 .generate_transactions(
-                    block
-                        .into_iter()
-                        .map(|tx| (tx.0, tx.1, tx.2, tx.3, tx.4, tx.5, false))
-                        .collect(),
+                    block.into_iter().map(|tx| (tx, false)).collect(),
                     TxnPrintInfo::new_no_time(i, num_txs),
                 )
                 .unwrap();
@@ -1307,9 +1298,8 @@ mod tests {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     fn test_query_service(
-        txs: Vec<Vec<(bool, u16, u16, u8, u8, i32)>>,
+        txs: Vec<Vec<TestTxSpec>>,
         nkeys: u8,
         ndefs: u8,
         init_rec: (u8, u8, u64),
@@ -1331,7 +1321,7 @@ mod tests {
             assert_eq!(initial_state.0.commit(), history[0].0.commit());
             let events = Box::pin(stream::iter(history.clone().into_iter().map(
                 |(_, block, _, state, quorum_certificate)| MockConsensusEvent {
-                    event: EventType::Decide {
+                    event: HotShotEventType::Decide {
                         block: Arc::new(vec![block]),
                         state: Arc::new(vec![state]),
                         qcs: Arc::new(vec![quorum_certificate]),
@@ -1495,7 +1485,22 @@ mod tests {
     #[test]
     fn test_query_service_small() {
         test_query_service(
-            vec![vec![(true, 0, 0, 0, 0, -2), (true, 0, 0, 0, 0, 0)]],
+            vec![vec![
+                TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 0,
+                    key1: 0,
+                    diff: -2,
+                },
+                TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 0,
+                    key1: 0,
+                    diff: 0,
+                },
+            ]],
             0,
             0,
             (0, 0, 0),
@@ -1503,7 +1508,22 @@ mod tests {
         );
 
         test_query_service(
-            vec![vec![(true, 0, 0, 1, 1, 0)], vec![(true, 0, 0, 0, 0, 0)]],
+            vec![
+                vec![TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 1,
+                    key1: 1,
+                    diff: 0,
+                }],
+                vec![TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 0,
+                    key1: 0,
+                    diff: 0,
+                }],
+            ],
             1,
             0,
             (0, 0, 0),
@@ -1512,9 +1532,9 @@ mod tests {
 
         test_query_service(
             vec![
-                vec![(false, 0, 0, 1, 1, 0)],
-                vec![(false, 0, 0, 1, 1, 0)],
-                vec![(false, 0, 0, 1, 1, 0)],
+                vec![TestTxSpec::OneInput { rec: 0, key: 1 }],
+                vec![TestTxSpec::OneInput { rec: 0, key: 1 }],
+                vec![TestTxSpec::OneInput { rec: 0, key: 1 }],
             ],
             2,
             1,
@@ -1523,7 +1543,16 @@ mod tests {
         );
 
         test_query_service(
-            vec![vec![(true, 0, 1, 1, 1, 0)], vec![(false, 5, 0, 1, 1, 0)]],
+            vec![
+                vec![TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 1,
+                    key0: 1,
+                    key1: 1,
+                    diff: 0,
+                }],
+                vec![TestTxSpec::OneInput { rec: 5, key: 1 }],
+            ],
             2,
             1,
             (0, 0, 2),
