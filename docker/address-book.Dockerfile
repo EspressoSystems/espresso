@@ -16,6 +16,9 @@ RUN apt-get update \
 &&  apt-get install -y curl wait-for-it \
 &&  rm -rf /var/lib/apt/lists/*
 
+COPY address-book/api /api
+COPY address-book/config /config
+
 COPY target/x86_64-unknown-linux-musl/release/address-book /bin/address-book
 RUN chmod +x /bin/address-book
 
