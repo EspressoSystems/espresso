@@ -12,6 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use espresso_macros::*;
+use jf_cap::structs::ReceiverMemo;
 
 pub use crate::full_persistence::FullPersistence;
 pub use crate::lw_persistence::LWPersistence;
@@ -73,6 +74,7 @@ pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 pub struct ElaboratedTransaction {
     pub txn: TransactionNote,
     pub proofs: Vec<SetMerkleProof>,
+    pub memos: Vec<ReceiverMemo>,
 }
 
 impl TransactionTrait<H_256> for ElaboratedTransaction {}
@@ -123,6 +125,7 @@ pub struct Block(pub Vec<TransactionNote>);
 pub struct ElaboratedBlock {
     pub block: Block,
     pub proofs: Vec<Vec<SetMerkleProof>>,
+    pub memos: Vec<Vec<ReceiverMemo>>,
 }
 
 impl Committable for ElaboratedBlock {
@@ -134,6 +137,7 @@ impl Committable for ElaboratedBlock {
         commit::RawCommitmentBuilder::new("ElaboratedBlock")
             .field("Block contents", self.block.commit())
             .var_size_field("Block proofs", &canonical::serialize(&self.proofs).unwrap())
+            .var_size_field("Block memos", &canonical::serialize(&self.memos).unwrap())
             .finalize()
     }
 }
@@ -144,6 +148,7 @@ impl Committable for ElaboratedTransaction {
         commit::RawCommitmentBuilder::new("ElaboratedTransaction")
             .field("Txn contents", self.txn.commit())
             .var_size_field("Txn proofs", &canonical::serialize(&self.proofs).unwrap())
+            .var_size_field("Txn memos", &canonical::serialize(&self.memos).unwrap())
             .finalize()
     }
 }
@@ -180,6 +185,7 @@ impl BlockContents<H_256> for ElaboratedBlock {
 
         ret.block.0.push(txn.txn.clone());
         ret.proofs.push(txn.proofs.clone());
+        ret.memos.push(txn.memos.clone());
 
         Ok(ret)
     }

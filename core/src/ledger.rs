@@ -66,7 +66,7 @@ impl traits::Transaction for ElaboratedTransaction {
     type Kind = cap::TransactionKind;
 
     fn cap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
-        Self { txn: note, proofs }
+        Self { txn: note, proofs, memos: Default::default() }
     }
 
     fn open_viewing_memo(
@@ -139,6 +139,7 @@ impl traits::Block for ElaboratedBlock {
         Self {
             block: crate::state::Block(txns),
             proofs,
+            memos: Default::default(),
         }
     }
 
@@ -147,9 +148,11 @@ impl traits::Block for ElaboratedBlock {
             .0
             .iter()
             .zip(&self.proofs)
-            .map(|(txn, proofs)| ElaboratedTransaction {
+            .zip(&self.memos)
+            .map(|((txn, proofs), memos)| ElaboratedTransaction {
                 txn: txn.clone(),
                 proofs: proofs.clone(),
+                memos: memos.clone(),
             })
             .collect()
     }

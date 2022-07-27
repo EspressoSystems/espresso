@@ -29,7 +29,7 @@ use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use tide::http::Url;
 use tracing::info;
-use validator_node::node::{QueryService, Validator};
+use validator_node::node::Validator;
 
 #[derive(StructOpt)]
 #[structopt(
@@ -103,7 +103,7 @@ fn default_config_path() -> PathBuf {
 async fn generate_transactions(
     num_txn: u64,
     own_id: usize,
-    mut hotshot: Node,
+    hotshot: Node,
     mut state: MultiXfrTestState,
 ) {
     #[cfg(target_os = "linux")]
@@ -232,14 +232,14 @@ async fn generate_transactions(
                     (owner_memos, kixs)
                 };
 
-                // If we're running a full node, publish the receiver memos.
-                if let Node::Full(node) = &mut hotshot {
-                    node.write()
-                        .await
-                        .post_memos(round, txn.index as u64, owner_memos.clone(), txn.signature)
-                        .await
-                        .unwrap();
-                }
+                // // If we're running a full node, publish the receiver memos.
+                // if let Node::Full(node) = &mut hotshot {
+                //     node.write()
+                //         .await
+                //         .post_memos(round, txn.index as u64, owner_memos.clone(), txn.signature)
+                //         .await
+                //         .unwrap();
+                // }
 
                 state
                     .try_add_transaction(

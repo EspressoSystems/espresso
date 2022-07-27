@@ -426,6 +426,7 @@ impl MultiXfrTestState {
                     ElaboratedTransaction {
                         txn: TransactionNote::Mint(Box::new(note)),
                         proofs: vec![nul],
+                        memos: memos.clone(),
                     },
                     ix,
                     memos,
@@ -853,7 +854,7 @@ impl MultiXfrTestState {
                     assert_eq!(owner_memos.len(), 3);
                     let keys_and_memos = vec![in_key1_ix, k1_ix, k2_ix]
                         .into_iter()
-                        .zip(owner_memos.into_iter())
+                        .zip(owner_memos.iter().cloned())
                         .collect();
 
                     Some(MultiXfrRecordSpecTransaction {
@@ -863,6 +864,7 @@ impl MultiXfrTestState {
                         transaction: ElaboratedTransaction {
                             txn: TransactionNote::Transfer(Box::new(txn)),
                             proofs: nullifier_pfs,
+                            memos: owner_memos,
                         },
                     })
                 },
@@ -1015,7 +1017,7 @@ impl MultiXfrTestState {
         assert_eq!(owner_memos.len(), 2);
         let keys_and_memos = vec![in_key_ix, out_key_ix]
             .into_iter()
-            .zip(owner_memos.into_iter())
+            .zip(owner_memos.iter().cloned())
             .collect();
 
         Some(MultiXfrRecordSpecTransaction {
@@ -1025,6 +1027,7 @@ impl MultiXfrTestState {
             transaction: ElaboratedTransaction {
                 txn: TransactionNote::Transfer(Box::new(txn)),
                 proofs: nullifier_pfs,
+                memos: owner_memos,
             },
         })
     }

@@ -21,6 +21,7 @@ use jf_cap::{structs::ReceiverMemo, Signature, TransactionNote};
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, Snafu};
 use std::fmt;
+use itertools::MultiUnzip;
 
 pub use net::*;
 
@@ -246,28 +247,29 @@ impl Display for CommittedBlock {
 
 impl From<CommittedBlock> for ElaboratedBlock {
     fn from(b: CommittedBlock) -> Self {
-        let (txs, proofs) = b
+        let (txs, proofs, memos) = b
             .transactions
             .into_iter()
-            .map(|tx| (tx.data, tx.proofs))
-            .unzip();
+            .map(|tx| (tx.data, tx.proofs, tx.output_memos)).multiunzip();
         Self {
             block: Block(txs),
             proofs,
+            memos,
         }
     }
 }
 
 impl From<&CommittedBlock> for ElaboratedBlock {
     fn from(b: &CommittedBlock) -> Self {
-        let (txs, proofs) = b
+        let (txs, proofs, memos) = b
             .transactions
             .iter()
-            .map(|tx| (tx.data.clone(), tx.proofs.clone()))
-            .unzip();
+            .map(|tx| (tx.data.clone(), tx.proofs.clone(), tx.output_memos.clone()))
+            .multiunzip();
         Self {
             block: Block(txs),
             proofs,
+            memos,
         }
     }
 }
@@ -278,7 +280,7 @@ pub struct CommittedTransaction {
     pub data: TransactionNote,
     pub proofs: Vec<SetMerkleProof>,
     pub output_uids: Vec<u64>,
-    pub output_memos: Option<Vec<ReceiverMemo>>,
+    pub output_memos: Vec<ReceiverMemo>,
     pub memos_signature: Option<Signature>,
 }
 
@@ -287,6 +289,7 @@ impl From<CommittedTransaction> for ElaboratedTransaction {
         Self {
             txn: tx.data,
             proofs: tx.proofs,
+            memos: tx.output_memos,
         }
     }
 }
@@ -296,6 +299,7 @@ impl From<&CommittedTransaction> for ElaboratedTransaction {
         Self {
             txn: tx.data.clone(),
             proofs: tx.proofs.clone(),
+            memos: tx.output_memos.clone(),
         }
     }
 }
