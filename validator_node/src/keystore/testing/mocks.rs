@@ -21,23 +21,20 @@ use espresso_core::{
     state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
 };
 use futures::stream::Stream;
-use itertools::izip;
 use jf_cap::{
     keys::{UserAddress, UserKeyPair, UserPubKey},
     structs::{Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
     MerkleTree, Signature,
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
-use reef::traits::Transaction as _;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     sparse_merkle_tree::SparseMerkleTree,
     testing,
     testing::MockEventSource,
     txn_builder::{PendingTransaction, TransactionInfo, TransactionState},
-    CryptoSnafu, KeystoreBackend, KeystoreError, KeystoreState,
+    KeystoreBackend, KeystoreError, KeystoreState,
 };
-use snafu::ResultExt;
 use std::collections::HashMap;
 use std::pin::Pin;
 use testing::MockNetwork;
@@ -112,46 +109,13 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
 
     fn post_memos(
         &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
+        _block_id: u64,
+        _txn_id: u64,
+        _memos: Vec<ReceiverMemo>,
+        _sig: Signature,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
         Ok(())
     }
-    //     let (block, block_uids) = &self.committed_blocks[block_id as usize];
-    //     let txn = &block.block.0[txn_id as usize];
-    //     let comms = txn.output_commitments();
-    //     let uids = block_uids[txn_id as usize].clone();
-    //     let kind = txn.kind();
-    //     let hash = ElaboratedTransaction {
-    //         txn: txn.clone(),
-    //         proofs: block.proofs[txn_id as usize].clone(),
-    //         memos: memos.clone(),
-    //     }
-    //     .hash();
-
-    //     txn.verify_receiver_memos_signature(&memos, &sig)
-    //         .context(CryptoSnafu)?;
-
-    //     let merkle_paths = uids
-    //         .iter()
-    //         .map(|uid| {
-    //             self.records
-    //                 .get_leaf(*uid)
-    //                 .expect_ok()
-    //                 .map(|(_, proof)| (proof.leaf.0, proof.path))
-    //                 .unwrap()
-    //                 .1
-    //         })
-    //         .collect::<Vec<_>>();
-    //     self.generate_event(LedgerEvent::<EspressoLedger>::Memos {
-    //         outputs: izip!(memos, comms, uids, merkle_paths).collect(),
-    //         transaction: Some((block_id, txn_id, hash, kind)),
-    //     });
-
-    //     Ok(())
-    // }
 
     fn memos_source(&self) -> EventSource {
         EventSource::QueryService
@@ -263,25 +227,10 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
 
     async fn finalize(
         &mut self,
-        txn: PendingTransaction<EspressoLedger>,
-        txid: Option<(u64, u64)>,
+        _txn: PendingTransaction<EspressoLedger>,
+        _txid: Option<(u64, u64)>,
     ) {
         // -> Result<(), KeystoreError<EspressoLedger>>
-
-        // if let Some((block_id, txn_id)) = txid {
-        //     let memos = txn
-        //         .info
-        //         .memos
-        //         .into_iter()
-        //         .collect::<Option<Vec<_>>>()
-        //         .unwrap();
-        //     let sig = txn.info.sig;
-        //     self.ledger
-        //         .lock()
-        //         .await
-        //         .post_memos(block_id, txn_id, memos, sig)
-        //         .unwrap()
-        // }
     }
 
     async fn get_initial_scan_state(

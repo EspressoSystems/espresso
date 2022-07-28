@@ -15,6 +15,8 @@ use crate::state::{
     SetMerkleTree, ValidationError, ValidatorState,
 };
 use commit::{Commitment, Committable};
+use itertools::izip;
+use itertools::MultiUnzip;
 use jf_cap::{
     keys::{ViewerKeyPair, ViewerPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
@@ -23,8 +25,6 @@ use jf_cap::{
 use reef::*;
 use std::collections::HashMap;
 use std::fmt::Display;
-use itertools::izip;
-use itertools::MultiUnzip;
 
 impl traits::NullifierSet for SetMerkleTree {
     type Proof = SetMerkleProof;
@@ -142,7 +142,9 @@ impl traits::Block for ElaboratedBlock {
 
     fn new(txns: Vec<Self::Transaction>) -> Self {
         let (txns, proofs, memos, signatures): (Vec<TransactionNote>, Vec<_>, Vec<_>, Vec<_>) =
-            txns.into_iter().map(|txn| (txn.txn, txn.proofs, txn.memos, txn.signature)).multiunzip();
+            txns.into_iter()
+                .map(|txn| (txn.txn, txn.proofs, txn.memos, txn.signature))
+                .multiunzip();
         Self {
             block: crate::state::Block(txns),
             proofs,
@@ -152,7 +154,6 @@ impl traits::Block for ElaboratedBlock {
     }
 
     fn txns(&self) -> Vec<Self::Transaction> {
-
         izip!(&self.block.0, &self.proofs, &self.memos, &self.signatures)
             .map(|(txn, proofs, memos, signature)| ElaboratedTransaction {
                 txn: txn.clone(),

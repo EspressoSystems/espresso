@@ -695,27 +695,6 @@ async fn submit_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respo
     Ok(tide::Response::new(StatusCode::Ok))
 }
 
-// async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-//     let PostMemos { memos, signature } = request_body(&mut req).await?;
-//     let mut bulletin = req.state().node.write().await;
-//     let TransactionId(BlockId(block), tx) =
-//         UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
-//             .ok_or_else(|| {
-//                 server_error(EspressoError::Param {
-//                     param: String::from("txid"),
-//                     msg: String::from(
-//                         "Valid transaction ID required. Transaction IDs start with TX~.",
-//                     ),
-//                 })
-//             })?
-//             .to()?;
-//     bulletin
-//         .post_memos(block as u64, tx as u64, memos, signature)
-//         .await
-//         .map_err(server_error)?;
-//     Ok(tide::Response::new(StatusCode::Ok))
-// }
-
 async fn form_demonstration(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
     let mut index_html: PathBuf = req.state().web_path.clone();
     index_html.push("index.html");

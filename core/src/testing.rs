@@ -413,7 +413,12 @@ impl MultiXfrTestState {
                     )
                     .unwrap();
 
-                    (kix, note, memos.clone(), sign_receiver_memos(&memo_kp, &memos).unwrap())
+                    (
+                        kix,
+                        note,
+                        memos.clone(),
+                        sign_receiver_memos(&memo_kp, &memos).unwrap(),
+                    )
                 })
                 .collect::<Vec<_>>();
 

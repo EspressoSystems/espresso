@@ -285,14 +285,16 @@ async fn get_block(
             transition.block.signatures,
         )
         .enumerate()
-        .map(|(i, (tx, proofs, memos, uids, signatures))| CommittedTransaction {
-            id: TransactionId(BlockId(index), i),
-            data: tx,
-            proofs,
-            output_uids: uids,
-            output_memos: memos,
-            memos_signature: signatures,
-        })
+        .map(
+            |(i, (tx, proofs, memos, uids, signatures))| CommittedTransaction {
+                id: TransactionId(BlockId(index), i),
+                data: tx,
+                proofs,
+                output_uids: uids,
+                output_memos: memos,
+                memos_signature: signatures,
+            },
+        )
         .collect(),
     })
 }

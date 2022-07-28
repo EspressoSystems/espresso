@@ -12,8 +12,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use espresso_macros::*;
-use jf_cap::Signature;
 use jf_cap::structs::ReceiverMemo;
+use jf_cap::Signature;
 
 pub use crate::full_persistence::FullPersistence;
 pub use crate::lw_persistence::LWPersistence;
@@ -128,7 +128,7 @@ pub struct ElaboratedBlock {
     pub block: Block,
     pub proofs: Vec<Vec<SetMerkleProof>>,
     pub memos: Vec<Vec<ReceiverMemo>>,
-    pub signatures: Vec<Signature>
+    pub signatures: Vec<Signature>,
 }
 
 impl Committable for ElaboratedBlock {
@@ -189,6 +189,7 @@ impl BlockContents<H_256> for ElaboratedBlock {
         ret.block.0.push(txn.txn.clone());
         ret.proofs.push(txn.proofs.clone());
         ret.memos.push(txn.memos.clone());
+        ret.signatures.push(txn.signature.clone());
 
         Ok(ret)
     }

@@ -266,13 +266,20 @@ impl From<&CommittedBlock> for ElaboratedBlock {
         let (txs, proofs, memos, signatures) = b
             .transactions
             .iter()
-            .map(|tx| (tx.data.clone(), tx.proofs.clone(), tx.output_memos.clone(), tx.memos_signature.clone()))
+            .map(|tx| {
+                (
+                    tx.data.clone(),
+                    tx.proofs.clone(),
+                    tx.output_memos.clone(),
+                    tx.memos_signature.clone(),
+                )
+            })
             .multiunzip();
         Self {
             block: Block(txs),
             proofs,
             memos,
-            signatures
+            signatures,
         }
     }
 }
