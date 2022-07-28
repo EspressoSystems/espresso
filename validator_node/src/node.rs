@@ -44,7 +44,7 @@ use hotshot::{traits::BlockContents, types::HotShotHandle, HotShotError, H_256};
 use itertools::izip;
 use jf_cap::{
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
-    MerkleTree, Signature,
+    MerkleTree,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use reef::traits::Transaction;
@@ -474,7 +474,7 @@ impl FullState {
                                     memos: memos.clone(),
                                 }
                                 .hash();
-                                txn_hashes.push(TransactionCommitment(hash.clone()));
+                                txn_hashes.push(TransactionCommitment(hash));
                                 let memo_event = LedgerEvent::Memos {
                                     outputs: izip!(
                                         memos.clone(),
@@ -1056,10 +1056,6 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
     fn as_query_service(&self) -> &(impl QueryService + 'a) {
         &self.query_service
     }
-
-    fn as_query_service_mut(&mut self) -> &mut (impl QueryService + 'a) {
-        &mut self.query_service
-    }
 }
 
 #[async_trait]
@@ -1447,85 +1443,6 @@ mod tests {
                     }
                 }
             }
-
-            // We should now be able to submit receiver memos for the blocks that just got committed.
-            // for (block_id, (_, block, memos, _, _)) in history.iter().enumerate() {
-            //     for (txn_id, (txn, (memos, sig))) in block.block.0.iter().zip(memos).enumerate() {
-            //         // // Posting memos with an invalid signature should fail.
-            //         // let dummy_signature = sign_receiver_memos(&dummy_key_pair, memos).unwrap();
-            //         // match qs
-            //         //     .post_memos(
-            //         //         block_id as u64,
-            //         //         txn_id as u64,
-            //         //         memos.clone(),
-            //         //         dummy_signature,
-            //         //     )
-            //         //     .await
-            //         // {
-            //         //     Err(QueryServiceError::InvalidSignature { .. }) => {}
-            //         //     res => {
-            //         //         panic!("Expected error InvalidSignature, got {:?}", res);
-            //         //     }
-            //         // }
-
-            //         // qs.post_memos(block_id as u64, txn_id as u64, memos.clone(), sig.clone())
-            //         //     .await
-            //         //     .unwrap();
-            //         match events.next().await.unwrap() {
-            //             LedgerEvent::Memos { outputs, .. } => {
-            //                 // After successfully posting memos, we should get a Memos event.
-            //                 for ((memo, comm, uid, merkle_path), (expected_memo, expected_comm)) in
-            //                     outputs
-            //                         .into_iter()
-            //                         .zip(memos.iter().zip(txn.output_commitments()))
-            //                 {
-            //                     // The contents of the event should match the memos we just posted.
-            //                     assert_eq!(memo, *expected_memo);
-            //                     assert_eq!(comm, expected_comm);
-            //                     assert_eq!(uid, expected_uid);
-
-            //                     // The event should contain a valid inclusion proof for each
-            //                     // commitment. This proof is relative to the root hash of the
-            //                     // latest validator state in the event stream.
-            //                     let state = &history[history.len() - 1].3;
-            //                     MerkleTree::check_proof(
-            //                         state.record_merkle_commitment.root_value,
-            //                         uid,
-            //                         &MerkleLeafProof::new(comm.to_field_element(), merkle_path),
-            //                     )
-            //                     .unwrap();
-
-            //                     expected_uid += 1;
-            //                 }
-            //             }
-
-            //             event => {
-            //                 panic!("Expected Memos event, got {:?}", event);
-            //             }
-            //         }
-
-            // Posting the same memos twice should fail.
-            // todo !jeb.bearer re-enable this test when persistent memo storage is supported
-            //      https://github.com/EspressoSystems/espresso/issues/345
-            // match qs
-            //     .post_memos(block_id as u64, txn_id as u64, memos.clone(), sig.clone())
-            //     .await
-            // {
-            //     Err(QueryServiceError::MemosAlreadyPosted { .. }) => {}
-            //     res => {
-            //         panic!("Expected error MemosAlreadyPosted, got {:?}", res);
-            //     }
-            // }
-
-            // We should be able to query the newly posted memos.
-            // todo !jeb.bearer re-enable this test when persistent memo storage is supported
-            //      https://github.com/EspressoSystems/espresso/issues/345
-            // let (queried_memos, sig) =
-            //     qs.get_memos(block_id as u64, txn_id as u64).await.unwrap();
-            // txn.verify_receiver_memos_signature(&queried_memos, &sig)
-            //     .unwrap();
-            // assert_eq!(queried_memos, *memos);
-            // }
 
             for (block_id, (state, block, _, _, _)) in history.into_iter().enumerate() {
                 // We should be able to query the block and state at each time step in the history

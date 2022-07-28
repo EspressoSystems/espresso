@@ -33,7 +33,6 @@ use jf_cap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, Univ
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use key_set::{ProverKeySet, SizedKey};
-use net::{BlockId, TransactionId};
 use node::{LedgerSnapshot, LedgerSummary};
 use seahorse::txn_builder::PendingTransaction;
 use seahorse::txn_builder::TransactionInfo;
@@ -351,30 +350,10 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
 
     async fn finalize(
         &mut self,
-        txn: PendingTransaction<EspressoLedger>,
-        txid: Option<(u64, u64)>,
+        _txn: PendingTransaction<EspressoLedger>,
+        _txid: Option<(u64, u64)>,
     ) {
         // -> Result<(), KeystoreError<EspressoLedger>>
-
-        // if let Some(txid) = txid {
-        //     let body = api::PostMemos {
-        //         memos: txn
-        //             .info
-        //             .memos
-        //             .into_iter()
-        //             .collect::<Option<Vec<_>>>()
-        //             .unwrap(),
-        //         signature: txn.info.sig,
-        //     };
-        //     let txid = TransactionId(BlockId(txid.0 as usize), txid.1 as usize);
-        //     // TODO: fix the trait so we don't need this unwrap
-        //     //       https://github.com/EspressoSystems/seahorse/issues/223
-        //     // TODO: include memos in transactions so we don't have to do this
-        //     //       https://github.com/EspressoSystems/espresso/issues/345
-        //     Self::post(&self.query_client, format!("/memos/{}", txid), &body)
-        //         .await
-        //         .unwrap()
-        // }
     }
 
     async fn get_initial_scan_state(
