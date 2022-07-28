@@ -44,8 +44,7 @@ use hotshot::{traits::BlockContents, types::HotShotHandle, HotShotError, H_256};
 use itertools::izip;
 use jf_cap::{
     structs::{Nullifier, ReceiverMemo, RecordCommitment},
-    MerkleTree,
-    Signature,
+    MerkleTree, Signature,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use reef::traits::Transaction;
@@ -242,17 +241,18 @@ pub trait QueryService {
         txn_id: u64,
     ) -> Result<(Vec<ReceiverMemo>, Signature), QueryServiceError> {
         let LedgerTransition { block, .. } = self.get_block(block_id as usize).await?;
-        let memos = block.memos
+        let memos = block
+            .memos
             .get(txn_id as usize)
             .cloned()
             .ok_or(QueryServiceError::InvalidTxnId {})?;
-        let sig =  block.signatures
+        let sig = block
+            .signatures
             .get(txn_id as usize)
             .cloned()
             .ok_or(QueryServiceError::InvalidTxnId {})?;
         Ok((memos, sig))
     }
-
 }
 
 #[derive(Clone, Debug, Snafu, Serialize, Deserialize)]
@@ -1030,7 +1030,7 @@ mod tests {
         universal_params::UNIVERSAL_PARAM,
     };
     use hotshot::data::VecQuorumCertificate;
-    use jf_cap::{KeyPair, MerkleLeafProof, MerkleTree, Signature};
+    use jf_cap::{MerkleLeafProof, MerkleTree, Signature};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
     use tempdir::TempDir;
@@ -1295,9 +1295,7 @@ mod tests {
                     }
                 }
                 // After commit we should get all the memo events fot he block
-                for (txn, (memos, _sig)) in
-                    hist_block.block.0.iter().zip(memos)
-                {
+                for (txn, (memos, _sig)) in hist_block.block.0.iter().zip(memos) {
                     match events.next().await.unwrap() {
                         LedgerEvent::Memos { outputs, .. } => {
                             // After successfully posting memos, we should get a Memos event.
