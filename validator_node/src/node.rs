@@ -1026,7 +1026,7 @@ mod tests {
     use async_std::task::block_on;
     use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
     use espresso_core::{
-        testing::{MultiXfrRecordSpec, MultiXfrTestState, TxnPrintInfo},
+        testing::{MultiXfrRecordSpec, MultiXfrTestState, TestTxSpec, TxnPrintInfo},
         universal_params::UNIVERSAL_PARAM,
     };
     use hotshot::data::VecQuorumCertificate;
@@ -1046,9 +1046,8 @@ mod tests {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     fn generate_valid_history(
-        txs: Vec<Vec<(bool, u16, u16, u8, u8, i32)>>,
+        txs: Vec<Vec<TestTxSpec>>,
         nkeys: u8,
         ndefs: u8,
         init_rec: (u8, u8, u64),
@@ -1115,13 +1114,9 @@ mod tests {
                 )
             });
 
-            // let block = block.into_iter().take(5).collect::<Vec<_>>();
             let txns = state
                 .generate_transactions(
-                    block
-                        .into_iter()
-                        .map(|tx| (tx.0, tx.1, tx.2, tx.3, tx.4, tx.5, false))
-                        .collect(),
+                    block.into_iter().map(|tx| (tx, false)).collect(),
                     TxnPrintInfo::new_no_time(i, num_txs),
                 )
                 .unwrap();
@@ -1221,9 +1216,8 @@ mod tests {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     fn test_query_service(
-        txs: Vec<Vec<(bool, u16, u16, u8, u8, i32)>>,
+        txs: Vec<Vec<TestTxSpec>>,
         nkeys: u8,
         ndefs: u8,
         init_rec: (u8, u8, u64),
@@ -1362,7 +1356,22 @@ mod tests {
     #[test]
     fn test_query_service_small() {
         test_query_service(
-            vec![vec![(true, 0, 0, 0, 0, -2), (true, 0, 0, 0, 0, 0)]],
+            vec![vec![
+                TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 0,
+                    key1: 0,
+                    diff: -2,
+                },
+                TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 0,
+                    key1: 0,
+                    diff: 0,
+                },
+            ]],
             0,
             0,
             (0, 0, 0),
@@ -1370,7 +1379,22 @@ mod tests {
         );
 
         test_query_service(
-            vec![vec![(true, 0, 0, 1, 1, 0)], vec![(true, 0, 0, 0, 0, 0)]],
+            vec![
+                vec![TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 1,
+                    key1: 1,
+                    diff: 0,
+                }],
+                vec![TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 0,
+                    key0: 0,
+                    key1: 0,
+                    diff: 0,
+                }],
+            ],
             1,
             0,
             (0, 0, 0),
@@ -1379,9 +1403,9 @@ mod tests {
 
         test_query_service(
             vec![
-                vec![(false, 0, 0, 1, 1, 0)],
-                vec![(false, 0, 0, 1, 1, 0)],
-                vec![(false, 0, 0, 1, 1, 0)],
+                vec![TestTxSpec::OneInput { rec: 0, key: 1 }],
+                vec![TestTxSpec::OneInput { rec: 0, key: 1 }],
+                vec![TestTxSpec::OneInput { rec: 0, key: 1 }],
             ],
             2,
             1,
@@ -1390,7 +1414,16 @@ mod tests {
         );
 
         test_query_service(
-            vec![vec![(true, 0, 1, 1, 1, 0)], vec![(false, 5, 0, 1, 1, 0)]],
+            vec![
+                vec![TestTxSpec::TwoInput {
+                    rec0: 0,
+                    rec1: 1,
+                    key0: 1,
+                    key1: 1,
+                    diff: 0,
+                }],
+                vec![TestTxSpec::OneInput { rec: 5, key: 1 }],
+            ],
             2,
             1,
             (0, 0, 2),

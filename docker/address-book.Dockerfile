@@ -16,6 +16,10 @@ RUN apt-get update \
 &&  apt-get install -y curl wait-for-it \
 &&  rm -rf /var/lib/apt/lists/*
 
+COPY address-book/api/api.toml /root/.local/share/espresso/address-book/api.toml
+COPY address-book/config/org.toml /root/.local/share/espresso/org.toml
+COPY address-book/config /config
+
 COPY target/x86_64-unknown-linux-musl/release/address-book /bin/address-book
 RUN chmod +x /bin/address-book
 
