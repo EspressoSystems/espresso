@@ -356,25 +356,25 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
     ) {
         // -> Result<(), KeystoreError<EspressoLedger>>
 
-        if let Some(txid) = txid {
-            let body = api::PostMemos {
-                memos: txn
-                    .info
-                    .memos
-                    .into_iter()
-                    .collect::<Option<Vec<_>>>()
-                    .unwrap(),
-                signature: txn.info.sig,
-            };
-            let txid = TransactionId(BlockId(txid.0 as usize), txid.1 as usize);
-            // TODO: fix the trait so we don't need this unwrap
-            //       https://github.com/EspressoSystems/seahorse/issues/223
-            // TODO: include memos in transactions so we don't have to do this
-            //       https://github.com/EspressoSystems/espresso/issues/345
-            Self::post(&self.query_client, format!("/memos/{}", txid), &body)
-                .await
-                .unwrap()
-        }
+        // if let Some(txid) = txid {
+        //     let body = api::PostMemos {
+        //         memos: txn
+        //             .info
+        //             .memos
+        //             .into_iter()
+        //             .collect::<Option<Vec<_>>>()
+        //             .unwrap(),
+        //         signature: txn.info.sig,
+        //     };
+        //     let txid = TransactionId(BlockId(txid.0 as usize), txid.1 as usize);
+        //     // TODO: fix the trait so we don't need this unwrap
+        //     //       https://github.com/EspressoSystems/seahorse/issues/223
+        //     // TODO: include memos in transactions so we don't have to do this
+        //     //       https://github.com/EspressoSystems/espresso/issues/345
+        //     Self::post(&self.query_client, format!("/memos/{}", txid), &body)
+        //         .await
+        //         .unwrap()
+        // }
     }
 
     async fn get_initial_scan_state(

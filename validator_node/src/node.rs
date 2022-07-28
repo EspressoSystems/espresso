@@ -429,32 +429,53 @@ impl FullState {
                                 })
                                 .collect::<Vec<_>>();
                             self.full_persisted.store_block_uids(&block_uids);
-                            self.full_persisted
-                                .store_memos(&vec![None; block.block.0.len()]);
+                            // self.full_persisted
+                            //     .store_memos(&vec![None; block.block.0.len()]);
 
                             // Add the results of this block to our current state.
                             let mut nullifiers =
                                 self.full_persisted.get_latest_nullifier_set().unwrap();
                             let mut txn_hashes = Vec::new();
                             let mut nullifiers_delta = Vec::new();
-                            for ((txn, proofs), memos) in block.block.0.iter().zip(block.proofs.iter()).zip(block.memos.iter()) {
+                            let mut memo_events = Vec::new();
+                            for (txn_id, ((txn, proofs), memos)) in block.block.0.iter().zip(block.proofs.iter()).zip(block.memos.iter()).enumerate() {
                                 for n in txn.nullifiers() {
                                     nullifiers.insert(n);
                                     nullifiers_delta.push(n);
                                 }
+                                let txn_uids = &block_uids[txn_id];
                                 for o in txn.output_commitments() {
                                     self.records_pending_memos.push(o.to_field_element());
                                 }
+                                let merkle_tree = &mut self.records_pending_memos;
+                                let merkle_paths = txn_uids
+                                    .iter()
+                                    .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path)
+                                    .collect::<Vec<_>>();
+                                // Once we have generated proofs for the memos, we will not need to generate proofs for
+                                // these records again (unless specifically requested) so there is no need to keep them in
+                                // memory.
+                                for uid in txn_uids.iter() {
+                                    merkle_tree.forget(*uid);
+                                }
 
-                                let hash = TransactionCommitment(
-                                    ElaboratedTransaction {
-                                        txn: txn.clone(),
-                                        proofs: proofs.clone(),
-                                        memos: memos.clone(),
-                                    }
-                                    .hash(),
-                                );
-                                txn_hashes.push(hash);
+                                let hash = 
+                                ElaboratedTransaction {
+                                    txn: txn.clone(),
+                                    proofs: proofs.clone(),
+                                    memos: memos.clone(),
+                                }
+                                .hash();
+                                txn_hashes.push(TransactionCommitment(hash.clone()));
+                                let memo_event = LedgerEvent::Memos { outputs: izip!(
+                                    memos.clone(),
+                                    txn.output_commitments(),
+                                    txn_uids.iter().cloned(),
+                                    merkle_paths
+                                ).collect(), 
+                                transaction: Some((block_index as u64, txn_id as u64, hash, txn.kind())), 
+                                };
+                                memo_events.push(memo_event);
                             }
                             self.num_txns += block.block.0.len();
                             self.cumulative_size += block.serialized_size();
@@ -533,6 +554,9 @@ impl FullState {
                                 block_id: block_index as u64,
                                 state_comm: self.validator.commit(),
                             });
+                            for memo_event in memo_events.into_iter() {
+                                self.send_event(memo_event);
+                            }
                         }
                     }
                 }
