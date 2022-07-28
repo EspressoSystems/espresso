@@ -17,11 +17,11 @@ use espresso_core::{
 };
 use fmt::{Display, Formatter};
 use hotshot::HotShotError;
+use itertools::MultiUnzip;
 use jf_cap::{structs::ReceiverMemo, Signature, TransactionNote};
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, Snafu};
 use std::fmt;
-use itertools::MultiUnzip;
 
 pub use net::*;
 
@@ -250,7 +250,8 @@ impl From<CommittedBlock> for ElaboratedBlock {
         let (txs, proofs, memos) = b
             .transactions
             .into_iter()
-            .map(|tx| (tx.data, tx.proofs, tx.output_memos)).multiunzip();
+            .map(|tx| (tx.data, tx.proofs, tx.output_memos))
+            .multiunzip();
         Self {
             block: Block(txs),
             proofs,

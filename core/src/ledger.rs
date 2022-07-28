@@ -66,7 +66,11 @@ impl traits::Transaction for ElaboratedTransaction {
     type Kind = cap::TransactionKind;
 
     fn cap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
-        Self { txn: note, proofs, memos: Default::default() }
+        Self {
+            txn: note,
+            proofs,
+            memos: Default::default(),
+        }
     }
 
     fn open_viewing_memo(

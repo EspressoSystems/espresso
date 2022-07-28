@@ -284,15 +284,13 @@ async fn get_block(
             transition.uids
         )
         .enumerate()
-        .map(|(i, (tx, proofs, memos, uids))| {
-            CommittedTransaction {
-                id: TransactionId(BlockId(index), i),
-                data: tx,
-                proofs,
-                output_uids: uids,
-                output_memos: memos,
-                memos_signature: None,
-            }
+        .map(|(i, (tx, proofs, memos, uids))| CommittedTransaction {
+            id: TransactionId(BlockId(index), i),
+            data: tx,
+            proofs,
+            output_uids: uids,
+            output_memos: memos,
+            memos_signature: None,
         })
         .collect(),
     })
@@ -324,7 +322,7 @@ async fn get_transaction(
     query_service: &impl QueryService,
 ) -> Result<CommittedTransaction, tide::Error> {
     let TransactionId(block_id, tx_id) = bindings[":txid"].value.to()?;
- 
+
     // First get the block containing the transaction.
     let LedgerTransition {
         mut block,
@@ -372,9 +370,7 @@ async fn get_unspent_record(
     let output_index = bindings[":output_index"].value.as_index()?;
 
     // First get the block containing the transaction.
-    let LedgerTransition {
-        block, uids, ..
-    } = query_service
+    let LedgerTransition { block, uids, .. } = query_service
         .get_block(block_id.0)
         .await
         .map_err(server_error)?;

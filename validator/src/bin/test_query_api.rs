@@ -171,8 +171,12 @@ async fn validate_committed_block(
         // };
 
         // Check outputs.
-        for (i, (output, uid, memo)) in
-            izip!(tx.data.output_commitments(), &tx.output_uids, &tx.output_memos).enumerate()
+        for (i, (output, uid, memo)) in izip!(
+            tx.data.output_commitments(),
+            &tx.output_uids,
+            &tx.output_memos
+        )
+        .enumerate()
         {
             // Check that we get the same record if we query for the output directly.
             let utxo: UnspentRecord =
