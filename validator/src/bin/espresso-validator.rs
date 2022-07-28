@@ -232,15 +232,6 @@ async fn generate_transactions(
                     (owner_memos, kixs)
                 };
 
-                // // If we're running a full node, publish the receiver memos.
-                // if let Node::Full(node) = &mut hotshot {
-                //     node.write()
-                //         .await
-                //         .post_memos(round, txn.index as u64, owner_memos.clone(), txn.signature)
-                //         .await
-                //         .unwrap();
-                // }
-
                 state
                     .try_add_transaction(
                         &mut blk,

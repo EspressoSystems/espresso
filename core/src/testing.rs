@@ -403,7 +403,7 @@ impl MultiXfrTestState {
                     ];
 
                     // TODO: use and check the ReceiverMemo signature
-                    let (note, _memo_kp) = MintNote::generate(
+                    let (note, memo_kp) = MintNote::generate(
                         &mut prng,
                         rec,
                         ret.asset_seeds[def_ix - 1].0,
@@ -413,11 +413,11 @@ impl MultiXfrTestState {
                     )
                     .unwrap();
 
-                    (kix, note, memos)
+                    (kix, note, memos.clone(), sign_receiver_memos(&memo_kp, &memos).unwrap())
                 })
                 .collect::<Vec<_>>();
 
-            for (kix, note, memos) in txns {
+            for (kix, note, memos, signature) in txns {
                 let nul = ret.nullifiers.contains(note.input_nullifier).unwrap().1;
 
                 let ix = setup_block.block.0.len();
@@ -427,6 +427,7 @@ impl MultiXfrTestState {
                         txn: TransactionNote::Mint(Box::new(note)),
                         proofs: vec![nul],
                         memos: memos.clone(),
+                        signature,
                     },
                     ix,
                     memos,
@@ -825,9 +826,6 @@ impl MultiXfrTestState {
                     .unwrap();
                     let sig = sign_receiver_memos(&owner_memo_kp, &owner_memos).unwrap();
 
-                    // owner_memos_key
-                    // .verify(&helpers::get_owner_memos_digest(&owner_memos),
-                    //     &owner_memos_sig)?;
                     println!(
                         "Txn {}.{}/{} note generated: {}s",
                         print_info.round + 1,
@@ -860,11 +858,12 @@ impl MultiXfrTestState {
                     Some(MultiXfrRecordSpecTransaction {
                         index: ix,
                         keys_and_memos,
-                        signature: sig,
+                        signature: sig.clone(),
                         transaction: ElaboratedTransaction {
                             txn: TransactionNote::Transfer(Box::new(txn)),
                             proofs: nullifier_pfs,
                             memos: owner_memos,
+                            signature: sig,
                         },
                     })
                 },
@@ -1023,11 +1022,12 @@ impl MultiXfrTestState {
         Some(MultiXfrRecordSpecTransaction {
             index: ix,
             keys_and_memos,
-            signature: sig,
+            signature: sig.clone(),
             transaction: ElaboratedTransaction {
                 txn: TransactionNote::Transfer(Box::new(txn)),
                 proofs: nullifier_pfs,
                 memos: owner_memos,
+                signature: sig,
             },
         })
     }
@@ -1037,7 +1037,7 @@ impl MultiXfrTestState {
     pub fn try_add_transaction(
         &mut self,
         blk: &mut ElaboratedBlock,
-        txn: ElaboratedTransaction,
+        mut txn: ElaboratedTransaction,
         ix: usize,
         owner_memos: Vec<ReceiverMemo>,
         kixs: Vec<usize>,
@@ -1049,6 +1049,7 @@ impl MultiXfrTestState {
             print_info.num_txs,
             ix
         );
+        txn.memos = owner_memos.clone();
 
         let base_ix = self.record_merkle_tree.num_leaves()
             + blk

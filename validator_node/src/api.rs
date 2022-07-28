@@ -247,30 +247,32 @@ impl Display for CommittedBlock {
 
 impl From<CommittedBlock> for ElaboratedBlock {
     fn from(b: CommittedBlock) -> Self {
-        let (txs, proofs, memos) = b
+        let (txs, proofs, memos, signatures) = b
             .transactions
             .into_iter()
-            .map(|tx| (tx.data, tx.proofs, tx.output_memos))
+            .map(|tx| (tx.data, tx.proofs, tx.output_memos, tx.memos_signature))
             .multiunzip();
         Self {
             block: Block(txs),
             proofs,
             memos,
+            signatures,
         }
     }
 }
 
 impl From<&CommittedBlock> for ElaboratedBlock {
     fn from(b: &CommittedBlock) -> Self {
-        let (txs, proofs, memos) = b
+        let (txs, proofs, memos, signatures) = b
             .transactions
             .iter()
-            .map(|tx| (tx.data.clone(), tx.proofs.clone(), tx.output_memos.clone()))
+            .map(|tx| (tx.data.clone(), tx.proofs.clone(), tx.output_memos.clone(), tx.memos_signature.clone()))
             .multiunzip();
         Self {
             block: Block(txs),
             proofs,
             memos,
+            signatures
         }
     }
 }
@@ -282,7 +284,7 @@ pub struct CommittedTransaction {
     pub proofs: Vec<SetMerkleProof>,
     pub output_uids: Vec<u64>,
     pub output_memos: Vec<ReceiverMemo>,
-    pub memos_signature: Option<Signature>,
+    pub memos_signature: Signature,
 }
 
 impl From<CommittedTransaction> for ElaboratedTransaction {
@@ -291,6 +293,7 @@ impl From<CommittedTransaction> for ElaboratedTransaction {
             txn: tx.data,
             proofs: tx.proofs,
             memos: tx.output_memos,
+            signature: tx.memos_signature,
         }
     }
 }
@@ -301,6 +304,7 @@ impl From<&CommittedTransaction> for ElaboratedTransaction {
             txn: tx.data.clone(),
             proofs: tx.proofs.clone(),
             memos: tx.output_memos.clone(),
+            signature: tx.memos_signature.clone(),
         }
     }
 }

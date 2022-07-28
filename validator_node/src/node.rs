@@ -429,8 +429,6 @@ impl FullState {
                                 })
                                 .collect::<Vec<_>>();
                             self.full_persisted.store_block_uids(&block_uids);
-                            // self.full_persisted
-                            //     .store_memos(&vec![None; block.block.0.len()]);
 
                             // Add the results of this block to our current state.
                             let mut nullifiers =
@@ -438,12 +436,13 @@ impl FullState {
                             let mut txn_hashes = Vec::new();
                             let mut nullifiers_delta = Vec::new();
                             let mut memo_events = Vec::new();
-                            for (txn_id, ((txn, proofs), memos)) in block
+                            for (txn_id, (((txn, proofs), memos), signatures)) in block
                                 .block
                                 .0
                                 .iter()
                                 .zip(block.proofs.iter())
                                 .zip(block.memos.iter())
+                                .zip(block.signatures.iter())
                                 .enumerate()
                             {
                                 for n in txn.nullifiers() {
@@ -472,8 +471,8 @@ impl FullState {
                                     txn: txn.clone(),
                                     proofs: proofs.clone(),
                                     memos: memos.clone(),
-                                }
-                                .hash();
+                                    signature: signatures.clone(),
+                                }.hash();
                                 txn_hashes.push(TransactionCommitment(hash));
                                 let memo_event = LedgerEvent::Memos {
                                     outputs: izip!(
@@ -1140,7 +1139,7 @@ mod tests {
         universal_params::UNIVERSAL_PARAM,
     };
     use hotshot::data::VecQuorumCertificate;
-    use jf_cap::{sign_receiver_memos, KeyPair, MerkleLeafProof, MerkleTree};
+    use jf_cap::{sign_receiver_memos, KeyPair, MerkleLeafProof, MerkleTree, Signature};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
     use tempdir::TempDir;

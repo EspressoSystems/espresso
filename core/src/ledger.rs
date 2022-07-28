@@ -23,6 +23,8 @@ use jf_cap::{
 use reef::*;
 use std::collections::HashMap;
 use std::fmt::Display;
+use itertools::izip;
+use itertools::MultiUnzip;
 
 impl traits::NullifierSet for SetMerkleTree {
     type Proof = SetMerkleProof;
@@ -70,6 +72,7 @@ impl traits::Transaction for ElaboratedTransaction {
             txn: note,
             proofs,
             memos: Default::default(),
+            signature: Default::default(),
         }
     }
 
@@ -138,25 +141,24 @@ impl traits::Block for ElaboratedBlock {
     type Error = ValidationError;
 
     fn new(txns: Vec<Self::Transaction>) -> Self {
-        let (txns, proofs): (Vec<TransactionNote>, Vec<_>) =
-            txns.into_iter().map(|txn| (txn.txn, txn.proofs)).unzip();
+        let (txns, proofs, memos, signatures): (Vec<TransactionNote>, Vec<_>, Vec<_>, Vec<_>) =
+            txns.into_iter().map(|txn| (txn.txn, txn.proofs, txn.memos, txn.signature)).multiunzip();
         Self {
             block: crate::state::Block(txns),
             proofs,
-            memos: Default::default(),
+            memos,
+            signatures,
         }
     }
 
     fn txns(&self) -> Vec<Self::Transaction> {
-        self.block
-            .0
-            .iter()
-            .zip(&self.proofs)
-            .zip(&self.memos)
-            .map(|((txn, proofs), memos)| ElaboratedTransaction {
+
+        izip!(&self.block.0, &self.proofs, &self.memos, &self.signatures)
+            .map(|(txn, proofs, memos, signature)| ElaboratedTransaction {
                 txn: txn.clone(),
                 proofs: proofs.clone(),
                 memos: memos.clone(),
+                signature: signature.clone(),
             })
             .collect()
     }
