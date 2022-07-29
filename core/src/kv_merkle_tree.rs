@@ -13,12 +13,8 @@
 #![deny(warnings)]
 #![allow(dead_code)]
 
-//use crate::util::canonical;
-//use arbitrary_wrappers::*;
 use ark_serialize::*;
-//use bitvec::vec::BitVec;
 use core::mem;
-//use jf_cap::structs::Nullifier;
 use crate::tree_hash::*;
 use core::fmt::Debug;
 use generic_array::{arr::AddLength, ArrayLength, GenericArray};
@@ -34,7 +30,6 @@ use typenum::{Unsigned, U1};
 pub enum KVMerkleTree<KVHash>
 where
     KVHash: KVTreeHash + Clone,
-    //this seems questionable
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
@@ -313,7 +308,7 @@ where
     }
 
     /// Returns `None` if the element is in a forgotten subtree
-    pub fn lookup(&self, key: KVHash::Key) -> Option<(bool, KVMerkleProof<KVHash>)> {
+    pub fn lookup(&self, key: KVHash::Key) -> Option<(KVHash::Value, KVMerkleProof<KVHash>)> {
         use KVMerkleTree::*;
         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
         let key_bits = key_bit_vec.into_iter().rev();
@@ -343,10 +338,9 @@ where
         match end_branch {
             ForgottenSubtree { .. } => None,
             EmptySubtree => {
-                //dbg!("empty subtree in lookup");
                 path.reverse();
-                Some((
-                    false,
+                None((
+                    //KVHash::Value::default(),
                     KVMerkleProof {
                         terminal_node: KVMerkleTerminalNode::EmptySubtree,
                         path,
@@ -360,9 +354,8 @@ where
                 ..
             } => {
                 path.reverse();
-                //dbg!("lookup leaf: {:?}", &key == leaf_key);
                 Some((
-                    &key == leaf_key,
+                    *leaf_value,
                     KVMerkleProof {
                         terminal_node: KVMerkleTerminalNode::Leaf {
                             height: *height,
@@ -394,7 +387,6 @@ where
                     break;
                 }
                 Branch { children, .. } => {
-                    // dbg!("matched on branch");
                     let target = children[pos as usize].clone();
                     end_branch = target;
                     children
@@ -406,11 +398,9 @@ where
                     value: leaf_value,
                     ..
                 } => {
-                    //dbg!("395 sanity check, height = {:?}, end height = {?:}", height, end_height);
                     debug_assert_eq!(height, end_height);
                     // Figure out if this leaf is down the same tree or if it's a sibling
                     let leaf_pos = {
-                        //KALEY: should root be 0 or 1 height?
                         debug_assert!(height > 0);
                         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(leaf_key));
                         key_bit_vec[height - 1]
@@ -448,7 +438,6 @@ where
                 ForgottenSubtree { digest }
             }
             EmptySubtree => {
-                //dbg!("inserting, empty subtree height: {:?}", end_height);
                 Self::new_leaf(end_height, key, value)
             }
             Branch { .. } => panic!("This tree has more levels than my hash has bits!"),
@@ -458,7 +447,6 @@ where
                 key: leaf_key,
                 ..
             } => {
-                //dbg!("end branch is leaf");
                 assert_eq!(height, end_height);
                 assert_eq!(key, leaf_key);
                 //rewrites value if (k,v1) exists and (k,v2) is inserted
@@ -542,7 +530,6 @@ where
                                     .collect(),
                             );
                         }
-                        //KALEY: path reverse
                         path_vec.into_iter().rev().collect()
                     },
                 });
@@ -716,7 +703,7 @@ mod tests {
     use quickcheck::QuickCheck;
     use rand_chacha::rand_core::SeedableRng;
     use rand_chacha::ChaChaRng;
-    use std::time::Instant; //????/
+    use std::time::Instant; 
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
     struct TestNulls(Nullifier);
@@ -782,17 +769,12 @@ mod tests {
         let update_elems: Vec<_> = updates.iter().map(|u| update_vals[u]).collect();
 
         for (u, elem) in updates.iter().zip(update_elems.iter()) {
-            // dbg!("starting new loop");
             let elem = *elem;
             hset.insert(u);
-            //dbg!("lookup1 test");
             let (in_set, pf) = t.lookup(TestNulls(elem)).unwrap();
-            //dbg!("insert1 test");
             t.insert(TestNulls(elem), TestNulls(elem));
             assert_eq!(pf.check(TestNulls(elem), lw_t.hash()).unwrap(), in_set);
-            //dbg!("remember test");
             lw_t.remember(TestNulls(elem), pf).unwrap();
-            //dbg!("insert2 test");
             lw_t.insert(TestNulls(elem), TestNulls(elem)).unwrap();
             let (in_new_lw_t, new_lw_pf) = lw_t.lookup(TestNulls(elem)).unwrap();
             assert!(in_new_lw_t);
@@ -826,7 +808,6 @@ mod tests {
                 assert!(hset.contains(&val));
                 assert!(t_contains);
             }
-            //dbg!("hset.contains: {:?}, t_contains: {:?}", hset.contains(&val), t_contains);
             assert_eq!(hset.contains(&val), t_contains);
             assert_eq!(
                 t_contains,
