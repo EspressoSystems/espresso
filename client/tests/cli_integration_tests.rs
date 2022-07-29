@@ -119,12 +119,10 @@ fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
         .output("Total 0")?
         // Transfer some native coins from the primary keystore to the secondary.
         .command(0, "transfer $native $default_pubkey1 500 1")?
-        .output("(?P<txn>TXN~.*)")?
+        .output("(?P<txn>TXUID~.*)")?
         // Wait for the transaction to complete in both keystores (just because one keystore has
         // received and processed the completed transaction doesn't mean the other has).
         .command(0, "wait $txn")?
-        .output("accepted")?
-        .command(1, "wait $txn")?
         .output("accepted")?
         .command(0, "balance $native")?
         .output(format!("Total {}", balance - 501))?
@@ -132,9 +130,7 @@ fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
         .output("Total 500")?
         // Transfer part of the money back
         .command(1, "transfer $native $default_pubkey0 200 2")?
-        .output("(?P<txn>TXN~.*)")?
-        .command(0, "wait $txn")?
-        .output("accepted")?
+        .output("(?P<txn>TXUID~.*)")?
         .command(1, "wait $txn")?
         .output("accepted")?
         .command(1, "balance $native")?
@@ -156,7 +152,7 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         .output("Not freezeable")?
         .output("Minter: me")?
         .command(0, "mint $asset1 $default_pubkey1 100 1")?
-        .output("(?P<txn>TXN~.*)")?
+        .output("(?P<txn>TXUID~.*)")?
         .command(0, "wait $txn")?
         .output("accepted")?
         .command(1, "wait $txn")?
@@ -189,7 +185,7 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         .output("Freezer: $freezekey1")?
         .output("Minter: me")?
         .command(0, "mint $asset2 $default_pubkey1 200 1")?
-        .output("(?P<txn>TXN~.*)")?
+        .output("(?P<txn>TXUID~.*)")?
         .command(0, "wait $txn")?
         .output("accepted")?
         .command(1, "wait $txn")?
