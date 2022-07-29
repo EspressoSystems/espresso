@@ -13,10 +13,10 @@
 #![deny(warnings)]
 #![allow(dead_code)]
 
-use ark_serialize::*;
-use core::mem;
 use crate::tree_hash::*;
+use ark_serialize::*;
 use core::fmt::Debug;
+use core::mem;
 use generic_array::{arr::AddLength, ArrayLength, GenericArray};
 use serde::{Deserialize, Serialize};
 use typenum::{Unsigned, U1};
@@ -308,7 +308,10 @@ where
     }
 
     /// Returns `None` if the element is in a forgotten subtree
-    pub fn lookup(&self, key: KVHash::Key) -> Option<(KVHash::Value, KVMerkleProof<KVHash>)> {
+    pub fn lookup(
+        &self,
+        key: KVHash::Key,
+    ) -> Option<(Option<KVHash::Value>, KVMerkleProof<KVHash>)> {
         use KVMerkleTree::*;
         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
         let key_bits = key_bit_vec.into_iter().rev();
@@ -337,16 +340,13 @@ where
 
         match end_branch {
             ForgottenSubtree { .. } => None,
-            EmptySubtree => {
-                path.reverse();
-                None((
-                    //KVHash::Value::default(),
-                    KVMerkleProof {
-                        terminal_node: KVMerkleTerminalNode::EmptySubtree,
-                        path,
-                    },
-                ))
-            }
+            EmptySubtree => Some((
+                None,
+                KVMerkleProof {
+                    terminal_node: KVMerkleTerminalNode::EmptySubtree,
+                    path,
+                },
+            )),
             Leaf {
                 height,
                 key: leaf_key,
@@ -354,8 +354,9 @@ where
                 ..
             } => {
                 path.reverse();
+                assert_eq!(key, *leaf_key);
                 Some((
-                    *leaf_value,
+                    Some(*leaf_value),
                     KVMerkleProof {
                         terminal_node: KVMerkleTerminalNode::Leaf {
                             height: *height,
@@ -437,9 +438,7 @@ where
                 ret = None;
                 ForgottenSubtree { digest }
             }
-            EmptySubtree => {
-                Self::new_leaf(end_height, key, value)
-            }
+            EmptySubtree => Self::new_leaf(end_height, key, value),
             Branch { .. } => panic!("This tree has more levels than my hash has bits!"),
             Leaf {
                 digest,
@@ -703,7 +702,7 @@ mod tests {
     use quickcheck::QuickCheck;
     use rand_chacha::rand_core::SeedableRng;
     use rand_chacha::ChaChaRng;
-    use std::time::Instant; 
+    use std::time::Instant;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
     struct TestNulls(Nullifier);
@@ -771,15 +770,18 @@ mod tests {
         for (u, elem) in updates.iter().zip(update_elems.iter()) {
             let elem = *elem;
             hset.insert(u);
-            let (in_set, pf) = t.lookup(TestNulls(elem)).unwrap();
+            let (val, pf) = t.lookup(TestNulls(elem)).unwrap();
+            let in_set = if val.is_none() { false } else { true };
             t.insert(TestNulls(elem), TestNulls(elem));
             assert_eq!(pf.check(TestNulls(elem), lw_t.hash()).unwrap(), in_set);
             lw_t.remember(TestNulls(elem), pf).unwrap();
             lw_t.insert(TestNulls(elem), TestNulls(elem)).unwrap();
-            let (in_new_lw_t, new_lw_pf) = lw_t.lookup(TestNulls(elem)).unwrap();
+            let (lw_t_val, new_lw_pf) = lw_t.lookup(TestNulls(elem)).unwrap();
+            let in_new_lw_t = if lw_t_val.is_none() { false } else { true };
+
             assert!(in_new_lw_t);
 
-            assert!(t.lookup(TestNulls(elem)).unwrap().0);
+            assert!(t.lookup(TestNulls(elem)).unwrap().0.is_some());
 
             assert_eq!(lw_t.hash(), t.hash());
             lw_t.forget(TestNulls(elem)).unwrap();
@@ -802,7 +804,8 @@ mod tests {
             };
             let elem = update_vals[&val];
 
-            let (t_contains, pf) = t.lookup(TestNulls(elem)).unwrap();
+            let (t_val, pf) = t.lookup(TestNulls(elem)).unwrap();
+            let t_contains = if t_val.is_none() { false } else { true };
 
             if should_be_there {
                 assert!(hset.contains(&val));
