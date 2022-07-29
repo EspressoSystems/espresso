@@ -69,9 +69,9 @@ use tide_websockets::{WebSocket, WebSocketConnection};
 use tracing::{debug, event, Level};
 use validator_node::{
     api::EspressoError,
-    api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
+    api::{server, UserPubKey},
     node,
-    node::{EventStream, HotShotEvent, QueryService, Validator},
+    node::{EventStream, HotShotEvent, Validator},
 };
 
 mod disco;
@@ -695,27 +695,6 @@ async fn submit_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respo
     Ok(tide::Response::new(StatusCode::Ok))
 }
 
-async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let PostMemos { memos, signature } = request_body(&mut req).await?;
-    let mut bulletin = req.state().node.write().await;
-    let TransactionId(BlockId(block), tx) =
-        UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
-            .ok_or_else(|| {
-                server_error(EspressoError::Param {
-                    param: String::from("txid"),
-                    msg: String::from(
-                        "Valid transaction ID required. Transaction IDs start with TX~.",
-                    ),
-                })
-            })?
-            .to()?;
-    bulletin
-        .post_memos(block as u64, tx as u64, memos, signature)
-        .await
-        .map_err(server_error)?;
-    Ok(tide::Response::new(StatusCode::Ok))
-}
-
 async fn form_demonstration(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
     let mut index_html: PathBuf = req.state().web_path.clone();
     index_html.push("index.html");
@@ -906,7 +885,6 @@ pub fn init_web_server(
     // their own services. For demo purposes, since they are not really part of the query service,
     // we just handle them here in a pretty ad hoc fashion.
     web_server.at("/submit").post(submit_endpoint);
-    web_server.at("/memos/:txid").post(memos_endpoint);
 
     // Add routes from a configuration file.
     if let Some(api_map) = api["route"].as_table() {

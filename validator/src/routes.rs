@@ -280,24 +280,21 @@ async fn get_block(
         transactions: izip!(
             transition.block.block.0,
             transition.block.proofs,
-            transition.memos,
-            transition.uids
+            transition.block.memos,
+            transition.uids,
+            transition.block.signatures,
         )
         .enumerate()
-        .map(|(i, (tx, proofs, signed_memos, uids))| {
-            let (memos, sig) = match signed_memos {
-                Some((memos, sig)) => (Some(memos), Some(sig)),
-                None => (None, None),
-            };
-            CommittedTransaction {
+        .map(
+            |(i, (tx, proofs, memos, uids, signatures))| CommittedTransaction {
                 id: TransactionId(BlockId(index), i),
                 data: tx,
                 proofs,
                 output_uids: uids,
                 output_memos: memos,
-                memos_signature: sig,
-            }
-        })
+                memos_signature: signatures,
+            },
+        )
         .collect(),
     })
 }
@@ -332,7 +329,6 @@ async fn get_transaction(
     // First get the block containing the transaction.
     let LedgerTransition {
         mut block,
-        mut memos,
         mut uids,
         ..
     } = query_service
@@ -349,11 +345,9 @@ async fn get_transaction(
     }
     let tx = block.block.0.swap_remove(tx_id);
     let proofs = block.proofs.swap_remove(tx_id);
+    let memos = block.memos.swap_remove(tx_id);
+    let signature = block.signatures.swap_remove(tx_id);
     let uids = uids.swap_remove(tx_id);
-    let (memos, sig) = match memos.swap_remove(tx_id) {
-        Some((memos, sig)) => (Some(memos), Some(sig)),
-        None => (None, None),
-    };
 
     Ok(CommittedTransaction {
         id: TransactionId(block_id, tx_id),
@@ -361,7 +355,7 @@ async fn get_transaction(
         proofs,
         output_uids: uids,
         output_memos: memos,
-        memos_signature: sig,
+        memos_signature: signature,
     })
 }
 
@@ -380,9 +374,7 @@ async fn get_unspent_record(
     let output_index = bindings[":output_index"].value.as_index()?;
 
     // First get the block containing the transaction.
-    let LedgerTransition {
-        block, memos, uids, ..
-    } = query_service
+    let LedgerTransition { block, uids, .. } = query_service
         .get_block(block_id.0)
         .await
         .map_err(server_error)?;
@@ -405,13 +397,11 @@ async fn get_unspent_record(
     }
     let comm = tx.output_commitments()[output_index];
     let uid = uids[tx_id][output_index];
-    let memo = memos[tx_id]
-        .as_ref()
-        .map(|(memos, _sig)| memos[output_index].clone());
+    let memo = block.memos[tx_id][output_index].clone();
     Ok(UnspentRecord {
         commitment: comm,
         uid,
-        memo,
+        memo: Some(memo),
     })
 }
 

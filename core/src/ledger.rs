@@ -15,6 +15,8 @@ use crate::state::{
     SetMerkleTree, ValidationError, ValidatorState,
 };
 use commit::{Commitment, Committable};
+use itertools::izip;
+use itertools::MultiUnzip;
 use jf_cap::{
     keys::{ViewerKeyPair, ViewerPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
@@ -66,7 +68,12 @@ impl traits::Transaction for ElaboratedTransaction {
     type Kind = cap::TransactionKind;
 
     fn cap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
-        Self { txn: note, proofs }
+        Self {
+            txn: note,
+            proofs,
+            memos: Default::default(),
+            signature: Default::default(),
+        }
     }
 
     fn open_viewing_memo(
@@ -134,22 +141,25 @@ impl traits::Block for ElaboratedBlock {
     type Error = ValidationError;
 
     fn new(txns: Vec<Self::Transaction>) -> Self {
-        let (txns, proofs): (Vec<TransactionNote>, Vec<_>) =
-            txns.into_iter().map(|txn| (txn.txn, txn.proofs)).unzip();
+        let (txns, proofs, memos, signatures): (Vec<TransactionNote>, Vec<_>, Vec<_>, Vec<_>) =
+            txns.into_iter()
+                .map(|txn| (txn.txn, txn.proofs, txn.memos, txn.signature))
+                .multiunzip();
         Self {
             block: crate::state::Block(txns),
             proofs,
+            memos,
+            signatures,
         }
     }
 
     fn txns(&self) -> Vec<Self::Transaction> {
-        self.block
-            .0
-            .iter()
-            .zip(&self.proofs)
-            .map(|(txn, proofs)| ElaboratedTransaction {
+        izip!(&self.block.0, &self.proofs, &self.memos, &self.signatures)
+            .map(|(txn, proofs, memos, signature)| ElaboratedTransaction {
                 txn: txn.clone(),
                 proofs: proofs.clone(),
+                memos: memos.clone(),
+                signature: signature.clone(),
             })
             .collect()
     }
