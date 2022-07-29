@@ -342,9 +342,14 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
 
     async fn submit(
         &mut self,
-        txn: ElaboratedTransaction,
-        _txn_info: TransactionInfo<EspressoLedger>,
+        mut txn: ElaboratedTransaction,
+        txn_info: TransactionInfo<EspressoLedger>,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
+        for memo in txn_info.memos.into_iter().flatten() {
+            txn.memos.push(memo);
+        }
+        txn.signature = txn_info.sig;
+        
         Self::post(&self.validator_client, "/submit", &txn).await
     }
 
