@@ -69,9 +69,9 @@ use tide_websockets::{WebSocket, WebSocketConnection};
 use tracing::{debug, event, Level};
 use validator_node::{
     api::EspressoError,
-    api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
+    api::{server, UserPubKey},
     node,
-    node::{EventStream, HotShotEvent, QueryService, Validator},
+    node::{EventStream, HotShotEvent, Validator},
 };
 
 mod disco;
@@ -94,7 +94,7 @@ pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
     if ip.chars().any(|c| c.is_alphabetic()) {
         // special case localhost
         if ip == "localhost" {
-            Multiaddr::from_str(&format!("/dns/{}/tcp/{}", "127.0.0.1", port))
+            Multiaddr::from_str(&format!("/ip4/{}/tcp/{}", "127.0.0.1", port))
         } else {
             // is domain
             Multiaddr::from_str(&format!("/dns/{}/tcp/{}", ip, port))
@@ -695,27 +695,6 @@ async fn submit_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respo
     Ok(tide::Response::new(StatusCode::Ok))
 }
 
-async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let PostMemos { memos, signature } = request_body(&mut req).await?;
-    let mut bulletin = req.state().node.write().await;
-    let TransactionId(BlockId(block), tx) =
-        UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
-            .ok_or_else(|| {
-                server_error(EspressoError::Param {
-                    param: String::from("txid"),
-                    msg: String::from(
-                        "Valid transaction ID required. Transaction IDs start with TX~.",
-                    ),
-                })
-            })?
-            .to()?;
-    bulletin
-        .post_memos(block as u64, tx as u64, memos, signature)
-        .await
-        .map_err(server_error)?;
-    Ok(tide::Response::new(StatusCode::Ok))
-}
-
 async fn form_demonstration(req: tide::Request<WebState>) -> Result<tide::Body, tide::Error> {
     let mut index_html: PathBuf = req.state().web_path.clone();
     index_html.push("index.html");
@@ -906,7 +885,6 @@ pub fn init_web_server(
     // their own services. For demo purposes, since they are not really part of the query service,
     // we just handle them here in a pretty ad hoc fashion.
     web_server.at("/submit").post(submit_endpoint);
-    web_server.at("/memos/:txid").post(memos_endpoint);
 
     // Add routes from a configuration file.
     if let Some(api_map) = api["route"].as_table() {
@@ -1079,20 +1057,13 @@ pub async fn init_validator(
         .take(num_bootstrap)
         .collect();
 
-    let mut to_connect_addrs: Vec<_> = bootstrap_priv
+    let to_connect_addrs: Vec<_> = bootstrap_priv
         .clone()
         .into_iter()
         .map(|(kp, ma)| (Some(PeerId::from_public_key(&kp.public())), ma))
         .collect();
 
     let (node_type, own_identity) = if own_id < num_bootstrap {
-        // TODO jr
-        // <https://github.com/EspressoSystems/espresso/issues/463>
-        // When we upgrade to phaselock 0.1.1,
-        // we can delete this line. The reason is because
-        // 0.1.0 HotShot is overly strict in matching the number of bootstrap nodes.
-        // This is fixed on HotShot main
-        to_connect_addrs.remove(own_id);
         (
             NetworkNodeType::Bootstrap,
             Some(bootstrap_priv[own_id].0.clone()),
