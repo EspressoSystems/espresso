@@ -32,7 +32,8 @@ use seahorse::{
     sparse_merkle_tree::SparseMerkleTree,
     testing,
     testing::MockEventSource,
-    txn_builder::{PendingTransaction, TransactionInfo, TransactionState},
+    transactions::Transaction,
+    txn_builder::TransactionState,
     KeystoreBackend, KeystoreError, KeystoreState,
 };
 use std::collections::HashMap;
@@ -162,7 +163,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                     record_mt: SparseMerkleTree::sparse(ledger.network().records.clone()),
 
                     now: ledger.now(),
-                    transactions: Default::default(),
                 },
                 key_state: Default::default(),
                 freezing_accounts: Default::default(),
@@ -219,17 +219,19 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
 
     async fn submit(
         &mut self,
-        txn: ElaboratedTransaction,
-        _info: TransactionInfo<EspressoLedger>,
+        mut txn: ElaboratedTransaction,
+        txn_info: Transaction<EspressoLedger>,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
+        if let Some(signed_memos) = txn_info.memos() {
+            for memo in signed_memos.memos.iter().cloned().flatten() {
+                txn.memos.push(memo);
+            }
+            txn.signature = signed_memos.sig.clone();
+        }
         self.ledger.lock().await.submit(txn)
     }
 
-    async fn finalize(
-        &mut self,
-        _txn: PendingTransaction<EspressoLedger>,
-        _txid: Option<(u64, u64)>,
-    ) {
+    async fn finalize(&mut self, _txn: Transaction<EspressoLedger>, _txid: Option<(u64, u64)>) {
         // -> Result<(), KeystoreError<EspressoLedger>>
     }
 

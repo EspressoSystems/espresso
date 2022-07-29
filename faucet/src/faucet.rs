@@ -51,7 +51,7 @@ use validator_node::keystore::{
     hd::Mnemonic,
     loader::{MnemonicPasswordLogin, RecoveryLoader},
     network::NetworkBackend,
-    txn_builder::{RecordInfo, TransactionReceipt, TransactionStatus},
+    txn_builder::{RecordInfo, TransactionStatus, TransactionUID},
     EspressoKeystore, EspressoKeystoreError, RecordAmount,
 };
 
@@ -593,7 +593,7 @@ async fn spendable_records(
     keystore: &EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin>,
     grant_size: RecordAmount,
 ) -> impl Iterator<Item = RecordInfo> {
-    let now = keystore.lock().await.state().txn_state.validator.now();
+    let now = keystore.read().await.state().txn_state.validator.now();
     keystore.records().await.filter(move |record| {
         record.ro.asset_def.code == AssetCode::native()
             && record.amount() >= grant_size
@@ -664,7 +664,7 @@ async fn maintain_enough_records(state: FaucetState, mut wakeup: mpsc::Receiver<
 /// If successful, returns a list of transaction receipts which will give at least
 /// `state.num_records` when they are finalized. If there were not enough large records to break up
 /// to obtain the desired number of records, returns [None].
-async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionReceipt<EspressoLedger>>> {
+async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionUID<EspressoLedger>>> {
     // Break up records until we have enough again.
     loop {
         // Generate as many transactions as we can simultaneously.
