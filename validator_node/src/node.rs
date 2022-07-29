@@ -829,13 +829,127 @@ impl<'a> HotShotQueryService<'a> {
         }
     }
 
-    // pub fn load(
-    //     event_source: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
-    //     univ_param: &'a jf_cap::proof::UniversalParam,
-    //     full_persisted: FullPersistence,
-    // ) -> Self {
-    //     unimplemented!("loading QueryService")
-    // }
+    #[allow(clippy::too_many_arguments)]
+    pub fn load(
+        event_source: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
+
+        // The current state of the network.
+        univ_param: &'a jf_cap::proof::UniversalParam,
+        mut validator: ValidatorState,
+        record_merkle_tree: MerkleTree,
+        nullifiers: SetMerkleTree,
+        unspent_memos: Vec<(ReceiverMemo, u64)>,
+        mut full_persisted: FullPersistence,
+        catchup_store: Arc<
+            RwLock<impl UpdateCatchUpData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
+        availability_store: Arc<
+            RwLock<impl UpdateAvailabilityData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
+        meta_state_store: Arc<
+            RwLock<impl UpdateMetaStateData<Error = EspressoError> + Send + Sync + 'static>,
+        >,
+    ) -> Self {
+        let mut block_hashes = HashMap::new();
+        let mut num_txns = 0;
+        let mut cumulative_size = 0;
+        for (index, block) in full_persisted.block_iter().enumerate() {
+            if let Ok(block) = block {
+                block_hashes.insert(Vec::from(block.hash().as_ref()), index);
+                num_txns += block.block.0.len();
+                cumulative_size += block.serialized_size();
+            }
+        }
+
+        let past_nullifiers: HashMap<_, _> = full_persisted
+            .state_iter()
+            .enumerate()
+            .filter(|(_, state)| state.is_ok())
+            .map(|(index, state)| (state.unwrap().past_nullifiers.current_root(), index))
+            .collect();
+
+        // Use the unpruned record Merkle tree.
+        assert_eq!(
+            record_merkle_tree.commitment(),
+            validator.record_merkle_commitment
+        );
+
+        let record_merkle_commitment = record_merkle_tree.commitment();
+        let record_merkle_frontier = record_merkle_tree.frontier();
+        // There have not yet been any transactions, so we are not expecting to receive any memos.
+        // Therefore, the set of record commitments that are pending the receipt of corresponding
+        // memos is the completely sparse merkle tree.
+        let records_pending_memos =
+            MerkleTree::restore_from_frontier(record_merkle_commitment, &record_merkle_frontier)
+                .unwrap();
+
+        validator.record_merkle_commitment = record_merkle_commitment;
+        validator.record_merkle_frontier = record_merkle_frontier;
+
+        // Commit the initial state.
+        if full_persisted.block_iter().len() == 0 {
+            full_persisted.store_initial(&validator, &record_merkle_tree, &nullifiers);
+        }
+        let state = Arc::new(RwLock::new(FullState {
+            validator,
+            records_pending_memos,
+            full_persisted,
+            past_nullifiers,
+            num_txns,
+            cumulative_size,
+            block_hashes,
+            proposed: ElaboratedBlock::default(),
+            subscribers: Default::default(),
+            pending_subscribers: Default::default(),
+            catchup_store,
+            availability_store,
+            meta_state_store,
+        }));
+
+        // Spawn event handling task.
+        let task = {
+            let state = state.clone();
+            let mut event_source = Box::pin(event_source);
+            AsyncStd::new()
+                .spawn_with_handle(async move {
+                    {
+                        // Broadcast the initial receiver memos so that clients can access the
+                        // records they have been granted at ledger setup time.
+                        let mut state = state.write().await;
+                        let (memos, uids): (Vec<_>, Vec<_>) = unspent_memos.into_iter().unzip();
+                        let (comms, merkle_paths): (Vec<_>, Vec<_>) = uids
+                            .iter()
+                            .map(|uid| {
+                                record_merkle_tree
+                                    .get_leaf(*uid)
+                                    .expect_ok()
+                                    .map(|(_, proof)| (proof.leaf.0, proof.path))
+                                    .unwrap()
+                            })
+                            .unzip();
+                        let comms = comms
+                            .into_iter()
+                            .map(RecordCommitment::from_field_element)
+                            .collect::<Vec<_>>();
+                        state.send_event(LedgerEvent::Memos {
+                            outputs: izip!(memos, comms, uids, merkle_paths).collect(),
+                            transaction: None,
+                        });
+                    }
+
+                    // Handle events as they come in from the network.
+                    while let Some(event) = event_source.next().await {
+                        state.write().await.update(event);
+                    }
+                })
+                .unwrap()
+        };
+        Self {
+            _univ_param: univ_param,
+            state,
+            _event_task: Arc::new(task),
+        }
+    }
 }
 
 #[async_trait]
