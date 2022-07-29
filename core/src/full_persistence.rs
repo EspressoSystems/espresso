@@ -23,8 +23,6 @@ use jf_cap::{MerkleLeaf, MerkleTree};
 use seahorse::events::LedgerEvent;
 use std::path::{Path, PathBuf};
 
-// type OptionalMemoMap = Option<(Vec<ReceiverMemo>, Signature)>;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Resource {
     StateHistory,

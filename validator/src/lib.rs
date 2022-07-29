@@ -885,7 +885,6 @@ pub fn init_web_server(
     // their own services. For demo purposes, since they are not really part of the query service,
     // we just handle them here in a pretty ad hoc fashion.
     web_server.at("/submit").post(submit_endpoint);
-    // web_server.at("/memos/:txid").post(memos_endpoint);
 
     // Add routes from a configuration file.
     if let Some(api_map) = api["route"].as_table() {
