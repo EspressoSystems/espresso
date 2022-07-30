@@ -22,11 +22,7 @@ RUN chmod +x /bin/espresso-validator
 COPY validator/api /api
 COPY validator/public /public
 
-# Configure the validator to run the demo, with 7 nodes by default.
-COPY validator/src/node-config.toml /config/node-config.toml
-
 # Set file locations.
-ENV ESPRESSO_VALIDATOR_CONFIG_PATH=/config/node-config.toml
 ENV ESPRESSO_VALIDATOR_PUB_KEY_PATH=/config
 ENV ESPRESSO_VALIDATOR_API_PATH=/api/api.toml
 ENV ESPRESSO_VALIDATOR_WEB_PATH=/public

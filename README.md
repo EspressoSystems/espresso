@@ -248,10 +248,8 @@ a service that attaches to the network and randomly generates transactions as a 
 
 Make sure the project is built as described in [Build](#build).
 
-We need to configure our validator network. See the [instructions](validator/README.md) for
-generating a `node-config.toml` file, or use [the default](validator/src/node-config.toml). We also
-need the public key of a genesis record which will be accessible by the faucet service. To get this,
-first set the mnemonic seed phrase you will use for the faucet service, e.g. `export
+We need the public key of a genesis record which will be accessible by the faucet service. To get
+this, first set the mnemonic seed phrase you will use for the faucet service, e.g. `export
 ESPRESSO_FAUCET_MANAGER_MNEMONIC="test test test test test test test test test test test junk"`.
 Then run `target/release/faucet-keystore-test-setup` and copy the output into your terminal to
 export the necessary environment variables. It should look something like:
@@ -265,8 +263,6 @@ Each service can be configured using command line arguments, but it is easier if
 environment variables which can be shared by all of the services. Set the following environment
 variables in each terminal where you intend to start a service:
 ```bash
-export ESPRESSO_VALIDATOR_CONFIG_PATH="/path/to/node-config.toml"
-export ESPRESSO_VALIDATOR_CONSENSUS_PORT="50076"
 export ESPRESSO_VALIDATOR_QUERY_PORT="50077"
 export ESPRESSO_ADDRESS_BOOK_PORT="50078"
 export ESPRESSO_ADDRESS_BOOK_URL="http://localhost:$ESPRESSO_ADDRESS_BOOK_PORT"
@@ -312,14 +308,14 @@ target/release/faucet
 
 | Environment Variable       | Type | Affected Services    | Meaning
 |----------------------------|------|----------------------|---------
-| ESPRESSO_VALIDATOR_CONFIG_PATH | Path | espresso-validator | Path to `node-config.toml` for validator network configuration
 | ESPRESSO_VALIDATOR_STORE_PATH | Path | espresso-validator | Path to persistence files for validator service
 | ESPRESSO_VALIDATOR_WEB_PATH | Path | espresso-validator | Path to validator assets including web server files.
 | ESPRESSO_VALIDATOR_API_PATH | Path | espresso-validator | Path to validator API specification
 | ESPRESSO_VALIDATOR_PUB_KEY_PATH | Path | espresso-validator | Path to validator public keys
 | ESPRESSO_VALIDATOR_QUERY_PORT    | u16  | espresso-validator   | Port on which to serve the query service and submit API
-| ESPRESSO_VALIDATOR_SECRET_KEY_SEED | TaggedBase64 (tag="SEED") | espresso-validator | Seed to use for generating threshold signature secret key (overrides the value from `node-config.toml`)
-| ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS | Vec<Url> | espresso-validator | Comma-separated list of URLs for bootstrap validators in the network (overrides the value from `node-config.toml`)
+| ESPRESSO_VALIDATOR_SECRET_KEY_SEED | TaggedBase64 (tag="SEED") | espresso-validator | Seed to use for generating threshold signature secret key
+| ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS | Vec<String> | espresso-validator | Comma-separated list of strings for the hosts of bootstrap validators in the network
+| ESPRESSO_VALIDATOR_CONSENSUS_PORTS | Vec<String> | espresso-validator | Comma-separated list of strings for the ports of all validators in the network
 | ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME | u64 | espresso-validator | Minimum time (in seconds) to wait for submitted transactions before proposing a block
 | ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME | u64 | espresso-validator | Maximum time (in seconds) to wait for submitted transactions before proposing a block
 | ESPRESSO_ADDRESS_BOOK_STORE_PATH | Path | address-book   | Path to persistence files for address book service (default `$LOCAL/.espresso/espresso/address-book/store`)

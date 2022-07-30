@@ -11,8 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    full_node_mem_data_source::QueryData, gen_keys, init_validator, init_web_server,
-    ConsensusConfig, GenesisState, Node, NodeConfig, NodeOpt, MINIMUM_NODES,
+    full_node_mem_data_source::QueryData, gen_keys, init_validator, init_web_server, ConsensusOpt,
+    GenesisState, Node, NodeOpt, MINIMUM_NODES,
 };
 use address_book::store::FileStore;
 use async_std::task::{block_on, spawn, JoinHandle};
@@ -153,14 +153,10 @@ impl Drop for TestNetwork {
 pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKey) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
-    let bootstrap_nodes = vec![NodeConfig {
-        ip: "localhost".to_string(),
-    }];
-    let config = ConsensusConfig {
-        seed: seed.into(),
-        bootstrap_nodes,
+    let bootstrap_hosts = vec!["localhost".to_string()];
+    let consensus_opt = ConsensusOpt {
+        secret_key_seed: Some(seed.into()),
         // NOTE these are arbitrarily chosen.
-        num_bootstrap: 1,
         replication_factor: 3,
         bootstrap_mesh_n_high: 7,
         bootstrap_mesh_n_low: 4,
@@ -170,12 +166,14 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         mesh_n_low: 4,
         mesh_outbound_min: 3,
         mesh_n: 6,
-        base_port: pick_unused_port().expect("No available port") as usize,
+        bootstrap_hosts,
+        consensus_ports: None,
+        base_consensus_port: Some(pick_unused_port().expect("No available port") as usize),
     };
 
     println!("generating public keys");
     let start = Instant::now();
-    let keys = gen_keys(&config, MINIMUM_NODES);
+    let keys = gen_keys(&consensus_opt, MINIMUM_NODES);
     let pub_keys = keys
         .iter()
         .map(|key| key.public.clone())
@@ -185,7 +183,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     let store = TempDir::new("minimal_test_network_store").unwrap();
     let genesis = GenesisState::new(iter::once(faucet_pub_key));
     let nodes = join_all((0..MINIMUM_NODES).into_iter().map(|i| {
-        let config = config.clone();
+        let consensus_opt = consensus_opt.clone();
         let genesis = genesis.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
@@ -206,7 +204,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
 
             let node = init_validator(
                 &opt,
-                &config,
+                &consensus_opt,
                 priv_key,
                 pub_keys,
                 genesis,

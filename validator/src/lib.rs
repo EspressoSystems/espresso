@@ -30,8 +30,8 @@ use espresso_core::{
     },
     testing::{MultiXfrRecordSpec, MultiXfrTestState},
     universal_params::UNIVERSAL_PARAM,
+    PrivKey, PubKey,
 };
-use espresso_core::{PrivKey, PubKey};
 use hotshot::traits::implementations::Libp2pNetwork;
 use hotshot::traits::NetworkError;
 use hotshot::types::ed25519::{Ed25519Priv, Ed25519Pub};
@@ -52,19 +52,19 @@ use libp2p::identity::Keypair;
 use libp2p::{multiaddr, Multiaddr, PeerId};
 use libp2p_networking::network::{MeshParams, NetworkNodeConfigBuilder, NetworkNodeType};
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
-use serde::{Deserialize, Serialize};
 use server::request_body;
 use std::collections::hash_map::HashMap;
 use std::collections::HashSet;
 use std::env;
+use std::fs;
 use std::io::Read;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use std::str;
 use std::str::FromStr;
 use std::time::Duration;
-use std::{fs, fs::File};
 use structopt::StructOpt;
-use tide::{http::Url, StatusCode};
+use tide::StatusCode;
 use tide_websockets::{WebSocket, WebSocketConnection};
 use tracing::{debug, event, Level};
 use validator_node::{
@@ -85,6 +85,10 @@ pub mod testing;
 pub const MINIMUM_NODES: usize = 5;
 
 const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
+const DEFAULT_SECRET_KEY_SEED: [u8; 32] = [
+    1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8,
+];
+const DEFAULT_BASE_PORT: usize = 9000;
 
 /// Parse a (url|ip):[0-9]+ into a multiaddr
 pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
@@ -137,13 +141,6 @@ pub struct NodeOpt {
     #[structopt(long = "api", env = "ESPRESSO_VALIDATOR_API_PATH")]
     pub api_path: Option<PathBuf>,
 
-    /// Port for the connection during the consensus.
-    ///
-    /// If not provided, `base_port + id` will be used as the port number, where `base_port` is
-    /// provided by the node configuration file and `id` is the ID of the current node.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONSENSUS_PORT")]
-    pub consensus_port: Option<u16>,
-
     /// Port for the query service.
     #[structopt(long, env = "ESPRESSO_VALIDATOR_QUERY_PORT", default_value = "5000")]
     pub web_server_port: u16,
@@ -188,19 +185,6 @@ impl NodeOpt {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NodeConfig {
-    pub ip: String,
-}
-
-impl From<Url> for NodeConfig {
-    fn from(url: Url) -> Self {
-        Self {
-            ip: url.host_str().unwrap().to_string(),
-        }
-    }
-}
-
 #[tagged_blob("SEED")]
 #[derive(Clone, Copy, Debug)]
 pub struct SecretKeySeed(pub [u8; 32]);
@@ -236,103 +220,55 @@ impl From<SecretKeySeed> for [u8; 32] {
     }
 }
 
-/// The structure of a node-config.toml file.
-///
-/// This struct exists to be deserialized and converted to [ConsensusConfig].
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ConsensusConfigFile {
-    seed: [u8; 32],
-    num_bootstrap: usize,
-    replication_factor: usize,
-    bootstrap_mesh_n_high: usize,
-    bootstrap_mesh_n_low: usize,
-    bootstrap_mesh_outbound_min: usize,
-    bootstrap_mesh_n: usize,
-    mesh_n_high: usize,
-    mesh_n_low: usize,
-    mesh_outbound_min: usize,
-    mesh_n: usize,
-    base_port: usize,
-    bootstrap_nodes: Vec<NodeConfig>,
-}
+#[derive(Clone, Debug, StructOpt)]
+pub struct ConsensusOpt {
+    /// Seed number used to generate secret key set for all nodes.
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
+    pub secret_key_seed: Option<SecretKeySeed>,
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(from = "ConsensusConfigFile", into = "ConsensusConfigFile")]
-pub struct ConsensusConfig {
-    pub seed: SecretKeySeed,
-    pub num_bootstrap: usize,
+    #[structopt(long, default_value = "5")]
     pub replication_factor: usize,
-    pub bootstrap_mesh_n_high: usize,
-    pub bootstrap_mesh_n_low: usize,
-    pub bootstrap_mesh_outbound_min: usize,
-    pub bootstrap_mesh_n: usize,
+
+    #[structopt(long, default_value = "15")]
     pub mesh_n_high: usize,
+    #[structopt(long, default_value = "8")]
     pub mesh_n_low: usize,
+    #[structopt(long, default_value = "4")]
     pub mesh_outbound_min: usize,
+    #[structopt(long, default_value = "12")]
     pub mesh_n: usize,
-    pub base_port: usize,
-    pub bootstrap_nodes: Vec<NodeConfig>,
-}
 
-impl ConsensusConfig {
-    pub fn from_file(path: &Path) -> Self {
-        // Read node info from node configuration file
-        let mut config_file = File::open(&path)
-            .unwrap_or_else(|_| panic!("Cannot find node config file: {}", path.display()));
-        let mut config_str = String::new();
-        config_file
-            .read_to_string(&mut config_str)
-            .unwrap_or_else(|err| panic!("Error while reading node config file: {}", err));
-        toml::from_str(&config_str).expect("Error while reading node config file")
-    }
-}
+    #[structopt(long, default_value = "50")]
+    pub bootstrap_mesh_n_high: usize,
+    #[structopt(long, default_value = "10")]
+    pub bootstrap_mesh_n_low: usize,
+    #[structopt(long, default_value = "5")]
+    pub bootstrap_mesh_outbound_min: usize,
+    #[structopt(long, default_value = "15")]
+    pub bootstrap_mesh_n: usize,
 
-impl From<ConsensusConfigFile> for ConsensusConfig {
-    fn from(cfg: ConsensusConfigFile) -> Self {
-        Self {
-            seed: cfg.seed.into(),
-            num_bootstrap: cfg.num_bootstrap,
-            bootstrap_nodes: cfg
-                .bootstrap_nodes
-                .into_iter()
-                .map(NodeConfig::from)
-                .collect(),
-            replication_factor: cfg.replication_factor,
-            bootstrap_mesh_n_high: cfg.bootstrap_mesh_n_high,
-            bootstrap_mesh_n_low: cfg.bootstrap_mesh_n_low,
-            bootstrap_mesh_outbound_min: cfg.bootstrap_mesh_outbound_min,
-            bootstrap_mesh_n: cfg.bootstrap_mesh_n,
-            mesh_n_high: cfg.mesh_n_high,
-            mesh_n_low: cfg.mesh_n_low,
-            mesh_outbound_min: cfg.mesh_outbound_min,
-            mesh_n: cfg.mesh_n,
-            base_port: cfg.base_port,
-        }
-    }
-}
+    /// Hosts of the bootstrap nodes.
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS",
+        default_value = "127.0.0.1,127.0.0.1,127.0.0.1,127.0.0.1,127.0.0.1,127.0.0.1,127.0.0.1",
+        value_delimiter = ","
+    )]
+    pub bootstrap_hosts: Vec<String>,
 
-impl From<ConsensusConfig> for ConsensusConfigFile {
-    fn from(cfg: ConsensusConfig) -> Self {
-        Self {
-            seed: cfg.seed.into(),
-            num_bootstrap: cfg.num_bootstrap,
-            bootstrap_nodes: cfg
-                .bootstrap_nodes
-                .into_iter()
-                .map(NodeConfig::from)
-                .collect(),
-            replication_factor: cfg.replication_factor,
-            bootstrap_mesh_n_high: cfg.bootstrap_mesh_n_high,
-            bootstrap_mesh_n_low: cfg.bootstrap_mesh_n_low,
-            bootstrap_mesh_outbound_min: cfg.bootstrap_mesh_outbound_min,
-            bootstrap_mesh_n: cfg.bootstrap_mesh_n,
-            mesh_n_high: cfg.mesh_n_high,
-            mesh_n_low: cfg.mesh_n_low,
-            mesh_outbound_min: cfg.mesh_outbound_min,
-            mesh_n: cfg.mesh_n,
-            base_port: cfg.base_port,
-        }
-    }
+    /// Ports of all nodes for the connection during the consensus.
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_CONSENSUS_PORTS",
+        value_delimiter = ","
+    )]
+    pub consensus_ports: Option<Vec<u16>>,
+
+    /// The base port for the consensus.
+    ///
+    /// If specified, the consesnsu port for node `i` will be `base_consensus_port + i`.
+    #[structopt(long, conflicts_with("consensus-ports"))]
+    pub base_consensus_port: Option<usize>,
 }
 
 /// Returns the project directory.
@@ -373,6 +309,25 @@ fn get_store_dir(options: &NodeOpt, node_id: usize) -> PathBuf {
         .store_path
         .clone()
         .unwrap_or_else(|| default_store_path(node_id))
+}
+
+fn get_secret_key_seed(consensus_opt: &ConsensusOpt) -> [u8; 32] {
+    consensus_opt
+        .secret_key_seed
+        .unwrap_or_else(|| SecretKeySeed(DEFAULT_SECRET_KEY_SEED))
+        .into()
+}
+
+fn get_consensus_port(consensus_opt: &ConsensusOpt, id: usize) -> u16 {
+    match &consensus_opt.consensus_ports {
+        Some(ports) => ports[id],
+        None => {
+            (consensus_opt
+                .base_consensus_port
+                .unwrap_or_else(|| DEFAULT_BASE_PORT)
+                + id) as u16
+        }
+    }
 }
 
 /// Removes the contents in the persistence files.
@@ -949,13 +904,16 @@ pub fn init_web_server(
     Ok(join_handle)
 }
 
-/// Generate a list of private and public keys for `config.bootstrap_nodes.len()` bootstrap keys, with a
-/// given `config.seed` seed.
-pub fn gen_bootstrap_keys(config: &ConsensusConfig) -> Vec<KeyPair> {
-    let mut keys = Vec::with_capacity(config.bootstrap_nodes.len());
+/// Generate a list of private and public keys for `consensus_opt.bootstrap_hosts.len()` bootstrap
+/// keys, with a given `consensus_opt.seed` seed.
+pub fn gen_bootstrap_keys(consensus_opt: &ConsensusOpt) -> Vec<KeyPair> {
+    let mut keys = Vec::with_capacity(consensus_opt.bootstrap_hosts.len());
 
-    for node_id in 0..config.bootstrap_nodes.len() {
-        let private = PrivKey::generated_from_seed_indexed(config.seed.0, node_id as u64);
+    for node_id in 0..consensus_opt.bootstrap_hosts.len() {
+        let private = PrivKey::generated_from_seed_indexed(
+            get_secret_key_seed(consensus_opt),
+            node_id as u64,
+        );
         let public = PubKey::from_private(&private);
 
         keys.push(KeyPair { public, private })
@@ -963,13 +921,16 @@ pub fn gen_bootstrap_keys(config: &ConsensusConfig) -> Vec<KeyPair> {
     keys
 }
 
-/// Generate a list of private and public keys for the given number of nodes with a given `config.
-/// seed` seed.
-pub fn gen_keys(config: &ConsensusConfig, num_nodes: usize) -> Vec<KeyPair> {
+/// Generate a list of private and public keys for the given number of nodes with a given
+/// `consensus_opt.seed` seed.
+pub fn gen_keys(consensus_opt: &ConsensusOpt, num_nodes: usize) -> Vec<KeyPair> {
     let mut keys = Vec::with_capacity(num_nodes);
 
     for node_id in 0..num_nodes {
-        let private = PrivKey::generated_from_seed_indexed(config.seed.0, node_id as u64);
+        let private = PrivKey::generated_from_seed_indexed(
+            get_secret_key_seed(consensus_opt),
+            node_id as u64,
+        );
         let public = PubKey::from_private(&private);
 
         keys.push(KeyPair { public, private })
@@ -991,12 +952,11 @@ pub async fn new_libp2p_network(
     node_type: NetworkNodeType,
     bound_addr: Multiaddr,
     identity: Option<Keypair>,
-    consensus_config: &ConsensusConfig,
+    consensus_opt: &ConsensusOpt,
 ) -> Result<PLNetwork, NetworkError> {
     let mut config_builder = NetworkNodeConfigBuilder::default();
     // NOTE we may need to change this as we scale
-    config_builder
-        .replication_factor(NonZeroUsize::new(consensus_config.replication_factor).unwrap());
+    config_builder.replication_factor(NonZeroUsize::new(consensus_opt.replication_factor).unwrap());
     // `to_connect_addrs` is an empty field that will be removed. We will pass `bs` into
     // `Libp2pNetwork::new` as the addresses to connect.
     config_builder.to_connect_addrs(HashSet::new());
@@ -1009,16 +969,16 @@ pub async fn new_libp2p_network(
 
     let mesh_params = match node_type {
         NetworkNodeType::Bootstrap => MeshParams {
-            mesh_n_high: consensus_config.bootstrap_mesh_n_high,
-            mesh_n_low: consensus_config.bootstrap_mesh_n_low,
-            mesh_outbound_min: consensus_config.bootstrap_mesh_outbound_min,
-            mesh_n: consensus_config.bootstrap_mesh_n,
+            mesh_n_high: consensus_opt.bootstrap_mesh_n_high,
+            mesh_n_low: consensus_opt.bootstrap_mesh_n_low,
+            mesh_outbound_min: consensus_opt.bootstrap_mesh_outbound_min,
+            mesh_n: consensus_opt.bootstrap_mesh_n,
         },
         NetworkNodeType::Regular => MeshParams {
-            mesh_n_high: consensus_config.mesh_n_high,
-            mesh_n_low: consensus_config.mesh_n_low,
-            mesh_outbound_min: consensus_config.mesh_outbound_min,
-            mesh_n: consensus_config.mesh_n,
+            mesh_n_high: consensus_opt.mesh_n_high,
+            mesh_n_low: consensus_opt.mesh_n_low,
+            mesh_outbound_min: consensus_opt.mesh_outbound_min,
+            mesh_n: consensus_opt.mesh_n,
         },
         NetworkNodeType::Conductor => unreachable!(),
     };
@@ -1031,22 +991,15 @@ pub async fn new_libp2p_network(
         config,
         pubkey,
         Arc::new(RwLock::new(bs)),
-        consensus_config.num_bootstrap,
+        consensus_opt.bootstrap_hosts.len(),
         node_id,
     )
     .await
 }
 
-fn get_consensus_port(options: &NodeOpt, config: &ConsensusConfig, id: usize) -> u16 {
-    match options.consensus_port {
-        Some(port) => port,
-        None => (config.base_port + id) as u16,
-    }
-}
-
 pub async fn init_validator(
     options: &NodeOpt,
-    config: &ConsensusConfig,
+    consensus_opt: &ConsensusOpt,
     priv_key: PrivKey,
     pub_keys: Vec<PubKey>,
     genesis: GenesisState,
@@ -1055,11 +1008,12 @@ pub async fn init_validator(
 ) -> Node {
     debug!("Current node: {}", own_id);
 
-    let num_bootstrap = config.num_bootstrap;
+    let num_bootstrap = consensus_opt.bootstrap_hosts.len();
 
     let mut bootstrap_nodes = vec![];
     for i in 0..num_bootstrap {
-        let priv_key = Ed25519Priv::generated_from_seed_indexed(config.seed.0, i as u64);
+        let priv_key =
+            Ed25519Priv::generated_from_seed_indexed(get_secret_key_seed(consensus_opt), i as u64);
         let libp2p_priv_key = SecretKey::from_bytes(&mut priv_key.to_bytes()[0..32]).unwrap();
         bootstrap_nodes.push(libp2p_priv_key);
     }
@@ -1070,8 +1024,8 @@ pub async fn init_validator(
         .map(|(idx, kp)| {
             let multiaddr = parse_url(&format!(
                 "{}:{}",
-                config.bootstrap_nodes[idx].ip,
-                get_consensus_port(options, config, idx)
+                consensus_opt.bootstrap_hosts[idx],
+                get_consensus_port(consensus_opt, idx)
             ))
             .unwrap();
             (libp2p::identity::Keypair::Ed25519(kp.into()), multiaddr)
@@ -1104,11 +1058,11 @@ pub async fn init_validator(
         node_type,
         parse_url(&format!(
             "0.0.0.0:{:?}",
-            get_consensus_port(options, config, own_id)
+            get_consensus_port(consensus_opt, own_id)
         ))
         .unwrap(),
         own_identity,
-        config,
+        consensus_opt,
     )
     .await
     .unwrap();
