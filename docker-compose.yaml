@@ -20,7 +20,7 @@ services:
   validator0:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - 40000:$ESPRESSO_VALIDATOR_CONSENSUS_PORTS[0]/tcp
+      - 40000:40000/tcp
       - 60000:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=0
@@ -35,7 +35,7 @@ services:
   validator1:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - 40001:$ESPRESSO_VALIDATOR_CONSENSUS_PORTS[1]/tcp
+      - 40001:40000/tcp
       - 60001:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=1
@@ -50,7 +50,7 @@ services:
   validator2:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - 40002:$ESPRESSO_VALIDATOR_CONSENSUS_PORTS[2]/tcp
+      - 40002:40000/tcp
       - 60002:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=2
@@ -65,7 +65,7 @@ services:
   validator3:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - 40003:$ESPRESSO_VALIDATOR_CONSENSUS_PORTS[3]/tcp
+      - 40003:40000/tcp
       - 60003:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=3
@@ -80,7 +80,7 @@ services:
   validator4:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - 40004:$ESPRESSO_VALIDATOR_CONSENSUS_PORTS[4]/tcp
+      - 40004:40000/tcp
       - 60004:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=4
@@ -95,7 +95,7 @@ services:
   validator5:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - 40005:$ESPRESSO_VALIDATOR_CONSENSUS_PORTS[5]/tcp
+      - 40005:40000/tcp
       - 60005:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=5
@@ -110,7 +110,7 @@ services:
   validator6:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - 40006:$ESPRESSO_VALIDATOR_CONSENSUS_PORTS[6]/tcp
+      - 40006:40000/tcp
       - 60006:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=6
@@ -125,7 +125,7 @@ services:
   validator7:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - 40007:$ESPRESSO_VALIDATOR_CONSENSUS_PORTS[7]/tcp
+      - 40007:40000/tcp
       - 60007:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=7
@@ -140,7 +140,7 @@ services:
   validator8:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - 40008:$ESPRESSO_VALIDATOR_CONSENSUS_PORTS[8]/tcp
+      - 40008:40000/tcp
       - 60008:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=8
@@ -155,7 +155,7 @@ services:
   validator9:
     image: ghcr.io/espressosystems/espresso/validator:main
     ports:
-      - 40009:$ESPRESSO_VALIDATOR_CONSENSUS_PORTS[9]/tcp
+      - 40009:40000/tcp
       - 60009:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
     environment:
       - ESPRESSO_VALIDATOR_ID=9
