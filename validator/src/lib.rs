@@ -562,7 +562,7 @@ async fn init_hotshot(
         threshold: NonZeroUsize::new(threshold as usize).unwrap(),
         max_transactions: NonZeroUsize::new(100).unwrap(),
         known_nodes,
-        next_view_timeout: 10_000,
+        next_view_timeout: 100_000,
         timeout_ratio: (11, 10),
         round_start_delay: 1,
         start_delay: 1,
