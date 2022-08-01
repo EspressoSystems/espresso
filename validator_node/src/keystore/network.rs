@@ -348,7 +348,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
             }
             txn.signature = signed_memos.sig.clone();
         }
-        txn.signature = txn_info.sig;
 
         Self::post(&self.validator_client, "/submit", &txn).await
     }
