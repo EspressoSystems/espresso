@@ -34,8 +34,7 @@ use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use key_set::{ProverKeySet, SizedKey};
 use node::{LedgerSnapshot, LedgerSummary};
-use seahorse::txn_builder::PendingTransaction;
-use seahorse::txn_builder::TransactionInfo;
+use seahorse::transactions::Transaction;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     sparse_merkle_tree::SparseMerkleTree,
@@ -227,8 +226,6 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
                 record_mt: SparseMerkleTree::sparse(records.0),
                 now: EventIndex::from_source(EventSource::QueryService, num_events),
                 records: Default::default(),
-
-                transactions: Default::default(),
             },
             key_state: Default::default(),
             viewing_accounts: Default::default(),
@@ -343,21 +340,20 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
     async fn submit(
         &mut self,
         mut txn: ElaboratedTransaction,
-        txn_info: TransactionInfo<EspressoLedger>,
+        txn_info: Transaction<EspressoLedger>,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
-        for memo in txn_info.memos.into_iter().flatten() {
-            txn.memos.push(memo);
+        if let Some(signed_memos) = txn_info.memos() {
+            for memo in signed_memos.memos.iter().flatten().cloned() {
+                txn.memos.push(memo);
+            }
+            txn.signature = signed_memos.sig.clone();
         }
         txn.signature = txn_info.sig;
 
         Self::post(&self.validator_client, "/submit", &txn).await
     }
 
-    async fn finalize(
-        &mut self,
-        _txn: PendingTransaction<EspressoLedger>,
-        _txid: Option<(u64, u64)>,
-    ) {
+    async fn finalize(&mut self, _txn: Transaction<EspressoLedger>, _txid: Option<(u64, u64)>) {
         // -> Result<(), KeystoreError<EspressoLedger>>
     }
 
