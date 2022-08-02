@@ -53,7 +53,10 @@ use structopt::StructOpt;
 use surf::StatusCode;
 use tempdir::TempDir;
 use tracing::{event, Level};
-use validator_node::keystore::network::{NetworkBackend, Url};
+use validator_node::{
+    api::client::response_body,
+    keystore::network::{NetworkBackend, Url},
+};
 
 #[derive(Debug)]
 pub enum OperationType {
@@ -166,8 +169,7 @@ async fn get_peers(url: &Url) -> Result<Vec<UserPubKey>, surf::Error> {
     let mut response = surf::get(format!("{}request_peers", url))
         .content_type(surf::http::mime::JSON)
         .await?;
-    let bytes = response.body_bytes().await.unwrap();
-    let pub_keys: Vec<UserPubKey> = bincode::deserialize(&bytes)?;
+    let pub_keys: Vec<UserPubKey> = response_body(&mut response).await?;
     event!(Level::INFO, "peers {} ", pub_keys.len());
     Ok(pub_keys)
 }

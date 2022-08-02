@@ -14,6 +14,22 @@
 extern crate espresso_client;
 use espresso_client::cli_client::{cli_test, CliClient};
 
+fn await_transaction(
+    uid: &str,
+    client: &mut CliClient,
+    sender: usize,
+    receiver: usize,
+) -> Result<(), String> {
+    client
+        .command(sender, format!("wait {}", uid))?
+        .output("accepted")?;
+
+    client.command(sender, "now")?.output("(?P<time>.*)")?;
+    let now = client.var("time")?;
+    client.command(receiver, format!("sync {}", now))?;
+    Ok(())
+}
+
 fn create_keystore(t: &mut CliClient, keystore: usize) -> Result<&mut CliClient, String> {
     let key_path = t.keystore_key_path(keystore)?;
     let key_path = key_path.as_os_str().to_str().ok_or_else(|| {
@@ -119,25 +135,19 @@ fn cli_transfer_native(t: &mut CliClient) -> Result<(), String> {
         .output("Total 0")?
         // Transfer some native coins from the primary keystore to the secondary.
         .command(0, "transfer $native $default_pubkey1 500 1")?
-        .output("(?P<txn>TXN~.*)")?
-        // Wait for the transaction to complete in both keystores (just because one keystore has
-        // received and processed the completed transaction doesn't mean the other has).
-        .command(0, "wait $txn")?
-        .output("accepted")?
-        .command(1, "wait $txn")?
-        .output("accepted")?
-        .command(0, "balance $native")?
+        .output("(?P<txn>TXUID~.*)")?;
+    // Wait for the transaction to complete in both keystores (just because one keystore has
+    // received and processed the completed transaction doesn't mean the other has).
+    await_transaction(&t.var("txn")?, t, 0, 1)?;
+    t.command(0, "balance $native")?
         .output(format!("Total {}", balance - 501))?
         .command(1, "balance $native")?
         .output("Total 500")?
         // Transfer part of the money back
         .command(1, "transfer $native $default_pubkey0 200 2")?
-        .output("(?P<txn>TXN~.*)")?
-        .command(0, "wait $txn")?
-        .output("accepted")?
-        .command(1, "wait $txn")?
-        .output("accepted")?
-        .command(1, "balance $native")?
+        .output("(?P<txn>TXUID~.*)")?;
+    await_transaction(&t.var("txn")?, t, 1, 0)?;
+    t.command(1, "balance $native")?
         .output("Total 298")?
         .command(0, "balance $native")?
         .output(format!("Total {}", balance - 301))?;
@@ -156,15 +166,12 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         .output("Not freezeable")?
         .output("Minter: me")?
         .command(0, "mint $asset1 $default_pubkey1 100 1")?
-        .output("(?P<txn>TXN~.*)")?
-        .command(0, "wait $txn")?
-        .output("accepted")?
-        .command(1, "wait $txn")?
-        .output("accepted")?
-        // Check on the receiving end that
-        //  (1) we have learned about the new asset after receiving it
-        //  (2) we have a balance of it
-        .command(1, "asset $asset1")?
+        .output("(?P<txn>TXUID~.*)")?;
+    await_transaction(&t.var("txn")?, t, 0, 1)?;
+    // Check on the receiving end that
+    //  (1) we have learned about the new asset after receiving it
+    //  (2) we have a balance of it
+    t.command(1, "asset $asset1")?
         .output("Asset $asset1")? // Receiver doesn't know the description "asset1"
         .output("Not viewable")?
         .output("Not freezeable")?
@@ -189,13 +196,10 @@ fn cli_mint_and_transfer(t: &mut CliClient) -> Result<(), String> {
         .output("Freezer: $freezekey1")?
         .output("Minter: me")?
         .command(0, "mint $asset2 $default_pubkey1 200 1")?
-        .output("(?P<txn>TXN~.*)")?
-        .command(0, "wait $txn")?
-        .output("accepted")?
-        .command(1, "wait $txn")?
-        .output("accepted")?
-        // Check on the receiving end
-        .command(1, "asset $asset2")?
+        .output("(?P<txn>TXUID~.*)")?;
+    await_transaction(&t.var("txn")?, t, 0, 1)?;
+    // Check on the receiving end
+    t.command(1, "asset $asset2")?
         .output("Asset $asset2")?
         .output("Viewer: $audkey0")?
         .output("Freezer: me")?
