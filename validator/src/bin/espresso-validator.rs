@@ -24,6 +24,7 @@ use futures::{future::pending, StreamExt};
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
 use std::path::{Path, PathBuf};
+use std::process::exit;
 use std::time::Duration;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
@@ -280,6 +281,11 @@ async fn generate_transactions(
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::from_args();
+    if let Err(msg) = options.node_opt.check() {
+        eprintln!("{}", msg);
+        exit(1);
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_ansi(options.colored_logs)

@@ -17,7 +17,7 @@ use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{exit, Command, Stdio};
 use std::time::Duration;
 use structopt::StructOpt;
 use tide::http::Url;
@@ -103,6 +103,10 @@ fn cargo_run(bin: impl AsRef<str>) -> Command {
 async fn main() {
     // Construct arguments to pass to the multi-machine demo.
     let options = Options::from_args();
+    if let Err(msg) = options.node_opt.check() {
+        eprintln!("{}", msg);
+        exit(1);
+    }
 
     // With StructOpt/CLAP, environment variables override command line arguments, but we are going
     // to construct a command line for each child, so the child processes shouldn't get their
@@ -118,6 +122,13 @@ async fn main() {
     env::remove_var("ESPRESSO_VALIDATOR_API_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_QUERY_PORT");
     env::remove_var("ESPRESSO_VALIDATOR_CONSENSUS_PORT");
+    env::remove_var("ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME");
+    env::remove_var("ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME");
+    env::remove_var("ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT");
+    env::remove_var("ESPRESSO_VALIDATOR_TIMEOUT_RATIO");
+    env::remove_var("ESPRESSO_VALIDATOR_ROUND_START_DELAY");
+    env::remove_var("ESPRESSO_VALIDATOR_START_DELAY");
+    env::remove_var("ESPRESSO_VALIDATOR_MAX_TRANSACTIONS");
 
     let mut args = vec![];
     if options.node_opt.reset_store_state {
@@ -147,6 +158,27 @@ async fn main() {
         args.push("--api");
         args.push(&api_path);
     }
+    let min_propose_time = format!("{}ms", options.node_opt.min_propose_time.as_millis());
+    args.push("--min-propose-time");
+    args.push(&min_propose_time);
+    let max_propose_time = format!("{}ms", options.node_opt.max_propose_time.as_millis());
+    args.push("--max-propose-time");
+    args.push(&max_propose_time);
+    let next_view_timeout = format!("{}ms", options.node_opt.next_view_timeout.as_millis());
+    args.push("--next-view-timeout");
+    args.push(&next_view_timeout);
+    let timeout_ratio = options.node_opt.timeout_ratio.to_string();
+    args.push("--timeout-ratio");
+    args.push(&timeout_ratio);
+    let round_start_delay = format!("{}ms", options.node_opt.round_start_delay.as_millis());
+    args.push("--round-start-delay");
+    args.push(&round_start_delay);
+    let start_delay = format!("{}ms", options.node_opt.start_delay.as_millis());
+    args.push("--start-delay");
+    args.push(&start_delay);
+    let max_transactions = options.node_opt.max_transactions.to_string();
+    args.push("--max-transactions");
+    args.push(&max_transactions);
     let config_path;
     if let Some(path) = &options.config {
         config_path = path.display().to_string();
