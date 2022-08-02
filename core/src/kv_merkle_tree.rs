@@ -366,18 +366,10 @@ where
                     path,
                 };
                 if key == *leaf_key {
-                    Some((
-                        Some(*leaf_value),
-                        proof,
-                    ))
+                    Some((Some(*leaf_value), proof))
+                } else {
+                    Some((None, proof))
                 }
-                else {
-                    Some((
-                        None,
-                        proof,
-                    ))
-                }
-                
             }
             Branch { .. } => panic!("This tree has more levels than my hash has bits!"),
         }
