@@ -1262,6 +1262,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cld"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ce3655c23ebf9cdeed9a0cb47fd2f2f6b3333cb520fd6f8e852fae983ccbaae"
+
+[[package]]
 name = "clipboard-win"
 version = "4.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2407,6 +2413,7 @@ dependencies = [
  "async-trait",
  "async-tungstenite 0.15.0",
  "bincode",
+ "cld",
  "dirs",
  "escargot",
  "espresso-availability-api",
@@ -2417,6 +2424,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hotshot",
+ "human_bytes",
  "itertools 0.10.3",
  "jf-cap",
  "jf-plonk",
@@ -3192,6 +3200,12 @@ name = "httparse"
 version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "496ce29bb5a52785b44e0f7ca2847ae0bb839c9bd28f69acac9b99d461c0c04c"
+
+[[package]]
+name = "human_bytes"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88a0d4dc39ec942e44c1c306aa196da67f2bd6a30dc7b4a475465c13ccf28817"
 
 [[package]]
 name = "ident_case"
