@@ -85,7 +85,7 @@ mod routes;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
-pub const MINIMUM_NODES: usize = 5;
+pub const MINIMUM_NODES: usize = 6;
 
 const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 const DEFAULT_SECRET_KEY_SEED: [u8; 32] = [
