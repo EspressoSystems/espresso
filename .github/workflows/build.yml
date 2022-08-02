@@ -63,8 +63,8 @@ jobs:
           token: ${{ github.token }}
           args: --workspace -- -D warnings -A clippy::format_push_string
 
-      - name: Viewing
-        run: cargo audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071 --ignore RUSTSEC-2022-0006
+      - name: Audit
+        run: cargo audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071 --ignore RUSTSEC-2022-0006 --ignore RUSTSEC-2022-0040
 
       - name: Build
         run: |
