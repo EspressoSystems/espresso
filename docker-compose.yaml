@@ -283,23 +283,45 @@ services:
     command: wait-for-it validator0:$ESPRESSO_VALIDATOR_QUERY_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- wait-for-it faucet:$ESPRESSO_FAUCET_PORT -- random-wallet --seed 0
     environment:
       - ESPRESSO_FAUCET_URL
-      - ESPRESSO_SUBMIT_URL
-      - ESPRESSO_ESQS_URL
       - ESPRESSO_ADDRESS_BOOK_URL
+      - ESPRESSO_SUBMIT_URL=http://validator0:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_ESQS_URL=http://validator0:$ESPRESSO_VALIDATOR_QUERY_PORT
       - RUST_LOG
     volumes:
       - random-wallet0-store:/store
   random-wallet1:
     image: ghcr.io/espressosystems/espresso/random-wallet:main
-    command: wait-for-it validator0:$ESPRESSO_VALIDATOR_QUERY_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- wait-for-it faucet:$ESPRESSO_FAUCET_PORT -- random-wallet --seed 1
+    command: wait-for-it validator1:$ESPRESSO_VALIDATOR_QUERY_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- wait-for-it faucet:$ESPRESSO_FAUCET_PORT -- random-wallet --seed 1
     environment:
       - ESPRESSO_FAUCET_URL
-      - ESPRESSO_SUBMIT_URL
-      - ESPRESSO_ESQS_URL
       - ESPRESSO_ADDRESS_BOOK_URL
+      - ESPRESSO_SUBMIT_URL=http://validator1:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_ESQS_URL=http://validator1:$ESPRESSO_VALIDATOR_QUERY_PORT
       - RUST_LOG
     volumes:
       - random-wallet1-store:/store
+  random-wallet2:
+    image: ghcr.io/espressosystems/espresso/random-wallet:main
+    command: wait-for-it validator2:$ESPRESSO_VALIDATOR_QUERY_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- wait-for-it faucet:$ESPRESSO_FAUCET_PORT -- random-wallet --seed 2
+    environment:
+      - ESPRESSO_FAUCET_URL
+      - ESPRESSO_ADDRESS_BOOK_URL
+      - ESPRESSO_SUBMIT_URL=http://validator2:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_ESQS_URL=http://validator2:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - RUST_LOG
+    volumes:
+      - random-wallet2-store:/store
+  random-wallet3:
+    image: ghcr.io/espressosystems/espresso/random-wallet:main
+    command: wait-for-it validator3:$ESPRESSO_VALIDATOR_QUERY_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- wait-for-it faucet:$ESPRESSO_FAUCET_PORT -- random-wallet --seed 3
+    environment:
+      - ESPRESSO_FAUCET_URL
+      - ESPRESSO_ADDRESS_BOOK_URL
+      - ESPRESSO_SUBMIT_URL=http://validator3:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_ESQS_URL=http://validator3:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - RUST_LOG
+    volumes:
+      - random-wallet3-store:/store
 
 volumes:
   validator0-store:
@@ -316,3 +338,5 @@ volumes:
   address-book-store:
   random-wallet0-store:
   random-wallet1-store:
+  random-wallet2-store:
+  random-wallet3-store:
