@@ -174,6 +174,44 @@ async fn get_peers(url: &Url) -> Result<Vec<UserPubKey>, surf::Error> {
     Ok(pub_keys)
 }
 
+async fn get_native_from_faucet(keystore: &mut Keystore, pub_key: &UserPubKey, url: &Url) {
+    // Request native asset for the keystore.
+    let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
+    loop {
+        match surf::post(format!("{}request_fee_assets", url))
+            .content_type(surf::http::mime::BYTE_STREAM)
+            .body_bytes(&receiver_key_bytes)
+            .await
+        {
+            Ok(res) if res.status() == StatusCode::Ok => {
+                break;
+            }
+            Ok(res) => {
+                tracing::error!("retrying faucet because of {} response", res.status());
+                retry_delay().await;
+            }
+            Err(err) => {
+                tracing::error!("Retrying faucet because of {:?}", err);
+                retry_delay().await;
+            }
+        }
+    }
+
+    // Wait for initial balance.
+    let mut i = 0;
+    while keystore.balance(&AssetCode::native()).await == 0u64.into() {
+        if i % 20 == 0 {
+            event!(Level::INFO, "waiting for initial balance");
+        }
+        i += 1;
+        retry_delay().await;
+    }
+    tracing::info!(
+        "balance after faucet: {}",
+        keystore.balance(&AssetCode::native()).await
+    );
+}
+
 #[async_std::main]
 async fn main() {
     let args = Args::from_args();
@@ -254,38 +292,8 @@ async fn main() {
     keystore.await_key_scan(&address).await.unwrap();
 
     if keystore.balance(&AssetCode::native()).await == 0u64.into() {
-        // Request native asset for the keystore.
-        let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
-        loop {
-            match surf::post(format!("{}request_fee_assets", args.faucet_url))
-                .content_type(surf::http::mime::BYTE_STREAM)
-                .body_bytes(&receiver_key_bytes)
-                .await
-            {
-                Ok(res) if res.status() == StatusCode::Ok => {
-                    break;
-                }
-                Ok(res) => {
-                    tracing::error!("retrying faucet because of {} response", res.status());
-                    retry_delay().await;
-                }
-                Err(err) => {
-                    tracing::error!("Retrying faucet because of {:?}", err);
-                    retry_delay().await;
-                }
-            }
-        }
-
-        // Wait for initial balance.
-        while keystore.balance(&AssetCode::native()).await == 0u64.into() {
-            event!(Level::INFO, "waiting for initial balance");
-            retry_delay().await;
-        }
+        get_native_from_faucet(&mut keystore, &pub_key, &args.faucet_url).await;
     }
-    tracing::info!(
-        "initial balance: {}",
-        keystore.balance(&AssetCode::native()).await
-    );
 
     // Check if we already have a mintable asset (if we are loading from a saved keystore).
     let my_asset = match keystore
@@ -350,6 +358,10 @@ async fn main() {
     let mut peers = vec![];
 
     loop {
+        // If we don't have any native asset left request more from the faucet
+        if keystore.balance(&AssetCode::native()).await == 0u64.into() {
+            get_native_from_faucet(&mut keystore, &pub_key, &args.faucet_url).await;
+        }
         // Get a list of all users in our group (this will include our own public key).
         // Filter out our own public key and randomly choose one of the other ones to transfer to.
         peers = match get_peers(&args.address_book_url).await {
@@ -386,7 +398,7 @@ async fn main() {
         // All transfers are the same, small size. This should prevent fragmentation errors and
         // allow us to make as many transactions as possible with the assets we have.
         let amount = 10;
-        let fee = 1;
+        let fee = 0;
 
         match operation {
             OperationType::Transfer => {
