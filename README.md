@@ -314,8 +314,17 @@ target/release/faucet
 | ESPRESSO_VALIDATOR_PUB_KEY_PATH | Path | espresso-validator | Path to validator public keys
 | ESPRESSO_VALIDATOR_QUERY_PORT    | u16  | espresso-validator   | Port on which to serve the query service and submit API
 | ESPRESSO_VALIDATOR_SECRET_KEY_SEED | TaggedBase64 (tag="SEED") | espresso-validator | Seed to use for generating threshold signature secret key
-| ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS | Vec<String> | espresso-validator | Comma-separated list of strings for the hosts of bootstrap validators in the network
-| ESPRESSO_VALIDATOR_CONSENSUS_PORTS | Vec<String> | espresso-validator | Comma-separated list of strings for the ports of all validators in the network
+| ESPRESSO_VALIDATOR_REPLICATION_FACTOR | usize | espresso-validator | Replication factor for entries in the DHT
+| ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH | usize | espresso-validator | `mesh_n_high` parameter for gossibpsub for bootstrap validators
+| ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW | usize | espresso-validator | `mesh_n_low` parameter for gossibpsub for bootstrap validators
+| ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN | usize | espresso-validator | `mesh_outbound_min` parameter for gossibpsub for bootstrap validators
+| ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N | usize | espresso-validator | `mesh_n` parameter for gossibpsub for bootstrap validators
+| ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH | usize | espresso-validator | `mesh_n_high` parameter for gossibpsub for non-bootstrap validators
+| ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW | usize | espresso-validator | `mesh_n_low` parameter for gossibpsub for non-bootstrap validators
+| ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN | usize | espresso-validator | `mesh_outbound_min` parameter for gossibpsub for non-bootstrap validators
+| ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N | usize | espresso-validator | `mesh_n` parameter for gossibpsub for non-bootstrap validators
+| ESPRESSO_VALIDATOR_BOOTSTRAP_NODES | Vec<Url> | espresso-validator | Comma-separated list of URLs for the hosts of bootstrap validators in the network
+| ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT | u16 | espresso-validator | String for the port of the current validator if it's non-bootstrap
 | ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME | u64 | espresso-validator | Minimum time (in seconds) to wait for submitted transactions before proposing a block
 | ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME | u64 | espresso-validator | Maximum time (in seconds) to wait for submitted transactions before proposing a block
 | ESPRESSO_ADDRESS_BOOK_STORE_PATH | Path | address-book   | Path to persistence files for address book service (default `$LOCAL/.espresso/espresso/address-book/store`)

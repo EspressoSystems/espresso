@@ -153,7 +153,7 @@ impl Drop for TestNetwork {
 pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKey) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
-    let bootstrap_hosts = vec!["localhost".to_string()];
+    let base_port = pick_unused_port().unwrap();
     let consensus_opt = ConsensusOpt {
         secret_key_seed: Some(seed.into()),
         // NOTE these are arbitrarily chosen.
@@ -162,13 +162,11 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         bootstrap_mesh_n_low: 4,
         bootstrap_mesh_outbound_min: 3,
         bootstrap_mesh_n: 6,
-        mesh_n_high: 7,
-        mesh_n_low: 4,
-        mesh_outbound_min: 3,
-        mesh_n: 6,
-        bootstrap_hosts,
-        consensus_ports: None,
-        base_consensus_port: Some(pick_unused_port().expect("No available port") as usize),
+        nonbootstrap_mesh_n_high: 7,
+        nonbootstrap_mesh_n_low: 4,
+        nonbootstrap_mesh_outbound_min: 3,
+        nonbootstrap_mesh_n: 6,
+        bootstrap_nodes: vec![Url::parse(&format!("localhost:{}", base_port)).unwrap()],
     };
 
     println!("generating public keys");
@@ -191,19 +189,20 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
 
         store_path.push(i.to_string());
         async move {
-            let mut opt = NodeOpt {
+            let mut node_opt = NodeOpt {
                 store_path: Some(store_path),
+                nonbootstrap_base_port: base_port as usize,
                 ..NodeOpt::default()
             };
             if i == 0 {
-                opt.full = true;
-                opt.web_server_port = pick_unused_port().unwrap();
+                node_opt.full = true;
+                node_opt.web_server_port = pick_unused_port().unwrap();
             }
             let data_source =
                 async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
 
             let node = init_validator(
-                &opt,
+                &node_opt,
                 &consensus_opt,
                 priv_key,
                 pub_keys,
@@ -218,9 +217,9 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 // This returns a JoinHandle for the server, but there's no way to kill a Tide
                 // server (this is a known bug/limitation of Tide) so all we can really do is drop
                 // the handle, detaching the task.
-                init_web_server(&opt, node.clone()).unwrap();
+                init_web_server(&node_opt, node.clone()).unwrap();
                 Some(
-                    format!("http://0.0.0.0:{}", opt.web_server_port)
+                    format!("http://0.0.0.0:{}", node_opt.web_server_port)
                         .parse()
                         .unwrap(),
                 )

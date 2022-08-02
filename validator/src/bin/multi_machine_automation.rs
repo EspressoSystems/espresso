@@ -29,14 +29,6 @@ struct Options {
     #[structopt(flatten)]
     node_opt: NodeOpt,
 
-    /// Hosts of the bootstrap nodes.
-    #[structopt(
-        long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS",
-        value_delimiter = ","
-    )]
-    pub bootstrap_hosts: Option<Vec<String>>,
-
     /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of
     /// non-bootstrap nodes.
     #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
@@ -99,14 +91,14 @@ async fn main() {
     // options from the environment. Clear the environment variables corresponding to each option
     // that we will set explicitly in the command line.
     env::remove_var("ESPRESSO_VALIDATOR_SECRET_KEY_SEED");
-    env::remove_var("ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS");
+    env::remove_var("ESPRESSO_VALIDATOR_BOOTSTRAP_NODES");
     env::remove_var("ESPRESSO_VALIDATOR_PUB_KEY_PATH");
     env::remove_var("ESPRESSO_FAUCET_PUB_KEY");
     env::remove_var("ESPRESSO_VALIDATOR_STORE_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_WEB_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_API_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_QUERY_PORT");
-    env::remove_var("ESPRESSO_VALIDATOR_CONSENSUS_PORTS");
+    env::remove_var("ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT");
 
     let mut args = vec![];
     if options.node_opt.reset_store_state {
@@ -135,17 +127,6 @@ async fn main() {
         api_path = path.display().to_string();
         args.push("--api");
         args.push(&api_path);
-    }
-    let bootstrap_hosts = options.bootstrap_hosts.as_ref().map(|nodes| {
-        nodes
-            .iter()
-            .map(|node| node.to_string())
-            .collect::<Vec<_>>()
-            .join(",")
-    });
-    if let Some(nodes) = &bootstrap_hosts {
-        args.push("--bootstrap-nodes");
-        args.push(nodes);
     }
     let num_nodes_str = options.num_nodes.to_string();
     let num_nodes = num_nodes_str.parse::<usize>().unwrap();

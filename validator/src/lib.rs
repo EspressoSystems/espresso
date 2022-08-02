@@ -64,6 +64,7 @@ use std::str;
 use std::str::FromStr;
 use std::time::Duration;
 use structopt::StructOpt;
+use surf::Url;
 use tide::StatusCode;
 use tide_websockets::{WebSocket, WebSocketConnection};
 use tracing::{debug, event, Level};
@@ -88,7 +89,6 @@ const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 const DEFAULT_SECRET_KEY_SEED: [u8; 32] = [
     1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8,
 ];
-const DEFAULT_BASE_PORT: usize = 9000;
 
 /// Parse a (url|ip):[0-9]+ into a multiaddr
 pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
@@ -144,6 +144,23 @@ pub struct NodeOpt {
     /// Port for the query service.
     #[structopt(long, env = "ESPRESSO_VALIDATOR_QUERY_PORT", default_value = "5000")]
     pub web_server_port: u16,
+
+    /// Port of the current node if it's non-bootstrap.
+    ///
+    /// Overrides `nonbootstrap_base_port`.
+    ///
+    /// If the node is bootstrap, thip option will be overriden by the corresponding port in
+    /// `--bootstrap-nodes`.
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT")]
+    pub nonbootstrap_port: Option<u16>,
+
+    /// The base port for the non-bootstrap nodes.
+    ///
+    /// If specified, the consesnsu port for node `i` will be `nonbootstrap_base_port + i`.
+    ///
+    /// Will be overriden by `nonbootstrap_port`.
+    #[structopt(long, default_value = "9000")]
+    pub nonbootstrap_base_port: usize,
 
     /// Minimum time (in seconds) to wait for submitted transactions before proposing a block.
     ///
@@ -220,55 +237,86 @@ impl From<SecretKeySeed> for [u8; 32] {
     }
 }
 
+/// Options for the validator connections during the consensus.
+///
+/// All validators should have the same consensus options.
+///
+/// The default values of `replication_factor` and mesh parameters for bootstrap and non-bootstrap
+/// nodes are set arbitrarily. They should increase as the number of nodes increases, and must meet
+/// the following requirements.
+/// 1. `mesh_outbound_min <= mesh_n_low <= mesh_n <= mesh_n_high`.
+/// 2. `mesh_outbound_min <= mesh_n / 2`.
 #[derive(Clone, Debug, StructOpt)]
 pub struct ConsensusOpt {
     /// Seed number used to generate secret key set for all nodes.
     #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
     pub secret_key_seed: Option<SecretKeySeed>,
 
-    #[structopt(long, default_value = "5")]
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_REPLICATION_FACTOR",
+        default_value = "5"
+    )]
     pub replication_factor: usize,
 
-    #[structopt(long, default_value = "15")]
-    pub mesh_n_high: usize,
-    #[structopt(long, default_value = "8")]
-    pub mesh_n_low: usize,
-    #[structopt(long, default_value = "4")]
-    pub mesh_outbound_min: usize,
-    #[structopt(long, default_value = "12")]
-    pub mesh_n: usize,
-
-    #[structopt(long, default_value = "50")]
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH",
+        default_value = "50"
+    )]
     pub bootstrap_mesh_n_high: usize,
-    #[structopt(long, default_value = "10")]
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW",
+        default_value = "10"
+    )]
     pub bootstrap_mesh_n_low: usize,
-    #[structopt(long, default_value = "5")]
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN",
+        default_value = "5"
+    )]
     pub bootstrap_mesh_outbound_min: usize,
-    #[structopt(long, default_value = "15")]
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N",
+        default_value = "15"
+    )]
     pub bootstrap_mesh_n: usize,
 
-    /// Hosts of the bootstrap nodes.
     #[structopt(
         long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS",
-        default_value = "127.0.0.1,127.0.0.1,127.0.0.1,127.0.0.1,127.0.0.1,127.0.0.1,127.0.0.1",
-        value_delimiter = ","
+        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH",
+        default_value = "15"
     )]
-    pub bootstrap_hosts: Vec<String>,
-
-    /// Ports of all nodes for the connection during the consensus.
+    pub nonbootstrap_mesh_n_high: usize,
     #[structopt(
         long,
-        env = "ESPRESSO_VALIDATOR_CONSENSUS_PORTS",
+        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW",
+        default_value = "8"
+    )]
+    pub nonbootstrap_mesh_n_low: usize,
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN",
+        default_value = "4"
+    )]
+    pub nonbootstrap_mesh_outbound_min: usize,
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N",
+        default_value = "12"
+    )]
+    pub nonbootstrap_mesh_n: usize,
+
+    /// URLs of the bootstrap nodes, in the format of `<host>:<port>`.
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_NODES",
+        default_value = "localhost:9000,localhost:9001,localhost:9002,localhost:9003,localhost:9004,localhost:9005,localhost:9006",
         value_delimiter = ","
     )]
-    pub consensus_ports: Option<Vec<u16>>,
-
-    /// The base port for the consensus.
-    ///
-    /// If specified, the consesnsu port for node `i` will be `base_consensus_port + i`.
-    #[structopt(long, conflicts_with("consensus-ports"))]
-    pub base_consensus_port: Option<usize>,
+    pub bootstrap_nodes: Vec<Url>,
 }
 
 /// Returns the project directory.
@@ -314,20 +362,8 @@ fn get_store_dir(options: &NodeOpt, node_id: usize) -> PathBuf {
 fn get_secret_key_seed(consensus_opt: &ConsensusOpt) -> [u8; 32] {
     consensus_opt
         .secret_key_seed
-        .unwrap_or_else(|| SecretKeySeed(DEFAULT_SECRET_KEY_SEED))
+        .unwrap_or(SecretKeySeed(DEFAULT_SECRET_KEY_SEED))
         .into()
-}
-
-fn get_consensus_port(consensus_opt: &ConsensusOpt, id: usize) -> u16 {
-    match &consensus_opt.consensus_ports {
-        Some(ports) => ports[id],
-        None => {
-            (consensus_opt
-                .base_consensus_port
-                .unwrap_or_else(|| DEFAULT_BASE_PORT)
-                + id) as u16
-        }
-    }
 }
 
 /// Removes the contents in the persistence files.
@@ -904,12 +940,12 @@ pub fn init_web_server(
     Ok(join_handle)
 }
 
-/// Generate a list of private and public keys for `consensus_opt.bootstrap_hosts.len()` bootstrap
+/// Generate a list of private and public keys for `consensus_opt.bootstrap_nodes.len()` bootstrap
 /// keys, with a given `consensus_opt.seed` seed.
 pub fn gen_bootstrap_keys(consensus_opt: &ConsensusOpt) -> Vec<KeyPair> {
-    let mut keys = Vec::with_capacity(consensus_opt.bootstrap_hosts.len());
+    let mut keys = Vec::with_capacity(consensus_opt.bootstrap_nodes.len());
 
-    for node_id in 0..consensus_opt.bootstrap_hosts.len() {
+    for node_id in 0..consensus_opt.bootstrap_nodes.len() {
         let private = PrivKey::generated_from_seed_indexed(
             get_secret_key_seed(consensus_opt),
             node_id as u64,
@@ -975,10 +1011,10 @@ pub async fn new_libp2p_network(
             mesh_n: consensus_opt.bootstrap_mesh_n,
         },
         NetworkNodeType::Regular => MeshParams {
-            mesh_n_high: consensus_opt.mesh_n_high,
-            mesh_n_low: consensus_opt.mesh_n_low,
-            mesh_outbound_min: consensus_opt.mesh_outbound_min,
-            mesh_n: consensus_opt.mesh_n,
+            mesh_n_high: consensus_opt.nonbootstrap_mesh_n_high,
+            mesh_n_low: consensus_opt.nonbootstrap_mesh_n_low,
+            mesh_outbound_min: consensus_opt.nonbootstrap_mesh_outbound_min,
+            mesh_n: consensus_opt.nonbootstrap_mesh_n,
         },
         NetworkNodeType::Conductor => unreachable!(),
     };
@@ -991,14 +1027,14 @@ pub async fn new_libp2p_network(
         config,
         pubkey,
         Arc::new(RwLock::new(bs)),
-        consensus_opt.bootstrap_hosts.len(),
+        consensus_opt.bootstrap_nodes.len(),
         node_id,
     )
     .await
 }
 
 pub async fn init_validator(
-    options: &NodeOpt,
+    node_opt: &NodeOpt,
     consensus_opt: &ConsensusOpt,
     priv_key: PrivKey,
     pub_keys: Vec<PubKey>,
@@ -1008,7 +1044,7 @@ pub async fn init_validator(
 ) -> Node {
     debug!("Current node: {}", own_id);
 
-    let num_bootstrap = consensus_opt.bootstrap_hosts.len();
+    let num_bootstrap = consensus_opt.bootstrap_nodes.len();
 
     let mut bootstrap_nodes = vec![];
     for i in 0..num_bootstrap {
@@ -1022,12 +1058,7 @@ pub async fn init_validator(
         .into_iter()
         .enumerate()
         .map(|(idx, kp)| {
-            let multiaddr = parse_url(&format!(
-                "{}:{}",
-                consensus_opt.bootstrap_hosts[idx],
-                get_consensus_port(consensus_opt, idx)
-            ))
-            .unwrap();
+            let multiaddr = parse_url(consensus_opt.bootstrap_nodes[idx].as_str()).unwrap();
             (libp2p::identity::Keypair::Ed25519(kp.into()), multiaddr)
         })
         .take(num_bootstrap)
@@ -1039,13 +1070,27 @@ pub async fn init_validator(
         .map(|(kp, ma)| (Some(PeerId::from_public_key(&kp.public())), ma))
         .collect();
 
-    let (node_type, own_identity) = if own_id < num_bootstrap {
+    let (node_type, own_identity, port) = if own_id < num_bootstrap {
         (
             NetworkNodeType::Bootstrap,
             Some(bootstrap_priv[own_id].0.clone()),
+            consensus_opt.bootstrap_nodes[own_id]
+                .as_str()
+                .split_once(':')
+                .unwrap()
+                .1
+                .parse::<u16>()
+                .unwrap(),
         )
     } else {
-        (NetworkNodeType::Regular, None)
+        (
+            NetworkNodeType::Regular,
+            None,
+            match &node_opt.nonbootstrap_port {
+                Some(port) => *port,
+                None => (node_opt.nonbootstrap_base_port + own_id) as u16,
+            },
+        )
     };
 
     // hotshot requires this threshold to be at least 2/3rd of the nodes for safety guarantee reasons
@@ -1056,11 +1101,7 @@ pub async fn init_validator(
         to_connect_addrs,
         own_id,
         node_type,
-        parse_url(&format!(
-            "0.0.0.0:{:?}",
-            get_consensus_port(consensus_opt, own_id)
-        ))
-        .unwrap(),
+        parse_url(&format!("0.0.0.0:{:?}", port)).unwrap(),
         own_identity,
         consensus_opt,
     )
@@ -1073,13 +1114,13 @@ pub async fn init_validator(
 
     // Initialize the state and hotshot
     init_hotshot(
-        options,
+        node_opt,
         known_nodes,
         priv_key,
         threshold,
         own_id,
         own_network,
-        options.full,
+        node_opt.full,
         genesis,
         data_source,
         num_bootstrap,

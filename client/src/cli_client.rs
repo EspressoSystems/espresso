@@ -74,7 +74,7 @@ impl CliClient {
             keystores: Default::default(),
             variables: Default::default(),
             prev_output: Default::default(),
-            validators: Self::start_validators(&key_path, pub_key, &server_ports)?,
+            validators: Self::start_validators(tmp_dir.path(), pub_key, &server_ports)?,
             address_book: block_on(AddressBook::init()),
             server_port: server_ports[0],
             _tmp_dir: tmp_dir,
@@ -492,10 +492,11 @@ impl Validator {
         let id = self.id;
         let port = self.port;
 
-        // Clear the environment variable corresponding to the consensus ports to avoid all
+        // Clear the environment variable corresponding to the consensus port to avoid all
         // validators having the same address.
-        env::remove_var("ESPRESSO_VALIDATOR_CONSENSUS_PORTS");
+        env::remove_var("ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT");
 
+        let base_port = pick_unused_port().expect("No available port").to_string();
         let mut child = spawn_blocking(move || {
             cargo_run("espresso-validator", "espresso-validator")
                 .map_err(err)?
@@ -520,18 +521,18 @@ impl Validator {
                     "5",
                     "--bootstrap-mesh-n",
                     "15",
-                    "--mesh-n-high",
+                    "--nonbootstrap-mesh-n-high",
                     "15",
-                    "--mesh-n-low",
+                    "--nonbootstrap-mesh-n-low",
                     "8",
-                    "--mesh-outbound-min",
+                    "--nonbootstrap-mesh-outbound-min",
                     "4",
-                    "--mesh-n",
+                    "--nonbootstrap-mesh-n",
                     "12",
-                    "--bootstrap-hosts",
-                    "localhost",
-                    "--base-consensus-port",
-                    &pick_unused_port().expect("No available port").to_string(),
+                    "--bootstrap-nodes",
+                    &format!("localhost:{}", base_port),
+                    "--nonbootstrap-base-port",
+                    &base_port,
                 ])
                 .env("ESPRESSO_VALIDATOR_QUERY_PORT", port.to_string())
                 .stdin(Stdio::piped())
