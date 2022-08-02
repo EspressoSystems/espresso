@@ -21,6 +21,7 @@ use ark_serialize::*;
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
+use cld::ClDuration;
 use dirs::data_local_dir;
 use espresso_core::{
     committee::Committee,
@@ -53,16 +54,17 @@ use libp2p::{multiaddr, Multiaddr, PeerId};
 use libp2p_networking::network::{MeshParams, NetworkNodeConfigBuilder, NetworkNodeType};
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
 use server::request_body;
+use snafu::Snafu;
 use std::collections::hash_map::HashMap;
 use std::collections::HashSet;
 use std::env;
+use std::fmt::{self, Display, Formatter};
 use std::fs;
 use std::io::Read;
-use std::num::NonZeroUsize;
+use std::num::{NonZeroUsize, ParseIntError};
 use std::path::{Path, PathBuf};
 use std::str;
 use std::str::FromStr;
-use std::time::Duration;
 use structopt::StructOpt;
 use surf::Url;
 use tide::StatusCode;
@@ -114,6 +116,52 @@ type PLNetwork = Libp2pNetwork<
     Ed25519Pub,
 >;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ratio {
+    pub numerator: u64,
+    pub denominator: u64,
+}
+
+impl From<Ratio> for (u64, u64) {
+    fn from(r: Ratio) -> Self {
+        (r.numerator, r.denominator)
+    }
+}
+
+impl Display for Ratio {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}:{}", self.numerator, self.denominator)
+    }
+}
+
+#[derive(Debug, Snafu)]
+pub enum ParseRatioError {
+    #[snafu(display("numerator and denominator must be separated by :"))]
+    MissingDelimiter,
+    InvalidNumerator {
+        err: ParseIntError,
+    },
+    InvalidDenominator {
+        err: ParseIntError,
+    },
+}
+
+impl FromStr for Ratio {
+    type Err = ParseRatioError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (num, den) = s.split_once(':').ok_or(ParseRatioError::MissingDelimiter)?;
+        Ok(Self {
+            numerator: num
+                .parse()
+                .map_err(|err| ParseRatioError::InvalidNumerator { err })?,
+            denominator: den
+                .parse()
+                .map_err(|err| ParseRatioError::InvalidDenominator { err })?,
+        })
+    }
+}
+
 #[derive(Debug, StructOpt)]
 pub struct NodeOpt {
     /// Whether to reset the persisted state.
@@ -162,28 +210,64 @@ pub struct NodeOpt {
     #[structopt(long, default_value = "9000")]
     pub nonbootstrap_base_port: usize,
 
-    /// Minimum time (in seconds) to wait for submitted transactions before proposing a block.
+    /// Minimum time to wait for submitted transactions before proposing a block.
     ///
     /// Increasing this trades off latency for throughput: the rate of new block proposals gets
     /// slower, but each block is proportionally larger. Because of batch verification, larger
     /// blocks should lead to increased throughput.
     #[structopt(
-        long = "min-propose-time",
+        long,
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
-        default_value = "0"
+        default_value = "0s"
     )]
-    pub min_propose_time_secs: u64,
+    pub min_propose_time: ClDuration,
 
-    /// Maximum time (in seconds) to wait for submitted transactions before proposing a block.
+    /// Maximum time to wait for submitted transactions before proposing a block.
     ///
     /// If a validator has not received any transactions after `min-propose-time`, it will wait up
     /// to `max-propose-time` before giving up and submitting an empty block.
     #[structopt(
-        long = "max-propose-time",
+        long,
         env = "ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME",
-        default_value = "10"
+        default_value = "10s"
     )]
-    pub max_propose_time_secs: u64,
+    pub max_propose_time: ClDuration,
+
+    /// Base duration for next-view timeout.
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT",
+        default_value = "100s"
+    )]
+    pub next_view_timeout: ClDuration,
+
+    /// The exponential backoff ratio for the next-view timeout.
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_TIMEOUT_RATIO",
+        default_value = "11:10"
+    )]
+    pub timeout_ratio: Ratio,
+
+    /// The delay a leader inserts before starting pre-commit.
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_ROUND_START_DELAY",
+        default_value = "1ms"
+    )]
+    pub round_start_delay: ClDuration,
+
+    /// Delay after init before starting consensus.
+    #[structopt(long, env = "ESPRESSO_VALIDATOR_START_DELAY", default_value = "1ms")]
+    pub start_delay: ClDuration,
+
+    /// Maximum number of transactions in a block.
+    #[structopt(
+        long,
+        env = "ESPRESSO_VALIDATOR_MAX_TRANSACTIONS",
+        default_value = "10000"
+    )]
+    pub max_transactions: NonZeroUsize,
 }
 
 impl Default for NodeOpt {
@@ -193,12 +277,20 @@ impl Default for NodeOpt {
 }
 
 impl NodeOpt {
-    pub fn min_propose_time(&self) -> Duration {
-        Duration::from_secs(self.min_propose_time_secs)
-    }
-
-    pub fn max_propose_time(&self) -> Duration {
-        Duration::from_secs(self.max_propose_time_secs)
+    pub fn check(&self) -> Result<(), String> {
+        if self.max_propose_time < self.min_propose_time {
+            return Err("max propose time must not be less than min propose time".into());
+        }
+        if self.max_propose_time.is_zero() {
+            return Err("max propose time must be non-zero".into());
+        }
+        if self.next_view_timeout <= self.max_propose_time {
+            return Err("next view timeout must be greater than max propose time".into());
+        }
+        if self.next_view_timeout <= self.round_start_delay {
+            return Err("next view timeout must be greater than round start delay".into());
+        }
+        Ok(())
     }
 }
 
@@ -552,14 +644,14 @@ async fn init_hotshot(
     let config = HotShotConfig {
         total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
         threshold: NonZeroUsize::new(threshold as usize).unwrap(),
-        max_transactions: NonZeroUsize::new(100).unwrap(),
+        max_transactions: options.max_transactions,
         known_nodes,
-        next_view_timeout: 100_000,
-        timeout_ratio: (11, 10),
-        round_start_delay: 1,
-        start_delay: 1,
-        propose_min_round_time: options.min_propose_time(),
-        propose_max_round_time: options.max_propose_time(),
+        next_view_timeout: options.next_view_timeout.as_millis() as u64,
+        timeout_ratio: options.timeout_ratio.into(),
+        round_start_delay: options.round_start_delay.as_millis() as u64,
+        start_delay: options.start_delay.as_millis() as u64,
+        propose_min_round_time: *options.min_propose_time,
+        propose_max_round_time: *options.max_propose_time,
         num_bootstrap,
     };
     debug!(?config);
