@@ -425,6 +425,12 @@ impl FullState {
                             let mut txn_hashes = Vec::new();
                             let mut nullifiers_delta = Vec::new();
                             let mut memo_events = Vec::new();
+                            for txn in block.block.0.iter() {
+                                for o in txn.output_commitments() {
+                                    self.records_pending_memos.push(o.to_field_element());
+                                }
+                            }
+
                             for (txn_id, (((txn, proofs), memos), signatures)) in block
                                 .block
                                 .0
@@ -439,9 +445,7 @@ impl FullState {
                                     nullifiers_delta.push(n);
                                 }
                                 let txn_uids = &block_uids[txn_id];
-                                for o in txn.output_commitments() {
-                                    self.records_pending_memos.push(o.to_field_element());
-                                }
+
                                 let merkle_tree = &mut self.records_pending_memos;
                                 let merkle_paths = txn_uids
                                     .iter()

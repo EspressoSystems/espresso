@@ -349,7 +349,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
             txn.memos.push(memo);
         }
         txn.signature = txn_info.sig;
-        
+
         Self::post(&self.validator_client, "/submit", &txn).await
     }
 
