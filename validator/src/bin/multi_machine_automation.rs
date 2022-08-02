@@ -12,15 +12,13 @@
 
 use async_std::task::{sleep, spawn_blocking};
 use escargot::CargoBuild;
-use espresso_validator::{NodeOpt, SecretKeySeed};
+use espresso_validator::NodeOpt;
 use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use structopt::StructOpt;
-use tide::http::Url;
 
 #[derive(StructOpt)]
 #[structopt(
@@ -30,22 +28,6 @@ use tide::http::Url;
 struct Options {
     #[structopt(flatten)]
     node_opt: NodeOpt,
-
-    /// Path to the node configuration file.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONFIG_PATH")]
-    pub config: Option<PathBuf>,
-
-    /// Override `seed` from the node configuration file.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
-    pub secret_key_seed: Option<SecretKeySeed>,
-
-    /// Override `bootstrap_nodes` from the node configuration file.
-    #[structopt(
-        long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS",
-        value_delimiter = ","
-    )]
-    pub bootstrap_nodes: Option<Vec<Url>>,
 
     /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of
     /// non-bootstrap nodes.
@@ -108,16 +90,15 @@ async fn main() {
     // to construct a command line for each child, so the child processes shouldn't get their
     // options from the environment. Clear the environment variables corresponding to each option
     // that we will set explicitly in the command line.
-    env::remove_var("ESPRESSO_VALIDATOR_CONFIG_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_SECRET_KEY_SEED");
-    env::remove_var("ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS");
+    env::remove_var("ESPRESSO_VALIDATOR_BOOTSTRAP_NODES");
     env::remove_var("ESPRESSO_VALIDATOR_PUB_KEY_PATH");
     env::remove_var("ESPRESSO_FAUCET_PUB_KEY");
     env::remove_var("ESPRESSO_VALIDATOR_STORE_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_WEB_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_API_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_QUERY_PORT");
-    env::remove_var("ESPRESSO_VALIDATOR_CONSENSUS_PORT");
+    env::remove_var("ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT");
 
     let mut args = vec![];
     if options.node_opt.reset_store_state {
@@ -146,29 +127,6 @@ async fn main() {
         api_path = path.display().to_string();
         args.push("--api");
         args.push(&api_path);
-    }
-    let config_path;
-    if let Some(path) = &options.config {
-        config_path = path.display().to_string();
-        args.push("--config");
-        args.push(&config_path);
-    }
-    let secret_key_seed;
-    if let Some(seed) = &options.secret_key_seed {
-        secret_key_seed = seed.to_string();
-        args.push("--secret-key-seed");
-        args.push(&secret_key_seed);
-    }
-    let bootstrap_nodes = options.bootstrap_nodes.as_ref().map(|nodes| {
-        nodes
-            .iter()
-            .map(|node| node.to_string())
-            .collect::<Vec<_>>()
-            .join(",")
-    });
-    if let Some(nodes) = &bootstrap_nodes {
-        args.push("--bootstrap-nodes");
-        args.push(nodes);
     }
     let num_nodes_str = options.num_nodes.to_string();
     let num_nodes = num_nodes_str.parse::<usize>().unwrap();
