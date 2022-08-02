@@ -145,10 +145,10 @@ where
 {
     fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
         match self {
-            KVMerkleTerminalNode::EmptySubtree => {
+            KVMerkleTerminalNode::<KVHash>::EmptySubtree => {
                 writer.write_all(&[0]).map_err(SerializationError::from)
             }
-            KVMerkleTerminalNode::Leaf { height, key, value } => {
+            KVMerkleTerminalNode::<KVHash>::Leaf { height, key, value } => {
                 writer.write_all(&[1]).map_err(SerializationError::from)?;
                 CanonicalSerialize::serialize(height, &mut writer)?;
                 CanonicalSerialize::serialize(key, &mut writer)?;
@@ -159,8 +159,8 @@ where
 
     fn serialized_size(&self) -> usize {
         1 + match self {
-            KVMerkleTerminalNode::EmptySubtree => 0,
-            KVMerkleTerminalNode::Leaf { height, key, value } => {
+            KVMerkleTerminalNode::<KVHash>::EmptySubtree => 0,
+            KVMerkleTerminalNode::<KVHash>::Leaf { height, key, value } => {
                 height.serialized_size() + key.serialized_size() + value.serialized_size()
             }
         }
@@ -177,12 +177,12 @@ where
         let mut flag = [0u8];
         reader.read_exact(&mut flag)?;
         match flag[0] {
-            0 => Ok(KVMerkleTerminalNode::EmptySubtree),
+            0 => Ok(KVMerkleTerminalNode::<KVHash>::EmptySubtree),
             1 => {
                 let height = CanonicalDeserialize::deserialize(&mut reader)?;
                 let key = CanonicalDeserialize::deserialize(&mut reader)?;
                 let value = CanonicalDeserialize::deserialize(&mut reader)?;
-                Ok(KVMerkleTerminalNode::Leaf { height, key, value })
+                Ok(KVMerkleTerminalNode::<KVHash>::Leaf { height, key, value })
             }
             _ => Err(SerializationError::InvalidData),
         }
@@ -278,8 +278,8 @@ where
 
         if running_hash == root {
             Ok(match &self.terminal_node {
-                KVMerkleTerminalNode::EmptySubtree {} => false,
-                KVMerkleTerminalNode::Leaf { key: leaf_key, .. } => (leaf_key == &key),
+                KVMerkleTerminalNode::<KVHash>::EmptySubtree {} => false,
+                KVMerkleTerminalNode::<KVHash>::Leaf { key: leaf_key, .. } => (leaf_key == &key),
             })
         } else {
             Err(running_hash)
@@ -340,13 +340,16 @@ where
 
         match end_branch {
             ForgottenSubtree { .. } => None,
-            EmptySubtree => Some((
-                None,
-                KVMerkleProof {
-                    terminal_node: KVMerkleTerminalNode::EmptySubtree,
-                    path,
-                },
-            )),
+            EmptySubtree => {
+                path.reverse();
+                Some((
+                    None,
+                    KVMerkleProof::<KVHash> {
+                        terminal_node: KVMerkleTerminalNode::<KVHash>::EmptySubtree,
+                        path,
+                    },
+                ))
+            }
             Leaf {
                 height,
                 key: leaf_key,
@@ -354,18 +357,27 @@ where
                 ..
             } => {
                 path.reverse();
-                assert_eq!(key, *leaf_key);
-                Some((
-                    Some(*leaf_value),
-                    KVMerkleProof {
-                        terminal_node: KVMerkleTerminalNode::Leaf {
-                            height: *height,
-                            key: *leaf_key,
-                            value: *leaf_value,
-                        },
-                        path,
+                let proof = KVMerkleProof::<KVHash> {
+                    terminal_node: KVMerkleTerminalNode::<KVHash>::Leaf {
+                        height: *height,
+                        key: *leaf_key,
+                        value: *leaf_value,
                     },
-                ))
+                    path,
+                };
+                if key == *leaf_key {
+                    Some((
+                        Some(*leaf_value),
+                        proof,
+                    ))
+                }
+                else {
+                    Some((
+                        None,
+                        proof,
+                    ))
+                }
+                
             }
             Branch { .. } => panic!("This tree has more levels than my hash has bits!"),
         }
@@ -505,8 +517,8 @@ where
         } = end_branch
         {
             if leaf_key == key {
-                ret = Some(KVMerkleProof {
-                    terminal_node: KVMerkleTerminalNode::Leaf {
+                ret = Some(KVMerkleProof::<KVHash> {
+                    terminal_node: KVMerkleTerminalNode::<KVHash>::Leaf {
                         height,
                         key: leaf_key,
                         value: leaf_value,
@@ -643,12 +655,12 @@ where
 
         end_branch = match end_branch {
             ForgottenSubtree { digest } => match proof.terminal_node {
-                KVMerkleTerminalNode::EmptySubtree => {
+                KVMerkleTerminalNode::<KVHash>::EmptySubtree => {
                     assert_eq!(digest, KVHash::empty_digest());
                     EmptySubtree
                 }
 
-                KVMerkleTerminalNode::Leaf { height, key, value } => {
+                KVMerkleTerminalNode::<KVHash>::Leaf { height, key, value } => {
                     Self::new_leaf(height, key, value)
                 }
             },
@@ -732,7 +744,7 @@ mod tests {
                     .map(|_| {let n = Nullifier::random_for_test(&mut prng); arr![<TestTreeHash as KVTreeHash>::Digest; <TestTreeHash as KVTreeHash>::hash_leaf(TestNulls(n),TestNulls(n))]})
                     .collect::<Vec<_>>();
                 let pf = KVMerkleProof::<TestTreeHash> {
-                    terminal_node: KVMerkleTerminalNode::EmptySubtree,
+                    terminal_node: KVMerkleTerminalNode::<TestTreeHash>::EmptySubtree,
                     path: pf,
                 };
                 let root = pf.check(TestNulls(elem), KVMerkleTree::<TestTreeHash>::default().hash()).unwrap_err();
@@ -770,8 +782,9 @@ mod tests {
         for (u, elem) in updates.iter().zip(update_elems.iter()) {
             let elem = *elem;
             hset.insert(u);
+
             let (val, pf) = t.lookup(TestNulls(elem)).unwrap();
-            let in_set = if val.is_none() { false } else { true };
+            let in_set = if val.is_some() { true } else { false };
             t.insert(TestNulls(elem), TestNulls(elem));
             assert_eq!(pf.check(TestNulls(elem), lw_t.hash()).unwrap(), in_set);
             lw_t.remember(TestNulls(elem), pf).unwrap();
@@ -780,7 +793,6 @@ mod tests {
             let in_new_lw_t = if lw_t_val.is_none() { false } else { true };
 
             assert!(in_new_lw_t);
-
             assert!(t.lookup(TestNulls(elem)).unwrap().0.is_some());
 
             assert_eq!(lw_t.hash(), t.hash());
@@ -803,9 +815,8 @@ mod tests {
                 }
             };
             let elem = update_vals[&val];
-
             let (t_val, pf) = t.lookup(TestNulls(elem)).unwrap();
-            let t_contains = if t_val.is_none() { false } else { true };
+            let t_contains = if t_val.is_some() { true } else { false };
 
             if should_be_there {
                 assert!(hset.contains(&val));
@@ -814,7 +825,7 @@ mod tests {
             assert_eq!(hset.contains(&val), t_contains);
             assert_eq!(
                 t_contains,
-                KVMerkleProof::check(&pf, TestNulls(elem), t.hash()).unwrap()
+                KVMerkleProof::<TestTreeHash>::check(&pf, TestNulls(elem), t.hash()).unwrap()
             );
         }
     }
