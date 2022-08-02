@@ -13,6 +13,8 @@
 use crate::query_data::{BlockQueryData, StateQueryData};
 use espresso_core::state::{BlockCommitment, TransactionCommitment};
 use jf_cap::MerkleTree;
+use std::error::Error;
+use std::fmt::Debug;
 
 /// Trait to be implemented on &'a DataSource for lifetime management purposes
 pub trait AvailabilityDataSource {
@@ -29,7 +31,7 @@ pub trait AvailabilityDataSource {
 }
 
 pub trait UpdateAvailabilityData {
-    type Error;
+    type Error: Error + Debug;
     fn append_blocks(
         &mut self,
         blocks: &mut Vec<BlockQueryData>,

@@ -10,24 +10,19 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::api::EspressoError;
 use crate::ser_test;
+use crate::update_query_data_source::UpdateQueryDataSource;
 use crate::validator_node::*;
 use arbitrary::Arbitrary;
 use arbitrary_wrappers::*;
 use ark_serialize::CanonicalSerialize;
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
-use async_std::task::block_on;
 use async_trait::async_trait;
-use commit::Committable;
 use espresso_availability_api::data_source::UpdateAvailabilityData;
-use espresso_availability_api::query_data::BlockQueryData;
-use espresso_availability_api::query_data::StateQueryData;
 use espresso_catchup_api::data_source::UpdateCatchUpData;
 use espresso_core::full_persistence::FullPersistence;
 pub use espresso_core::state::state_comm::LedgerStateCommitment;
-use espresso_core::state::BlockCommitment;
 use espresso_core::{
     ledger::EspressoLedger,
     set_merkle_tree::*,
@@ -37,6 +32,7 @@ use espresso_core::{
     },
 };
 use espresso_metastate_api::data_source::UpdateMetaStateData;
+use espresso_status_api::data_source::UpdateStatusData;
 pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::{channel::mpsc, future::RemoteHandle, select, task::SpawnExt};
@@ -316,17 +312,6 @@ struct FullState {
     // Clients which have subscribed to events starting at some time in the future, to be added to
     // `subscribers` when the time comes.
     pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<LedgerEvent<EspressoLedger>>>>,
-
-    // Handles to the new store go here for now, in order to minimize the potential failure
-    // modes for the refactoring. Once we move over to the tide_disco based services, we may be
-    // able to remove most of this FullNode/FullState, leaving just the HotShotEvent processing
-    // and whatever needs to be added for subscription support.
-
-    // The status updates are made elsewhere, because that won't work through dyn.
-    catchup_store: Arc<RwLock<dyn UpdateCatchUpData<Error = EspressoError> + Send + Sync>>,
-    availability_store:
-        Arc<RwLock<dyn UpdateAvailabilityData<Error = EspressoError> + Send + Sync>>,
-    meta_state_store: Arc<RwLock<dyn UpdateMetaStateData<Error = EspressoError> + Send + Sync>>,
 }
 
 impl FullState {
@@ -390,11 +375,6 @@ impl FullState {
                         }
 
                         Ok((mut uids, nullifier_proofs)) => {
-                            let records_from = if uids.is_empty() {
-                                self.validator.record_merkle_commitment.num_leaves
-                            } else {
-                                uids[0]
-                            };
                             let hist_index = self.full_persisted.state_iter().len();
                             assert!(hist_index > 0);
                             let block_index = hist_index - 1;
@@ -494,53 +474,6 @@ impl FullState {
                             );
                             self.full_persisted.store_nullifier_set(&nullifiers);
                             self.full_persisted.commit_accepted();
-                            let event_index;
-                            {
-                                let mut catchup_store = block_on(self.catchup_store.write());
-                                event_index = catchup_store.event_count() as u64;
-                                if let Err(e) =
-                                    catchup_store.append_events(&mut vec![LedgerEvent::Commit {
-                                        block: block.clone(),
-                                        block_id: block_index as u64,
-                                        state_comm: self.validator.commit(),
-                                    }])
-                                {
-                                    // log for now... this should be propagated once we get rid of FullState
-                                    tracing::warn!("append_events returned error {}", e);
-                                }
-                            }
-                            {
-                                let mut availability_store =
-                                    block_on(self.availability_store.write());
-                                if let Err(e) = availability_store.append_blocks(
-                                    &mut vec![BlockQueryData {
-                                        raw_block: block.clone(),
-                                        block_hash: BlockCommitment(block.block.commit()),
-                                        block_id: block_index as u64,
-                                        records_from,
-                                        record_count: uids.len() as u64,
-                                        txn_hashes,
-                                    }],
-                                    &mut vec![StateQueryData {
-                                        state: state.clone(),
-                                        commitment: state.commit(),
-                                        block_id: block_index as u64,
-                                        event_index,
-                                    }],
-                                ) {
-                                    // log for now... this should be propagated once we get rid of FullState
-                                    tracing::warn!("append_blocks returned error {}", e);
-                                }
-                            }
-                            {
-                                let mut meta_state_store = block_on(self.meta_state_store.write());
-                                if let Err(e) = meta_state_store
-                                    .append_block_nullifiers(block_index as u64, nullifiers_delta)
-                                {
-                                    // log for now... this should be propagated once we get rid of FullState
-                                    tracing::warn!("append_block_nullifiers returned error {}", e);
-                                }
-                            }
 
                             // Update the nullifier proofs in the block so that clients do not have
                             // to worry about out of date nullifier proofs.
@@ -734,15 +667,6 @@ impl<'a> HotShotQueryService<'a> {
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
         mut full_persisted: FullPersistence,
-        catchup_store: Arc<
-            RwLock<impl UpdateCatchUpData<Error = EspressoError> + Send + Sync + 'static>,
-        >,
-        availability_store: Arc<
-            RwLock<impl UpdateAvailabilityData<Error = EspressoError> + Send + Sync + 'static>,
-        >,
-        meta_state_store: Arc<
-            RwLock<impl UpdateMetaStateData<Error = EspressoError> + Send + Sync + 'static>,
-        >,
     ) -> Self {
         //todo !jeb.bearer If we are not starting from the genesis of the ledger, query the full
         // state at this point from another full node, like
@@ -783,9 +707,6 @@ impl<'a> HotShotQueryService<'a> {
             proposed: ElaboratedBlock::default(),
             subscribers: Default::default(),
             pending_subscribers: Default::default(),
-            catchup_store,
-            availability_store,
-            meta_state_store,
         }));
 
         // Spawn event handling task.
@@ -908,12 +829,30 @@ impl<'a> QueryService for HotShotQueryService<'a> {
 }
 
 /// A full node is a QueryService running alongside a lightweight validator.
-pub struct FullNode<'a, NET: PLNet, STORE: PLStore> {
+pub struct FullNode<'a, NET, STORE, CU, AV, MS, ST>
+where
+    NET: PLNet,
+    STORE: PLStore,
+    CU: UpdateCatchUpData + Sized + Send + Sync,
+    AV: UpdateAvailabilityData + Sized + Send + Sync,
+    MS: UpdateMetaStateData + Sized + Send + Sync,
+    ST: UpdateStatusData + Sized + Send + Sync,
+{
     validator: LightWeightNode<NET, STORE>,
+    #[allow(dead_code)]
+    data_source_updater: Arc<RwLock<UpdateQueryDataSource<CU, AV, MS, ST>>>,
     query_service: HotShotQueryService<'a>,
 }
 
-impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
+impl<'a, NET, STORE, CU, AV, MS, ST> FullNode<'a, NET, STORE, CU, AV, MS, ST>
+where
+    NET: PLNet,
+    STORE: PLStore,
+    CU: UpdateCatchUpData + Sized + Send + Sync + 'static,
+    AV: UpdateAvailabilityData + Sized + Send + Sync + 'static,
+    MS: UpdateMetaStateData + Sized + Send + Sync + 'static,
+    ST: UpdateStatusData + Sized + Send + Sync + 'static,
+{
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         validator: LightWeightNode<NET, STORE>,
@@ -925,37 +864,39 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
         full_persisted: FullPersistence,
-        catchup_store: Arc<
-            RwLock<impl UpdateCatchUpData<Error = EspressoError> + Send + Sync + 'static>,
-        >,
-        availability_store: Arc<
-            RwLock<impl UpdateAvailabilityData<Error = EspressoError> + Send + Sync + 'static>,
-        >,
-        meta_state_store: Arc<
-            RwLock<impl UpdateMetaStateData<Error = EspressoError> + Send + Sync + 'static>,
-        >,
+        catchup_store: Arc<RwLock<CU>>,
+        availability_store: Arc<RwLock<AV>>,
+        meta_state_store: Arc<RwLock<MS>>,
+        status_store: Arc<RwLock<ST>>,
     ) -> Self {
         let query_service = HotShotQueryService::new(
             validator.subscribe(),
             univ_param,
-            state,
+            state.clone(),
             record_merkle_tree,
             nullifiers,
             unspent_memos,
             full_persisted,
+        );
+        let data_source_updater = UpdateQueryDataSource::new(
+            validator.subscribe(),
             catchup_store,
             availability_store,
             meta_state_store,
+            status_store,
+            state,
         );
         Self {
             validator,
+            data_source_updater,
             query_service,
         }
     }
 
     fn as_validator(
         &self,
-    ) -> &impl Validator<Event = <FullNode<'a, NET, STORE> as Validator>::Event> {
+    ) -> &impl Validator<Event = <FullNode<'a, NET, STORE, CU, AV, MS, ST> as Validator>::Event>
+    {
         &self.validator
     }
 
@@ -965,7 +906,15 @@ impl<'a, NET: PLNet, STORE: PLStore> FullNode<'a, NET, STORE> {
 }
 
 #[async_trait]
-impl<'a, NET: PLNet, STORE: PLStore> Validator for FullNode<'a, NET, STORE> {
+impl<'a, NET, STORE, CU, AV, MS, ST> Validator for FullNode<'a, NET, STORE, CU, AV, MS, ST>
+where
+    NET: PLNet,
+    STORE: PLStore,
+    CU: UpdateCatchUpData + Sized + Send + Sync + 'static,
+    AV: UpdateAvailabilityData + Sized + Send + Sync + 'static,
+    MS: UpdateMetaStateData + Sized + Send + Sync + 'static,
+    ST: UpdateStatusData + Sized + Send + Sync + 'static,
+{
     type Event = <LightWeightNode<NET, STORE> as Validator>::Event;
 
     async fn current_state(&self) -> Result<Option<ValidatorState>, HotShotError> {
@@ -986,7 +935,15 @@ impl<'a, NET: PLNet, STORE: PLStore> Validator for FullNode<'a, NET, STORE> {
 }
 
 #[async_trait]
-impl<'a, NET: PLNet, STORE: PLStore> QueryService for FullNode<'a, NET, STORE> {
+impl<'a, NET, STORE, CU, AV, MS, ST> QueryService for FullNode<'a, NET, STORE, CU, AV, MS, ST>
+where
+    NET: PLNet,
+    STORE: PLStore,
+    CU: UpdateCatchUpData + Sized + Send + Sync + 'static,
+    AV: UpdateAvailabilityData + Sized + Send + Sync + 'static,
+    MS: UpdateMetaStateData + Sized + Send + Sync + 'static,
+    ST: UpdateStatusData + Sized + Send + Sync + 'static,
+{
     async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError> {
         self.as_query_service().get_summary().await
     }
@@ -1220,6 +1177,23 @@ mod tests {
         }
     }
 
+    impl UpdateStatusData for TestOnlyMockAllStores {
+        type Error = EspressoError;
+        fn set_status(
+            &mut self,
+            _status: espresso_status_api::query_data::ValidatorStatus,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn edit_status<U, F>(&mut self, _op: F) -> Result<(), Self::Error>
+        where
+            F: FnOnce(&mut espresso_status_api::query_data::ValidatorStatus) -> Result<(), U>,
+            Self::Error: From<U>,
+        {
+            Ok(())
+        }
+    }
+
     fn test_query_service(
         txs: Vec<Vec<TestTxSpec>>,
         nkeys: u8,
@@ -1252,7 +1226,7 @@ mod tests {
             let full_persisted =
                 FullPersistence::new(temp_persisted_dir.path(), "full_store").unwrap();
 
-            let mock_store = Arc::new(RwLock::new(TestOnlyMockAllStores::default()));
+            let _mock_store = Arc::new(RwLock::new(TestOnlyMockAllStores::default()));
             let qs = HotShotQueryService::new(
                 events,
                 &*UNIVERSAL_PARAM,
@@ -1261,9 +1235,6 @@ mod tests {
                 initial_state.2,
                 initial_state.3,
                 full_persisted,
-                mock_store.clone(),
-                mock_store.clone(),
-                mock_store.clone(),
             );
 
             // The first event gives receiver memos for the records in the initial state of the

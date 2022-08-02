@@ -12,6 +12,8 @@
 
 use espresso_core::ledger::EspressoLedger;
 use seahorse::events::LedgerEvent;
+use std::error::Error;
+use std::fmt::Debug;
 
 pub trait CatchUpDataSource {
     type EventIterType: AsRef<[LedgerEvent<EspressoLedger>]>;
@@ -22,7 +24,7 @@ pub trait CatchUpDataSource {
 }
 
 pub trait UpdateCatchUpData {
-    type Error;
+    type Error: Error + Debug;
 
     fn event_count(&self) -> usize;
 
