@@ -189,6 +189,7 @@ services:
       - $ESPRESSO_ADDRESS_BOOK_PORT:$ESPRESSO_ADDRESS_BOOK_PORT/tcp
     environment:
       - ESPRESSO_ADDRESS_BOOK_PORT
+      - ADDRESS_BOOK_BASE_URL=0.0.0.0:$ESPRESSO_ADDRESS_BOOK_PORT
       - RUST_LOG
     volumes:
       - address-book-store:/store

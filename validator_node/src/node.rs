@@ -174,7 +174,7 @@ pub struct LedgerTransition {
     // None until valid memos for that block are received by the sender. Note that this may never
     // happen if the sender chooses to send the memos directly to the receiver without posting them
     // publicly.
-    pub memos: Vec<Option<(Vec<ReceiverMemo>, Signature)>>,
+    // pub memos: Vec<Option<(Vec<ReceiverMemo>, Signature)>>,
     pub uids: Vec<Vec<u64>>,
 }
 
@@ -226,25 +226,7 @@ pub trait QueryService {
     /// the associated bulletin board.
     async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<EspressoLedger>>;
 
-    /// Broadcast that a set of receiver memos corresponds to a particular transaction. The memos
-    /// must be signed using the signing key for the specified transaction. The sender of a message
-    /// may only post one set of receiver memos per transaction, so calling this function twice with
-    /// the same (block_id, txn_id) will fail. (Note that non-senders of a transaction are prevented
-    /// from effectively denying service by posting invalid memos for transactions they didn't send
-    /// by the signature mechanism).
-    ///
-    /// If successful, the memos will be available for querying via `get_memos`. In addition, an
-    /// event will be broadcast asynchronously to all subscribers informing them of the new memos
-    /// and the corresponding record uids and commitments.
-    async fn post_memos(
-        &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        signature: Signature,
-    ) -> Result<(), QueryServiceError>;
-
-    // TODO !keyao Return commitments and UIDs as well: https://gitlab.com/translucence/systems/system/-/issues/39.
+    /// TODO !keyao Return commitments and UIDs as well: https://gitlab.com/translucence/systems/system/-/issues/39.
     /// Get the receiver memos for a transaction, if they have been posted to the bulletin board.
     /// The result includes a signature over the contents of the memos using the signing key for the
     /// requested transaction, as proof that these memos are in fact the ones that the sender
@@ -254,12 +236,18 @@ pub trait QueryService {
         block_id: u64,
         txn_id: u64,
     ) -> Result<(Vec<ReceiverMemo>, Signature), QueryServiceError> {
-        let LedgerTransition { memos, .. } = self.get_block(block_id as usize).await?;
-        memos
+        let LedgerTransition { block, .. } = self.get_block(block_id as usize).await?;
+        let memos = block
+            .memos
             .get(txn_id as usize)
             .cloned()
-            .flatten()
-            .ok_or(QueryServiceError::InvalidTxnId {})
+            .ok_or(QueryServiceError::InvalidTxnId {})?;
+        let sig = block
+            .signatures
+            .get(txn_id as usize)
+            .cloned()
+            .ok_or(QueryServiceError::InvalidTxnId {})?;
+        Ok((memos, sig))
     }
 }
 
@@ -410,31 +398,68 @@ impl FullState {
                                 })
                                 .collect::<Vec<_>>();
                             self.full_persisted.store_block_uids(&block_uids);
-                            self.full_persisted
-                                .store_memos(&vec![None; block.block.0.len()]);
 
                             // Add the results of this block to our current state.
                             let mut nullifiers =
                                 self.full_persisted.get_latest_nullifier_set().unwrap();
                             let mut txn_hashes = Vec::new();
                             let mut nullifiers_delta = Vec::new();
-                            for (txn, proofs) in block.block.0.iter().zip(block.proofs.iter()) {
+                            let mut memo_events = Vec::new();
+                            for (txn_id, (((txn, proofs), memos), signatures)) in block
+                                .block
+                                .0
+                                .iter()
+                                .zip(block.proofs.iter())
+                                .zip(block.memos.iter())
+                                .zip(block.signatures.iter())
+                                .enumerate()
+                            {
                                 for n in txn.nullifiers() {
                                     nullifiers.insert(n);
                                     nullifiers_delta.push(n);
                                 }
+                                let txn_uids = &block_uids[txn_id];
                                 for o in txn.output_commitments() {
                                     self.records_pending_memos.push(o.to_field_element());
                                 }
+                                let merkle_tree = &mut self.records_pending_memos;
+                                let merkle_paths = txn_uids
+                                    .iter()
+                                    .map(|uid| {
+                                        merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path
+                                    })
+                                    .collect::<Vec<_>>();
+                                // Once we have generated proofs for the memos, we will not need to generate proofs for
+                                // these records again (unless specifically requested) so there is no need to keep them in
+                                // memory.
+                                for uid in txn_uids.iter() {
+                                    merkle_tree.forget(*uid);
+                                }
 
-                                let hash = TransactionCommitment(
-                                    ElaboratedTransaction {
-                                        txn: txn.clone(),
-                                        proofs: proofs.clone(),
-                                    }
-                                    .hash(),
-                                );
-                                txn_hashes.push(hash);
+                                let hash = ElaboratedTransaction {
+                                    txn: txn.clone(),
+                                    proofs: proofs.clone(),
+                                    memos: memos.clone(),
+                                    signature: signatures.clone(),
+                                }
+                                .hash();
+                                txn_hashes.push(TransactionCommitment(hash));
+                                let memo_event = LedgerEvent::Memos {
+                                    outputs: izip!(
+                                        memos.clone(),
+                                        txn.output_commitments(),
+                                        txn_uids.iter().cloned(),
+                                        merkle_paths
+                                    )
+                                    .collect(),
+                                    transaction: Some((
+                                        block_index as u64,
+                                        txn_id as u64,
+                                        hash,
+                                        txn.kind(),
+                                    )),
+                                };
+                                memo_events.push(memo_event);
                             }
                             self.num_txns += block.block.0.len();
                             self.cumulative_size += block.serialized_size();
@@ -466,6 +491,9 @@ impl FullState {
                                 block_id: block_index as u64,
                                 state_comm: self.validator.commit(),
                             });
+                            for memo_event in memo_events.into_iter() {
+                                self.send_event(memo_event);
+                            }
                         }
                     }
                 }
@@ -602,14 +630,6 @@ impl FullState {
                 .map_err(|err| QueryServiceError::PersistenceError {
                     msg: err.to_string(),
                 })?,
-            memos: self
-                .full_persisted
-                .memos_iter()
-                .nth(index)
-                .unwrap()
-                .map_err(|err| QueryServiceError::PersistenceError {
-                    msg: err.to_string(),
-                })?,
             uids: self
                 .full_persisted
                 .block_uids_iter()
@@ -619,81 +639,6 @@ impl FullState {
                     msg: err.to_string(),
                 })?,
         })
-    }
-
-    fn post_memos(
-        &mut self,
-        block_id: u64,
-        txn_id: u64,
-        new_memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), QueryServiceError> {
-        let block_id = block_id as usize;
-        let txn_id = txn_id as usize;
-
-        // Get the information about the committed block containing the relevant transaction.
-        let LedgerTransition {
-            block, uids, memos, ..
-        } = self.get_block(block_id)?;
-        let num_txns = block.block.0.len();
-        assert_eq!(uids.len(), num_txns);
-        assert_eq!(block.proofs.len(), num_txns);
-
-        // Validate `txn_id` and get the relevant information for the transaction within `block`.
-        if txn_id >= num_txns {
-            return Err(QueryServiceError::InvalidTxnId {});
-        }
-        let txn = &block.block.0[txn_id];
-        let hash = ElaboratedTransaction {
-            txn: txn.clone(),
-            proofs: block.proofs[txn_id].clone(),
-        }
-        .hash();
-        let uids = &uids[txn_id];
-
-        // Validate the new memos.
-        if memos[txn_id].is_some() {
-            return Err(QueryServiceError::MemosAlreadyPosted {});
-        }
-        if txn
-            .verify_receiver_memos_signature(&new_memos, &sig)
-            .is_err()
-        {
-            return Err(QueryServiceError::InvalidSignature {});
-        }
-        if new_memos.len() != txn.output_len() {
-            return Err(QueryServiceError::WrongNumberOfMemos {
-                expected: txn.output_len(),
-            });
-        }
-
-        // Authenticate the validity of the records corresponding to the memos.
-        let merkle_tree = &mut self.records_pending_memos;
-        let merkle_paths = uids
-            .iter()
-            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path)
-            .collect::<Vec<_>>();
-        // Once we have generated proofs for the memos, we will not need to generate proofs for
-        // these records again (unless specifically requested) so there is no need to keep them in
-        // memory.
-        for uid in uids {
-            merkle_tree.forget(*uid);
-        }
-
-        // Store and broadcast the new memos.
-        let event = LedgerEvent::Memos {
-            outputs: izip!(
-                new_memos,
-                txn.output_commitments(),
-                uids.iter().cloned(),
-                merkle_paths
-            )
-            .collect(),
-            transaction: Some((block_id as u64, txn_id as u64, hash, txn.kind())),
-        };
-        self.send_event(event);
-
-        Ok(())
     }
 }
 
@@ -877,17 +822,6 @@ impl<'a> QueryService for HotShotQueryService<'a> {
         let mut state = self.state.write().await;
         state.subscribe(i)
     }
-
-    async fn post_memos(
-        &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), QueryServiceError> {
-        let mut state = self.state.write().await;
-        state.post_memos(block_id, txn_id, memos, sig)
-    }
 }
 
 /// A full node is a QueryService running alongside a lightweight validator.
@@ -965,10 +899,6 @@ where
     fn as_query_service(&self) -> &(impl QueryService + 'a) {
         &self.query_service
     }
-
-    fn as_query_service_mut(&mut self) -> &mut (impl QueryService + 'a) {
-        &mut self.query_service
-    }
 }
 
 #[async_trait]
@@ -1044,18 +974,6 @@ where
     async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<EspressoLedger>> {
         self.as_query_service().subscribe(i).await
     }
-
-    async fn post_memos(
-        &mut self,
-        block_id: u64,
-        txn_id: u64,
-        memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), QueryServiceError> {
-        self.as_query_service_mut()
-            .post_memos(block_id, txn_id, memos, sig)
-            .await
-    }
 }
 
 #[cfg(test)]
@@ -1069,7 +987,7 @@ mod tests {
         universal_params::UNIVERSAL_PARAM,
     };
     use hotshot::data::VecQuorumCertificate;
-    use jf_cap::{sign_receiver_memos, KeyPair, MerkleLeafProof, MerkleTree};
+    use jf_cap::{MerkleLeafProof, MerkleTree, Signature};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
     use tempdir::TempDir;
@@ -1285,7 +1203,6 @@ mod tests {
         }
 
         let mut rng = ChaChaRng::from_seed([0x42u8; 32]);
-        let dummy_key_pair = KeyPair::generate(&mut rng);
         let temp_persisted_dir = TempDir::new("test_query_service").unwrap();
 
         block_on(async {
@@ -1306,7 +1223,7 @@ mod tests {
                 FullPersistence::new(temp_persisted_dir.path(), "full_store").unwrap();
 
             let _mock_store = Arc::new(RwLock::new(TestOnlyMockAllStores::default()));
-            let mut qs = HotShotQueryService::new(
+            let qs = HotShotQueryService::new(
                 events,
                 &*UNIVERSAL_PARAM,
                 initial_state.0,
@@ -1319,7 +1236,8 @@ mod tests {
             // The first event gives receiver memos for the records in the initial state of the
             // ledger. We can skip that to get to the real events starting at index 1.
             let mut events = qs.subscribe(1).await;
-            for (_, hist_block, _, hist_state, _) in history.iter() {
+            let mut expected_uid = initial_uid;
+            for (_, hist_block, memos, hist_state, _) in history.iter() {
                 match events.next().await.unwrap() {
                     LedgerEvent::Commit { block, .. } => {
                         assert_eq!(block, *hist_block);
@@ -1337,37 +1255,12 @@ mod tests {
                             }
                         }
                     }
-
                     event => {
                         panic!("Expected Commit event, got {:?}", event);
                     }
                 }
-            }
-
-            // We should now be able to submit receiver memos for the blocks that just got committed.
-            let mut expected_uid = initial_uid;
-            for (block_id, (_, block, memos, _, _)) in history.iter().enumerate() {
-                for (txn_id, (txn, (memos, sig))) in block.block.0.iter().zip(memos).enumerate() {
-                    // Posting memos with an invalid signature should fail.
-                    let dummy_signature = sign_receiver_memos(&dummy_key_pair, memos).unwrap();
-                    match qs
-                        .post_memos(
-                            block_id as u64,
-                            txn_id as u64,
-                            memos.clone(),
-                            dummy_signature,
-                        )
-                        .await
-                    {
-                        Err(QueryServiceError::InvalidSignature { .. }) => {}
-                        res => {
-                            panic!("Expected error InvalidSignature, got {:?}", res);
-                        }
-                    }
-
-                    qs.post_memos(block_id as u64, txn_id as u64, memos.clone(), sig.clone())
-                        .await
-                        .unwrap();
+                // After commit we should get all the memo events fot he block
+                for (txn, (memos, _sig)) in hist_block.block.0.iter().zip(memos) {
                     match events.next().await.unwrap() {
                         LedgerEvent::Memos { outputs, .. } => {
                             // After successfully posting memos, we should get a Memos event.
@@ -1382,9 +1275,9 @@ mod tests {
                                 assert_eq!(uid, expected_uid);
 
                                 // The event should contain a valid inclusion proof for each
-                                // commitment. This proof is relative to the root hash of the
-                                // latest validator state in the event stream.
-                                let state = &history[history.len() - 1].3;
+                                // commitment. This proof is relative to the root hash of when the
+                                // the transaction was accepted
+                                let state = &hist_state;
                                 MerkleTree::check_proof(
                                     state.record_merkle_commitment.root_value,
                                     uid,
@@ -1400,28 +1293,6 @@ mod tests {
                             panic!("Expected Memos event, got {:?}", event);
                         }
                     }
-
-                    // Posting the same memos twice should fail.
-                    // todo !jeb.bearer re-enable this test when persistent memo storage is supported
-                    //      https://github.com/EspressoSystems/espresso/issues/345
-                    // match qs
-                    //     .post_memos(block_id as u64, txn_id as u64, memos.clone(), sig.clone())
-                    //     .await
-                    // {
-                    //     Err(QueryServiceError::MemosAlreadyPosted { .. }) => {}
-                    //     res => {
-                    //         panic!("Expected error MemosAlreadyPosted, got {:?}", res);
-                    //     }
-                    // }
-
-                    // We should be able to query the newly posted memos.
-                    // todo !jeb.bearer re-enable this test when persistent memo storage is supported
-                    //      https://github.com/EspressoSystems/espresso/issues/345
-                    // let (queried_memos, sig) =
-                    //     qs.get_memos(block_id as u64, txn_id as u64).await.unwrap();
-                    // txn.verify_receiver_memos_signature(&queried_memos, &sig)
-                    //     .unwrap();
-                    // assert_eq!(queried_memos, *memos);
                 }
             }
 

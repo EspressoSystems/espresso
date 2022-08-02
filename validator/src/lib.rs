@@ -69,9 +69,9 @@ use tide_websockets::{WebSocket, WebSocketConnection};
 use tracing::{debug, event, Level};
 use validator_node::{
     api::EspressoError,
-    api::{server, BlockId, PostMemos, TransactionId, UserPubKey},
+    api::{server, UserPubKey},
     node,
-    node::{EventStream, HotShotEvent, QueryService, Validator},
+    node::{EventStream, HotShotEvent, Validator},
 };
 
 mod disco;
@@ -563,7 +563,7 @@ async fn init_hotshot(
         threshold: NonZeroUsize::new(threshold as usize).unwrap(),
         max_transactions: NonZeroUsize::new(100).unwrap(),
         known_nodes,
-        next_view_timeout: 10_000,
+        next_view_timeout: 100_000,
         timeout_ratio: (11, 10),
         round_start_delay: 1,
         start_delay: 1,
@@ -692,27 +692,6 @@ async fn submit_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Respo
     let validator = req.state().node.read().await;
     validator
         .submit_transaction(tx)
-        .await
-        .map_err(server_error)?;
-    Ok(tide::Response::new(StatusCode::Ok))
-}
-
-async fn memos_endpoint(mut req: tide::Request<WebState>) -> Result<tide::Response, tide::Error> {
-    let PostMemos { memos, signature } = request_body(&mut req).await?;
-    let mut bulletin = req.state().node.write().await;
-    let TransactionId(BlockId(block), tx) =
-        UrlSegmentValue::parse(req.param("txid").unwrap(), "TaggedBase64")
-            .ok_or_else(|| {
-                server_error(EspressoError::Param {
-                    param: String::from("txid"),
-                    msg: String::from(
-                        "Valid transaction ID required. Transaction IDs start with TX~.",
-                    ),
-                })
-            })?
-            .to()?;
-    bulletin
-        .post_memos(block as u64, tx as u64, memos, signature)
         .await
         .map_err(server_error)?;
     Ok(tide::Response::new(StatusCode::Ok))
@@ -908,7 +887,6 @@ pub fn init_web_server(
     // their own services. For demo purposes, since they are not really part of the query service,
     // we just handle them here in a pretty ad hoc fashion.
     web_server.at("/submit").post(submit_endpoint);
-    web_server.at("/memos/:txid").post(memos_endpoint);
 
     // Add routes from a configuration file.
     if let Some(api_map) = api["route"].as_table() {

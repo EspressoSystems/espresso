@@ -159,27 +159,25 @@ async fn validate_committed_block(
         }
 
         // Check memos.
-        let memos = match (&tx.output_memos, &tx.memos_signature) {
-            (Some(memos), Some(sig)) => {
-                assert_eq!(memos.len(), tx.data.output_len());
-                tx.data.verify_receiver_memos_signature(memos, sig).unwrap();
-                memos.iter().cloned().map(Some).collect()
-            }
-            (None, None) => vec![None; tx.data.output_len()],
-            (Some(_), None) => panic!("memos are provided without a signature"),
-            (None, Some(_)) => panic!("signature is provied without memos"),
-        };
+        assert_eq!(tx.output_memos.len(), tx.data.output_len());
+        tx.data
+            .verify_receiver_memos_signature(&tx.output_memos, &tx.memos_signature)
+            .unwrap();
 
         // Check outputs.
-        for (i, (output, uid, memo)) in
-            izip!(tx.data.output_commitments(), &tx.output_uids, memos).enumerate()
+        for (i, (output, uid, memo)) in izip!(
+            tx.data.output_commitments(),
+            &tx.output_uids,
+            &tx.output_memos
+        )
+        .enumerate()
         {
             // Check that we get the same record if we query for the output directly.
             let utxo: UnspentRecord =
                 get(format!("/getunspentrecord/{}/{}/{}", tx.id, i, false)).await;
             assert_eq!(output, utxo.commitment);
             assert_eq!(*uid, utxo.uid);
-            assert_eq!(memo, utxo.memo);
+            assert_eq!(*memo, utxo.memo.unwrap());
         }
     }
 }

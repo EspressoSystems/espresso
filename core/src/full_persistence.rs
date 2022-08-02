@@ -19,11 +19,9 @@ use atomic_store::{
     PersistenceError,
 };
 use core::fmt::Debug;
-use jf_cap::{structs::ReceiverMemo, MerkleLeaf, MerkleTree, Signature};
+use jf_cap::{MerkleLeaf, MerkleTree};
 use seahorse::events::LedgerEvent;
 use std::path::{Path, PathBuf};
-
-type OptionalMemoMap = Option<(Vec<ReceiverMemo>, Signature)>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Resource {
@@ -46,7 +44,6 @@ pub struct FullPersistence {
     // how long can memos remain unposted? We probably need a custom store for these after demo2
     // also, are txn uids not a sequential series? Could this be stored as a list of start/len pairs?
     block_uids: AppendLog<BincodeLoadStore<Vec<Vec<u64>>>>,
-    memos: AppendLog<BincodeLoadStore<Vec<OptionalMemoMap>>>,
     events: AppendLog<BincodeLoadStore<LedgerEvent<EspressoLedger>>>,
 }
 
@@ -60,7 +57,6 @@ impl FullPersistence {
         let full_rmt_tag = format!("{}_full_rmt", key_tag);
         let nullifier_set_tag = format!("{}_full_nullifier_snapshots", key_tag);
         let txn_uids_tag = format!("{}_txn_uids", key_tag);
-        let memos_tag = format!("{}_memos", key_tag);
         let events_tag = format!("{}_events", key_tag);
         let state_history = AppendLog::load(&mut loader, Default::default(), &state_tag, 1024)?;
         let block_history = AppendLog::load(&mut loader, Default::default(), &block_tag, 1024)?;
@@ -69,7 +65,6 @@ impl FullPersistence {
         let nullifier_snapshots =
             AppendLog::load(&mut loader, Default::default(), &nullifier_set_tag, 1024)?;
         let block_uids = AppendLog::load(&mut loader, Default::default(), &txn_uids_tag, 1024)?;
-        let memos = AppendLog::load(&mut loader, Default::default(), &memos_tag, 1024)?;
         let events = AppendLog::load(&mut loader, Default::default(), &events_tag, 1024)?;
         let atomic_store = AtomicStore::open(loader)?;
         Ok(FullPersistence {
@@ -79,7 +74,6 @@ impl FullPersistence {
             rmt_leaves_full,
             nullifier_snapshots,
             block_uids,
-            memos,
             events,
         })
     }
@@ -132,12 +126,6 @@ impl FullPersistence {
         self.nullifier_snapshots.store_resource(nullifiers).unwrap();
     }
 
-    // call when next outstanding by index shows up...
-    #[allow(clippy::ptr_arg)]
-    pub fn store_memos(&mut self, memos: &Vec<OptionalMemoMap>) {
-        self.memos.store_resource(memos).unwrap();
-    }
-
     pub fn commit_accepted(&mut self) {
         use Resource::*;
         self.commit(&[
@@ -185,11 +173,6 @@ impl FullPersistence {
         } else {
             self.nullifier_snapshots.skip_version().unwrap();
         }
-        if dirty.contains(&Memos) {
-            self.memos.commit_version().unwrap();
-        } else {
-            self.memos.skip_version().unwrap();
-        }
         if dirty.contains(&Events) {
             self.events.commit_version().unwrap();
         } else {
@@ -220,10 +203,6 @@ impl FullPersistence {
 
     pub fn block_uids_iter(&self) -> Iter<BincodeLoadStore<Vec<Vec<u64>>>> {
         self.block_uids.iter()
-    }
-
-    pub fn memos_iter(&self) -> Iter<BincodeLoadStore<Vec<OptionalMemoMap>>> {
-        self.memos.iter()
     }
 
     pub fn events_iter(&self) -> Iter<BincodeLoadStore<LedgerEvent<EspressoLedger>>> {

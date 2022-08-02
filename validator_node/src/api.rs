@@ -17,6 +17,7 @@ use espresso_core::{
 };
 use fmt::{Display, Formatter};
 use hotshot::HotShotError;
+use itertools::MultiUnzip;
 use jf_cap::{structs::ReceiverMemo, Signature, TransactionNote};
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, Snafu};
@@ -246,28 +247,39 @@ impl Display for CommittedBlock {
 
 impl From<CommittedBlock> for ElaboratedBlock {
     fn from(b: CommittedBlock) -> Self {
-        let (txs, proofs) = b
+        let (txs, proofs, memos, signatures) = b
             .transactions
             .into_iter()
-            .map(|tx| (tx.data, tx.proofs))
-            .unzip();
+            .map(|tx| (tx.data, tx.proofs, tx.output_memos, tx.memos_signature))
+            .multiunzip();
         Self {
             block: Block(txs),
             proofs,
+            memos,
+            signatures,
         }
     }
 }
 
 impl From<&CommittedBlock> for ElaboratedBlock {
     fn from(b: &CommittedBlock) -> Self {
-        let (txs, proofs) = b
+        let (txs, proofs, memos, signatures) = b
             .transactions
             .iter()
-            .map(|tx| (tx.data.clone(), tx.proofs.clone()))
-            .unzip();
+            .map(|tx| {
+                (
+                    tx.data.clone(),
+                    tx.proofs.clone(),
+                    tx.output_memos.clone(),
+                    tx.memos_signature.clone(),
+                )
+            })
+            .multiunzip();
         Self {
             block: Block(txs),
             proofs,
+            memos,
+            signatures,
         }
     }
 }
@@ -278,8 +290,8 @@ pub struct CommittedTransaction {
     pub data: TransactionNote,
     pub proofs: Vec<SetMerkleProof>,
     pub output_uids: Vec<u64>,
-    pub output_memos: Option<Vec<ReceiverMemo>>,
-    pub memos_signature: Option<Signature>,
+    pub output_memos: Vec<ReceiverMemo>,
+    pub memos_signature: Signature,
 }
 
 impl From<CommittedTransaction> for ElaboratedTransaction {
@@ -287,6 +299,8 @@ impl From<CommittedTransaction> for ElaboratedTransaction {
         Self {
             txn: tx.data,
             proofs: tx.proofs,
+            memos: tx.output_memos,
+            signature: tx.memos_signature,
         }
     }
 }
@@ -296,6 +310,8 @@ impl From<&CommittedTransaction> for ElaboratedTransaction {
         Self {
             txn: tx.data.clone(),
             proofs: tx.proofs.clone(),
+            memos: tx.output_memos.clone(),
+            signature: tx.memos_signature.clone(),
         }
     }
 }
