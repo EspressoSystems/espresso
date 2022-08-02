@@ -40,5 +40,7 @@ pub struct ValidatorStatus {
     pub proposed_block_count: u64,
     pub decided_block_count: u64,
     pub abandoned_block_count: u64,
+    pub cumulative_txn_count: u64,
+    pub cumulative_size: u64,
     pub time_operational: Duration,
 }

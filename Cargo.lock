@@ -2424,6 +2424,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hotshot",
+ "human_bytes",
  "itertools 0.10.3",
  "jf-cap",
  "jf-plonk",
@@ -3199,6 +3200,12 @@ name = "httparse"
 version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "496ce29bb5a52785b44e0f7ca2847ae0bb839c9bd28f69acac9b99d461c0c04c"
+
+[[package]]
+name = "human_bytes"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88a0d4dc39ec942e44c1c306aa196da67f2bd6a30dc7b4a475465c13ccf28817"
 
 [[package]]
 name = "ident_case"

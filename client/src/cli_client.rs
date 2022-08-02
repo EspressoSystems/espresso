@@ -13,14 +13,14 @@
 
 use async_std::task::{block_on, sleep, spawn_blocking};
 use escargot::CargoBuild;
-use espresso_validator::{testing::AddressBook, ConsensusConfig, NodeConfig, MINIMUM_NODES};
+use espresso_validator::{testing::AddressBook, MINIMUM_NODES};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use regex::Regex;
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
-use std::fs::{self, File};
+use std::fs::{self};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -246,7 +246,7 @@ impl CliClient {
     }
 
     fn start_validators(
-        tmp_dir: &Path,
+        store_dir: &Path,
         pub_key: UserPubKey,
         server_ports: &[u16],
     ) -> Result<Vec<Validator>, String> {
@@ -256,38 +256,10 @@ impl CliClient {
             MINIMUM_NODES,
             server_ports.len()
         );
-        let config = ConsensusConfig {
-            seed: [
-                1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4,
-                5, 6, 7, 8,
-            ]
-            .into(),
-            bootstrap_nodes: vec![NodeConfig {
-                ip: "localhost".to_string(),
-            }],
-            // NOTE these are arbitrarily chosen.
-            num_bootstrap: 1,
-            replication_factor: server_ports.len() - 2,
-            bootstrap_mesh_n_high: 50,
-            bootstrap_mesh_n_low: 10,
-            bootstrap_mesh_outbound_min: 5,
-            bootstrap_mesh_n: 15,
-            mesh_n_high: 15,
-            mesh_n_low: 8,
-            mesh_outbound_min: 4,
-            mesh_n: 12,
-            base_port: pick_unused_port().expect("No available port") as usize,
-        };
-        let mut config_file = tmp_dir.to_path_buf();
-        config_file.push("node-config.toml");
-        File::create(&config_file)
-            .unwrap()
-            .write_all(toml::to_string(&config).unwrap().as_bytes())
-            .unwrap();
 
         let ret = block_on(futures::future::join_all(
             server_ports.iter().enumerate().map(|(i, port)| {
-                let mut v = Validator::new(&config_file, pub_key.clone(), i, *port);
+                let mut v = Validator::new(store_dir, pub_key.clone(), i, *port);
                 async move {
                     v.open(server_ports.len()).await?;
                     Ok(v)
@@ -475,7 +447,6 @@ impl Drop for Keystore {
 pub struct Validator {
     process: Option<Child>,
     id: usize,
-    cfg_path: PathBuf,
     store_path: PathBuf,
     pub_key: UserPubKey,
     port: u16,
@@ -494,10 +465,8 @@ impl Validator {
         self.port
     }
 
-    fn new(cfg_path: &Path, pub_key: UserPubKey, id: usize, port: u16) -> Self {
-        let cfg_path = PathBuf::from(cfg_path);
-        let mut store_path = cfg_path.clone();
-        store_path.pop(); // remove config toml file
+    fn new(store_dir: &Path, pub_key: UserPubKey, id: usize, port: u16) -> Self {
+        let mut store_path = store_dir.to_path_buf();
         store_path.push(format!("store_for_{}", id));
         println!(
             "Launching validator with store path {}",
@@ -507,7 +476,6 @@ impl Validator {
         Self {
             process: None,
             id,
-            cfg_path,
             store_path,
             pub_key,
             port,
@@ -519,7 +487,6 @@ impl Validator {
             return Err(format!("validator {} is already open", self.id));
         }
 
-        let cfg_path = self.cfg_path.clone();
         let store_path = self.store_path.clone();
         let pub_key = self.pub_key.clone();
         let id = self.id;
@@ -527,14 +494,13 @@ impl Validator {
 
         // Clear the environment variable corresponding to the consensus port to avoid all
         // validators having the same address.
-        env::remove_var("ESPRESSO_VALIDATOR_CONSENSUS_PORT");
+        env::remove_var("ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT");
 
+        let base_port = pick_unused_port().expect("No available port").to_string();
         let mut child = spawn_blocking(move || {
             cargo_run("espresso-validator", "espresso-validator")
                 .map_err(err)?
                 .args([
-                    "--config",
-                    cfg_path.as_os_str().to_str().unwrap(),
                     "--store-path",
                     store_path.as_os_str().to_str().unwrap(),
                     "--full",
@@ -544,6 +510,29 @@ impl Validator {
                     &num_nodes.to_string(),
                     "--faucet-pub-key",
                     &pub_key.to_string(),
+                    // NOTE these are arbitrarily chosen.
+                    "--replication-factor",
+                    "4",
+                    "--bootstrap-mesh-n-high",
+                    "50",
+                    "--bootstrap-mesh-n-low",
+                    "10",
+                    "--bootstrap-mesh-outbound-min",
+                    "5",
+                    "--bootstrap-mesh-n",
+                    "15",
+                    "--nonbootstrap-mesh-n-high",
+                    "15",
+                    "--nonbootstrap-mesh-n-low",
+                    "8",
+                    "--nonbootstrap-mesh-outbound-min",
+                    "4",
+                    "--nonbootstrap-mesh-n",
+                    "12",
+                    "--bootstrap-nodes",
+                    &format!("localhost:{}", base_port),
+                    "--nonbootstrap-base-port",
+                    &base_port,
                 ])
                 .env("ESPRESSO_VALIDATOR_QUERY_PORT", port.to_string())
                 .stdin(Stdio::piped())
