@@ -21,6 +21,7 @@ use generic_array::{arr::AddLength, ArrayLength, GenericArray};
 use serde::{Deserialize, Serialize};
 use typenum::{Unsigned, U1};
 
+/// The core enum of the key-value Merkle tree. Making use of KVTreeHash, it is generic over branch-arity (number of branches).
 /// Note: this type implements PartialEq so that containing types can derive PartialEq, mostly for
 /// testing purposes. The implementation tests for logical equality of the represented set, ignoring
 /// sparseness. That is, any two sets with the same root hash will compare equal, even if the
@@ -72,6 +73,7 @@ where
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
+    /// Create a new leaf in the tree
     fn new_leaf(height: usize, key: KVHash::Key, value: KVHash::Value) -> Self {
         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
         let key_bits = key_bit_vec.into_iter();
@@ -96,6 +98,7 @@ where
         }
     }
 
+    /// Create a new branch in the tree
     fn new_branch(
         children: GenericArray<
             Self,
@@ -116,11 +119,13 @@ where
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
+    /// The default tree is an empty subtree
     fn default() -> Self {
         Self::EmptySubtree
     }
 }
 
+/// Terminal nodes in a KVMT are either a leaf or an empty subtree
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum KVMerkleTerminalNode<KVHash>
 where
@@ -130,7 +135,9 @@ where
 {
     EmptySubtree,
     Leaf {
-        /// how far above the "true" leaf level this leaf is
+        /// How far above the "true" leaf level this leaf is. This
+        /// is used for reducing the memory footprint of a tree and proof when a leaf
+        /// is the only element in a subtree, indicated by a height of 0.
         height: usize,
         key: KVHash::Key,
         value: KVHash::Value,
@@ -224,17 +231,7 @@ where
     }
 }
 
-/* #[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-    Serialize,
-    Deserialize,
-)] */
-
+/// Structure for proofs in the KVMT
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KVMerkleProof<KVHash>
 where
@@ -254,6 +251,7 @@ where
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
+    /// Checks correctness of a proof by recreating the proof path from the given key
     pub fn check(&self, key: KVHash::Key, root: KVHash::Digest) -> Result<bool, KVHash::Digest> {
         let mut running_hash = self.terminal_node.value();
 
@@ -293,10 +291,12 @@ where
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
+    /// Representation for a sparse Merkle tree
     pub fn sparse(root: KVHash::Digest) -> Self {
         Self::ForgottenSubtree { digest: root }
     }
 
+    /// Returns the digest for a node in a KVMT
     pub fn hash(&self) -> KVHash::Digest {
         use KVMerkleTree::*;
         match self {
@@ -307,7 +307,8 @@ where
         }
     }
 
-    /// Returns `None` if the element is in a forgotten subtree
+    /// Returns the value and proof for a queried key. If the key exists in a forgotten subtree, 
+    /// returns None. 
     pub fn lookup(
         &self,
         key: KVHash::Key,
@@ -375,6 +376,8 @@ where
         }
     }
 
+    /// Inserts a (key, value) pair into the KVMT. If a (key, value1) pair exists and (key, value2) is 
+    /// inserted, value1 is overwritten by value2.
     pub fn insert(&mut self, key: KVHash::Key, value: KVHash::Value) -> Option<()> {
         use KVMerkleTree::*;
         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
