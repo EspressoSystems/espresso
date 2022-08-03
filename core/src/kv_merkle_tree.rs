@@ -307,8 +307,8 @@ where
         }
     }
 
-    /// Returns the value and proof for a queried key. If the key exists in a forgotten subtree, 
-    /// returns None. 
+    /// Returns the value and proof for a queried key. If the key exists in a forgotten subtree,
+    /// returns None.
     pub fn lookup(
         &self,
         key: KVHash::Key,
@@ -376,7 +376,7 @@ where
         }
     }
 
-    /// Inserts a (key, value) pair into the KVMT. If a (key, value1) pair exists and (key, value2) is 
+    /// Inserts a (key, value) pair into the KVMT. If a (key, value1) pair exists and (key, value2) is
     /// inserted, value1 is overwritten by value2.
     pub fn insert(&mut self, key: KVHash::Key, value: KVHash::Value) -> Option<()> {
         use KVMerkleTree::*;
