@@ -18,6 +18,9 @@ use jf_cap::Signature;
 pub use crate::full_persistence::FullPersistence;
 pub use crate::lw_persistence::LWPersistence;
 pub use crate::set_merkle_tree::*;
+pub use crate::kv_merkle_tree::*;
+pub use crate::tree_hash::committable_hash::*;
+pub use crate::PubKey;
 pub use crate::util::canonical;
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
@@ -766,6 +769,23 @@ pub mod state_comm {
     }
 }
 
+// Struct representing the inputs to the stake table
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+struct StakeTableKey(PubKey);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+struct StakeTableValue(u64);
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+struct StakeTableTag();
+
+impl CommitableHashTag for StakeTableTag {
+    fn commitment_diversifier() -> &'static str {
+        "Stake Table Input"
+    }
+}
+
+type StakeTableHash = CommitableHash<StakeTableKey, StakeTableValue, StakeTableTag>;
+
+
 /// The working state of the ledger
 ///
 /// Only the previous state is represented as a commitment. Other
@@ -785,6 +805,8 @@ pub struct ValidatorState {
     /// Nullifiers from recent blocks, which allows validating slightly out-of-date-transactions
     pub past_nullifiers: NullifierHistory,
     pub prev_block: BlockCommitment,
+    // For fixed-stake
+    pub stake_table: KVMerkleTree<StakeTableHash>,
 }
 
 /// Nullifier proofs, organized by the root hash for which they are valid.
