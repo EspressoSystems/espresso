@@ -292,6 +292,11 @@ async fn main() {
     keystore.await_key_scan(&address).await.unwrap();
 
     if keystore.balance(&AssetCode::native()).await == 0u64.into() {
+        event!(
+            Level::INFO,
+            "Seed {}, Requesting intial funds from faucet",
+            seed
+        );
         get_native_from_faucet(&mut keystore, &pub_key, &args.faucet_url).await;
     }
 
@@ -361,6 +366,12 @@ async fn main() {
     loop {
         // If we don't have any native asset left request more from the faucet
         if keystore.balance(&AssetCode::native()).await == 0u64.into() {
+            event!(
+                Level::INFO,
+                "Seed {}, Ran out of native requesting more from faucet",
+                seed
+            );
+
             get_native_from_faucet(&mut keystore, &pub_key, &args.faucet_url).await;
         }
         // Get a list of all users in our group (this will include our own public key).
