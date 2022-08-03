@@ -12,15 +12,13 @@
 
 use async_std::task::{sleep, spawn_blocking};
 use escargot::CargoBuild;
-use espresso_validator::{NodeOpt, SecretKeySeed};
+use espresso_validator::NodeOpt;
 use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{exit, Command, Stdio};
 use std::time::Duration;
 use structopt::StructOpt;
-use tide::http::Url;
 
 #[derive(StructOpt)]
 #[structopt(
@@ -30,22 +28,6 @@ use tide::http::Url;
 struct Options {
     #[structopt(flatten)]
     node_opt: NodeOpt,
-
-    /// Path to the node configuration file.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONFIG_PATH")]
-    pub config: Option<PathBuf>,
-
-    /// Override `seed` from the node configuration file.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
-    pub secret_key_seed: Option<SecretKeySeed>,
-
-    /// Override `bootstrap_nodes` from the node configuration file.
-    #[structopt(
-        long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS",
-        value_delimiter = ","
-    )]
-    pub bootstrap_nodes: Option<Vec<Url>>,
 
     /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of
     /// non-bootstrap nodes.
@@ -103,21 +85,31 @@ fn cargo_run(bin: impl AsRef<str>) -> Command {
 async fn main() {
     // Construct arguments to pass to the multi-machine demo.
     let options = Options::from_args();
+    if let Err(msg) = options.node_opt.check() {
+        eprintln!("{}", msg);
+        exit(1);
+    }
 
     // With StructOpt/CLAP, environment variables override command line arguments, but we are going
     // to construct a command line for each child, so the child processes shouldn't get their
     // options from the environment. Clear the environment variables corresponding to each option
     // that we will set explicitly in the command line.
-    env::remove_var("ESPRESSO_VALIDATOR_CONFIG_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_SECRET_KEY_SEED");
-    env::remove_var("ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS");
+    env::remove_var("ESPRESSO_VALIDATOR_BOOTSTRAP_NODES");
     env::remove_var("ESPRESSO_VALIDATOR_PUB_KEY_PATH");
     env::remove_var("ESPRESSO_FAUCET_PUB_KEY");
     env::remove_var("ESPRESSO_VALIDATOR_STORE_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_WEB_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_API_PATH");
     env::remove_var("ESPRESSO_VALIDATOR_QUERY_PORT");
-    env::remove_var("ESPRESSO_VALIDATOR_CONSENSUS_PORT");
+    env::remove_var("ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME");
+    env::remove_var("ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME");
+    env::remove_var("ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT");
+    env::remove_var("ESPRESSO_VALIDATOR_TIMEOUT_RATIO");
+    env::remove_var("ESPRESSO_VALIDATOR_ROUND_START_DELAY");
+    env::remove_var("ESPRESSO_VALIDATOR_START_DELAY");
+    env::remove_var("ESPRESSO_VALIDATOR_MAX_TRANSACTIONS");
+    env::remove_var("ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT");
 
     let mut args = vec![];
     if options.node_opt.reset_store_state {
@@ -147,29 +139,27 @@ async fn main() {
         args.push("--api");
         args.push(&api_path);
     }
-    let config_path;
-    if let Some(path) = &options.config {
-        config_path = path.display().to_string();
-        args.push("--config");
-        args.push(&config_path);
-    }
-    let secret_key_seed;
-    if let Some(seed) = &options.secret_key_seed {
-        secret_key_seed = seed.to_string();
-        args.push("--secret-key-seed");
-        args.push(&secret_key_seed);
-    }
-    let bootstrap_nodes = options.bootstrap_nodes.as_ref().map(|nodes| {
-        nodes
-            .iter()
-            .map(|node| node.to_string())
-            .collect::<Vec<_>>()
-            .join(",")
-    });
-    if let Some(nodes) = &bootstrap_nodes {
-        args.push("--bootstrap-nodes");
-        args.push(nodes);
-    }
+    let min_propose_time = format!("{}ms", options.node_opt.min_propose_time.as_millis());
+    args.push("--min-propose-time");
+    args.push(&min_propose_time);
+    let max_propose_time = format!("{}ms", options.node_opt.max_propose_time.as_millis());
+    args.push("--max-propose-time");
+    args.push(&max_propose_time);
+    let next_view_timeout = format!("{}ms", options.node_opt.next_view_timeout.as_millis());
+    args.push("--next-view-timeout");
+    args.push(&next_view_timeout);
+    let timeout_ratio = options.node_opt.timeout_ratio.to_string();
+    args.push("--timeout-ratio");
+    args.push(&timeout_ratio);
+    let round_start_delay = format!("{}ms", options.node_opt.round_start_delay.as_millis());
+    args.push("--round-start-delay");
+    args.push(&round_start_delay);
+    let start_delay = format!("{}ms", options.node_opt.start_delay.as_millis());
+    args.push("--start-delay");
+    args.push(&start_delay);
+    let max_transactions = options.node_opt.max_transactions.to_string();
+    args.push("--max-transactions");
+    args.push(&max_transactions);
     let num_nodes_str = options.num_nodes.to_string();
     let num_nodes = num_nodes_str.parse::<usize>().unwrap();
     let faucet_pub_keys = options
