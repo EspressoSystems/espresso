@@ -201,7 +201,7 @@ async fn get_native_from_faucet(keystore: &mut Keystore, pub_key: &UserPubKey, u
     let mut i = 0;
     while keystore.balance(&AssetCode::native()).await == 0u64.into() {
         if i % 20 == 0 {
-            event!(Level::INFO, "waiting for initial balance");
+            event!(Level::INFO, "waiting for balance from faucet");
         }
         i += 1;
         retry_delay().await;
@@ -286,7 +286,7 @@ async fn main() {
         }
     };
     let address = pub_key.address();
-    event!(Level::INFO, "address = {:?}", address);
+    event!(Level::INFO, "Seed {}, address = {:?}", seed, address);
 
     // Wait for the scan of the ledger to catch up.
     keystore.await_key_scan(&address).await.unwrap();
@@ -305,7 +305,8 @@ async fn main() {
         Some(info) => {
             event!(
                 Level::INFO,
-                "found saved keystore with custom asset type {}",
+                "Seed {}, found saved keystore with custom asset type {}",
+                seed,
                 info.code()
             );
             info.definition().clone()
@@ -356,7 +357,7 @@ async fn main() {
     }
 
     let mut peers = vec![];
-
+    event!(Level::INFO, "STARTING TEST LOOP, seed: {}", seed);
     loop {
         // If we don't have any native asset left request more from the faucet
         if keystore.balance(&AssetCode::native()).await == 0u64.into() {
@@ -404,7 +405,8 @@ async fn main() {
             OperationType::Transfer => {
                 event!(
                     Level::INFO,
-                    "transferring {} units of {} to user {}",
+                    "Seed {}, transferring {} units of {} to user {}",
+                    seed,
                     amount,
                     if *asset == AssetCode::native() {
                         String::from("the native asset")
@@ -421,7 +423,12 @@ async fn main() {
                 {
                     Ok(txn) => txn,
                     Err(err) => {
-                        event!(Level::ERROR, "Error generating transfer: {}", err);
+                        event!(
+                            Level::ERROR,
+                            "Seed {}, Error generating transfer: {}",
+                            seed,
+                            err
+                        );
                         continue;
                     }
                 };
@@ -431,11 +438,16 @@ async fn main() {
                             // Transfers are allowed to fail. It can happen, for instance, if we get starved
                             // out until our transfer becomes too old for the validators. Thus we make this
                             // a warning, not an error.
-                            event!(Level::WARN, "transfer failed!");
+                            event!(Level::WARN, "Seed {}, transfer failed!", seed);
                         }
                     }
                     Err(err) => {
-                        event!(Level::ERROR, "error while waiting for transaction: {}", err);
+                        event!(
+                            Level::ERROR,
+                            "Seed {}, error while waiting for transaction: {}",
+                            seed,
+                            err
+                        );
                     }
                 }
             }
@@ -454,14 +466,17 @@ async fn main() {
                 {
                     Ok(txn) => txn,
                     Err(err) => {
-                        event!(Level::ERROR, "Error defining asset: {}", err);
+                        event!(Level::ERROR, "Seed {}, Error defining asset: {}", seed, err);
                         continue;
                     }
                 };
 
-                event!(Level::INFO, "defined a new asset type: {}", new_asset.code);
-
-                event!(Level::INFO, "minting my asset type {}", new_asset.code);
+                event!(
+                    Level::INFO,
+                    "Seed {}, minting my asset type {}",
+                    seed,
+                    new_asset.code
+                );
                 let txn = match keystore
                     .mint(
                         Some(&address),
@@ -474,29 +489,34 @@ async fn main() {
                 {
                     Ok(txn) => txn,
                     Err(err) => {
-                        event!(Level::ERROR, "Error minting asset: {}", err);
+                        event!(Level::ERROR, "Seed {}, Error minting asset: {}", seed, err);
                         continue;
                     }
                 };
                 match keystore.await_transaction(&txn).await {
                     Ok(status) => {
                         if !status.succeeded() {
-                            event!(Level::WARN, "mint failed!");
+                            event!(Level::WARN, "Seed {}, mint failed!", seed);
                         }
                     }
                     Err(err) => {
-                        event!(Level::ERROR, "error while waiting for mint: {}", err);
+                        event!(
+                            Level::ERROR,
+                            "Seed {}, error while waiting for mint: {}",
+                            seed,
+                            err
+                        );
                     }
                 }
                 // The mint transaction is allowed to fail due to contention from other clients.
                 retry_delay().await;
-                event!(Level::INFO, "minted custom asset");
+                event!(Level::INFO, "Seed {}, minted custom asset", seed);
             }
             OperationType::Freeze => {
                 let freezable_records: Vec<RecordInfo> =
                     find_freezable_records(&keystore, FreezeFlag::Unfrozen).await;
                 if freezable_records.is_empty() {
-                    event!(Level::INFO, "No freezable records");
+                    event!(Level::INFO, "Seed {}, No freezable records", seed);
                     continue;
                 }
                 let record = freezable_records.choose(&mut rng).unwrap();
@@ -504,7 +524,8 @@ async fn main() {
                 let asset_def = &record.ro.asset_def;
                 event!(
                     Level::INFO,
-                    "Freezing Asset: {}, Amount: {}, Owner: {}",
+                    "Seed {}, Freezing Asset: {}, Amount: {}, Owner: {}",
+                    seed,
                     asset_def.code,
                     record.ro.amount,
                     owner_address
@@ -523,11 +544,11 @@ async fn main() {
                     .ok();
             }
             OperationType::Unfreeze => {
-                event!(Level::INFO, "Unfreezing");
+                event!(Level::INFO, "Seed {}, Unfreezing", seed);
                 let freezable_records: Vec<RecordInfo> =
                     find_freezable_records(&keystore, FreezeFlag::Frozen).await;
                 if freezable_records.is_empty() {
-                    event!(Level::INFO, "No frozen records");
+                    event!(Level::INFO, "Seed {}, No frozen records", seed);
                     continue;
                 }
                 let record = freezable_records.choose(&mut rng).unwrap();
@@ -535,7 +556,8 @@ async fn main() {
                 let asset_def = &record.ro.asset_def;
                 event!(
                     Level::INFO,
-                    "Unfreezing Asset: {}, Amount: {}, Owner: {}",
+                    "Seed {}, Unfreezing Asset: {}, Amount: {}, Owner: {}",
+                    seed,
                     asset_def.code,
                     record.ro.amount,
                     owner_address
@@ -556,13 +578,9 @@ async fn main() {
 
         event!(
             Level::INFO,
-            "Wallet Native balance {}",
+            "Seed {}, Wallet Native balance {}",
+            seed,
             keystore.balance(&AssetCode::native()).await
-        );
-        event!(
-            Level::INFO,
-            "Wallet Custom Asset balance {}",
-            keystore.balance(&my_asset.code).await
         );
         retry_delay().await;
     }
