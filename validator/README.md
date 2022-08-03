@@ -32,12 +32,6 @@ nix develop .#staticShell -c cargo build --bin multi_machine_automation
 
 The resulting binary is in `target/x86_64-unknown-linux-musl/release/multi_machine_automation`.
 
-
-## Create a node config file
-* To demonstrate consensus among 7 nodes, use the default config file, `validator/src/node-config.toml`.
-* Otherwise, create a `.toml` file similar to the default file but with information of the desired number of nodes.
-    * Note: number of nodes must be at least 5.
-
 ## Run demo
 The instructions below assume that the number of nodes is 7. Otherwise, replace numbers accordingly.
 
@@ -46,9 +40,7 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
     * Open 7 terminal windows (or split a window into 7 sessions using tmux). Let them be `window 0, 1, ..., 6`, each representing a node.
     * In each window:
         * Cd to `target/release/`.
-        * Run `./espresso-validator --config {config} --id {id} --num-nodes {num_nodes} --num-txn {num_txn}`.
-            * `config` is the path to the node config file.
-                * Skip this option if using the default file, `validator/src/node-config.toml`.
+        * Run `./espresso-validator --id {id} --num-nodes {num_nodes} --num-txn {num_txn}`.
             * `id` is the ID of the current node, starting from `0` to `6`.
                 * `Node 0` is going to propose all transactions, but not necessarily the leader in each round.
             * `num_nodes` is the number of nodes, including the bootstrap nodes in the node config file, and non-bootstrap nodes.
@@ -61,9 +53,7 @@ The instructions below assume that the number of nodes is 7. Otherwise, replace 
 * To automate a single-command consensus:
     * In a terminal window:
         * Cd to `target/release/`.
-        * Run `./multi_machine_automation --config {config} --num-nodes {num_nodes} --num-txn {num_txn}`.
-            * `config` is the path to the node config file.
-                * Skip this option if using the default file, `validator/src/node-config.toml`.
+        * Run `./multi_machine_automation --num-nodes {num_nodes} --num-txn {num_txn}`.
             * `num_nodes` is the number of nodes, including the bootstrap nodes in the node config file, and non-bootstrap nodes.
             * `num_txn` is the number of transactions to generate.
                 * If skipped, the consensus will keep running till the process is killed. For easier manual testing, do not skip it.

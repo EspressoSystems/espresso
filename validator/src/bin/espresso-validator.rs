@@ -23,11 +23,10 @@ use espresso_validator::*;
 use futures::{future::pending, StreamExt};
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
-use std::path::{Path, PathBuf};
+use std::process::exit;
 use std::time::Duration;
 use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
-use tide::http::Url;
 use tracing::info;
 use validator_node::node::Validator;
 
@@ -40,21 +39,8 @@ struct Options {
     #[structopt(flatten)]
     node_opt: NodeOpt,
 
-    /// Path to the node configuration file.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_CONFIG_PATH")]
-    pub config: Option<PathBuf>,
-
-    /// Override `seed` from the node configuration file.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
-    pub secret_key_seed: Option<SecretKeySeed>,
-
-    /// Override `bootstrap_nodes` from the node configuration file.
-    #[structopt(
-        long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_HOSTS",
-        value_delimiter = ","
-    )]
-    pub bootstrap_nodes: Option<Vec<Url>>,
+    #[structopt(flatten)]
+    consensus_opt: ConsensusOpt,
 
     /// Id of the current node.
     ///
@@ -91,13 +77,6 @@ struct Options {
     /// Whether to color log output with ANSI color codes.
     #[structopt(long, env = "ESPRESSO_COLORED_LOGS")]
     pub colored_logs: bool,
-}
-
-/// Returns the default path to the node configuration file.
-fn default_config_path() -> PathBuf {
-    const CONFIG_FILE: &str = "src/node-config.toml";
-    let dir = project_path();
-    [&dir, Path::new(CONFIG_FILE)].iter().collect()
 }
 
 async fn generate_transactions(
@@ -280,21 +259,18 @@ async fn generate_transactions(
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::from_args();
+    if let Err(msg) = options.node_opt.check() {
+        eprintln!("{}", msg);
+        exit(1);
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_ansi(options.colored_logs)
         .init();
 
-    // Get configuration
-    let config_path = options.config.clone().unwrap_or_else(default_config_path);
-    let mut config = ConsensusConfig::from_file(&config_path);
-    // Update config if any parameters are overridden by options.
-    if let Some(secret_key_seed) = &options.secret_key_seed {
-        config.seed = *secret_key_seed;
-    }
-    if let Some(nodes) = &options.bootstrap_nodes {
-        config.bootstrap_nodes = nodes.iter().cloned().map(NodeConfig::from).collect();
-    }
+    // Get the consensus configuration.
+    let consensus_opt = options.consensus_opt;
 
     let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
 
@@ -308,13 +284,13 @@ async fn main() -> Result<(), std::io::Error> {
     } else {
         (GenesisState::new(options.faucet_pub_key.clone()), None)
     };
-    let keys = gen_keys(&config, options.num_nodes);
+    let keys = gen_keys(&consensus_opt, options.num_nodes);
     let priv_key = keys[own_id].private.clone();
     let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
 
     let hotshot = init_validator(
         &options.node_opt,
-        &config,
+        &consensus_opt,
         priv_key,
         known_nodes,
         genesis,
