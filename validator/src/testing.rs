@@ -24,7 +24,7 @@ use rand_chacha::{rand_core::RngCore, ChaChaRng};
 use std::io;
 use std::iter;
 use std::mem::take;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use surf::Url;
 use tempdir::TempDir;
 use tide_disco::{wait_for_server, SERVER_STARTUP_RETRIES, SERVER_STARTUP_SLEEP_MS};
@@ -156,16 +156,15 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     let base_port = pick_unused_port().unwrap();
     let consensus_opt = ConsensusOpt {
         secret_key_seed: Some(seed.into()),
-        // NOTE these are arbitrarily chosen.
-        replication_factor: 3,
-        bootstrap_mesh_n_high: 7,
-        bootstrap_mesh_n_low: 4,
-        bootstrap_mesh_outbound_min: 3,
-        bootstrap_mesh_n: 6,
-        nonbootstrap_mesh_n_high: 7,
-        nonbootstrap_mesh_n_low: 4,
-        nonbootstrap_mesh_outbound_min: 3,
-        nonbootstrap_mesh_n: 6,
+        replication_factor: 4,
+        bootstrap_mesh_n_high: 50,
+        bootstrap_mesh_n_low: 10,
+        bootstrap_mesh_outbound_min: 4,
+        bootstrap_mesh_n: 15,
+        nonbootstrap_mesh_n_high: 15,
+        nonbootstrap_mesh_n_low: 8,
+        nonbootstrap_mesh_outbound_min: 4,
+        nonbootstrap_mesh_n: 12,
         bootstrap_nodes: vec![Url::parse(&format!("localhost:{}", base_port)).unwrap()],
     };
 
@@ -192,6 +191,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             let mut node_opt = NodeOpt {
                 store_path: Some(store_path),
                 nonbootstrap_base_port: base_port as usize,
+                next_view_timeout: Duration::from_secs(10 * 60).into(),
                 ..NodeOpt::default()
             };
             if i == 0 {
