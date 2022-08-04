@@ -237,7 +237,7 @@ impl net::Error for FaucetError {
         match self {
             Self::Transfer { .. } => StatusCode::BadRequest,
             Self::Internal { .. } => StatusCode::InternalServerError,
-            Self::AlreadyInQueue { .. } => StatusCode::BadRequest,
+            Self::AlreadyInQueue { .. } => StatusCode::TooManyRequests,
             Self::QueueFull { .. } => StatusCode::InternalServerError,
             Self::Persistence { .. } => StatusCode::InternalServerError,
             Self::Unavailable => StatusCode::ServiceUnavailable,
