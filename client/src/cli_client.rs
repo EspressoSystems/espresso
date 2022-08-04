@@ -18,7 +18,6 @@ use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use regex::Regex;
 use std::collections::HashMap;
-use std::env;
 use std::ffi::OsStr;
 use std::fs::{self};
 use std::io::{BufRead, BufReader, Write};
@@ -256,10 +255,10 @@ impl CliClient {
             MINIMUM_NODES,
             server_ports.len()
         );
-
+        let bootstrap_port = pick_unused_port().unwrap();
         let ret = block_on(futures::future::join_all(
             server_ports.iter().enumerate().map(|(i, port)| {
-                let mut v = Validator::new(store_dir, pub_key.clone(), i, *port);
+                let mut v = Validator::new(store_dir, pub_key.clone(), i, *port, bootstrap_port);
                 async move {
                     v.open(server_ports.len()).await?;
                     Ok(v)
@@ -449,7 +448,8 @@ pub struct Validator {
     id: usize,
     store_path: PathBuf,
     pub_key: UserPubKey,
-    port: u16,
+    server_port: u16,
+    bootstrap_port: u16,
 }
 
 impl Validator {
@@ -461,11 +461,17 @@ impl Validator {
         String::from("localhost")
     }
 
-    pub fn port(&self) -> u16 {
-        self.port
+    pub fn server_port(&self) -> u16 {
+        self.server_port
     }
 
-    fn new(store_dir: &Path, pub_key: UserPubKey, id: usize, port: u16) -> Self {
+    fn new(
+        store_dir: &Path,
+        pub_key: UserPubKey,
+        id: usize,
+        server_port: u16,
+        bootstrap_port: u16,
+    ) -> Self {
         let mut store_path = store_dir.to_path_buf();
         store_path.push(format!("store_for_{}", id));
         println!(
@@ -478,7 +484,8 @@ impl Validator {
             id,
             store_path,
             pub_key,
-            port,
+            server_port,
+            bootstrap_port,
         }
     }
 
@@ -490,13 +497,9 @@ impl Validator {
         let store_path = self.store_path.clone();
         let pub_key = self.pub_key.clone();
         let id = self.id;
-        let port = self.port;
+        let server_port = self.server_port;
+        let bootstrap_port = self.bootstrap_port;
 
-        // Clear the environment variable corresponding to the consensus port to avoid all
-        // validators having the same address.
-        env::remove_var("ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT");
-
-        let base_port = pick_unused_port().expect("No available port").to_string();
         let mut child = spawn_blocking(move || {
             cargo_run("espresso-validator", "espresso-validator")
                 .map_err(err)?
@@ -530,11 +533,13 @@ impl Validator {
                     "--nonbootstrap-mesh-n",
                     "12",
                     "--bootstrap-nodes",
-                    &format!("localhost:{}", base_port),
-                    "--nonbootstrap-base-port",
-                    &base_port,
+                    &format!("localhost:{}", bootstrap_port),
                 ])
-                .env("ESPRESSO_VALIDATOR_QUERY_PORT", port.to_string())
+                .env("ESPRESSO_VALIDATOR_QUERY_PORT", server_port.to_string())
+                .env(
+                    "ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT",
+                    pick_unused_port().unwrap().to_string(),
+                )
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
@@ -557,7 +562,7 @@ impl Validator {
         });
 
         // Wait for the child to initialize its web server.
-        wait_for_connect(port).await?;
+        wait_for_connect(server_port).await?;
 
         self.process = Some(child);
         println!("Leaving Validator::new for {}", id);

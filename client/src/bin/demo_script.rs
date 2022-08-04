@@ -43,7 +43,7 @@ fn main() {
                         Some(id) => id.to_string(),
                         None => String::from("not running"),
                     };
-                    println!("  {} {}:{}", pid, v.hostname(), v.port());
+                    println!("  {} {}:{}", pid, v.hostname(), v.server_port());
                 }
                 println!("Keystores:");
                 for w in cli.keystores() {
@@ -175,7 +175,13 @@ fn validator_command(
         "query" => {
             let v = cli.validator(validator)?;
             let res: serde_json::Value = block_on(
-                surf::get(format!("http://{}:{}/{}", v.hostname(), v.port(), args)).recv_json(),
+                surf::get(format!(
+                    "http://{}:{}/{}",
+                    v.hostname(),
+                    v.server_port(),
+                    args
+                ))
+                .recv_json(),
             )
             .map_err(|err| err.to_string())?;
             let output = serde_json::to_string_pretty(&res).map_err(|err| err.to_string())?;
