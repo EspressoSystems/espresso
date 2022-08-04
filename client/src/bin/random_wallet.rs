@@ -417,7 +417,7 @@ async fn main() {
         let operation: OperationType = rand::random();
         // All transfers are the same, small size. This should prevent fragmentation errors and
         // allow us to make as many transactions as possible with the assets we have.
-        let amount: u128 = min(U256::from(10), keystore.balance(&asset).await).as_u128();
+        let amount: u128 = min(U256::from(10), keystore.balance(asset).await).as_u128();
         let fee = 0;
 
         match operation {
