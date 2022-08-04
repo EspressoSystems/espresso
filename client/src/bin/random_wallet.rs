@@ -35,6 +35,7 @@ use async_std::task::sleep;
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use jf_cap::keys::{FreezerPubKey, UserKeyPair, UserPubKey};
 use jf_cap::structs::{AssetCode, AssetPolicy, FreezeFlag};
+use primitive_types::U256;
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand::{
@@ -44,6 +45,7 @@ use rand::{
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use seahorse::txn_builder::RecordInfo;
 use seahorse::{events::EventIndex, hd::KeyTree, loader::KeystoreLoader, KeystoreError};
+use std::cmp::min;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Read;
@@ -184,6 +186,12 @@ async fn get_native_from_faucet(keystore: &mut Keystore, pub_key: &UserPubKey, u
             .await
         {
             Ok(res) if res.status() == StatusCode::Ok => {
+                break;
+            }
+            Ok(res) if res.status() == StatusCode::TooManyRequests => {
+                tracing::warn!(
+                    "Faucet request failed due because another is in flight.  Won't retry."
+                );
                 break;
             }
             Ok(res) => {
@@ -409,7 +417,7 @@ async fn main() {
         let operation: OperationType = rand::random();
         // All transfers are the same, small size. This should prevent fragmentation errors and
         // allow us to make as many transactions as possible with the assets we have.
-        let amount = 10;
+        let amount: u128 = min(U256::from(10), keystore.balance(&asset).await).as_u128();
         let fee = 0;
 
         match operation {
