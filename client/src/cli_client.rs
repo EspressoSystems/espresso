@@ -448,7 +448,7 @@ pub struct Validator {
     id: usize,
     store_path: PathBuf,
     pub_key: UserPubKey,
-    port: u16,
+    server_port: u16,
     bootstrap_port: u16,
 }
 
@@ -461,15 +461,15 @@ impl Validator {
         String::from("localhost")
     }
 
-    pub fn port(&self) -> u16 {
-        self.port
+    pub fn server_port(&self) -> u16 {
+        self.server_port
     }
 
     fn new(
         store_dir: &Path,
         pub_key: UserPubKey,
         id: usize,
-        port: u16,
+        server_port: u16,
         bootstrap_port: u16,
     ) -> Self {
         let mut store_path = store_dir.to_path_buf();
@@ -484,7 +484,7 @@ impl Validator {
             id,
             store_path,
             pub_key,
-            port,
+            server_port,
             bootstrap_port,
         }
     }
@@ -497,7 +497,7 @@ impl Validator {
         let store_path = self.store_path.clone();
         let pub_key = self.pub_key.clone();
         let id = self.id;
-        let port = self.port;
+        let server_port = self.server_port;
         let bootstrap_port = self.bootstrap_port;
 
         let mut child = spawn_blocking(move || {
@@ -535,7 +535,7 @@ impl Validator {
                     "--bootstrap-nodes",
                     &format!("localhost:{}", bootstrap_port),
                 ])
-                .env("ESPRESSO_VALIDATOR_QUERY_PORT", port.to_string())
+                .env("ESPRESSO_VALIDATOR_QUERY_PORT", server_port.to_string())
                 .env(
                     "ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT",
                     pick_unused_port().unwrap().to_string(),
@@ -562,7 +562,7 @@ impl Validator {
         });
 
         // Wait for the child to initialize its web server.
-        wait_for_connect(port).await?;
+        wait_for_connect(server_port).await?;
 
         self.process = Some(child);
         println!("Leaving Validator::new for {}", id);
