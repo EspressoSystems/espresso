@@ -252,7 +252,11 @@ where
         ArrayLength<KVMerkleTree<KVHash>>,
 {
     /// Checks correctness of a proof by recreating the proof path from the given key
-    pub fn check(&self, key: KVHash::Key, root: KVHash::Digest) -> Result<bool, KVHash::Digest> {
+    pub fn check(
+        &self,
+        key: KVHash::Key,
+        root: KVHash::Digest,
+    ) -> Option<(Option<KVHash::Value>, KVHash::Digest)> {
         let mut running_hash = self.terminal_node.value();
 
         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
@@ -275,12 +279,22 @@ where
         }
 
         if running_hash == root {
-            Ok(match &self.terminal_node {
-                KVMerkleTerminalNode::<KVHash>::EmptySubtree {} => false,
-                KVMerkleTerminalNode::<KVHash>::Leaf { key: leaf_key, .. } => (leaf_key == &key),
-            })
+            match &self.terminal_node {
+                KVMerkleTerminalNode::<KVHash>::EmptySubtree {} => Some((None, running_hash)),
+                KVMerkleTerminalNode::<KVHash>::Leaf {
+                    key: leaf_key,
+                    value: leaf_value,
+                    ..
+                } => {
+                    if leaf_key == &key {
+                        Some((Some(*leaf_value), running_hash))
+                    } else {
+                        Some((None, running_hash))
+                    }
+                }
+            }
         } else {
-            Err(running_hash)
+            Some((None, running_hash))
         }
     }
 }
@@ -577,7 +591,8 @@ where
         // safely assume that all the values along the path match. This first
         //check can be removed as an optimization opportunity if we really need
         //to, but keeping it in is defensive programming
-        let key_in_set = proof.check(key, self.hash())?;
+
+        let key_in_set = matches!(proof.check(key, self.hash()), Some((Some(_), ..)));
 
         use KVMerkleTree::*;
         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
@@ -674,7 +689,7 @@ where
 }
 
 #[allow(clippy::type_complexity)]
-pub fn set_merkle_lw_multi_insert<KVHash>(
+pub fn kv_merkle_lw_multi_insert<KVHash>(
     inserts: Vec<(KVHash::Key, KVHash::Value, KVMerkleProof<KVHash>)>,
     root: KVHash::Digest,
 ) -> Result<(KVHash::Digest, Vec<KVMerkleProof<KVHash>>), KVHash::Digest>
@@ -725,7 +740,7 @@ mod tests {
     type TestTreeHash = CommitableHash<TestNulls, TestNulls, TestNullsTag>;
 
     #[test]
-    fn test_set_merkle_speed() {
+    fn test_kv_merkle_speed() {
         let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
         let elems = (1..1000)
             .map(|_| Nullifier::random_for_test(&mut prng))
@@ -742,7 +757,10 @@ mod tests {
                     terminal_node: KVMerkleTerminalNode::<TestTreeHash>::EmptySubtree,
                     path: pf,
                 };
-                let root = pf.check(TestNulls(elem), KVMerkleTree::<TestTreeHash>::default().hash()).unwrap_err();
+                let root = match pf.check(TestNulls(elem), KVMerkleTree::<TestTreeHash>::default().hash()) {
+                    Some((_, hash)) => hash,
+                    _ => panic!("Should always receive digest from check!"),
+                };
                 (elem, pf, root)
             })
             .collect::<Vec<_>>();
@@ -751,7 +769,7 @@ mod tests {
         let mut tot = 0;
         for (elem, pf, root) in pfs {
             let new_root = pf.check(TestNulls(elem), root);
-            if new_root.unwrap() {
+            if new_root.unwrap().0.is_some() {
                 tot += 1;
             }
         }
@@ -781,7 +799,11 @@ mod tests {
             let (val, pf) = t.lookup(TestNulls(elem)).unwrap();
             let in_set = if val.is_some() { true } else { false };
             t.insert(TestNulls(elem), TestNulls(elem));
-            assert_eq!(pf.check(TestNulls(elem), lw_t.hash()).unwrap(), in_set);
+            let pf_check = match pf.check(TestNulls(elem), lw_t.hash()) {
+                Some((Some(_), ..)) => true,
+                _ => false,
+            };
+            assert_eq!(pf_check, in_set);
             lw_t.remember(TestNulls(elem), pf).unwrap();
             lw_t.insert(TestNulls(elem), TestNulls(elem)).unwrap();
             let (lw_t_val, new_lw_pf) = lw_t.lookup(TestNulls(elem)).unwrap();
@@ -794,7 +816,11 @@ mod tests {
             lw_t.forget(TestNulls(elem)).unwrap();
             assert!(lw_t.lookup(TestNulls(elem)).is_none());
 
-            assert!(new_lw_pf.check(TestNulls(elem), lw_t.hash()).unwrap());
+            let new_lw_pf_check = match new_lw_pf.check(TestNulls(elem), lw_t.hash()) {
+                Some((Some(_), ..)) => true,
+                _ => false,
+            };
+            assert!(new_lw_pf_check);
         }
 
         for c in checks {
@@ -818,22 +844,24 @@ mod tests {
                 assert!(t_contains);
             }
             assert_eq!(hset.contains(&val), t_contains);
-            assert_eq!(
-                t_contains,
-                KVMerkleProof::<TestTreeHash>::check(&pf, TestNulls(elem), t.hash()).unwrap()
-            );
+
+            let check = match KVMerkleProof::<TestTreeHash>::check(&pf, TestNulls(elem), t.hash()) {
+                Some((Some(_), ..)) => true,
+                _ => false,
+            };
+            assert_eq!(t_contains, check);
         }
     }
 
     #[test]
-    fn quickcheck_merkle_tree_set_regressions_kv() {
+    fn quickcheck_merkle_tree_kv_regressions() {
         test_merkle_tree_set_kv(vec![20, 0], vec![Ok(20)]);
         test_merkle_tree_set_kv(vec![0, 38], vec![Err(0), Ok(1), Ok(38)]);
         test_merkle_tree_set_kv(vec![0, 0, 0], vec![])
     }
 
     #[test]
-    fn quickcheck_merkle_tree_set_kv() {
+    fn quickcheck_merkle_tree_kv() {
         QuickCheck::new()
             .tests(10)
             .quickcheck(test_merkle_tree_set_kv as fn(Vec<_>, Vec<_>) -> ());
