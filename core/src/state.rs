@@ -12,7 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use espresso_macros::*;
-use hotshot::types::Commit;
+//use hotshot::types::Commit;
 use jf_cap::structs::ReceiverMemo;
 use jf_cap::Signature;
 
@@ -26,7 +26,6 @@ pub use crate::PubKey;
 pub use crate::util::canonical;
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
-use serde_with;
 use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
@@ -48,6 +47,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::iter::once;
+use std::str::FromStr;
 
 /// Height of the records Merkle tree
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
@@ -777,36 +777,33 @@ pub mod state_comm {
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 struct StakeTableKey(PubKey);
 
-impl<T> serde_with::SerializeAs<T> for StakeTableKey 
-where
-    T: CanonicalSerialize,
-{
-    fn serialize_as<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
+impl CanonicalSerialize for StakeTableKey {
+    fn serialized_size(&self) -> usize {
+        ((self.0)).to_string().serialized_size()
+    }
+    fn serialize<W: ark_serialize::Write>(
+        &self,
+        mut w: W,
+    ) -> Result<(), ark_serialize::SerializationError> {
+        CanonicalSerialize::serialize(&(self.0).to_string(), &mut w)?;
+        Ok(())
     }
 }
-impl<'de, T> serde_with::DeserializeAs<'de, T> for StakeTableKey
-where
-    T: CanonicalDeserialize,
-{
-    fn deserialize_as<D>(deserializer: D) -> Result<Self, D::Error>
+impl CanonicalDeserialize for StakeTableKey {
+    fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
     where
-        D: serde::Deserializer<'de>,
+        R: ark_serialize::Read,
     {
-        let base64 = String::deserialize(deserializer)?;
-        Self::from_str(&base64).map_err(D::Error::custom)
+        let pubkey: String = CanonicalDeserialize::deserialize(&mut r)?;
+        Ok(Self(PubKey::from_str(&pubkey).unwrap()))
     }
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize,)]
 struct StakeTableValue(u64);
+
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
-
 struct StakeTableTag();
-
 impl CommitableHashTag for StakeTableTag {
     fn commitment_diversifier() -> &'static str {
         "Stake Table Input"
@@ -815,8 +812,14 @@ impl CommitableHashTag for StakeTableTag {
 
 type StakeTableHash = CommitableHash<StakeTableKey, StakeTableValue, StakeTableTag>;
 
-// Stores commitment hash of previous rounds' stake tables
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+// Stores commitment hash of previous rounds' stake tables in (block_num, stake table commitment) kv pairs
+#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize,)]
+struct StakeTableCommitmentKey(u64);
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize,)]
+struct StakeTableCommitmentValue(<StakeTableHash as KVTreeHash>::Digest);
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 struct StakeTableCommitmentTag();
 impl CommitableHashTag for StakeTableCommitmentTag {
     fn commitment_diversifier() -> &'static str {
@@ -824,43 +827,38 @@ impl CommitableHashTag for StakeTableCommitmentTag {
     }
 }
 
-type StakeTableCommitmentsHash = CommitableHash<u64, <StakeTableHash as KVTreeHash>::Digest, StakeTableCommitmentTag>;
+type StakeTableCommitmentsHash = CommitableHash<StakeTableCommitmentKey, StakeTableCommitmentValue, StakeTableCommitmentTag>;
 
 // Set Merkle tree for all of the previously-collected rewards
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq,)]
 struct CollectedRewards((PubKey,u64));
 
-impl<T> serde_with::SerializeAs<T> for CollectedRewards 
-where
-    T: CanonicalSerialize,
-{
-    fn serialize_as<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let tup = serializer.serialize_tuple(2)?;
-        tup.serialize_str(&(self.0).0.to_string())?;
-        tup.serialize_u64((self.0).1)?;
-        tup.end()
+impl CanonicalSerialize for CollectedRewards {
+    fn serialized_size(&self) -> usize {
+        0u64.serialized_size() + &((self.0).0).to_string().serialized_size()
+    }
+    fn serialize<W: ark_serialize::Write>(
+        &self,
+        mut w: W,
+    ) -> Result<(), ark_serialize::SerializationError> {
+        CanonicalSerialize::serialize(&((self.0).0).to_string(), &mut w)?;
+        CanonicalSerialize::serialize(&((self.0).1), &mut w)?;
+        Ok(())
     }
 }
-impl<'de, T> serde_with::DeserializeAs<'de, T> for CollectedRewards
-where
-    T: CanonicalDeserialize,
-{
-    fn deserialize_as<D>(deserializer: D) -> Result<Self, D::Error>
+impl CanonicalDeserialize for CollectedRewards {
+    fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
     where
-        D: serde::Deserializer<'de>,
+        R: ark_serialize::Read,
     {
-        let base64 = String::deserialize(deserializer)?;
-        let pubkey = PubKey::from_str(&base64).map_err(D::Error::custom);
-        let block_num = u64::deserialize(deserializer)?;
-        Ok(Self((pubkey,block_num)))
+        let pubkey: String = CanonicalDeserialize::deserialize(&mut r)?;
+        let mut block_num = CanonicalDeserialize::deserialize(&mut r)?;
+        Ok(Self((PubKey::from_str(&pubkey).unwrap(),block_num)))
     }
 }
 
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 struct CollectedRewardsTag();
 impl CommitableHashTag for CollectedRewardsTag {
     fn commitment_diversifier() -> &'static str {
@@ -868,7 +866,7 @@ impl CommitableHashTag for CollectedRewardsTag {
     }
 }
 
-type CollectedRewardsHash = CommitableHash<CollectedRewards,CollectedRewards,CollectedRewardsTag>;
+type CollectedRewardsHash = CommitableHash<CollectedRewards,(),CollectedRewardsTag>;
 
 
 /// The working state of the ledger
@@ -921,6 +919,7 @@ impl ValidatorState {
             )),
             past_nullifiers: NullifierHistory::default(),
             prev_block: BlockCommitment(Block::default().commit()),
+            //KALEY: ask about stake table initialization
             stake_table: KVMerkleTree::<StakeTableHash>::EmptySubtree,
             stake_table_commitments: KVMerkleTree::<StakeTableCommitmentsHash>::EmptySubtree,
             collected_rewards: KVMerkleTree::<CollectedRewardsHash>::EmptySubtree,
