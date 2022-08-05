@@ -35,7 +35,6 @@ use async_std::task::sleep;
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use jf_cap::keys::{FreezerPubKey, UserKeyPair, UserPubKey};
 use jf_cap::structs::{AssetCode, AssetPolicy, FreezeFlag};
-use primitive_types::U256;
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand::{
@@ -412,46 +411,59 @@ async fn main() {
             }
         }
 
-        // Get a list of all users in our group (this will include our own public key).
-        // Filter out our own public key and randomly choose one of the other ones to transfer to.
-        peers = match get_peers(&args.address_book_url).await {
-            Ok(results) => results,
-            Err(_) => {
-                event!(Level::ERROR, "Failed to refresh peers from address book");
-                peers
-            }
-        };
-        let recipient =
-            match peers.choose_weighted(&mut rng, |pk| if *pk == pub_key { 0u64 } else { 1u64 }) {
-                Ok(recipient) => recipient,
-                Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
-                    event!(Level::INFO, "no peers yet, retrying...");
-                    retry_delay().await;
-                    continue;
-                }
-                Err(err) => {
-                    panic!("error in weighted choice of peer: {}", err);
-                }
-            };
-
-        // Get a list of assets for which we have a non-zero balance.
-        let mut asset_balances = vec![];
-        for info in keystore.assets().await {
-            if keystore.balance(&info.code()).await > 0u64.into() {
-                asset_balances.push(info.code());
-            }
-        }
-        // Randomly choose an asset type for the transfer.
-        let asset = asset_balances.choose(&mut rng).unwrap();
-
         let operation: OperationType = rand::random();
-        // All transfers are the same, small size. This should prevent fragmentation errors and
-        // allow us to make as many transactions as possible with the assets we have.
-        let amount: u128 = min(U256::from(10), keystore.balance(asset).await).as_u128();
         let fee = 0;
 
         match operation {
             OperationType::Transfer => {
+                // Get a list of all users in our group (this will include our own public key).
+                // Filter out our own public key and randomly choose one of the other ones to
+                // transfer to.
+                peers = match get_peers(&args.address_book_url).await {
+                    Ok(results) => results,
+                    Err(_) => {
+                        event!(Level::ERROR, "Failed to refresh peers from address book");
+                        peers
+                    }
+                };
+                let recipient =
+                    match peers
+                        .choose_weighted(&mut rng, |pk| if *pk == pub_key { 0u64 } else { 1u64 })
+                    {
+                        Ok(recipient) => recipient,
+                        Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
+                            event!(Level::INFO, "no peers yet, retrying...");
+                            retry_delay().await;
+                            continue;
+                        }
+                        Err(err) => {
+                            panic!("error in weighted choice of peer: {}", err);
+                        }
+                    };
+
+                // All transfers are the same, small size. This should prevent fragmentation errors
+                // and allow us to make as many transactions as possible with the assets we have.
+                let transfer_size = 10.into();
+
+                // Get a list of assets for which we have a non-zero balance.
+                let mut asset_balances = vec![];
+                for info in keystore.assets().await {
+                    // Don't transfer away the last of our native tokens, we need them to do any
+                    // other operations.
+                    if info.code() == AssetCode::native() {
+                        if keystore.balance(&info.code()).await > transfer_size {
+                            asset_balances.push(info.code());
+                        }
+                    } else if keystore.balance(&info.code()).await > 0u64.into() {
+                        asset_balances.push(info.code());
+                    }
+                }
+                // Randomly choose an asset type for the transfer.
+                let asset = asset_balances.choose(&mut rng).unwrap();
+
+                // Don't spend more than we have.
+                let amount: u128 = min(transfer_size, keystore.balance(asset).await).as_u128();
+
                 event!(
                     Level::INFO,
                     "Seed {}, transferring {} units of {} to user {}",
@@ -512,7 +524,7 @@ async fn main() {
                 let txn = match keystore
                     .mint(
                         Some(&address),
-                        1,
+                        fee,
                         &new_asset.code,
                         1u64 << 32,
                         pub_key.clone(),
