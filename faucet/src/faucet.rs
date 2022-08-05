@@ -618,7 +618,15 @@ async fn spendable_records(
 /// Worker task to maintain at least `state.num_records` in the faucet keystore.
 ///
 /// When signalled on `wakeup`, this thread will break large records into small records of size
-/// `state.grant_size`, until there are at least `state.num_records` distinct records in the keystore.
+/// `state.grant_size`, until there are at least `state.num_records` distinct records in the
+/// keystore.
+///
+/// The record breakup is only triggered when the number of available records is less than half of
+/// the desired number of records, and in that case we always replenish all the way to the desired
+/// number of records if possible. This prevents us from generating a record transaction every time
+/// we do a transfer, and ensures that whenever we do break up records, we break up many at a time,
+/// so we can take advantage of the parallelism of having multiple record breakup transactions in
+/// flight at the same time.
 async fn maintain_enough_records(state: FaucetState, mut wakeup: mpsc::Receiver<()>) {
     loop {
         // Wait until we have few enough records that we need to break them up, and we have a big
@@ -631,7 +639,7 @@ async fn maintain_enough_records(state: FaucetState, mut wakeup: mpsc::Receiver<
             let records = spendable_records(&keystore, state.grant_size)
                 .await
                 .collect::<Vec<_>>();
-            if records.len() >= state.num_records {
+            if records.len() >= state.num_records / 2 {
                 // We have enough records for now, wait for a signal that the number of records has
                 // changed.
                 info!(
