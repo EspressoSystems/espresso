@@ -226,11 +226,11 @@ pub trait QueryService {
     /// the associated bulletin board.
     async fn subscribe(&self, i: u64) -> EventStream<LedgerEvent<EspressoLedger>>;
 
-    /// TODO !keyao Return commitments and UIDs as well: https://gitlab.com/translucence/systems/system/-/issues/39.
     /// Get the receiver memos for a transaction, if they have been posted to the bulletin board.
     /// The result includes a signature over the contents of the memos using the signing key for the
     /// requested transaction, as proof that these memos are in fact the ones that the sender
     /// intended to associate with this transaction.
+    // TODO !keyao Return commitments and UIDs as well: https://gitlab.com/translucence/systems/system/-/issues/39.
     async fn get_memos(
         &self,
         block_id: u64,
