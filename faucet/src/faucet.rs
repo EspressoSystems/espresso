@@ -53,7 +53,7 @@ use validator_node::keystore::{
     loader::{MnemonicPasswordLogin, RecoveryLoader},
     network::NetworkBackend,
     txn_builder::{RecordInfo, TransactionStatus, TransactionUID},
-    EspressoKeystore, EspressoKeystoreError, RecordAmount,
+    EspressoKeystore, RecordAmount,
 };
 
 #[derive(Debug, StructOpt)]
@@ -255,12 +255,6 @@ impl From<PersistenceError> for FaucetError {
 
 pub fn faucet_server_error<E: Into<FaucetError>>(err: E) -> tide::Error {
     net::server_error(err)
-}
-
-pub fn faucet_error(source: EspressoKeystoreError) -> tide::Error {
-    faucet_server_error(FaucetError::Transfer {
-        msg: source.to_string(),
-    })
 }
 
 /// A shared, asynchronous queue of requests.
@@ -532,7 +526,14 @@ async fn request_fee_assets(
 ) -> Result<tide::Response, tide::Error> {
     check_service_available(req.state()).await?;
     let pub_key: UserPubKey = net::server::request_body(&mut req).await?;
-    response(&req, &req.state().queue.push(pub_key).await?)
+    response(
+        &req,
+        &req.state()
+            .queue
+            .push(pub_key)
+            .await
+            .map_err(faucet_server_error)?,
+    )
 }
 
 async fn worker(id: usize, mut state: FaucetState) {
