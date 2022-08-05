@@ -41,7 +41,7 @@ dependencies = [
  "tagged-base64 0.2.0",
  "tempdir",
  "tide",
- "tide-disco 0.1.0 (git+ssh://git@github.com/EspressoSystems/tide-disco.git?tag=0.2.0)",
+ "tide-disco",
  "tide-websockets",
  "toml",
  "tracing",
@@ -1262,6 +1262,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cld"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ce3655c23ebf9cdeed9a0cb47fd2f2f6b3333cb520fd6f8e852fae983ccbaae"
+
+[[package]]
 name = "clipboard-win"
 version = "4.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2263,6 +2269,7 @@ dependencies = [
  "jf-utils",
  "lazy_static",
  "portpicker",
+ "primitive-types",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "regex",
@@ -2408,6 +2415,7 @@ dependencies = [
  "async-trait",
  "async-tungstenite 0.15.0",
  "bincode",
+ "cld",
  "dirs",
  "escargot",
  "espresso-availability-api",
@@ -2418,6 +2426,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hotshot",
+ "human_bytes",
  "itertools 0.10.3",
  "jf-cap",
  "jf-plonk",
@@ -2446,7 +2455,7 @@ dependencies = [
  "tagged-base64 0.2.0",
  "tempdir",
  "tide",
- "tide-disco 0.1.0 (git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main)",
+ "tide-disco",
  "tide-websockets",
  "toml",
  "tracing",
@@ -3193,6 +3202,12 @@ name = "httparse"
 version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "496ce29bb5a52785b44e0f7ca2847ae0bb839c9bd28f69acac9b99d461c0c04c"
+
+[[package]]
+name = "human_bytes"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88a0d4dc39ec942e44c1c306aa196da67f2bd6a30dc7b4a475465c13ccf28817"
 
 [[package]]
 name = "ident_case"
@@ -6897,51 +6912,7 @@ dependencies = [
 [[package]]
 name = "tide-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?tag=0.2.0#6a80f2e5adb8bc8789fcb7eed79cc463921443a0"
-dependencies = [
- "async-std",
- "async-trait",
- "bincode",
- "clap 3.2.14",
- "config",
- "derive_more",
- "dirs",
- "edit-distance",
- "futures",
- "futures-util",
- "http",
- "lazy_static",
- "libc",
- "markdown",
- "parking_lot 0.12.1",
- "routefinder",
- "semver 1.0.12",
- "serde",
- "serde_json",
- "serde_with",
- "shellexpand",
- "signal-hook",
- "signal-hook-async-std",
- "snafu",
- "strum 0.20.0",
- "strum_macros",
- "surf",
- "tagged-base64 0.1.0",
- "tide",
- "tide-websockets",
- "toml",
- "tracing",
- "tracing-distributed 0.4.0",
- "tracing-futures",
- "tracing-log",
- "tracing-subscriber 0.3.15",
- "url",
-]
-
-[[package]]
-name = "tide-disco"
-version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#dfde0102ea1155240a03557aff0a962072dfcba0"
+source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#3841d98cb128c1c3dc81a8837ced63b3145de234"
 dependencies = [
  "async-std",
  "async-trait",

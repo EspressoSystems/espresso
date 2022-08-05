@@ -46,13 +46,14 @@ use tide::{
     security::{CorsMiddleware, Origin},
     StatusCode,
 };
+use tracing::{error, info, warn};
 use validator_node::keystore::{
     events::EventIndex,
     hd::Mnemonic,
     loader::{MnemonicPasswordLogin, RecoveryLoader},
     network::NetworkBackend,
     txn_builder::{RecordInfo, TransactionStatus, TransactionUID},
-    EspressoKeystore, EspressoKeystoreError, RecordAmount,
+    EspressoKeystore, RecordAmount,
 };
 
 #[derive(Debug, StructOpt)]
@@ -236,7 +237,7 @@ impl net::Error for FaucetError {
         match self {
             Self::Transfer { .. } => StatusCode::BadRequest,
             Self::Internal { .. } => StatusCode::InternalServerError,
-            Self::AlreadyInQueue { .. } => StatusCode::BadRequest,
+            Self::AlreadyInQueue { .. } => StatusCode::TooManyRequests,
             Self::QueueFull { .. } => StatusCode::InternalServerError,
             Self::Persistence { .. } => StatusCode::InternalServerError,
             Self::Unavailable => StatusCode::ServiceUnavailable,
@@ -254,12 +255,6 @@ impl From<PersistenceError> for FaucetError {
 
 pub fn faucet_server_error<E: Into<FaucetError>>(err: E) -> tide::Error {
     net::server_error(err)
-}
-
-pub fn faucet_error(source: EspressoKeystoreError) -> tide::Error {
-    faucet_server_error(FaucetError::Transfer {
-        msg: source.to_string(),
-    })
 }
 
 /// A shared, asynchronous queue of requests.
@@ -318,7 +313,12 @@ impl FaucetQueueIndex {
         }
 
         // Add the key to our persistent log.
-        self.queue.store_resource(&(key.clone(), Some(0)))?;
+        self.queue
+            .store_resource(&(key.clone(), Some(0)))
+            .map_err(|err| {
+                error!("storage error adding {} to queue: {}", key, err);
+                err
+            })?;
         self.queue.commit_version().unwrap();
         self.store.commit_version().unwrap();
         // If successful, add it to our in-memory index.
@@ -341,7 +341,11 @@ impl FaucetQueueIndex {
         } else {
             // Update the entry in our persistent log.
             self.queue
-                .store_resource(&(key.clone(), Some(grants_given)))?;
+                .store_resource(&(key.clone(), Some(grants_given)))
+                .map_err(|err| {
+                    error!("storage error updating {} in queue: {}", key, err);
+                    err
+                })?;
             self.queue.commit_version().unwrap();
             self.store.commit_version().unwrap();
             // If successful, update our in-memory index.
@@ -353,7 +357,12 @@ impl FaucetQueueIndex {
     /// Remove an element from the persistent set.
     fn remove(&mut self, key: &UserPubKey) -> Result<(), FaucetError> {
         // Make a persistent note to remove the key.
-        self.queue.store_resource(&(key.clone(), None))?;
+        self.queue
+            .store_resource(&(key.clone(), None))
+            .map_err(|err| {
+                error!("storage error removing {} from queue: {}", key, err);
+                err
+            })?;
         self.queue.commit_version().unwrap();
         self.store.commit_version().unwrap();
         // Update our in-memory set.
@@ -442,16 +451,18 @@ impl FaucetQueue {
             let mut index = self.index.lock().await;
             if let Some(max_len) = self.max_len {
                 if index.len() >= max_len {
+                    warn!("rejecting {} because queue is full ({})", key, max_len);
                     return Err(FaucetError::QueueFull { max_len });
                 }
             }
             if !index.insert(key.clone())? {
+                warn!("rejecting {} because it is already in the queue", key);
                 return Err(FaucetError::AlreadyInQueue { key });
             }
         }
         // If we successfully added the key to the index, we can send it to a receiver.
         if self.sender.send(key).await.is_err() {
-            tracing::warn!("failed to add request to the queue: channel is closed");
+            warn!("failed to add request to the queue: channel is closed");
         }
         Ok(())
     }
@@ -462,18 +473,16 @@ impl FaucetQueue {
     }
 
     async fn grant(&mut self, request: UserPubKey, max_grants: usize) -> bool {
-        match self.index.lock().await.grant(request, max_grants) {
-            Ok(more) => more,
-            Err(err) => {
-                tracing::error!("error updating request: {}", err);
-                false
-            }
-        }
+        self.index
+            .lock()
+            .await
+            .grant(request, max_grants)
+            .unwrap_or(false)
     }
 
     async fn fail(&mut self, request: UserPubKey) {
         if let Err(err) = self.sender.send(request).await {
-            tracing::error!(
+            error!(
                 "error re-adding failed request; request will be dropped. {}",
                 err
             );
@@ -517,7 +526,14 @@ async fn request_fee_assets(
 ) -> Result<tide::Response, tide::Error> {
     check_service_available(req.state()).await?;
     let pub_key: UserPubKey = net::server::request_body(&mut req).await?;
-    response(&req, &req.state().queue.push(pub_key).await?)
+    response(
+        &req,
+        &req.state()
+            .queue
+            .push(pub_key)
+            .await
+            .map_err(faucet_server_error)?,
+    )
 }
 
 async fn worker(id: usize, mut state: FaucetState) {
@@ -530,7 +546,7 @@ async fn worker(id: usize, mut state: FaucetState) {
                 let keystore = state.keystore.lock().await;
                 let balance = keystore.balance(&AssetCode::native()).await;
                 if balance < state.grant_size.into() {
-                    tracing::warn!(
+                    warn!(
                         "worker {}: insufficient balance for transfer, sleeping for 30s",
                         id
                     );
@@ -538,17 +554,15 @@ async fn worker(id: usize, mut state: FaucetState) {
                     sleep(Duration::from_secs(30)).await;
                 } else {
                     let records = spendable_records(&keystore, state.grant_size).await.count();
-                    tracing::info!(
+                    info!(
                         "worker {}: transferring {} tokens to {}",
                         id,
                         state.grant_size,
                         net::UserAddress(pub_key.address())
                     );
-                    tracing::info!(
+                    info!(
                         "worker {}: keystore balance before transfer: {} across {} records",
-                        id,
-                        balance,
-                        records
+                        id, balance, records
                     );
                     break keystore;
                 }
@@ -562,7 +576,7 @@ async fn worker(id: usize, mut state: FaucetState) {
                 )
                 .await
             {
-                tracing::error!("worker {}: failed to transfer: {}", id, err);
+                error!("worker {}: failed to transfer: {}", id, err);
                 // If we failed, mark the request as failed in the queue so it can be retried
                 // later.
                 state.queue.fail(pub_key).await;
@@ -579,14 +593,14 @@ async fn worker(id: usize, mut state: FaucetState) {
         // Signal the record breaking thread that we have spent some records, so that it can create
         // more by breaking up larger records.
         if state.signal_breaker_thread.clone().try_send(()).is_err() {
-            tracing::error!(
+            error!(
                 "worker {}: error signalling the breaker thread. Perhaps it has crashed?",
                 id
             );
         }
     }
 
-    tracing::warn!("worker {}: exiting, request queue closed", id);
+    warn!("worker {}: exiting, request queue closed", id);
 }
 
 async fn spendable_records(
@@ -605,7 +619,15 @@ async fn spendable_records(
 /// Worker task to maintain at least `state.num_records` in the faucet keystore.
 ///
 /// When signalled on `wakeup`, this thread will break large records into small records of size
-/// `state.grant_size`, until there are at least `state.num_records` distinct records in the keystore.
+/// `state.grant_size`, until there are at least `state.num_records` distinct records in the
+/// keystore.
+///
+/// The record breakup is only triggered when the number of available records is less than half of
+/// the desired number of records, and in that case we always replenish all the way to the desired
+/// number of records if possible. This prevents us from generating a record transaction every time
+/// we do a transfer, and ensures that whenever we do break up records, we break up many at a time,
+/// so we can take advantage of the parallelism of having multiple record breakup transactions in
+/// flight at the same time.
 async fn maintain_enough_records(state: FaucetState, mut wakeup: mpsc::Receiver<()>) {
     loop {
         // Wait until we have few enough records that we need to break them up, and we have a big
@@ -618,10 +640,10 @@ async fn maintain_enough_records(state: FaucetState, mut wakeup: mpsc::Receiver<
             let records = spendable_records(&keystore, state.grant_size)
                 .await
                 .collect::<Vec<_>>();
-            if records.len() >= state.num_records {
+            if records.len() >= state.num_records / 2 {
                 // We have enough records for now, wait for a signal that the number of records has
                 // changed.
-                tracing::info!(
+                info!(
                     "got {}/{} records, waiting for a change",
                     records.len(),
                     state.num_records
@@ -633,7 +655,7 @@ async fn maintain_enough_records(state: FaucetState, mut wakeup: mpsc::Receiver<
                 // There are no big records to break up, so there's nothing for us to do. Exit
                 // the inner loop and wait for a notification that the record distribution has
                 // changed.
-                tracing::warn!("not enough records, but no large records to break up");
+                warn!("not enough records, but no large records to break up");
             } else {
                 // We don't have enough records and we do have a big record to break up. Break out
                 // of the wait loop and enter the next loop to break up our records.
@@ -650,7 +672,7 @@ async fn maintain_enough_records(state: FaucetState, mut wakeup: mpsc::Receiver<
             // `break_up_records` finalize. Returning to the previous loop and checking if we have
             // enough records might spuriously lead us to call `break_up_records` again, which would
             // be an unnecessary waste of time.
-            tracing::info!(
+            info!(
                 "will have sufficient records after {} transactions, waiting for a change",
                 transactions.len()
             );
@@ -706,7 +728,7 @@ async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionUID<Espr
             let split_amount = largest_record.amount() / 2;
             let change_amount = largest_record.amount() - split_amount;
 
-            tracing::info!(
+            info!(
                 "breaking up a record of size {} into records of size {} and {}",
                 largest_record.amount(),
                 split_amount,
@@ -735,7 +757,7 @@ async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionUID<Espr
                     // If our transfers start failing, we will assume there is something wrong and
                     // try not to put extra stress on the system. Break out of the inner loop and
                     // wait for the transactions we did initiate to finish.
-                    tracing::error!("record breakup transfer failed: {}", err);
+                    error!("record breakup transfer failed: {}", err);
                     break;
                 }
             };
@@ -746,7 +768,7 @@ async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionUID<Espr
             // We did not have sufficient records to generate any break-up transactions. Give up
             // early and return with fewer-than-desired records. When the allocation of records
             // changes, the record breaker thread will be notified and we will get to try again.
-            tracing::warn!("No large records to break up");
+            warn!("No large records to break up");
             return None;
         }
 
@@ -759,7 +781,7 @@ async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionUID<Espr
         // before we acquire it, during time where we would just be idly waiting. If this happens,
         // it only means we spend less time waiting for our transactions once we are able to
         // reacquire the lock.
-        tracing::info!(
+        info!(
             "waiting for {} transactions before breaking more records",
             transactions.len()
         );
@@ -772,7 +794,7 @@ async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionUID<Espr
         .await
         {
             if !matches!(result, Ok(TransactionStatus::Retired)) {
-                tracing::error!("record breakup transfer did not complete successfully");
+                error!("record breakup transfer did not complete successfully");
             }
         }
     }

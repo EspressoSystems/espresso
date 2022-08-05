@@ -48,6 +48,7 @@ use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::iter::once;
 use std::str::FromStr;
+use std::sync::Arc;
 
 /// Height of the records Merkle tree
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
@@ -878,7 +879,7 @@ type CollectedRewardsHash = CommitableHash<CollectedRewards,(),CollectedRewardsT
 pub struct ValidatorState {
     pub prev_commit_time: u64,
     pub prev_state: Option<state_comm::LedgerStateCommitment>,
-    pub verif_crs: VerifierKeySet,
+    pub verif_crs: Arc<VerifierKeySet>,
     /// The current record Merkle commitment
     pub record_merkle_commitment: MerkleCommitment,
     /// The current frontier of the record Merkle tree
@@ -911,7 +912,7 @@ impl ValidatorState {
         Self {
             prev_commit_time: 0u64,
             prev_state: None,
-            verif_crs,
+            verif_crs: Arc::new(verif_crs),
             record_merkle_commitment: record_merkle_frontier.commitment(),
             record_merkle_frontier: record_merkle_frontier.frontier(),
             past_record_merkle_roots: RecordMerkleHistory(VecDeque::with_capacity(

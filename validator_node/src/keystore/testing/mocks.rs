@@ -21,12 +21,14 @@ use espresso_core::{
     state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
 };
 use futures::stream::Stream;
+use itertools::izip;
 use jf_cap::{
     keys::{UserAddress, UserKeyPair, UserPubKey},
     structs::{Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
     MerkleTree, Signature,
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
+use reef::traits::Transaction as _;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     sparse_merkle_tree::SparseMerkleTree,
@@ -86,9 +88,10 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
                 }
 
                 // Broadcast the new block
+                let block_id = self.committed_blocks.len() as u64;
                 self.generate_event(LedgerEvent::Commit {
                     block: block.clone(),
-                    block_id: self.committed_blocks.len() as u64,
+                    block_id,
                     state_comm: self.validator.commit(),
                 });
 
@@ -100,7 +103,15 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
                     assert_eq!(this_txn_uids.len(), txn.output_len());
                     block_uids.push(this_txn_uids);
                 }
-                self.committed_blocks.push((block, block_uids));
+                self.committed_blocks.push((block.clone(), block_uids));
+
+                // Broadcast the memos.
+                for (txn_id, (memos, sig)) in
+                    block.memos.into_iter().zip(block.signatures).enumerate()
+                {
+                    self.post_memos(block_id, txn_id as u64, memos, sig)
+                        .unwrap();
+                }
             }
             Err(error) => self.generate_event(LedgerEvent::Reject { block, error }),
         }
@@ -110,11 +121,62 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
 
     fn post_memos(
         &mut self,
-        _block_id: u64,
-        _txn_id: u64,
-        _memos: Vec<ReceiverMemo>,
-        _sig: Signature,
+        block_id: u64,
+        txn_id: u64,
+        memos: Vec<ReceiverMemo>,
+        sig: Signature,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
+        let (block, uids) = match self.committed_blocks.get(block_id as usize) {
+            Some(block) => block,
+            None => {
+                return Err(KeystoreError::Failed {
+                    msg: String::from("invalid block ID"),
+                });
+            }
+        };
+        let txn = match block.block.0.get(txn_id as usize) {
+            Some(txn) => txn,
+            None => {
+                return Err(KeystoreError::Failed {
+                    msg: String::from("invalid transaction ID"),
+                });
+            }
+        };
+        let uids = &uids[txn_id as usize];
+
+        // Validate the new memos.
+        if txn.verify_receiver_memos_signature(&memos, &sig).is_err() {
+            return Err(KeystoreError::Failed {
+                msg: String::from("invalid memos signature"),
+            });
+        }
+        if memos.len() != txn.output_len() {
+            return Err(KeystoreError::Failed {
+                msg: format!("wrong number of memos (expected {})", txn.output_len()),
+            });
+        }
+
+        // Authenticate the validity of the records corresponding to the memos.
+        let merkle_tree = &self.records;
+        let merkle_paths = uids
+            .iter()
+            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path)
+            .collect::<Vec<_>>();
+
+        // Broadcast the new memos.
+        let memos = izip!(
+            memos,
+            txn.output_commitments(),
+            uids.iter().cloned(),
+            merkle_paths
+        )
+        .collect::<Vec<_>>();
+        let event = LedgerEvent::Memos {
+            outputs: memos,
+            transaction: Some((block_id as u64, txn_id as u64, txn.hash(), txn.kind())),
+        };
+        self.generate_event(event);
+
         Ok(())
     }
 
@@ -239,7 +301,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         &self,
         _from: EventIndex,
     ) -> Result<(MerkleTree, EventIndex), KeystoreError<EspressoLedger>> {
-        dbg!(self.ledger.lock().await.get_initial_scan_state())
+        self.ledger.lock().await.get_initial_scan_state()
     }
 }
 

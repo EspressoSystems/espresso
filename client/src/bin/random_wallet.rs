@@ -44,7 +44,8 @@ use rand::{
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use seahorse::txn_builder::RecordInfo;
 use seahorse::{events::EventIndex, hd::KeyTree, loader::KeystoreLoader, KeystoreError};
-use std::collections::HashSet;
+use std::cmp::min;
+use std::collections::{HashSet, VecDeque};
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
@@ -174,6 +175,50 @@ async fn get_peers(url: &Url) -> Result<Vec<UserPubKey>, surf::Error> {
     Ok(pub_keys)
 }
 
+async fn get_native_from_faucet(keystore: &mut Keystore, pub_key: &UserPubKey, url: &Url) {
+    // Request native asset for the keystore.
+    let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
+    loop {
+        match surf::post(format!("{}request_fee_assets", url))
+            .content_type(surf::http::mime::BYTE_STREAM)
+            .body_bytes(&receiver_key_bytes)
+            .await
+        {
+            Ok(res) if res.status() == StatusCode::Ok => {
+                break;
+            }
+            Ok(res) if res.status() == StatusCode::TooManyRequests => {
+                tracing::warn!(
+                    "Faucet request failed due because another is in flight.  Won't retry."
+                );
+                break;
+            }
+            Ok(res) => {
+                tracing::error!("retrying faucet because of {} response", res.status());
+                retry_delay().await;
+            }
+            Err(err) => {
+                tracing::error!("Retrying faucet because of {:?}", err);
+                retry_delay().await;
+            }
+        }
+    }
+
+    // Wait for initial balance.
+    let mut i = 0;
+    while keystore.balance(&AssetCode::native()).await == 0u64.into() {
+        if i % 20 == 0 {
+            event!(Level::INFO, "waiting for balance from faucet");
+        }
+        i += 1;
+        retry_delay().await;
+    }
+    tracing::info!(
+        "balance after faucet: {}",
+        keystore.balance(&AssetCode::native()).await
+    );
+}
+
 #[async_std::main]
 async fn main() {
     let args = Args::from_args();
@@ -248,44 +293,19 @@ async fn main() {
         }
     };
     let address = pub_key.address();
-    event!(Level::INFO, "address = {:?}", address);
+    event!(Level::INFO, "Seed {}, address = {:?}", seed, address);
 
     // Wait for the scan of the ledger to catch up.
     keystore.await_key_scan(&address).await.unwrap();
 
     if keystore.balance(&AssetCode::native()).await == 0u64.into() {
-        // Request native asset for the keystore.
-        let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
-        loop {
-            match surf::post(format!("{}request_fee_assets", args.faucet_url))
-                .content_type(surf::http::mime::BYTE_STREAM)
-                .body_bytes(&receiver_key_bytes)
-                .await
-            {
-                Ok(res) if res.status() == StatusCode::Ok => {
-                    break;
-                }
-                Ok(res) => {
-                    tracing::error!("retrying faucet because of {} response", res.status());
-                    retry_delay().await;
-                }
-                Err(err) => {
-                    tracing::error!("Retrying faucet because of {:?}", err);
-                    retry_delay().await;
-                }
-            }
-        }
-
-        // Wait for initial balance.
-        while keystore.balance(&AssetCode::native()).await == 0u64.into() {
-            event!(Level::INFO, "waiting for initial balance");
-            retry_delay().await;
-        }
+        event!(
+            Level::INFO,
+            "Seed {}, Requesting intial funds from faucet",
+            seed
+        );
+        get_native_from_faucet(&mut keystore, &pub_key, &args.faucet_url).await;
     }
-    tracing::info!(
-        "initial balance: {}",
-        keystore.balance(&AssetCode::native()).await
-    );
 
     // Check if we already have a mintable asset (if we are loading from a saved keystore).
     let my_asset = match keystore
@@ -297,7 +317,8 @@ async fn main() {
         Some(info) => {
             event!(
                 Level::INFO,
-                "found saved keystore with custom asset type {}",
+                "Seed {}, found saved keystore with custom asset type {}",
+                seed,
                 info.code()
             );
             info.definition().clone()
@@ -326,7 +347,7 @@ async fn main() {
             let txn = keystore
                 .mint(
                     Some(&address),
-                    1,
+                    0,
                     &my_asset.code,
                     1u64 << 32,
                     pub_key.clone(),
@@ -348,51 +369,105 @@ async fn main() {
     }
 
     let mut peers = vec![];
-
+    let mut pending = VecDeque::new();
+    event!(Level::INFO, "STARTING TEST LOOP, seed: {}", seed);
     loop {
-        // Get a list of all users in our group (this will include our own public key).
-        // Filter out our own public key and randomly choose one of the other ones to transfer to.
-        peers = match get_peers(&args.address_book_url).await {
-            Ok(results) => results,
-            Err(_) => {
-                event!(Level::ERROR, "Failed to refresh peers from address book");
-                peers
-            }
-        };
-        let recipient =
-            match peers.choose_weighted(&mut rng, |pk| if *pk == pub_key { 0u64 } else { 1u64 }) {
-                Ok(recipient) => recipient,
-                Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
-                    event!(Level::INFO, "no peers yet, retrying...");
-                    retry_delay().await;
-                    continue;
+        while keystore.balance(&AssetCode::native()).await == 0u64.into() {
+            // If we don't have any native asset left, wait for a pending transaction to complete
+            // so we collect the fee change.
+            if let Some(txn) = pending.pop_front() {
+                event!(
+                    Level::INFO,
+                    "Seed {}, Ran out of native, waiting for a pending transaction",
+                    seed
+                );
+                match keystore.await_transaction(&txn).await {
+                    Ok(status) => {
+                        if !status.succeeded() {
+                            // Transfers are allowed to fail. It can happen, for instance, if we get starved
+                            // out until our transfer becomes too old for the validators. Thus we make this
+                            // a warning, not an error.
+                            event!(Level::WARN, "Seed {}, transfer failed!", seed);
+                        }
+                    }
+                    Err(err) => {
+                        event!(
+                            Level::ERROR,
+                            "Seed {}, error while waiting for transaction: {}",
+                            seed,
+                            err
+                        );
+                    }
                 }
-                Err(err) => {
-                    panic!("error in weighted choice of peer: {}", err);
-                }
-            };
-
-        // Get a list of assets for which we have a non-zero balance.
-        let mut asset_balances = vec![];
-        for info in keystore.assets().await {
-            if keystore.balance(&info.code()).await > 0u64.into() {
-                asset_balances.push(info.code());
+            } else {
+                // If we are out of native tokens _and_ don't have any pending, request more from
+                // the faucet.
+                event!(
+                    Level::INFO,
+                    "Seed {}, Ran out of native, requesting more from faucet",
+                    seed
+                );
+                get_native_from_faucet(&mut keystore, &pub_key, &args.faucet_url).await;
             }
         }
-        // Randomly choose an asset type for the transfer.
-        let asset = asset_balances.choose(&mut rng).unwrap();
 
         let operation: OperationType = rand::random();
-        // All transfers are the same, small size. This should prevent fragmentation errors and
-        // allow us to make as many transactions as possible with the assets we have.
-        let amount = 10;
-        let fee = 1;
+        let fee = 0;
 
         match operation {
             OperationType::Transfer => {
+                // Get a list of all users in our group (this will include our own public key).
+                // Filter out our own public key and randomly choose one of the other ones to
+                // transfer to.
+                peers = match get_peers(&args.address_book_url).await {
+                    Ok(results) => results,
+                    Err(_) => {
+                        event!(Level::ERROR, "Failed to refresh peers from address book");
+                        peers
+                    }
+                };
+                let recipient =
+                    match peers
+                        .choose_weighted(&mut rng, |pk| if *pk == pub_key { 0u64 } else { 1u64 })
+                    {
+                        Ok(recipient) => recipient,
+                        Err(WeightedError::NoItem | WeightedError::AllWeightsZero) => {
+                            event!(Level::INFO, "no peers yet, retrying...");
+                            retry_delay().await;
+                            continue;
+                        }
+                        Err(err) => {
+                            panic!("error in weighted choice of peer: {}", err);
+                        }
+                    };
+
+                // All transfers are the same, small size. This should prevent fragmentation errors
+                // and allow us to make as many transactions as possible with the assets we have.
+                let transfer_size = 10.into();
+
+                // Get a list of assets for which we have a non-zero balance.
+                let mut asset_balances = vec![];
+                for info in keystore.assets().await {
+                    // Don't transfer away the last of our native tokens, we need them to do any
+                    // other operations.
+                    if info.code() == AssetCode::native() {
+                        if keystore.balance(&info.code()).await > transfer_size {
+                            asset_balances.push(info.code());
+                        }
+                    } else if keystore.balance(&info.code()).await > 0u64.into() {
+                        asset_balances.push(info.code());
+                    }
+                }
+                // Randomly choose an asset type for the transfer.
+                let asset = asset_balances.choose(&mut rng).unwrap();
+
+                // Don't spend more than we have.
+                let amount: u128 = min(transfer_size, keystore.balance(asset).await).as_u128();
+
                 event!(
                     Level::INFO,
-                    "transferring {} units of {} to user {}",
+                    "Seed {}, transferring {} units of {} to user {}",
+                    seed,
                     amount,
                     if *asset == AssetCode::native() {
                         String::from("the native asset")
@@ -409,23 +484,16 @@ async fn main() {
                 {
                     Ok(txn) => txn,
                     Err(err) => {
-                        event!(Level::ERROR, "Error generating transfer: {}", err);
+                        event!(
+                            Level::ERROR,
+                            "Seed {}, Error generating transfer: {}",
+                            seed,
+                            err
+                        );
                         continue;
                     }
                 };
-                match keystore.await_transaction(&txn).await {
-                    Ok(status) => {
-                        if !status.succeeded() {
-                            // Transfers are allowed to fail. It can happen, for instance, if we get starved
-                            // out until our transfer becomes too old for the validators. Thus we make this
-                            // a warning, not an error.
-                            event!(Level::WARN, "transfer failed!");
-                        }
-                    }
-                    Err(err) => {
-                        event!(Level::ERROR, "error while waiting for transaction: {}", err);
-                    }
-                }
+                pending.push_back(txn);
             }
             OperationType::Mint => {
                 let new_asset = match keystore
@@ -442,18 +510,21 @@ async fn main() {
                 {
                     Ok(txn) => txn,
                     Err(err) => {
-                        event!(Level::ERROR, "Error defining asset: {}", err);
+                        event!(Level::ERROR, "Seed {}, Error defining asset: {}", seed, err);
                         continue;
                     }
                 };
 
-                event!(Level::INFO, "defined a new asset type: {}", new_asset.code);
-
-                event!(Level::INFO, "minting my asset type {}", new_asset.code);
+                event!(
+                    Level::INFO,
+                    "Seed {}, minting my asset type {}",
+                    seed,
+                    new_asset.code
+                );
                 let txn = match keystore
                     .mint(
                         Some(&address),
-                        1,
+                        fee,
                         &new_asset.code,
                         1u64 << 32,
                         pub_key.clone(),
@@ -462,29 +533,17 @@ async fn main() {
                 {
                     Ok(txn) => txn,
                     Err(err) => {
-                        event!(Level::ERROR, "Error minting asset: {}", err);
+                        event!(Level::ERROR, "Seed {}, Error minting asset: {}", seed, err);
                         continue;
                     }
                 };
-                match keystore.await_transaction(&txn).await {
-                    Ok(status) => {
-                        if !status.succeeded() {
-                            event!(Level::WARN, "mint failed!");
-                        }
-                    }
-                    Err(err) => {
-                        event!(Level::ERROR, "error while waiting for mint: {}", err);
-                    }
-                }
-                // The mint transaction is allowed to fail due to contention from other clients.
-                retry_delay().await;
-                event!(Level::INFO, "minted custom asset");
+                pending.push_back(txn);
             }
             OperationType::Freeze => {
                 let freezable_records: Vec<RecordInfo> =
                     find_freezable_records(&keystore, FreezeFlag::Unfrozen).await;
                 if freezable_records.is_empty() {
-                    event!(Level::INFO, "No freezable records");
+                    event!(Level::INFO, "Seed {}, No freezable records", seed);
                     continue;
                 }
                 let record = freezable_records.choose(&mut rng).unwrap();
@@ -492,14 +551,15 @@ async fn main() {
                 let asset_def = &record.ro.asset_def;
                 event!(
                     Level::INFO,
-                    "Freezing Asset: {}, Amount: {}, Owner: {}",
+                    "Seed {}, Freezing Asset: {}, Amount: {}, Owner: {}",
+                    seed,
                     asset_def.code,
                     record.ro.amount,
                     owner_address
                 );
                 let freeze_address = keystore.pub_keys().await[0].address();
 
-                keystore
+                let txn = match keystore
                     .freeze(
                         Some(&freeze_address),
                         fee,
@@ -508,14 +568,21 @@ async fn main() {
                         owner_address,
                     )
                     .await
-                    .ok();
+                {
+                    Ok(txn) => txn,
+                    Err(err) => {
+                        event!(Level::ERROR, "Seed {}, Error freezing asset: {}", seed, err);
+                        continue;
+                    }
+                };
+                pending.push_back(txn);
             }
             OperationType::Unfreeze => {
-                event!(Level::INFO, "Unfreezing");
+                event!(Level::INFO, "Seed {}, Unfreezing", seed);
                 let freezable_records: Vec<RecordInfo> =
                     find_freezable_records(&keystore, FreezeFlag::Frozen).await;
                 if freezable_records.is_empty() {
-                    event!(Level::INFO, "No frozen records");
+                    event!(Level::INFO, "Seed {}, No frozen records", seed);
                     continue;
                 }
                 let record = freezable_records.choose(&mut rng).unwrap();
@@ -523,13 +590,14 @@ async fn main() {
                 let asset_def = &record.ro.asset_def;
                 event!(
                     Level::INFO,
-                    "Unfreezing Asset: {}, Amount: {}, Owner: {}",
+                    "Seed {}, Unfreezing Asset: {}, Amount: {}, Owner: {}",
+                    seed,
                     asset_def.code,
                     record.ro.amount,
                     owner_address
                 );
                 let freeze_address = keystore.pub_keys().await[0].address();
-                keystore
+                let txn = match keystore
                     .unfreeze(
                         Some(&freeze_address),
                         fee,
@@ -538,20 +606,40 @@ async fn main() {
                         owner_address,
                     )
                     .await
-                    .ok();
+                {
+                    Ok(txn) => txn,
+                    Err(err) => {
+                        event!(
+                            Level::ERROR,
+                            "Seed {}, Error unfreezing asset: {}",
+                            seed,
+                            err
+                        );
+                        continue;
+                    }
+                };
+                pending.push_back(txn);
             }
         }
 
+        // Filter out pending transactions which have already completed.
+        for txn in std::mem::take(&mut pending) {
+            let keep = match keystore.transaction_status(&txn).await {
+                Ok(status) => !status.is_final(),
+                // If we failed to fetch the status, keep the transaction. Maybe we will succeed
+                // next time.
+                Err(_) => true,
+            };
+            if keep {
+                pending.push_back(txn);
+            }
+        }
         event!(
             Level::INFO,
-            "Wallet Native balance {}",
-            keystore.balance(&AssetCode::native()).await
+            "Seed {}, Wallet Native balance {}, Pending transactions {}",
+            seed,
+            keystore.balance(&AssetCode::native()).await,
+            pending.len()
         );
-        event!(
-            Level::INFO,
-            "Wallet Custom Asset balance {}",
-            keystore.balance(&my_asset.code).await
-        );
-        retry_delay().await;
     }
 }
