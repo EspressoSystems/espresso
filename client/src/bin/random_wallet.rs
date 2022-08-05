@@ -348,7 +348,7 @@ async fn main() {
             let txn = keystore
                 .mint(
                     Some(&address),
-                    1,
+                    0,
                     &my_asset.code,
                     1u64 << 32,
                     pub_key.clone(),
