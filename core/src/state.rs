@@ -12,6 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use espresso_macros::*;
+use hotshot::types::Commit;
 use jf_cap::structs::ReceiverMemo;
 use jf_cap::Signature;
 
@@ -19,11 +20,13 @@ pub use crate::full_persistence::FullPersistence;
 pub use crate::lw_persistence::LWPersistence;
 pub use crate::set_merkle_tree::*;
 pub use crate::kv_merkle_tree::*;
+pub use crate::tree_hash::*;
 pub use crate::tree_hash::committable_hash::*;
 pub use crate::PubKey;
 pub use crate::util::canonical;
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
+use serde_with;
 use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
@@ -769,12 +772,39 @@ pub mod state_comm {
     }
 }
 
-// Struct representing the inputs to the stake table
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+
+// Stake table for each round
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 struct StakeTableKey(PubKey);
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+
+impl<T> serde_with::SerializeAs<T> for StakeTableKey 
+where
+    T: CanonicalSerialize,
+{
+    fn serialize_as<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+impl<'de, T> serde_with::DeserializeAs<'de, T> for StakeTableKey
+where
+    T: CanonicalDeserialize,
+{
+    fn deserialize_as<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let base64 = String::deserialize(deserializer)?;
+        Self::from_str(&base64).map_err(D::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 struct StakeTableValue(u64);
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
+
 struct StakeTableTag();
 
 impl CommitableHashTag for StakeTableTag {
@@ -784,6 +814,61 @@ impl CommitableHashTag for StakeTableTag {
 }
 
 type StakeTableHash = CommitableHash<StakeTableKey, StakeTableValue, StakeTableTag>;
+
+// Stores commitment hash of previous rounds' stake tables
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+struct StakeTableCommitmentTag();
+impl CommitableHashTag for StakeTableCommitmentTag {
+    fn commitment_diversifier() -> &'static str {
+        "Stake Table Commitment"
+    }
+}
+
+type StakeTableCommitmentsHash = CommitableHash<u64, <StakeTableHash as KVTreeHash>::Digest, StakeTableCommitmentTag>;
+
+// Set Merkle tree for all of the previously-collected rewards
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+struct CollectedRewards((PubKey,u64));
+
+impl<T> serde_with::SerializeAs<T> for CollectedRewards 
+where
+    T: CanonicalSerialize,
+{
+    fn serialize_as<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let tup = serializer.serialize_tuple(2)?;
+        tup.serialize_str(&(self.0).0.to_string())?;
+        tup.serialize_u64((self.0).1)?;
+        tup.end()
+    }
+}
+impl<'de, T> serde_with::DeserializeAs<'de, T> for CollectedRewards
+where
+    T: CanonicalDeserialize,
+{
+    fn deserialize_as<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let base64 = String::deserialize(deserializer)?;
+        let pubkey = PubKey::from_str(&base64).map_err(D::Error::custom);
+        let block_num = u64::deserialize(deserializer)?;
+        Ok(Self((pubkey,block_num)))
+    }
+}
+
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+struct CollectedRewardsTag();
+impl CommitableHashTag for CollectedRewardsTag {
+    fn commitment_diversifier() -> &'static str {
+        "Collected rewards"
+    }
+}
+
+type CollectedRewardsHash = CommitableHash<CollectedRewards,CollectedRewards,CollectedRewardsTag>;
 
 
 /// The working state of the ledger
@@ -805,8 +890,12 @@ pub struct ValidatorState {
     /// Nullifiers from recent blocks, which allows validating slightly out-of-date-transactions
     pub past_nullifiers: NullifierHistory,
     pub prev_block: BlockCommitment,
-    // For fixed-stake
+    // Staking table. For fixed-stake, this will be the same each round
     pub stake_table: KVMerkleTree<StakeTableHash>,
+    // Keeps track of previous stake tables 
+    pub stake_table_commitments: KVMerkleTree<StakeTableCommitmentsHash>,
+    // Track already-collected rewards via (staking_key, block number) tuples
+    pub collected_rewards: KVMerkleTree<CollectedRewardsHash>,
 }
 
 /// Nullifier proofs, organized by the root hash for which they are valid.
@@ -832,6 +921,9 @@ impl ValidatorState {
             )),
             past_nullifiers: NullifierHistory::default(),
             prev_block: BlockCommitment(Block::default().commit()),
+            stake_table: KVMerkleTree::<StakeTableHash>::EmptySubtree,
+            stake_table_commitments: KVMerkleTree::<StakeTableCommitmentsHash>::EmptySubtree,
+            collected_rewards: KVMerkleTree::<CollectedRewardsHash>::EmptySubtree,
         }
     }
 
