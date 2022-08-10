@@ -48,17 +48,7 @@ use std::sync::Arc;
 /// Height of the records Merkle tree
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
-#[derive(
-    Debug,
-    Clone,
-    //CanonicalSerialize,
-    //CanonicalDeserialize,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 
 /// A transaction tht can be either a CAP transaction or a collect reward transaction
 pub enum EspressoTransaction {
@@ -985,33 +975,6 @@ impl ValidatorState {
                 .map_err(|err| CryptoError { err: Ok(err) })?;
         }
         //TODO (fernando) verify CollectReward
-
-        /* if !txns.0.is_empty() {
-            txn_batch_verify(
-                cap_txns,
-                &txns
-                    .0
-                    .iter()
-                    .map(|note| {
-                        // Only validate transactions if we can confirm that the record Merkle root
-                        // they were generated with is a valid previous or current ledger state.
-                        if self.record_merkle_commitment.root_value == note.merkle_root()
-                            || self
-                                .past_record_merkle_roots
-                                .0
-                                .contains(&note.merkle_root())
-                        {
-                            Ok(note.merkle_root())
-                        } else {
-                            Err(BadMerkleRoot {})
-                        }
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-                now,
-                &verif_keys,
-            )
-            .map_err(|err| CryptoError { err: Ok(err) })?;
-        }*/
 
         Ok((txns, proofs))
     }
