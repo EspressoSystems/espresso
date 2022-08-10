@@ -35,6 +35,7 @@ use espresso_metastate_api::data_source::UpdateMetaStateData;
 use espresso_status_api::data_source::UpdateStatusData;
 use futures::StreamExt;
 use futures::{future::RemoteHandle, task::SpawnExt};
+use reef::traits::Transaction;
 
 pub struct UpdateQueryDataSource<CU, AV, MS, ST>
 where
@@ -161,7 +162,7 @@ where
                             let mut txn_hashes = Vec::new();
                             let mut nullifiers_delta = Vec::new();
                             for (txn, _proofs) in block.block.0.iter().zip(block.proofs.iter()) {
-                                for n in txn.nullifiers() {
+                                for n in txn.input_nullifiers() {
                                     nullifiers_delta.push(n);
                                 }
                                 let hash = TransactionCommitment(txn.commit());
@@ -224,7 +225,7 @@ where
                                 .0
                                 .iter()
                                 .map(|txn| {
-                                    txn.nullifiers()
+                                    txn.input_nullifiers()
                                         .into_iter()
                                         .map(|n| nullifier_proofs.contains(n).unwrap().1)
                                         .collect()

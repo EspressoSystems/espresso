@@ -420,7 +420,7 @@ impl FullState {
                                 .zip(block.signatures.iter())
                                 .enumerate()
                             {
-                                for n in txn.nullifiers() {
+                                for n in txn.input_nullifiers() {
                                     nullifiers.insert(n);
                                     nullifiers_delta.push(n);
                                 }
@@ -482,7 +482,7 @@ impl FullState {
                                 .0
                                 .iter()
                                 .map(|txn| {
-                                    txn.nullifiers()
+                                    txn.input_nullifiers()
                                         .into_iter()
                                         .map(|n| nullifier_proofs.contains(n).unwrap().1)
                                         .collect()
@@ -1249,7 +1249,7 @@ mod tests {
                         // We should be able to get inclusion proofs for all the nullifiers in the
                         // new block.
                         for txn in block.block.0 {
-                            for n in txn.nullifiers() {
+                            for n in txn.input_nullifiers() {
                                 let (incl, proof) = qs
                                     .nullifier_proof(hist_state.nullifiers_root(), n)
                                     .await

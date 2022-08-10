@@ -23,8 +23,10 @@ use espresso_status_api::data_source::{StatusDataSource, UpdateStatusData};
 use espresso_status_api::query_data::ValidatorStatus;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
+use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 use validator_node::api::EspressoError;
+use validator_node::keystore::reef;
 use validator_node::node::QueryServiceError;
 
 #[derive(Default)]
@@ -184,7 +186,7 @@ impl QueryData {
             for last_index in index..block_id as usize {
                 let block = &self.blocks[last_index + 1];
                 for transaction in block.raw_block.block.0.iter() {
-                    for nullifier_in in transaction.nullifiers() {
+                    for nullifier_in in transaction.input_nullifiers() {
                         adjusted_nullifier_set.insert(nullifier_in);
                     }
                 }

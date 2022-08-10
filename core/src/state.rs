@@ -36,6 +36,7 @@ use jf_cap::{
 };
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
+use reef::traits::Transaction;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -229,9 +230,9 @@ impl BlockContents<H_256> for ElaboratedBlock {
             .block
             .0
             .iter()
-            .flat_map(|x| x.nullifiers().into_iter())
+            .flat_map(|x| x.input_nullifiers().into_iter())
             .collect::<HashSet<_>>();
-        for n in txn.txn.nullifiers().iter() {
+        for n in txn.txn.input_nullifiers().iter() {
             if nulls.contains(n) {
                 return Err(ValidationError::ConflictingNullifiers {});
             }
@@ -921,7 +922,7 @@ impl ValidatorState {
         for (pf, n) in null_pfs
             .into_iter()
             .zip(txns.0.iter())
-            .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.nullifiers().into_iter()))
+            .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.input_nullifiers().into_iter()))
         {
             if nulls.contains(&n) {
                 return Err(NullifierAlreadyExists { nullifier: n });

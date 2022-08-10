@@ -14,17 +14,18 @@ use crate::state::{
     state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction, EspressoTransaction,
     SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
+use arbitrary_wrappers::ArbitraryNullifier;
 use commit::{Commitment, Committable};
 use itertools::izip;
 use itertools::MultiUnzip;
+use jf_cap::structs::RecordOpening;
 use jf_cap::{
     keys::{ViewerKeyPair, ViewerPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
     TransactionNote,
 };
-use reef::traits::Transaction;
 use reef::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
 impl traits::NullifierSet for SetMerkleTree {
@@ -63,40 +64,76 @@ impl traits::NullifierSet for SetMerkleTree {
     }
 }
 
-impl EspressoTransaction {
-    pub fn nullifiers(&self) -> Vec<Nullifier> {
-        match self {
-            Self::CAP(txn) => txn.nullifiers(),
-        }
+impl reef::traits::Transaction for EspressoTransaction {
+    type NullifierSet = HashSet<ArbitraryNullifier>;
+    type Hash = Commitment<Self>;
+    type Kind = reef::cap::TransactionKind; //TODO (fernando) what when transaction include CollectRewards
+
+    fn cap(
+        note: TransactionNote,
+        proofs: Vec<<Self::NullifierSet as traits::NullifierSet>::Proof>,
+    ) -> Self {
+        EspressoTransaction::CAP(Box::new(TransactionNote::cap(note, proofs)))
     }
 
-    // TODO(fernando) probably implement this in reef
-    pub(crate) fn open_viewing_memo(
+    fn open_viewing_memo(
         &self,
-        assets: &HashMap<AssetCode, AssetDefinition>,
-        keys: &HashMap<ViewerPubKey, ViewerKeyPair>,
+        viewable_assets: &HashMap<AssetCode, AssetDefinition>,
+        viewing_keys: &HashMap<ViewerPubKey, ViewerKeyPair>,
     ) -> Result<ViewingMemoOpening, ViewingError> {
         match self {
-            Self::CAP(txn) => txn.open_viewing_memo(assets, keys),
+            Self::CAP(txn) => txn.open_viewing_memo(viewable_assets, viewing_keys),
         }
     }
 
-    pub fn output_commitments(&self) -> Vec<RecordCommitment> {
+    fn proven_nullifiers(
+        &self,
+    ) -> Vec<(
+        Nullifier,
+        <Self::NullifierSet as traits::NullifierSet>::Proof,
+    )> {
+        match self {
+            Self::CAP(txn) => txn.proven_nullifiers(),
+        }
+    }
+
+    fn output_commitments(&self) -> Vec<RecordCommitment> {
         match self {
             Self::CAP(txn) => txn.output_commitments(),
         }
     }
 
-    pub fn output_len(&self) -> usize {
+    fn output_openings(&self) -> Option<Vec<RecordOpening>> {
+        match self {
+            Self::CAP(txn) => txn.output_openings(),
+        }
+    }
+
+    fn hash(&self) -> Self::Hash {
+        self.commit()
+    }
+
+    fn kind(&self) -> Self::Kind {
+        match self {
+            Self::CAP(txn) => txn.kind(),
+        }
+    }
+
+    fn set_proofs(&mut self, proofs: Vec<<Self::NullifierSet as traits::NullifierSet>::Proof>) {
+        match self {
+            Self::CAP(txn) => txn.set_proofs(proofs),
+        }
+    }
+
+    fn output_len(&self) -> usize {
         match self {
             Self::CAP(txn) => txn.output_len(),
         }
     }
 
-    // TODO (fernando) this seems hacky, should I rather implement reef::trait for EspressoTransaction
-    pub fn kind(&self) -> reef::cap::TransactionKind {
+    fn input_nullifiers(&self) -> Vec<Nullifier> {
         match self {
-            Self::CAP(txn) => txn.kind(),
+            Self::CAP(txn) => txn.input_nullifiers(),
         }
     }
 }
@@ -139,14 +176,14 @@ impl traits::Transaction for ElaboratedTransaction {
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {
         self.txn
-            .nullifiers()
+            .input_nullifiers()
             .into_iter()
             .zip(self.proofs.clone())
             .collect()
     }
 
     fn input_nullifiers(&self) -> Vec<Nullifier> {
-        self.txn.nullifiers()
+        self.txn.input_nullifiers()
     }
 
     fn output_commitments(&self) -> Vec<RecordCommitment> {
