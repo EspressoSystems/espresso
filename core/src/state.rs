@@ -47,6 +47,57 @@ use std::sync::Arc;
 /// Height of the records Merkle tree
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
+#[derive(
+    Debug,
+    Clone,
+    //CanonicalSerialize,
+    //CanonicalDeserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+)]
+
+/// A transaction tht can be either a CAP transaction or a collect reward transaction
+pub enum EspressoTransaction {
+    CAP(Box<TransactionNote>),
+}
+
+impl CanonicalSerialize for EspressoTransaction {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        match self {
+            EspressoTransaction::CAP(txn) => {
+                let flag = 0;
+                writer.write_all(&[flag])?;
+                <TransactionNote as CanonicalSerialize>::serialize(txn, &mut writer)
+            }
+        }
+    }
+
+    fn serialized_size(&self) -> usize {
+        match self {
+            EspressoTransaction::CAP(txn) => txn.serialized_size() + 1,
+        }
+    }
+}
+
+impl CanonicalDeserialize for EspressoTransaction {
+    fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
+    where
+        R: ark_serialize::Read,
+    {
+        let mut flag = [0u8; 1];
+        r.read_exact(&mut flag)?;
+        match flag[0] {
+            0 => Ok(Self::CAP(Box::new(
+                <TransactionNote as CanonicalDeserialize>::deserialize(&mut r)?,
+            ))),
+            _ => Err(SerializationError::InvalidData),
+        }
+    }
+}
+
 /// A transaction with nullifier non-inclusion proofs
 ///
 /// Validation involves checking proofs that unspent records are unspent.
@@ -74,7 +125,7 @@ pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
     Deserialize,
 )]
 pub struct ElaboratedTransaction {
-    pub txn: TransactionNote,
+    pub txn: EspressoTransaction,
     pub proofs: Vec<SetMerkleProof>,
     pub memos: Vec<ReceiverMemo>,
     pub signature: Signature,
@@ -100,7 +151,7 @@ impl TransactionTrait<H_256> for ElaboratedTransaction {}
     Eq,
     Hash,
 )]
-pub struct Block(pub Vec<TransactionNote>);
+pub struct Block(pub Vec<EspressoTransaction>);
 
 /// A block of transactions with proofs
 ///
@@ -359,7 +410,7 @@ impl Committable for Block {
 #[derive(
     Arbitrary, Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize,
 )]
-pub struct TransactionCommitment(pub commit::Commitment<TransactionNote>);
+pub struct TransactionCommitment(pub commit::Commitment<EspressoTransaction>);
 
 // Implements From<CanonicalBytes>. See serialize.rs in Jellyfish.
 deserialize_canonical_bytes!(TransactionCommitment);
@@ -887,32 +938,56 @@ impl ValidatorState {
             .0
             .iter()
             .map(|txn| match txn {
-                TransactionNote::Mint(_) => Ok(&self.verif_crs.mint),
-                TransactionNote::Transfer(note) => {
-                    let num_inputs = note.inputs_nullifiers.len();
-                    let num_outputs = note.output_commitments.len();
-                    self.verif_crs
-                        .xfr
-                        .key_for_size(num_inputs, num_outputs)
-                        .ok_or(UnsupportedTransferSize {
-                            num_inputs,
-                            num_outputs,
-                        })
-                }
-                TransactionNote::Freeze(note) => {
-                    let num_inputs = note.input_nullifiers.len();
-                    let num_outputs = note.output_commitments.len();
-                    self.verif_crs
-                        .freeze
-                        .key_for_size(num_inputs, num_outputs)
-                        .ok_or(UnsupportedFreezeSize { num_inputs })
-                }
+                EspressoTransaction::CAP(cap_txn) => match cap_txn.as_ref() {
+                    TransactionNote::Mint(_) => Ok(&self.verif_crs.mint),
+                    TransactionNote::Transfer(note) => {
+                        let num_inputs = note.inputs_nullifiers.len();
+                        let num_outputs = note.output_commitments.len();
+                        self.verif_crs
+                            .xfr
+                            .key_for_size(num_inputs, num_outputs)
+                            .ok_or(UnsupportedTransferSize {
+                                num_inputs,
+                                num_outputs,
+                            })
+                    }
+                    TransactionNote::Freeze(note) => {
+                        let num_inputs = note.input_nullifiers.len();
+                        let num_outputs = note.output_commitments.len();
+                        self.verif_crs
+                            .freeze
+                            .key_for_size(num_inputs, num_outputs)
+                            .ok_or(UnsupportedFreezeSize { num_inputs })
+                    }
+                },
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let mut cap_txns = vec![];
+        let mut merkle_roots = vec![];
+        for espresso_txn in txns.0.iter() {
+            match espresso_txn {
+                EspressoTransaction::CAP(cap_note) => {
+                    cap_txns.push(cap_note.as_ref().clone()); // TODO can we avoid this clone
+                    let note_mt_root = cap_note.merkle_root();
+                    if self.record_merkle_commitment.root_value == note_mt_root
+                        || self.past_record_merkle_roots.0.contains(&note_mt_root)
+                    {
+                        merkle_roots.push(note_mt_root)
+                    } else {
+                        return Err(BadMerkleRoot {});
+                    }
+                } // _ => {}
+            }
+        }
+        if !cap_txns.is_empty() {
+            txn_batch_verify(&cap_txns[..], &merkle_roots, now, &verif_keys)
+                .map_err(|err| CryptoError { err: Ok(err) })?;
+        }
+        //TODO (fernando) verify CollectReward
 
-        if !txns.0.is_empty() {
+        /* if !txns.0.is_empty() {
             txn_batch_verify(
-                &txns.0,
+                cap_txns,
                 &txns
                     .0
                     .iter()
@@ -935,7 +1010,7 @@ impl ValidatorState {
                 &verif_keys,
             )
             .map_err(|err| CryptoError { err: Ok(err) })?;
-        }
+        }*/
 
         Ok((txns, proofs))
     }

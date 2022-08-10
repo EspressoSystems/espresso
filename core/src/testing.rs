@@ -515,7 +515,9 @@ impl MultiXfrTestState {
                 ret.try_add_transaction(
                     &mut setup_block,
                     ElaboratedTransaction {
-                        txn: TransactionNote::Mint(Box::new(note)),
+                        txn: EspressoTransaction::CAP(Box::new(TransactionNote::Mint(Box::new(
+                            note,
+                        )))),
                         proofs: vec![nul],
                         memos: memos.clone(),
                         signature,
@@ -947,7 +949,9 @@ impl MultiXfrTestState {
                     keys_and_memos,
                     signature: sig.clone(),
                     transaction: ElaboratedTransaction {
-                        txn: TransactionNote::Transfer(Box::new(txn)),
+                        txn: EspressoTransaction::CAP(Box::new(TransactionNote::Transfer(
+                            Box::new(txn),
+                        ))),
                         proofs: nullifier_pfs,
                         memos: owner_memos,
                         signature: sig,
@@ -1109,7 +1113,7 @@ impl MultiXfrTestState {
             keys_and_memos,
             signature: sig.clone(),
             transaction: ElaboratedTransaction {
-                txn: TransactionNote::Transfer(Box::new(txn)),
+                txn: EspressoTransaction::CAP(Box::new(TransactionNote::Transfer(Box::new(txn)))),
                 proofs: nullifier_pfs,
                 memos: owner_memos,
                 signature: sig,

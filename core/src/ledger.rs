@@ -11,8 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::state::{
-    state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction, SetMerkleProof,
-    SetMerkleTree, ValidationError, ValidatorState,
+    state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction, EspressoTransaction,
+    SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
 use commit::{Commitment, Committable};
 use itertools::izip;
@@ -22,6 +22,7 @@ use jf_cap::{
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
     TransactionNote,
 };
+use reef::traits::Transaction;
 use reef::*;
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -62,14 +63,66 @@ impl traits::NullifierSet for SetMerkleTree {
     }
 }
 
+impl EspressoTransaction {
+    pub fn nullifiers(&self) -> Vec<Nullifier> {
+        match self {
+            Self::CAP(txn) => txn.nullifiers(),
+        }
+    }
+
+    // TODO(fernando) probably implement this in reef
+    pub(crate) fn open_viewing_memo(
+        &self,
+        assets: &HashMap<AssetCode, AssetDefinition>,
+        keys: &HashMap<ViewerPubKey, ViewerKeyPair>,
+    ) -> Result<ViewingMemoOpening, ViewingError> {
+        match self {
+            Self::CAP(txn) => txn.open_viewing_memo(assets, keys),
+        }
+    }
+
+    pub fn output_commitments(&self) -> Vec<RecordCommitment> {
+        match self {
+            Self::CAP(txn) => txn.output_commitments(),
+        }
+    }
+
+    pub fn output_len(&self) -> usize {
+        match self {
+            Self::CAP(txn) => txn.output_len(),
+        }
+    }
+
+    // TODO (fernando) this seems hacky, should I rather implement reef::trait for EspressoTransaction
+    pub fn kind(&self) -> reef::cap::TransactionKind {
+        match self {
+            Self::CAP(txn) => txn.kind(),
+        }
+    }
+}
+
+impl commit::Committable for EspressoTransaction {
+    fn commit(&self) -> Commitment<Self> {
+        let bytes = match self {
+            EspressoTransaction::CAP(txn) => {
+                let commitment = txn.commit();
+                commitment.as_ref().to_vec()
+            }
+        };
+        commit::RawCommitmentBuilder::new("Es Txn Comm")
+            .var_size_bytes(&bytes)
+            .finalize()
+    }
+}
+
 impl traits::Transaction for ElaboratedTransaction {
     type NullifierSet = SetMerkleTree;
-    type Hash = Commitment<TransactionNote>;
+    type Hash = Commitment<EspressoTransaction>;
     type Kind = cap::TransactionKind;
 
     fn cap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
         Self {
-            txn: note,
+            txn: EspressoTransaction::CAP(Box::new(note)),
             proofs,
             memos: Default::default(),
             signature: Default::default(),
@@ -110,14 +163,17 @@ impl traits::Transaction for ElaboratedTransaction {
         // fundamental identity of the transaction (i.e. its effect on the ledger state) and they
         // may even change without changing the identity of the transaction; for example, when the
         // EsQS updates nullifier proofs to the latest nullifier set root hash.
+
         self.txn.commit()
     }
 
     fn kind(&self) -> Self::Kind {
         match &self.txn {
-            TransactionNote::Mint(_) => cap::TransactionKind::Mint,
-            TransactionNote::Transfer(_) => cap::TransactionKind::Send,
-            TransactionNote::Freeze(_) => cap::TransactionKind::Freeze,
+            EspressoTransaction::CAP(txn) => match txn.as_ref() {
+                TransactionNote::Mint(_) => cap::TransactionKind::Mint,
+                TransactionNote::Transfer(_) => cap::TransactionKind::Send,
+                TransactionNote::Freeze(_) => cap::TransactionKind::Freeze,
+            },
         }
     }
 
@@ -141,7 +197,7 @@ impl traits::Block for ElaboratedBlock {
     type Error = ValidationError;
 
     fn new(txns: Vec<Self::Transaction>) -> Self {
-        let (txns, proofs, memos, signatures): (Vec<TransactionNote>, Vec<_>, Vec<_>, Vec<_>) =
+        let (txns, proofs, memos, signatures): (Vec<EspressoTransaction>, Vec<_>, Vec<_>, Vec<_>) =
             txns.into_iter()
                 .map(|txn| (txn.txn, txn.proofs, txn.memos, txn.signature))
                 .multiunzip();
