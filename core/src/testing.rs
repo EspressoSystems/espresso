@@ -516,9 +516,7 @@ impl MultiXfrTestState {
                 ret.try_add_transaction(
                     &mut setup_block,
                     ElaboratedTransaction {
-                        txn: EspressoTransaction::CAP(Box::new(TransactionNote::Mint(Box::new(
-                            note,
-                        )))),
+                        txn: EspressoTransaction::CAP(TransactionNote::Mint(Box::new(note))),
                         proofs: vec![nul],
                         memos: memos.clone(),
                         signature,
@@ -950,9 +948,7 @@ impl MultiXfrTestState {
                     keys_and_memos,
                     signature: sig.clone(),
                     transaction: ElaboratedTransaction {
-                        txn: EspressoTransaction::CAP(Box::new(TransactionNote::Transfer(
-                            Box::new(txn),
-                        ))),
+                        txn: EspressoTransaction::CAP(TransactionNote::Transfer(Box::new(txn))),
                         proofs: nullifier_pfs,
                         memos: owner_memos,
                         signature: sig,
@@ -1114,7 +1110,7 @@ impl MultiXfrTestState {
             keys_and_memos,
             signature: sig.clone(),
             transaction: ElaboratedTransaction {
-                txn: EspressoTransaction::CAP(Box::new(TransactionNote::Transfer(Box::new(txn)))),
+                txn: EspressoTransaction::CAP(TransactionNote::Transfer(Box::new(txn))),
                 proofs: nullifier_pfs,
                 memos: owner_memos,
                 signature: sig,
@@ -1792,8 +1788,8 @@ mod tests {
         let new_uids = validator
             .validate_and_apply(
                 1,
-                Block(vec![EspressoTransaction::CAP(Box::new(
-                    TransactionNote::Transfer(Box::new(txn1)),
+                Block(vec![EspressoTransaction::CAP(TransactionNote::Transfer(
+                    Box::new(txn1),
                 ))]),
                 vec![nullifier_pfs],
             )

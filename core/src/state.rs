@@ -52,7 +52,7 @@ pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
 /// A transaction tht can be either a CAP transaction or a collect reward transaction
 pub enum EspressoTransaction {
-    CAP(Box<TransactionNote>),
+    CAP(TransactionNote),
 }
 
 impl CanonicalSerialize for EspressoTransaction {
@@ -81,9 +81,9 @@ impl CanonicalDeserialize for EspressoTransaction {
         let mut flag = [0u8; 1];
         r.read_exact(&mut flag)?;
         match flag[0] {
-            0 => Ok(Self::CAP(Box::new(
+            0 => Ok(Self::CAP(
                 <TransactionNote as CanonicalDeserialize>::deserialize(&mut r)?,
-            ))),
+            )),
             _ => Err(SerializationError::InvalidData),
         }
     }
@@ -929,7 +929,7 @@ impl ValidatorState {
             .0
             .iter()
             .map(|txn| match txn {
-                EspressoTransaction::CAP(cap_txn) => match cap_txn.as_ref() {
+                EspressoTransaction::CAP(cap_txn) => match cap_txn {
                     TransactionNote::Mint(_) => Ok(&self.verif_crs.mint),
                     TransactionNote::Transfer(note) => {
                         let num_inputs = note.inputs_nullifiers.len();
@@ -958,7 +958,6 @@ impl ValidatorState {
         for espresso_txn in txns.0.iter() {
             match espresso_txn {
                 EspressoTransaction::CAP(cap_note) => {
-                    cap_txns.push(cap_note.as_ref().clone()); // TODO can we avoid this clone
                     let note_mt_root = cap_note.merkle_root();
                     if self.record_merkle_commitment.root_value == note_mt_root
                         || self.past_record_merkle_roots.0.contains(&note_mt_root)
@@ -967,6 +966,7 @@ impl ValidatorState {
                     } else {
                         return Err(BadMerkleRoot {});
                     }
+                    cap_txns.push(cap_note.clone());
                 } // _ => {}
             }
         }
@@ -974,9 +974,12 @@ impl ValidatorState {
             txn_batch_verify(&cap_txns[..], &merkle_roots, now, &verif_keys)
                 .map_err(|err| CryptoError { err: Ok(err) })?;
         }
-        //TODO (fernando) verify CollectReward
+        //TODO (fernando) verify CollectRewards
 
-        Ok((txns, proofs))
+        let txns: Vec<_> = cap_txns.into_iter().map(EspressoTransaction::CAP).collect();
+        // TODO(fernando) append CollectRewardsTransactions
+
+        Ok((Block(txns), proofs))
     }
 
     /// Performs validation for a block, updating the ValidatorState.

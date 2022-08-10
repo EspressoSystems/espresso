@@ -73,7 +73,7 @@ impl reef::traits::Transaction for EspressoTransaction {
         note: TransactionNote,
         proofs: Vec<<Self::NullifierSet as traits::NullifierSet>::Proof>,
     ) -> Self {
-        EspressoTransaction::CAP(Box::new(TransactionNote::cap(note, proofs)))
+        EspressoTransaction::CAP(TransactionNote::cap(note, proofs))
     }
 
     fn open_viewing_memo(
@@ -159,7 +159,7 @@ impl traits::Transaction for ElaboratedTransaction {
 
     fn cap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
         Self {
-            txn: EspressoTransaction::CAP(Box::new(note)),
+            txn: EspressoTransaction::CAP(note),
             proofs,
             memos: Default::default(),
             signature: Default::default(),
@@ -206,7 +206,7 @@ impl traits::Transaction for ElaboratedTransaction {
 
     fn kind(&self) -> Self::Kind {
         match &self.txn {
-            EspressoTransaction::CAP(txn) => match txn.as_ref() {
+            EspressoTransaction::CAP(txn) => match txn {
                 TransactionNote::Mint(_) => cap::TransactionKind::Mint,
                 TransactionNote::Transfer(_) => cap::TransactionKind::Send,
                 TransactionNote::Freeze(_) => cap::TransactionKind::Freeze,
