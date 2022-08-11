@@ -128,6 +128,10 @@
 
           export PATH=${pkgs.xdot}/bin:$PATH
           export PATH=''${my_pwd}/bin:$PATH
+
+          # Prevent cargo aliases from using programs in `~/.cargo` to avoid conflicts
+          # with rustup installations.
+          export CARGO_HOME=''${my_pwd}/.cargo
         '';
       in {
         checks = {
