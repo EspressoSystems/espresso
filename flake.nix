@@ -131,7 +131,7 @@
 
           # Prevent cargo aliases from using programs in `~/.cargo` to avoid conflicts
           # with rustup installations.
-          export CARGO_HOME=''${my_pwd}/.cargo
+          export CARGO_HOME=$HOME/.cargo-nix
         '';
       in {
         checks = {
