@@ -21,9 +21,7 @@ use espresso_core::{
 use futures::prelude::*;
 use hotshot::traits::BlockContents;
 use itertools::izip;
-use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
-use seahorse::reef;
 use serde::{Deserialize, Serialize};
 use server::{best_response_type, response};
 use std::collections::HashMap;

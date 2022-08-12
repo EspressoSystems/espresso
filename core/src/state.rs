@@ -36,7 +36,6 @@ use jf_cap::{
 };
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
-use reef::traits::Transaction;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -953,6 +952,7 @@ impl ValidatorState {
                 },
             })
             .collect::<Result<Vec<_>, _>>()?;
+        // filter cap transactions to be validated first
         let mut cap_txns = vec![];
         let mut merkle_roots = vec![];
         for espresso_txn in txns.0.iter() {
@@ -970,6 +970,7 @@ impl ValidatorState {
                 } // _ => {}
             }
         }
+        // cap transactions validates first
         if !cap_txns.is_empty() {
             txn_batch_verify(&cap_txns[..], &merkle_roots, now, &verif_keys)
                 .map_err(|err| CryptoError { err: Ok(err) })?;

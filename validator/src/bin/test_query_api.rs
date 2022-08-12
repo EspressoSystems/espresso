@@ -39,10 +39,8 @@ use espresso_core::{
 use futures::prelude::*;
 use hotshot::traits::BlockContents;
 use itertools::izip;
-use reef::traits::Transaction;
 use seahorse::{
-    events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, reef, KeySnafu, Keystore,
-    KeystoreError,
+    events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnafu, Keystore, KeystoreError,
 };
 use serde::Deserialize;
 use snafu::ResultExt;

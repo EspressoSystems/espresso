@@ -23,10 +23,8 @@ use espresso_status_api::data_source::{StatusDataSource, UpdateStatusData};
 use espresso_status_api::query_data::ValidatorStatus;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
-use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 use validator_node::api::EspressoError;
-use validator_node::keystore::reef;
 use validator_node::node::QueryServiceError;
 
 #[derive(Default)]

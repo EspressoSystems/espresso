@@ -20,7 +20,6 @@ use atomic_store::{
 };
 use core::fmt::Debug;
 use jf_cap::{MerkleLeaf, MerkleTree};
-use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 use std::path::{Path, PathBuf};
 

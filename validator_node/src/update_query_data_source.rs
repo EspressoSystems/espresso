@@ -35,7 +35,6 @@ use espresso_metastate_api::data_source::UpdateMetaStateData;
 use espresso_status_api::data_source::UpdateStatusData;
 use futures::StreamExt;
 use futures::{future::RemoteHandle, task::SpawnExt};
-use reef::traits::Transaction;
 
 pub struct UpdateQueryDataSource<CU, AV, MS, ST>
 where

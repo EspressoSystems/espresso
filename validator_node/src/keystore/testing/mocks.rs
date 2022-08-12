@@ -29,7 +29,6 @@ use jf_cap::{
     MerkleTree, Signature,
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
-use reef::traits::Transaction as _;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     sparse_merkle_tree::SparseMerkleTree,
