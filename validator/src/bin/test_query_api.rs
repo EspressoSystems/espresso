@@ -32,6 +32,7 @@
 
 use async_std::future::timeout;
 use async_tungstenite::async_std::connect_async;
+use espresso_core::state::EspressoTransaction;
 use espresso_core::{
     ledger::EspressoLedger, state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM,
 };
@@ -160,9 +161,11 @@ async fn validate_committed_block(
 
         // Check memos.
         assert_eq!(tx.output_memos.len(), tx.data.output_len());
-        tx.data
-            .verify_receiver_memos_signature(&tx.output_memos, &tx.memos_signature)
-            .unwrap();
+        match &tx.data {
+            EspressoTransaction::CAP(txn) => txn
+                .verify_receiver_memos_signature(&tx.output_memos, &tx.memos_signature)
+                .unwrap(), // TODO _ => {}
+        }
 
         // Check outputs.
         for (i, (output, uid, memo)) in izip!(
