@@ -43,14 +43,15 @@
         os = (builtins.elemAt (builtins.elemAt info 3) 0);
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        nightlyToolchain = pkgs.rust-bin.nightly."2022-07-17".minimal.override {
+        rust_version = "1.63.0";
+        stableToolchain = pkgs.rust-bin.stable.${rust_version}.minimal.override {
           extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
         };
-        nightlyMuslRustToolchain =
-          pkgs.rust-bin.nightly."2022-07-17".minimal.override {
+        stableMuslRustToolchain =
+          pkgs.rust-bin.stable.${rust_version}.minimal.override {
             extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
             targets = [ "${arch}-unknown-${os}-musl" ];
-          };
+        };
         rustDeps = with pkgs;
           [
             pkgconfig
@@ -197,10 +198,10 @@
               nixpkgs-fmt
               git
               mdbook # make-doc, documentation generation
-              nightlyToolchain
+              stableToolchain
             ] ++ myPython ++ rustDeps;
 
-          RUST_SRC_PATH = "${nightlyToolchain}/lib/rustlib/src/rust/library";
+          RUST_SRC_PATH = "${stableToolchain}/lib/rustlib/src/rust/library";
           RUST_BACKTRACE = 1;
           RUST_LOG = "info,libp2p=off";
         };
@@ -208,7 +209,7 @@
           perfShell = pkgs.mkShell {
             shellHook = shellHook;
             buildInputs = with pkgs;
-              [ cargo-llvm-cov nightlyToolchain ] ++ rustDeps;
+              [ cargo-llvm-cov stableToolchain ] ++ rustDeps;
 
             RUST_LOG = "info,libp2p=off";
           };
@@ -226,7 +227,7 @@
             OPENSSL_LIB_DIR = "${opensslMusl.dev}/lib/";
             CARGO_BUILD_TARGET = "${arch}-unknown-${os}-musl";
             buildInputs = with pkgs;
-              [ nightlyMuslRustToolchain fd cmake ];
+              [ stableMuslRustToolchain fd cmake ];
             meta.broken = if "${os}" == "darwin" then true else false;
 
             RUST_LOG = "info,libp2p=off";
