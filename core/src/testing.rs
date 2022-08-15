@@ -2158,6 +2158,7 @@ mod tests {
     /// defines two equivalent blocks which differ in the ages of their nullifier proofs. The test
     /// applies each sequence of blocks to the same initial state, checking at each step that the
     /// states and their commitments are equal.
+    #[allow(clippy::type_complexity)]
     fn test_nullifier_history_commitment(
         seed: u64,
         blocks: Vec<((usize, usize), Vec<(usize, usize)>)>,

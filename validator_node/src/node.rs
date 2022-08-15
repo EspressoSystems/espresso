@@ -1007,6 +1007,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn generate_valid_history(
         txs: Vec<Vec<TestTxSpec>>,
         nkeys: u8,

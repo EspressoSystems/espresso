@@ -290,7 +290,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         txn_info: Transaction<EspressoLedger>,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
         if let Some(signed_memos) = txn_info.memos() {
-            for memo in signed_memos.memos.iter().cloned().flatten() {
+            for memo in signed_memos.memos.iter().flatten().cloned() {
                 txn.memos.push(memo);
             }
             txn.signature = signed_memos.sig.clone();

@@ -782,7 +782,7 @@ mod tests {
         let update_vals = updates
             .iter()
             .cloned()
-            .chain(checks.iter().filter_map(|x| x.ok().clone()))
+            .chain(checks.iter().filter_map(|x| x.ok()))
             .map(|u| (u, Nullifier::random_for_test(&mut prng)))
             .collect::<HashMap<_, _>>();
         let mut hset = HashSet::new();
@@ -797,17 +797,14 @@ mod tests {
             hset.insert(u);
 
             let (val, pf) = t.lookup(TestNulls(elem)).unwrap();
-            let in_set = if val.is_some() { true } else { false };
+            let in_set = val.is_some();
             t.insert(TestNulls(elem), TestNulls(elem));
-            let pf_check = match pf.check(TestNulls(elem), lw_t.hash()) {
-                Some((Some(_), ..)) => true,
-                _ => false,
-            };
+            let pf_check = matches!(pf.check(TestNulls(elem), lw_t.hash()), Some((Some(_), ..)));
             assert_eq!(pf_check, in_set);
             lw_t.remember(TestNulls(elem), pf).unwrap();
             lw_t.insert(TestNulls(elem), TestNulls(elem)).unwrap();
             let (lw_t_val, new_lw_pf) = lw_t.lookup(TestNulls(elem)).unwrap();
-            let in_new_lw_t = if lw_t_val.is_none() { false } else { true };
+            let in_new_lw_t = lw_t_val.is_some();
 
             assert!(in_new_lw_t);
             assert!(t.lookup(TestNulls(elem)).unwrap().0.is_some());
@@ -816,10 +813,10 @@ mod tests {
             lw_t.forget(TestNulls(elem)).unwrap();
             assert!(lw_t.lookup(TestNulls(elem)).is_none());
 
-            let new_lw_pf_check = match new_lw_pf.check(TestNulls(elem), lw_t.hash()) {
-                Some((Some(_), ..)) => true,
-                _ => false,
-            };
+            let new_lw_pf_check = matches!(
+                new_lw_pf.check(TestNulls(elem), lw_t.hash()),
+                Some((Some(_), ..))
+            );
             assert!(new_lw_pf_check);
         }
 
@@ -837,7 +834,7 @@ mod tests {
             };
             let elem = update_vals[&val];
             let (t_val, pf) = t.lookup(TestNulls(elem)).unwrap();
-            let t_contains = if t_val.is_some() { true } else { false };
+            let t_contains = t_val.is_some();
 
             if should_be_there {
                 assert!(hset.contains(&val));
@@ -845,10 +842,10 @@ mod tests {
             }
             assert_eq!(hset.contains(&val), t_contains);
 
-            let check = match KVMerkleProof::<TestTreeHash>::check(&pf, TestNulls(elem), t.hash()) {
-                Some((Some(_), ..)) => true,
-                _ => false,
-            };
+            let check = matches!(
+                KVMerkleProof::<TestTreeHash>::check(&pf, TestNulls(elem), t.hash()),
+                Some((Some(_), ..))
+            );
             assert_eq!(t_contains, check);
         }
     }
