@@ -32,9 +32,14 @@
 // `-w KEY_FILE.pub` and pass the key pair to `random_keystore` with `-k KEY_FILE`.
 
 use async_std::task::sleep;
+use derive_more::Deref;
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
-use jf_cap::keys::{FreezerPubKey, UserKeyPair, UserPubKey};
-use jf_cap::structs::{AssetCode, AssetPolicy, FreezeFlag};
+use human_bytes::human_bytes;
+use jf_cap::{
+    keys::{FreezerPubKey, UserKeyPair, UserPubKey},
+    structs::{AssetCode, AssetPolicy, FreezeFlag},
+    TransactionNote,
+};
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand::{
@@ -46,9 +51,11 @@ use seahorse::txn_builder::RecordInfo;
 use seahorse::{events::EventIndex, hd::KeyTree, loader::KeystoreLoader, KeystoreError};
 use std::cmp::min;
 use std::collections::{HashSet, VecDeque};
+use std::fmt::{self, Display, Formatter};
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Duration;
 use structopt::StructOpt;
 use surf::StatusCode;
@@ -56,7 +63,11 @@ use tempdir::TempDir;
 use tracing::{event, Level};
 use validator_node::{
     api::client::response_body,
-    keystore::network::{NetworkBackend, Url},
+    keystore::{
+        network::{NetworkBackend, Url},
+        txn_builder::TransactionUID,
+        RecordAmount,
+    },
 };
 
 #[derive(Debug)]
@@ -104,6 +115,23 @@ pub async fn find_freezable_records<'a>(freezer: &Keystore, frozen: FreezeFlag) 
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, Deref)]
+struct Bytes(usize);
+
+impl FromStr for Bytes {
+    type Err = parse_size::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(parse_size::parse_size(s)? as usize))
+    }
+}
+
+impl Display for Bytes {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", human_bytes(self.0 as f64))
+    }
+}
+
 #[derive(StructOpt, Debug)]
 struct Args {
     /// Path to a private key file to use for the keystore.
@@ -139,6 +167,10 @@ struct Args {
     /// Whether to color log output with ANSI color codes.
     #[structopt(long, env = "ESPRESSO_COLORED_LOGS")]
     colored_logs: bool,
+
+    /// Size of additional padding to add to transfers.
+    #[structopt(long, env = "ESPRESSO_RANDOM_WALLET_PADDING", default_value = "0")]
+    padding: Bytes,
 }
 
 struct TrivialKeystoreLoader {
@@ -478,21 +510,19 @@ async fn main() {
                     },
                     recipient,
                 );
-                let txn = match keystore
-                    .transfer(Some(&address), asset, &[(recipient.clone(), amount)], fee)
-                    .await
-                {
-                    Ok(txn) => txn,
-                    Err(err) => {
-                        event!(
-                            Level::ERROR,
-                            "Seed {}, Error generating transfer: {}",
-                            seed,
-                            err
-                        );
-                        continue;
-                    }
-                };
+                let txn =
+                    match transfer(&mut keystore, *asset, recipient, amount, *args.padding).await {
+                        Ok(txn) => txn,
+                        Err(err) => {
+                            event!(
+                                Level::ERROR,
+                                "Seed {}, Error generating transfer: {}",
+                                seed,
+                                err
+                            );
+                            continue;
+                        }
+                    };
                 pending.push_back(txn);
             }
             OperationType::Mint => {
@@ -642,4 +672,26 @@ async fn main() {
             pending.len()
         );
     }
+}
+
+async fn transfer(
+    keystore: &mut Keystore,
+    asset: AssetCode,
+    receiver: &UserPubKey,
+    amount: impl Into<RecordAmount> + Clone,
+    padding: usize,
+) -> Result<TransactionUID<EspressoLedger>, KeystoreError<EspressoLedger>> {
+    let (note, params) = keystore
+        .build_transfer(
+            None,
+            &asset,
+            &[(receiver.clone(), amount, false)],
+            0,
+            vec![0; padding],
+            None,
+        )
+        .await?;
+    keystore
+        .submit_cap(TransactionNote::Transfer(Box::new(note)), params)
+        .await
 }

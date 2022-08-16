@@ -2259,15 +2259,18 @@ dependencies = [
  "async-std",
  "async-trait",
  "bincode",
+ "derive_more",
  "escargot",
  "espresso-core",
  "espresso-validator",
  "futures",
+ "human_bytes",
  "jf-cap",
  "jf-plonk",
  "jf-primitives",
  "jf-utils",
  "lazy_static",
+ "parse-size",
  "portpicker",
  "primitive-types",
  "rand 0.8.5",
@@ -2442,6 +2445,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.2.2",
  "rand_chacha 0.3.1",
+ "reef",
  "seahorse",
  "serde",
  "serde_derive",
@@ -4949,6 +4953,12 @@ dependencies = [
  "smallvec",
  "windows-sys",
 ]
+
+[[package]]
+name = "parse-size"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "944553dd59c802559559161f9816429058b869003836120e262e8caec061b7ae"
 
 [[package]]
 name = "password-hash"

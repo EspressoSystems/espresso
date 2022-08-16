@@ -1,4 +1,16 @@
 #![deny(warnings)]
+// Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+// even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
+
 use crate::util::canonical;
 // use arbitrary_wrappers::*;
 use ark_serialize::*;
@@ -21,8 +33,8 @@ pub trait KVTreeHash: Copy + Clone + PartialEq + Eq + Debug {
         + CanonicalDeserialize;
     /// A data type for keys
     /// A data type for values
-    type Key: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize;
-    type Value: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize;
+    type Key: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize;
+    type Value: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize;
 
     /// The number of children each branch has minus one. This is due to the proof paths having sibling
     /// path lengths of n-1 and the generic implementation relying on type systems
@@ -193,7 +205,7 @@ pub mod treehash_tests {
         key: TH::Key,
         value: TH::Value,
     ) {
-        assert_ne!(TH::hash_leaf(key, value), TH::hash_key(key));
+        assert_ne!(TH::hash_leaf(key.clone(), value), TH::hash_key(key));
     }
 
     pub fn treehash_collision_sanity_checks1<TH: KVTreeHash>(
@@ -202,21 +214,33 @@ pub mod treehash_tests {
         k1: TH::Key,
         v1: TH::Value,
     ) {
-        if (k0, v0) == (k1, v1) {
-            assert_eq!(TH::hash_leaf(k0, v0), TH::hash_leaf(k1, v1));
+        if (k0.clone(), v0.clone()) == (k1.clone(), v1.clone()) {
+            assert_eq!(
+                TH::hash_leaf(k0.clone(), v0.clone()),
+                TH::hash_leaf(k1.clone(), v1.clone())
+            );
         } else {
-            assert_ne!(TH::hash_leaf(k0, v0), TH::hash_leaf(k1, v1));
+            assert_ne!(
+                TH::hash_leaf(k0.clone(), v0.clone()),
+                TH::hash_leaf(k1.clone(), v1.clone())
+            );
         }
 
         if k0 == k1 {
-            assert_eq!(TH::hash_key(k0), TH::hash_key(k1));
-            assert_eq!(TH::hash_leaf(k0, v0), TH::hash_leaf(k1, v0));
-            assert_eq!(TH::hash_leaf(k0, v1), TH::hash_leaf(k1, v1));
+            assert_eq!(TH::hash_key(k0.clone()), TH::hash_key(k1.clone()));
+            assert_eq!(
+                TH::hash_leaf(k0.clone(), v0.clone()),
+                TH::hash_leaf(k1.clone(), v0)
+            );
+            assert_eq!(TH::hash_leaf(k0, v1.clone()), TH::hash_leaf(k1, v1));
         } else {
-            assert_ne!(TH::hash_key(k0), TH::hash_key(k1));
+            assert_ne!(TH::hash_key(k0.clone()), TH::hash_key(k1.clone()));
 
-            assert_ne!(TH::hash_leaf(k0, v1), TH::hash_leaf(k1, v1));
-            assert_ne!(TH::hash_leaf(k0, v0), TH::hash_leaf(k1, v0));
+            assert_ne!(
+                TH::hash_leaf(k0.clone(), v1.clone()),
+                TH::hash_leaf(k1.clone(), v1)
+            );
+            assert_ne!(TH::hash_leaf(k0, v0.clone()), TH::hash_leaf(k1, v0));
         }
     }
 
@@ -231,7 +255,7 @@ pub mod treehash_tests {
         let mut all_results = HashSet::new();
         all_results.insert(TH::empty_digest());
 
-        assert!(all_results.insert(TH::hash_key(key)));
+        assert!(all_results.insert(TH::hash_key(key.clone())));
         assert!(all_results.insert(TH::hash_leaf(key, val)));
         assert!(all_results.insert(TH::hash_branch(&digests)));
 
@@ -423,8 +447,8 @@ pub mod kv_treehash_tests {
     impl quickcheck::Arbitrary for TestEntry {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
             let mut ret = [0u8; 32];
-            for i in 0..ret.len() {
-                ret[i] = <_>::arbitrary(g);
+            for item in &mut ret {
+                *item = <_>::arbitrary(g);
             }
             Self(ret)
         }
@@ -547,19 +571,20 @@ pub mod kv_treehash_tests {
         val: <TheTreeHash as KVTreeHash>::Value,
         digests: Vec<TestEntry>,
     ) {
-        let digests: Vec<<TheTreeHash as KVTreeHash>::Digest> = digests
-            .into_iter()
-            .map(|x| crate::util::canonical::deserialize(&x.0).unwrap())
-            .collect();
         let digests: GenericArray<
             <TheTreeHash as KVTreeHash>::Digest,
             <<TheTreeHash as KVTreeHash>::BranchArityMinus1 as AddLength<
                 <TheTreeHash as KVTreeHash>::Digest,
                 U1,
             >>::Output,
-        > = GenericArray::from_iter(digests.into_iter().chain(std::iter::repeat(
-            <TheTreeHash as KVTreeHash>::empty_digest(),
-        )));
+        > = GenericArray::from_iter(
+            digests
+                .into_iter()
+                .map(|x| crate::util::canonical::deserialize(&x.0).unwrap())
+                .chain(std::iter::repeat(
+                    <TheTreeHash as KVTreeHash>::empty_digest(),
+                )),
+        );
 
         let digests2: GenericArray<
             <TheTreeHash2 as KVTreeHash>::Digest,
@@ -586,32 +611,34 @@ pub mod kv_treehash_tests {
 
     #[quickcheck]
     fn treehash_collision_sanity_checks3(digests0: Vec<TestEntry>, digests1: Vec<TestEntry>) {
-        let digests0: Vec<<TheTreeHash as KVTreeHash>::Digest> = digests0
-            .into_iter()
-            .map(|x| crate::util::canonical::deserialize(&x.0).unwrap())
-            .collect();
         let digests0: GenericArray<
             <TheTreeHash as KVTreeHash>::Digest,
             <<TheTreeHash as KVTreeHash>::BranchArityMinus1 as AddLength<
                 <TheTreeHash as KVTreeHash>::Digest,
                 U1,
             >>::Output,
-        > = GenericArray::from_iter(digests0.into_iter().chain(std::iter::repeat(
-            <TheTreeHash as KVTreeHash>::empty_digest(),
-        )));
-        let digests1: Vec<<TheTreeHash as KVTreeHash>::Digest> = digests1
-            .into_iter()
-            .map(|x| crate::util::canonical::deserialize(&x.0).unwrap())
-            .collect();
+        > = GenericArray::from_iter(
+            digests0
+                .into_iter()
+                .map(|x| crate::util::canonical::deserialize(&x.0).unwrap())
+                .chain(std::iter::repeat(
+                    <TheTreeHash as KVTreeHash>::empty_digest(),
+                )),
+        );
         let digests1: GenericArray<
             <TheTreeHash as KVTreeHash>::Digest,
             <<TheTreeHash as KVTreeHash>::BranchArityMinus1 as AddLength<
                 <TheTreeHash as KVTreeHash>::Digest,
                 U1,
             >>::Output,
-        > = GenericArray::from_iter(digests1.into_iter().chain(std::iter::repeat(
-            <TheTreeHash as KVTreeHash>::empty_digest(),
-        )));
+        > = GenericArray::from_iter(
+            digests1
+                .into_iter()
+                .map(|x| crate::util::canonical::deserialize(&x.0).unwrap())
+                .chain(std::iter::repeat(
+                    <TheTreeHash as KVTreeHash>::empty_digest(),
+                )),
+        );
         treehash_tests::treehash_collision_sanity_checks3::<TheTreeHash>(digests0, digests1);
     }
 }

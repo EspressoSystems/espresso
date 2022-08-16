@@ -46,11 +46,11 @@ jobs:
         uses: actions/cache@v2
         with:
           path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git
+            ~/.cargo-nix/registry/index
+            ~/.cargo-nix/registry/cache
+            ~/.cargo-nix/git
             target
-          key: espresso-nix-v1-${{ hashFiles('Cargo.lock') }}
+          key: espresso-nix-v2-${{ hashFiles('Cargo.lock') }}
 
       - name: "Sanity Check: nix environment loads"
         run: nix-shell --run "echo Success"

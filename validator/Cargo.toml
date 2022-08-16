@@ -53,6 +53,7 @@ portpicker = { version = "0.1", optional = true }
 rand = "0.8.5"
 rand_chacha = { package = "rand_chacha", version = "0.3.1" }
 rand_chacha_02 = { package = "rand_chacha", version = "0.2.2" }
+reef = { git = "https://github.com/EspressoSystems/reef.git", features = ["testing"] }
 seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
 serde = { version = "1.0.139", features = ["derive", "rc"] }
 serde_derive = "1.0.118"

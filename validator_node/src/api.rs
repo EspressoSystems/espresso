@@ -18,11 +18,12 @@ use espresso_core::{
 use fmt::{Display, Formatter};
 use hotshot::HotShotError;
 use itertools::MultiUnzip;
-use jf_cap::{structs::ReceiverMemo, Signature, TransactionNote};
+use jf_cap::{structs::ReceiverMemo, Signature};
 use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, Snafu};
 use std::fmt;
 
+use espresso_core::state::EspressoTransaction;
 pub use net::*;
 
 #[derive(Debug, Serialize, Deserialize, Snafu)]
@@ -287,7 +288,7 @@ impl From<&CommittedBlock> for ElaboratedBlock {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommittedTransaction {
     pub id: TransactionId,
-    pub data: TransactionNote,
+    pub data: EspressoTransaction,
     pub proofs: Vec<SetMerkleProof>,
     pub output_uids: Vec<u64>,
     pub output_memos: Vec<ReceiverMemo>,

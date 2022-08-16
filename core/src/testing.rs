@@ -515,7 +515,7 @@ impl MultiXfrTestState {
                 ret.try_add_transaction(
                     &mut setup_block,
                     ElaboratedTransaction {
-                        txn: TransactionNote::Mint(Box::new(note)),
+                        txn: EspressoTransaction::CAP(TransactionNote::Mint(Box::new(note))),
                         proofs: vec![nul],
                         memos: memos.clone(),
                         signature,
@@ -947,7 +947,7 @@ impl MultiXfrTestState {
                     keys_and_memos,
                     signature: sig.clone(),
                     transaction: ElaboratedTransaction {
-                        txn: TransactionNote::Transfer(Box::new(txn)),
+                        txn: EspressoTransaction::CAP(TransactionNote::Transfer(Box::new(txn))),
                         proofs: nullifier_pfs,
                         memos: owner_memos,
                         signature: sig,
@@ -1109,7 +1109,7 @@ impl MultiXfrTestState {
             keys_and_memos,
             signature: sig.clone(),
             transaction: ElaboratedTransaction {
-                txn: TransactionNote::Transfer(Box::new(txn)),
+                txn: EspressoTransaction::CAP(TransactionNote::Transfer(Box::new(txn))),
                 proofs: nullifier_pfs,
                 memos: owner_memos,
                 signature: sig,
@@ -1174,7 +1174,12 @@ impl MultiXfrTestState {
         )?;
         let new_state = self.validator.append(&blk).unwrap();
 
-        for n in blk.block.0.iter().flat_map(|x| x.nullifiers().into_iter()) {
+        for n in blk
+            .block
+            .0
+            .iter()
+            .flat_map(|x| x.input_nullifiers().into_iter())
+        {
             assert!(!self.nullifiers.contains(n).unwrap().0);
             self.nullifiers.insert(n);
         }
@@ -1782,7 +1787,9 @@ mod tests {
         let new_uids = validator
             .validate_and_apply(
                 1,
-                Block(vec![TransactionNote::Transfer(Box::new(txn1))]),
+                Block(vec![EspressoTransaction::CAP(TransactionNote::Transfer(
+                    Box::new(txn1),
+                ))]),
                 vec![nullifier_pfs],
             )
             .unwrap()
@@ -2151,6 +2158,7 @@ mod tests {
     /// defines two equivalent blocks which differ in the ages of their nullifier proofs. The test
     /// applies each sequence of blocks to the same initial state, checking at each step that the
     /// states and their commitments are equal.
+    #[allow(clippy::type_complexity)]
     fn test_nullifier_history_commitment(
         seed: u64,
         blocks: Vec<((usize, usize), Vec<(usize, usize)>)>,

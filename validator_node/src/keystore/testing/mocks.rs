@@ -15,6 +15,7 @@ pub use seahorse::testing::MockLedger;
 use crate::node;
 use async_std::sync::{Arc, Mutex};
 use async_trait::async_trait;
+use espresso_core::state::EspressoTransaction;
 use espresso_core::{
     ledger::EspressoLedger,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
@@ -28,7 +29,6 @@ use jf_cap::{
     MerkleTree, Signature,
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
-use reef::traits::Transaction as _;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     sparse_merkle_tree::SparseMerkleTree,
@@ -79,7 +79,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
             Ok((mut uids, _)) => {
                 // Add nullifiers
                 for txn in &block.block.0 {
-                    for nullifier in txn.nullifiers() {
+                    for nullifier in txn.input_nullifiers() {
                         self.nullifiers.insert(nullifier);
                     }
                     for record in txn.output_commitments() {
@@ -145,11 +145,16 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
         let uids = &uids[txn_id as usize];
 
         // Validate the new memos.
-        if txn.verify_receiver_memos_signature(&memos, &sig).is_err() {
-            return Err(KeystoreError::Failed {
-                msg: String::from("invalid memos signature"),
-            });
+        match txn {
+            EspressoTransaction::CAP(txn) => {
+                if txn.verify_receiver_memos_signature(&memos, &sig).is_err() {
+                    return Err(KeystoreError::Failed {
+                        msg: String::from("invalid memos signature"),
+                    });
+                }
+            }
         }
+
         if memos.len() != txn.output_len() {
             return Err(KeystoreError::Failed {
                 msg: format!("wrong number of memos (expected {})", txn.output_len()),
@@ -285,7 +290,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         txn_info: Transaction<EspressoLedger>,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
         if let Some(signed_memos) = txn_info.memos() {
-            for memo in signed_memos.memos.iter().cloned().flatten() {
+            for memo in signed_memos.memos.iter().flatten().cloned() {
                 txn.memos.push(memo);
             }
             txn.signature = signed_memos.sig.clone();

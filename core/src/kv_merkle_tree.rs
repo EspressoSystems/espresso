@@ -75,10 +75,10 @@ where
 {
     /// Create a new leaf in the tree
     fn new_leaf(height: usize, key: KVHash::Key, value: KVHash::Value) -> Self {
-        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
+        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key.clone()));
         let key_bits = key_bit_vec.into_iter();
 
-        let mut h = KVHash::hash_leaf(key, value);
+        let mut h = KVHash::hash_leaf(key.clone(), value.clone());
 
         for sib in key_bits.into_iter().take(height) {
             let mut children = GenericArray::from_iter(vec![
@@ -207,13 +207,13 @@ where
         match self {
             EmptySubtree => KVHash::empty_digest(),
             Leaf { height, key, value } => {
-                let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(*key));
+                let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key.clone()));
 
                 // the path only goes until a terminal node is reached, so skip
                 // part of the bit-vec
                 let key_bits = key_bit_vec.into_iter();
 
-                let mut running_hash = KVHash::hash_leaf(*key, *value);
+                let mut running_hash = KVHash::hash_leaf(key.clone(), value.clone());
 
                 // if the height is too large, keep hashing
                 for sib in key_bits.chain(core::iter::repeat(0)).take(*height) {
@@ -259,7 +259,7 @@ where
     ) -> Option<(Option<KVHash::Value>, KVHash::Digest)> {
         let mut running_hash = self.terminal_node.value();
 
-        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
+        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key.clone()));
 
         // the path only goes until a terminal node is reached, so skip
         // part of the bit-vec
@@ -287,7 +287,7 @@ where
                     ..
                 } => {
                     if leaf_key == &key {
-                        Some((Some(*leaf_value), running_hash))
+                        Some((Some(leaf_value.clone()), running_hash))
                     } else {
                         Some((None, running_hash))
                     }
@@ -328,7 +328,7 @@ where
         key: KVHash::Key,
     ) -> Option<(Option<KVHash::Value>, KVMerkleProof<KVHash>)> {
         use KVMerkleTree::*;
-        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
+        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key.clone()));
         let key_bits = key_bit_vec.into_iter().rev();
 
         let mut path = Vec::new();
@@ -375,13 +375,13 @@ where
                 let proof = KVMerkleProof::<KVHash> {
                     terminal_node: KVMerkleTerminalNode::<KVHash>::Leaf {
                         height: *height,
-                        key: *leaf_key,
-                        value: *leaf_value,
+                        key: leaf_key.clone(),
+                        value: leaf_value.clone(),
                     },
                     path,
                 };
-                if key == *leaf_key {
-                    Some((Some(*leaf_value), proof))
+                if key == leaf_key.clone() {
+                    Some((Some(leaf_value.clone()), proof))
                 } else {
                     Some((None, proof))
                 }
@@ -394,7 +394,7 @@ where
     /// inserted, value1 is overwritten by value2.
     pub fn insert(&mut self, key: KVHash::Key, value: KVHash::Value) -> Option<()> {
         use KVMerkleTree::*;
-        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
+        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key.clone()));
         let mut end_height = key_bit_vec.len();
         let key_bits = key_bit_vec.into_iter().rev();
 
@@ -424,7 +424,8 @@ where
                     // Figure out if this leaf is down the same tree or if it's a sibling
                     let leaf_pos = {
                         debug_assert!(height > 0);
-                        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(leaf_key));
+                        let key_bit_vec =
+                            KVHash::traversal_of_digest(KVHash::hash_key(leaf_key.clone()));
                         key_bit_vec[height - 1]
                     };
 
@@ -491,7 +492,7 @@ where
 
     pub fn forget(&mut self, key: KVHash::Key) -> Option<KVMerkleProof<KVHash>> {
         use KVMerkleTree::*;
-        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
+        let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key.clone()));
         let key_bits = key_bit_vec.into_iter().rev();
 
         let mut siblings = vec![];
@@ -523,7 +524,7 @@ where
             key: leaf_key,
             value: leaf_value,
             ..
-        } = end_branch
+        } = end_branch.clone()
         {
             if leaf_key == key {
                 ret = Some(KVMerkleProof::<KVHash> {
@@ -592,7 +593,7 @@ where
         //check can be removed as an optimization opportunity if we really need
         //to, but keeping it in is defensive programming
 
-        let key_in_set = matches!(proof.check(key, self.hash()), Some((Some(_), ..)));
+        let key_in_set = matches!(proof.check(key.clone(), self.hash()), Some((Some(_), ..)));
 
         use KVMerkleTree::*;
         let key_bit_vec = KVHash::traversal_of_digest(KVHash::hash_key(key));
@@ -701,11 +702,11 @@ where
     let mut kvs = vec![];
     let mut s = KVMerkleTree::ForgottenSubtree { digest: root };
     for (k, v, proof) in inserts {
-        s.remember(k, proof)?;
+        s.remember(k.clone(), proof)?;
         kvs.push((k, v));
     }
     for (k, v) in kvs.iter() {
-        s.insert(*k, *v).unwrap();
+        s.insert(k.clone(), v.clone()).unwrap();
     }
     Ok((
         s.hash(),
@@ -782,7 +783,7 @@ mod tests {
         let update_vals = updates
             .iter()
             .cloned()
-            .chain(checks.iter().filter_map(|x| x.ok().clone()))
+            .chain(checks.iter().filter_map(|x| x.ok()))
             .map(|u| (u, Nullifier::random_for_test(&mut prng)))
             .collect::<HashMap<_, _>>();
         let mut hset = HashSet::new();
@@ -797,17 +798,14 @@ mod tests {
             hset.insert(u);
 
             let (val, pf) = t.lookup(TestNulls(elem)).unwrap();
-            let in_set = if val.is_some() { true } else { false };
+            let in_set = val.is_some();
             t.insert(TestNulls(elem), TestNulls(elem));
-            let pf_check = match pf.check(TestNulls(elem), lw_t.hash()) {
-                Some((Some(_), ..)) => true,
-                _ => false,
-            };
+            let pf_check = matches!(pf.check(TestNulls(elem), lw_t.hash()), Some((Some(_), ..)));
             assert_eq!(pf_check, in_set);
             lw_t.remember(TestNulls(elem), pf).unwrap();
             lw_t.insert(TestNulls(elem), TestNulls(elem)).unwrap();
             let (lw_t_val, new_lw_pf) = lw_t.lookup(TestNulls(elem)).unwrap();
-            let in_new_lw_t = if lw_t_val.is_none() { false } else { true };
+            let in_new_lw_t = lw_t_val.is_some();
 
             assert!(in_new_lw_t);
             assert!(t.lookup(TestNulls(elem)).unwrap().0.is_some());
@@ -816,10 +814,10 @@ mod tests {
             lw_t.forget(TestNulls(elem)).unwrap();
             assert!(lw_t.lookup(TestNulls(elem)).is_none());
 
-            let new_lw_pf_check = match new_lw_pf.check(TestNulls(elem), lw_t.hash()) {
-                Some((Some(_), ..)) => true,
-                _ => false,
-            };
+            let new_lw_pf_check = matches!(
+                new_lw_pf.check(TestNulls(elem), lw_t.hash()),
+                Some((Some(_), ..))
+            );
             assert!(new_lw_pf_check);
         }
 
@@ -837,7 +835,7 @@ mod tests {
             };
             let elem = update_vals[&val];
             let (t_val, pf) = t.lookup(TestNulls(elem)).unwrap();
-            let t_contains = if t_val.is_some() { true } else { false };
+            let t_contains = t_val.is_some();
 
             if should_be_there {
                 assert!(hset.contains(&val));
@@ -845,10 +843,10 @@ mod tests {
             }
             assert_eq!(hset.contains(&val), t_contains);
 
-            let check = match KVMerkleProof::<TestTreeHash>::check(&pf, TestNulls(elem), t.hash()) {
-                Some((Some(_), ..)) => true,
-                _ => false,
-            };
+            let check = matches!(
+                KVMerkleProof::<TestTreeHash>::check(&pf, TestNulls(elem), t.hash()),
+                Some((Some(_), ..))
+            );
             assert_eq!(t_contains, check);
         }
     }

@@ -11,9 +11,10 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::state::{
-    state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction, SetMerkleProof,
-    SetMerkleTree, ValidationError, ValidatorState,
+    state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction, EspressoTransaction,
+    SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
+use crate::util::canonical;
 use commit::{Commitment, Committable};
 use itertools::izip;
 use itertools::MultiUnzip;
@@ -22,9 +23,43 @@ use jf_cap::{
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
     TransactionNote,
 };
+use reef::traits::Transaction;
 use reef::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum_macros::Display)]
+pub enum EspressoTransactionKind {
+    CAP(reef::cap::TransactionKind),
+    // REWARD TODO (fernando)
+}
+
+impl traits::TransactionKind for EspressoTransactionKind {
+    fn send() -> Self {
+        EspressoTransactionKind::CAP(reef::cap::TransactionKind::Send)
+    }
+
+    fn receive() -> Self {
+        EspressoTransactionKind::CAP(reef::cap::TransactionKind::Receive)
+    }
+
+    fn mint() -> Self {
+        EspressoTransactionKind::CAP(reef::cap::TransactionKind::Mint)
+    }
+
+    fn freeze() -> Self {
+        EspressoTransactionKind::CAP(reef::cap::TransactionKind::Freeze)
+    }
+
+    fn unfreeze() -> Self {
+        EspressoTransactionKind::CAP(reef::cap::TransactionKind::Unfreeze)
+    }
+
+    fn unknown() -> Self {
+        EspressoTransactionKind::CAP(reef::cap::TransactionKind::Unknown)
+    }
+}
 
 impl traits::NullifierSet for SetMerkleTree {
     type Proof = SetMerkleProof;
@@ -62,14 +97,69 @@ impl traits::NullifierSet for SetMerkleTree {
     }
 }
 
+impl EspressoTransaction {
+    pub(crate) fn open_viewing_memo(
+        &self,
+        viewable_assets: &HashMap<AssetCode, AssetDefinition>,
+        viewing_keys: &HashMap<ViewerPubKey, ViewerKeyPair>,
+    ) -> Result<ViewingMemoOpening, ViewingError> {
+        match self {
+            Self::CAP(txn) => {
+                reef::traits::Transaction::open_viewing_memo(txn, viewable_assets, viewing_keys)
+            }
+        }
+    }
+
+    /// Retrieve transaction output record commitments.
+    pub fn output_commitments(&self) -> Vec<RecordCommitment> {
+        match self {
+            Self::CAP(txn) => txn.output_commitments(),
+        }
+    }
+
+    /// A committing hash of this transaction.
+    pub fn hash(&self) -> Commitment<EspressoTransaction> {
+        self.commit()
+    }
+
+    /// Retrieve kind of transaction.
+    pub fn kind(&self) -> EspressoTransactionKind {
+        match self {
+            EspressoTransaction::CAP(txn) => EspressoTransactionKind::CAP(txn.kind()),
+        }
+    }
+
+    /// Retrieve number of transaction outputs.
+    pub fn output_len(&self) -> usize {
+        match self {
+            Self::CAP(txn) => txn.output_len(),
+        }
+    }
+
+    /// Retrieve transaction input nullifiers.
+    pub fn input_nullifiers(&self) -> Vec<Nullifier> {
+        match self {
+            Self::CAP(txn) => txn.input_nullifiers(),
+        }
+    }
+}
+
+impl commit::Committable for EspressoTransaction {
+    fn commit(&self) -> Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Es Txn Comm")
+            .var_size_bytes(&canonical::serialize(self).unwrap())
+            .finalize()
+    }
+}
+
 impl traits::Transaction for ElaboratedTransaction {
     type NullifierSet = SetMerkleTree;
-    type Hash = Commitment<TransactionNote>;
-    type Kind = cap::TransactionKind;
+    type Hash = Commitment<EspressoTransaction>;
+    type Kind = EspressoTransactionKind;
 
     fn cap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
         Self {
-            txn: note,
+            txn: EspressoTransaction::CAP(note),
             proofs,
             memos: Default::default(),
             signature: Default::default(),
@@ -85,15 +175,17 @@ impl traits::Transaction for ElaboratedTransaction {
     }
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {
+        // reward transaction wont have nullifiers, so self.txn.input_nullifiers will return
+        // empty vector
         self.txn
-            .nullifiers()
+            .input_nullifiers()
             .into_iter()
             .zip(self.proofs.clone())
             .collect()
     }
 
     fn input_nullifiers(&self) -> Vec<Nullifier> {
-        self.txn.nullifiers()
+        self.txn.input_nullifiers()
     }
 
     fn output_commitments(&self) -> Vec<RecordCommitment> {
@@ -110,15 +202,12 @@ impl traits::Transaction for ElaboratedTransaction {
         // fundamental identity of the transaction (i.e. its effect on the ledger state) and they
         // may even change without changing the identity of the transaction; for example, when the
         // EsQS updates nullifier proofs to the latest nullifier set root hash.
+
         self.txn.commit()
     }
 
     fn kind(&self) -> Self::Kind {
-        match &self.txn {
-            TransactionNote::Mint(_) => cap::TransactionKind::Mint,
-            TransactionNote::Transfer(_) => cap::TransactionKind::Send,
-            TransactionNote::Freeze(_) => cap::TransactionKind::Freeze,
-        }
+        self.txn.kind()
     }
 
     fn set_proofs(&mut self, proofs: Vec<SetMerkleProof>) {
@@ -141,7 +230,7 @@ impl traits::Block for ElaboratedBlock {
     type Error = ValidationError;
 
     fn new(txns: Vec<Self::Transaction>) -> Self {
-        let (txns, proofs, memos, signatures): (Vec<TransactionNote>, Vec<_>, Vec<_>, Vec<_>) =
+        let (txns, proofs, memos, signatures): (Vec<EspressoTransaction>, Vec<_>, Vec<_>, Vec<_>) =
             txns.into_iter()
                 .map(|txn| (txn.txn, txn.proofs, txn.memos, txn.signature))
                 .multiunzip();

@@ -184,7 +184,7 @@ impl QueryData {
             for last_index in index..block_id as usize {
                 let block = &self.blocks[last_index + 1];
                 for transaction in block.raw_block.block.0.iter() {
-                    for nullifier_in in transaction.nullifiers() {
+                    for nullifier_in in transaction.input_nullifiers() {
                         adjusted_nullifier_set.insert(nullifier_in);
                     }
                 }
