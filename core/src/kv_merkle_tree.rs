@@ -27,7 +27,7 @@ use typenum::{Unsigned, U1};
 /// sparseness. That is, any two sets with the same root hash will compare equal, even if the
 /// elements retained in memory are different between the two sets.
 #[allow(clippy::type_complexity)]
-#[derive(Debug, Clone,)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum KVMerkleTree<KVHash>
 where
     KVHash: KVTreeHash + Clone,
