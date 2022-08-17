@@ -12,7 +12,7 @@
 
 use async_std::task::{sleep, spawn_blocking};
 use escargot::CargoBuild;
-use espresso_validator::NodeOpt;
+use espresso_validator::{full_node_esqs, NodeOpt};
 use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
@@ -53,6 +53,10 @@ struct Options {
     /// Wait for web server to exit after transactions complete.
     #[structopt(long, short)]
     pub wait: bool,
+
+    /// Options for the new EsQS.
+    #[structopt(flatten)]
+    pub esqs: full_node_esqs::Options,
 
     #[structopt(long, short)]
     verbose: bool,
@@ -139,6 +143,9 @@ async fn main() {
         args.push("--api");
         args.push(&api_path);
     }
+    let web_server_port = options.node_opt.web_server_port.to_string();
+    args.push("--web-server-port");
+    args.push(&web_server_port);
     let min_propose_time = format!("{}ms", options.node_opt.min_propose_time.as_millis());
     args.push("--min-propose-time");
     args.push(&min_propose_time);
@@ -171,6 +178,23 @@ async fn main() {
         args.push("--faucet-pub-key");
         args.push(pub_key);
     }
+    let esqs_port;
+    let esqs_metastate_api_path;
+    if let Some(port) = options.esqs.port {
+        esqs_port = port.to_string();
+        esqs_metastate_api_path = options
+            .esqs
+            .metastate_api_path
+            .as_ref()
+            .unwrap()
+            .display()
+            .to_string();
+        args.push("--esqs-port");
+        args.push(&esqs_port);
+        args.push("--metastate-api-path");
+        args.push(&esqs_metastate_api_path);
+    }
+
     let num_txn_str = match options.num_txn {
         Some(num_txn) => num_txn.to_string(),
         None => "".to_string(),

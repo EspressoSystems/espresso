@@ -194,9 +194,9 @@ impl QueryData {
     }
 }
 
-impl<'a> MetaStateDataSource for &'a QueryData {
+impl MetaStateDataSource for QueryData {
     fn get_nullifier_proof_for(
-        self,
+        &self,
         block_id: u64,
         nullifier: Nullifier,
     ) -> Option<(bool, SetMerkleProof)> {

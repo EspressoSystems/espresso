@@ -78,6 +78,7 @@ use validator_node::{
 };
 
 mod disco;
+pub mod full_node_esqs;
 pub mod full_node_mem_data_source;
 mod ip;
 mod routes;
