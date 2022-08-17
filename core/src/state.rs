@@ -815,7 +815,8 @@ pub mod state_comm {
 }
 
 // Stake table for each round
-#[derive(Debug, Clone, PartialEq, Hash, Eq, Serialize, Deserialize)]
+#[tagged_blob("STAKEKEY")]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct StakeTableKey(PubKey);
 
 // cannot derive CanonicalSerialize because PubKey does not implement it
@@ -841,17 +842,8 @@ impl CanonicalDeserialize for StakeTableKey {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Copy,
-    PartialEq,
-    Eq,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-    Serialize,
-    Deserialize,
-)]
+#[tagged_blob("STAKEVALUE")]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct StakeTableValue(u64);
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
@@ -865,30 +857,12 @@ impl CommitableHashTag for StakeTableTag {
 type StakeTableHash = CommitableHash<StakeTableKey, StakeTableValue, StakeTableTag>;
 
 // Stores commitment hash of previous rounds' stake tables in (block_num, stake table commitment) kv pairs
-#[derive(
-    Clone,
-    Debug,
-    Copy,
-    PartialEq,
-    Eq,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-    Serialize,
-    Deserialize,
-)]
+#[tagged_blob("STAKECOMMKEY")]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct StakeTableCommitmentKey(u64);
 
-#[derive(
-    Clone,
-    Debug,
-    Copy,
-    PartialEq,
-    Eq,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-    Serialize,
-    Deserialize,
-)]
+#[tagged_blob("STAKECOMMVALUE")]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct StakeTableCommitmentValue(<StakeTableHash as KVTreeHash>::Digest);
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -903,7 +877,8 @@ type StakeTableCommitmentsHash =
     CommitableHash<StakeTableCommitmentKey, StakeTableCommitmentValue, StakeTableCommitmentTag>;
 
 // Set Merkle tree for all of the previously-collected rewards
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[tagged_blob("COLLECTED-REWARD")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CollectedRewards((PubKey, u64));
 
 impl CanonicalSerialize for CollectedRewards {
