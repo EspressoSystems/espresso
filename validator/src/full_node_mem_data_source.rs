@@ -38,23 +38,29 @@ pub struct QueryData {
     node_status: ValidatorStatus,
 }
 
+// We implement [AvailabilityDataSource] for `&'a QueryData`, not `QueryData`, so that we can name
+// the lifetime `'a` when defining the associated iterator types. This is a workaround in place of
+// GATs. Once GATs stabilize, we can do something like
+//
+//      type BlockIterType<'a> = &'a [BlockQueryData];
+//      fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType<'_>;
 impl<'a> AvailabilityDataSource for &'a QueryData {
     type BlockIterType = &'a [BlockQueryData];
     type StateIterType = &'a [StateQueryData];
 
-    fn get_nth_block_iter(self, n: usize) -> Self::BlockIterType {
+    fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType {
         self.blocks.split_at(n).1
     }
-    fn get_nth_state_iter(self, n: usize) -> Self::StateIterType {
+    fn get_nth_state_iter(&self, n: usize) -> Self::StateIterType {
         self.states.split_at(n).1
     }
-    fn get_block_index_by_hash(self, hash: BlockCommitment) -> Option<u64> {
+    fn get_block_index_by_hash(&self, hash: BlockCommitment) -> Option<u64> {
         self.index_by_block_hash.get(&hash).cloned()
     }
-    fn get_txn_index_by_hash(self, hash: TransactionCommitment) -> Option<(u64, u64)> {
+    fn get_txn_index_by_hash(&self, hash: TransactionCommitment) -> Option<(u64, u64)> {
         self.index_by_txn_hash.get(&hash).cloned()
     }
-    fn get_record_index_by_uid(self, uid: u64) -> Option<(u64, u64, u64)> {
+    fn get_record_index_by_uid(&self, uid: u64) -> Option<(u64, u64, u64)> {
         if let Ok(index) = self.blocks.binary_search_by(|bqd| {
             if uid < bqd.records_from {
                 std::cmp::Ordering::Less
@@ -87,7 +93,7 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
             None
         }
     }
-    fn get_record_merkle_tree_at_block_index(self, n: usize) -> Option<MerkleTree> {
+    fn get_record_merkle_tree_at_block_index(&self, n: usize) -> Option<MerkleTree> {
         let state = &self.states[n].state;
         MerkleTree::restore_from_frontier(
             state.record_merkle_commitment,
@@ -127,6 +133,12 @@ impl UpdateAvailabilityData for QueryData {
     }
 }
 
+// We implement [CatchUpDataSource] for `&'a QueryData`, not `QueryData`, so that we can name the
+// lifetime `'a` when defining the associated iterator types. This is a workaround in place of GATs.
+// Once GATs stabilize, we can do something like
+//
+//      type EventIterType<'a> = &'a [LedgerEvent<EspressoLedger>];
+//      fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType<'_>;
 impl<'a> CatchUpDataSource for &'a QueryData {
     type EventIterType = &'a [LedgerEvent<EspressoLedger>];
     fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType {
@@ -194,9 +206,9 @@ impl QueryData {
     }
 }
 
-impl<'a> MetaStateDataSource for &'a QueryData {
+impl MetaStateDataSource for QueryData {
     fn get_nullifier_proof_for(
-        self,
+        &self,
         block_id: u64,
         nullifier: Nullifier,
     ) -> Option<(bool, SetMerkleProof)> {
@@ -227,8 +239,8 @@ impl UpdateMetaStateData for QueryData {
     }
 }
 
-impl<'a> StatusDataSource<'a> for &'a QueryData {
-    fn get_validator_status(self) -> &'a ValidatorStatus {
+impl StatusDataSource for QueryData {
+    fn get_validator_status(&self) -> &ValidatorStatus {
         &self.node_status
     }
 }
