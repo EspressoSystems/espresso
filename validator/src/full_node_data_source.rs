@@ -29,6 +29,7 @@ use espresso_status_api::query_data::ValidatorStatus;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use seahorse::events::LedgerEvent;
+use tracing::warn;
 use validator_node::api::EspressoError;
 use validator_node::node::QueryServiceError;
 
@@ -136,9 +137,15 @@ impl UpdateAvailabilityData for QueryData {
             }
         }
         blocks.iter().zip(states.iter()).for_each(|(block, state)| {
-            let _ = self
+            if let Err(e) = self
                 .block_storage
-                .store_resource(&(block.clone(), state.clone()));
+                .store_resource(&(block.clone(), state.clone()))
+            {
+                warn!(
+                    "Failed to store block {:?} and state {:?}: Error: {}",
+                    block, state, e
+                );
+            }
         });
         self.blocks.append(blocks);
         self.states.append(states);
@@ -172,7 +179,9 @@ impl UpdateCatchUpData for QueryData {
         events: &mut Vec<LedgerEvent<EspressoLedger>>,
     ) -> Result<(), Self::Error> {
         events.iter().for_each(|event| {
-            let _ = self.event_storage.store_resource(event);
+            if let Err(e) = self.event_storage.store_resource(event) {
+                warn!("Failed to store event {:?}, Error: {}", event, e);
+            }
         });
         self.events.append(events);
         Ok(())
@@ -266,7 +275,12 @@ impl UpdateStatusData for QueryData {
 
     fn set_status(&mut self, status: ValidatorStatus) -> Result<(), Self::Error> {
         self.node_status = status;
-        let _ = self.status_storage.store_resource(&self.node_status);
+        if let Err(e) = self.status_storage.store_resource(&self.node_status) {
+            warn!(
+                "Failed to store status {:?}, Error {}",
+                &self.node_status, e
+            );
+        }
         Ok(())
     }
     fn edit_status<U, F>(&mut self, op: F) -> Result<(), Self::Error>
@@ -275,10 +289,17 @@ impl UpdateStatusData for QueryData {
         Self::Error: From<U>,
     {
         op(&mut self.node_status).map_err(EspressoError::from)?;
-        let _ = self.status_storage.store_resource(&self.node_status);
+        if let Err(e) = self.status_storage.store_resource(&self.node_status) {
+            warn!(
+                "Failed to store status {:?}, Error {}",
+                &self.node_status, e
+            );
+        }
         Ok(())
     }
 }
+
+const STATUS_STORAGE_COUNT: u32 = 10u32;
 
 impl QueryData {
     pub fn new(store_path: &Path) -> Result<QueryData, PersistenceError> {
@@ -289,8 +310,11 @@ impl QueryData {
         let mut loader = AtomicStoreLoader::create(store_path, key_tag)?;
         let block_storage = AppendLog::create(&mut loader, Default::default(), &blocks_tag, 1024)?;
         let event_storage = AppendLog::create(&mut loader, Default::default(), &events_tag, 1024)?;
-        let status_storage =
+        let mut status_storage =
             RollingLog::create(&mut loader, Default::default(), &status_tag, 1024)?;
+        // this should be loaded from a config setting...
+        status_storage.set_retained_entries(STATUS_STORAGE_COUNT);
+
         let state_storage = AtomicStore::open(loader)?;
 
         Ok(QueryData {
@@ -316,7 +340,10 @@ impl QueryData {
         let mut loader = AtomicStoreLoader::load(store_path, key_tag)?;
         let block_storage = AppendLog::load(&mut loader, Default::default(), &blocks_tag, 1024)?;
         let event_storage = AppendLog::load(&mut loader, Default::default(), &events_tag, 1024)?;
-        let status_storage = RollingLog::load(&mut loader, Default::default(), &status_tag, 1024)?;
+        let mut status_storage =
+            RollingLog::load(&mut loader, Default::default(), &status_tag, 1024)?;
+        // this should be loaded from a config setting...
+        status_storage.set_retained_entries(STATUS_STORAGE_COUNT);
         let state_storage = AtomicStore::open(loader)?;
 
         let (blocks, states): (Vec<BlockQueryData>, Vec<StateQueryData>) =
@@ -365,10 +392,21 @@ impl QueryData {
     }
 
     pub fn commit_all(&mut self) {
-        let _ = self.block_storage.commit_version();
-        let _ = self.event_storage.commit_version();
-        let _ = self.status_storage.commit_version();
-        let _ = self.state_storage.commit_version();
+        if let Err(e) = self.block_storage.commit_version() {
+            warn!("Failed to commit block storage: Error {}", e);
+        }
+        if let Err(e) = self.event_storage.commit_version() {
+            warn!("Failed to commit event storage: Error {}", e);
+        }
+        if let Err(e) = self.status_storage.commit_version() {
+            warn!("Failed to commit status storage: Error {}", e);
+        }
+        if let Err(e) = self.state_storage.commit_version() {
+            warn!("Failed to commit query state storage: Error {}", e);
+        }
+        if let Err(e) = self.status_storage.prune_file_entries() {
+            warn!("Failed to prune status storage: Error {}", e);
+        }
     }
 
     fn calculate_sparse_cache(_index: u64, _total_size: u64) -> bool {

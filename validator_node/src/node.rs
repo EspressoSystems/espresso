@@ -969,12 +969,19 @@ where
 mod tests {
     use super::*;
     use crate::api::EspressoError;
+    use crate::update_query_data_source::EventProcessedHandler;
     use async_std::task::block_on;
-    use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
+    use espresso_availability_api::{
+        data_source::UpdateAvailabilityData,
+        query_data::{BlockQueryData, StateQueryData},
+    };
+    use espresso_catchup_api::data_source::UpdateCatchUpData;
     use espresso_core::{
         testing::{MultiXfrRecordSpec, MultiXfrTestState, TestTxSpec, TxnPrintInfo},
         universal_params::UNIVERSAL_PARAM,
     };
+    use espresso_metastate_api::data_source::UpdateMetaStateData;
+    use espresso_status_api::data_source::UpdateStatusData;
     use hotshot::data::VecQuorumCertificate;
     use jf_cap::{MerkleLeafProof, MerkleTree, Signature};
     use quickcheck::QuickCheck;
@@ -1178,6 +1185,10 @@ mod tests {
         {
             Ok(())
         }
+    }
+
+    impl EventProcessedHandler for TestOnlyMockAllStores {
+        fn on_event_processing_complete(&mut self) {}
     }
 
     fn test_query_service(

@@ -19,19 +19,19 @@ use hotshot::{data::QuorumCertificate, H_256};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PeerInfo {
     pub peer_id: PubKey,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MempoolInfo {
     pub transaction_count: u64,
     pub output_count: u64,
     pub memory_footprint: u64,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ValidatorStatus {
     pub peer_list: Vec<PeerInfo>,
     // TBD; these are going to correspond to active views, possibly want to also retain recent views?
