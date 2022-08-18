@@ -2386,7 +2386,12 @@ name = "espresso-metastate-api"
 version = "0.1.0"
 dependencies = [
  "espresso-core",
+ "futures",
  "jf-cap",
+ "serde",
+ "snafu",
+ "tide-disco",
+ "toml",
 ]
 
 [[package]]
@@ -6925,8 +6930,9 @@ dependencies = [
 [[package]]
 name = "tide-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#3841d98cb128c1c3dc81a8837ced63b3145de234"
+source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#45e834a0a89afa06553fdd1e0f9dbf8072b32474"
 dependencies = [
+ "ark-serialize",
  "async-std",
  "async-trait",
  "bincode",
@@ -6938,6 +6944,7 @@ dependencies = [
  "futures",
  "futures-util",
  "http",
+ "jf-utils",
  "lazy_static",
  "libc",
  "markdown",

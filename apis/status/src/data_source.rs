@@ -15,8 +15,8 @@ use core::convert::From;
 use std::error::Error;
 use std::fmt::Debug;
 
-pub trait StatusDataSource<'a> {
-    fn get_validator_status(self) -> &'a ValidatorStatus;
+pub trait StatusDataSource {
+    fn get_validator_status(&self) -> &ValidatorStatus;
 }
 
 pub trait UpdateStatusData {

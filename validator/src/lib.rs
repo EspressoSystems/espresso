@@ -80,6 +80,7 @@ use validator_node::{
 
 mod disco;
 pub mod full_node_data_source;
+pub mod full_node_esqs;
 mod ip;
 mod routes;
 

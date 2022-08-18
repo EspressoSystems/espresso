@@ -17,7 +17,7 @@ use std::fmt::Debug;
 
 pub trait MetaStateDataSource {
     fn get_nullifier_proof_for(
-        self,
+        &self,
         block_id: u64,
         nullifier: Nullifier,
     ) -> Option<(bool, SetMerkleProof)>;
