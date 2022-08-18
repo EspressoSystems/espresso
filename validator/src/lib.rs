@@ -13,7 +13,7 @@
 #![deny(warnings)]
 #![allow(clippy::format_push_string)]
 
-use crate::full_node_mem_data_source::QueryData;
+use crate::full_node_data_source::QueryData;
 use crate::routes::{
     dispatch_url, dispatch_web_socket, server_error, RouteBinding, UrlSegmentType, UrlSegmentValue,
 };
@@ -70,6 +70,7 @@ use surf::Url;
 use tide::StatusCode;
 use tide_websockets::{WebSocket, WebSocketConnection};
 use tracing::{debug, event, Level};
+use validator_node::update_query_data_source::UpdateQueryDataSourceTypes;
 use validator_node::{
     api::EspressoError,
     api::{server, UserPubKey},
@@ -78,7 +79,7 @@ use validator_node::{
 };
 
 mod disco;
-pub mod full_node_mem_data_source;
+pub mod full_node_data_source;
 mod ip;
 mod routes;
 
@@ -464,10 +465,19 @@ fn reset_store_dir(store_dir: PathBuf) {
     fs::remove_dir_all(path).expect("Failed to remove persistence files");
 }
 
+pub struct UpdateQueryDataSourceTypesBinder;
+
+impl UpdateQueryDataSourceTypes for UpdateQueryDataSourceTypesBinder {
+    type CU = QueryData;
+    type AV = QueryData;
+    type MS = QueryData;
+    type ST = QueryData;
+    type EH = QueryData;
+}
+
 type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
-type FullNode<'a> =
-    node::FullNode<'a, PLNetwork, PLStorage, QueryData, QueryData, QueryData, QueryData>;
+type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage, UpdateQueryDataSourceTypesBinder>;
 
 #[derive(Clone)]
 pub enum Node {
@@ -741,6 +751,7 @@ async fn init_hotshot(
             nullifiers,
             state.memos,
             full_persisted,
+            data_source.clone(),
             data_source.clone(),
             data_source.clone(),
             data_source.clone(),

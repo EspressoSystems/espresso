@@ -2241,6 +2241,7 @@ dependencies = [
  "commit",
  "espresso-core",
  "jf-cap",
+ "serde",
 ]
 
 [[package]]
@@ -2395,6 +2396,7 @@ dependencies = [
  "espresso-core",
  "hotshot",
  "jf-cap",
+ "serde",
 ]
 
 [[package]]
@@ -2417,6 +2419,7 @@ dependencies = [
  "async-std",
  "async-trait",
  "async-tungstenite 0.15.0",
+ "atomic_store 0.1.2",
  "bincode",
  "cld",
  "dirs",

@@ -11,7 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::ser_test;
-use crate::update_query_data_source::UpdateQueryDataSource;
+use crate::update_query_data_source::{UpdateQueryDataSource, UpdateQueryDataSourceTypes};
 use crate::validator_node::*;
 use arbitrary::Arbitrary;
 use arbitrary_wrappers::*;
@@ -19,8 +19,6 @@ use ark_serialize::CanonicalSerialize;
 use async_executors::exec::AsyncStd;
 use async_std::sync::{Arc, RwLock};
 use async_trait::async_trait;
-use espresso_availability_api::data_source::UpdateAvailabilityData;
-use espresso_catchup_api::data_source::UpdateCatchUpData;
 use espresso_core::full_persistence::FullPersistence;
 pub use espresso_core::state::state_comm::LedgerStateCommitment;
 use espresso_core::{
@@ -31,8 +29,6 @@ use espresso_core::{
         ValidatorState,
     },
 };
-use espresso_metastate_api::data_source::UpdateMetaStateData;
-use espresso_status_api::data_source::UpdateStatusData;
 pub use futures::prelude::*;
 pub use futures::stream::Stream;
 use futures::{channel::mpsc, future::RemoteHandle, select, task::SpawnExt};
@@ -829,29 +825,23 @@ impl<'a> QueryService for HotShotQueryService<'a> {
 }
 
 /// A full node is a QueryService running alongside a lightweight validator.
-pub struct FullNode<'a, NET, STORE, CU, AV, MS, ST>
+pub struct FullNode<'a, NET, STORE, TYPES>
 where
     NET: PLNet,
     STORE: PLStore,
-    CU: UpdateCatchUpData + Sized + Send + Sync,
-    AV: UpdateAvailabilityData + Sized + Send + Sync,
-    MS: UpdateMetaStateData + Sized + Send + Sync,
-    ST: UpdateStatusData + Sized + Send + Sync,
+    TYPES: UpdateQueryDataSourceTypes,
 {
     validator: LightWeightNode<NET, STORE>,
     #[allow(dead_code)]
-    data_source_updater: Arc<RwLock<UpdateQueryDataSource<CU, AV, MS, ST>>>,
+    data_source_updater: Arc<RwLock<UpdateQueryDataSource<TYPES>>>,
     query_service: HotShotQueryService<'a>,
 }
 
-impl<'a, NET, STORE, CU, AV, MS, ST> FullNode<'a, NET, STORE, CU, AV, MS, ST>
+impl<'a, NET, STORE, TYPES> FullNode<'a, NET, STORE, TYPES>
 where
     NET: PLNet,
     STORE: PLStore,
-    CU: UpdateCatchUpData + Sized + Send + Sync + 'static,
-    AV: UpdateAvailabilityData + Sized + Send + Sync + 'static,
-    MS: UpdateMetaStateData + Sized + Send + Sync + 'static,
-    ST: UpdateStatusData + Sized + Send + Sync + 'static,
+    TYPES: UpdateQueryDataSourceTypes + 'static,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -864,10 +854,11 @@ where
         nullifiers: SetMerkleTree,
         unspent_memos: Vec<(ReceiverMemo, u64)>,
         full_persisted: FullPersistence,
-        catchup_store: Arc<RwLock<CU>>,
-        availability_store: Arc<RwLock<AV>>,
-        meta_state_store: Arc<RwLock<MS>>,
-        status_store: Arc<RwLock<ST>>,
+        catchup_store: Arc<RwLock<TYPES::CU>>,
+        availability_store: Arc<RwLock<TYPES::AV>>,
+        meta_state_store: Arc<RwLock<TYPES::MS>>,
+        status_store: Arc<RwLock<TYPES::ST>>,
+        event_handler: Arc<RwLock<TYPES::EH>>,
     ) -> Self {
         let query_service = HotShotQueryService::new(
             validator.subscribe(),
@@ -884,6 +875,7 @@ where
             availability_store,
             meta_state_store,
             status_store,
+            event_handler,
             state,
         );
         Self {
@@ -895,8 +887,7 @@ where
 
     fn as_validator(
         &self,
-    ) -> &impl Validator<Event = <FullNode<'a, NET, STORE, CU, AV, MS, ST> as Validator>::Event>
-    {
+    ) -> &impl Validator<Event = <FullNode<'a, NET, STORE, TYPES> as Validator>::Event> {
         &self.validator
     }
 
@@ -906,14 +897,11 @@ where
 }
 
 #[async_trait]
-impl<'a, NET, STORE, CU, AV, MS, ST> Validator for FullNode<'a, NET, STORE, CU, AV, MS, ST>
+impl<'a, NET, STORE, TYPES> Validator for FullNode<'a, NET, STORE, TYPES>
 where
     NET: PLNet,
     STORE: PLStore,
-    CU: UpdateCatchUpData + Sized + Send + Sync + 'static,
-    AV: UpdateAvailabilityData + Sized + Send + Sync + 'static,
-    MS: UpdateMetaStateData + Sized + Send + Sync + 'static,
-    ST: UpdateStatusData + Sized + Send + Sync + 'static,
+    TYPES: UpdateQueryDataSourceTypes + 'static,
 {
     type Event = <LightWeightNode<NET, STORE> as Validator>::Event;
 
@@ -935,14 +923,11 @@ where
 }
 
 #[async_trait]
-impl<'a, NET, STORE, CU, AV, MS, ST> QueryService for FullNode<'a, NET, STORE, CU, AV, MS, ST>
+impl<'a, NET, STORE, TYPES> QueryService for FullNode<'a, NET, STORE, TYPES>
 where
     NET: PLNet,
     STORE: PLStore,
-    CU: UpdateCatchUpData + Sized + Send + Sync + 'static,
-    AV: UpdateAvailabilityData + Sized + Send + Sync + 'static,
-    MS: UpdateMetaStateData + Sized + Send + Sync + 'static,
-    ST: UpdateStatusData + Sized + Send + Sync + 'static,
+    TYPES: UpdateQueryDataSourceTypes + 'static,
 {
     async fn get_summary(&self) -> Result<LedgerSummary, QueryServiceError> {
         self.as_query_service().get_summary().await

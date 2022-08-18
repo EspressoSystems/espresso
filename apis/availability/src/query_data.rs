@@ -14,7 +14,9 @@ use espresso_core::state::{
     state_comm::LedgerStateCommitment, BlockCommitment, ElaboratedBlock, TransactionCommitment,
     ValidatorState,
 };
+use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct BlockQueryData {
     pub raw_block: ElaboratedBlock,
     pub block_hash: BlockCommitment,
@@ -24,6 +26,7 @@ pub struct BlockQueryData {
     pub txn_hashes: Vec<TransactionCommitment>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StateQueryData {
     pub state: ValidatorState,
     pub commitment: LedgerStateCommitment,
