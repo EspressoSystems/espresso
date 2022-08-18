@@ -26,7 +26,7 @@ use tide_disco::{
 #[derive(Args)]
 pub struct Options {
     #[clap(long = "metastate-api-path", env = "ESPRESSO_METASTATE_API_PATH")]
-    pub api_path: PathBuf,
+    pub api_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Snafu, Deserialize, Serialize)]
@@ -61,7 +61,17 @@ where
     State: 'static + Send + Sync + ReadState,
     <State as ReadState>::State: Sync + MetaStateDataSource,
 {
-    let mut api = Api::<State, Error>::from_file(&options.api_path)?;
+    let mut api = match &options.api_path {
+        Some(path) => Api::<State, Error>::from_file(path)?,
+        None => {
+            let toml = toml::from_str(include_str!("../api/api.toml")).map_err(|err| {
+                ApiError::CannotReadToml {
+                    reason: err.to_string(),
+                }
+            })?;
+            Api::<State, Error>::new(toml)?
+        }
+    };
     api.with_version(env!("CARGO_PKG_VERSION").parse().unwrap())
         .get("check_nullifier", |req, state| {
             async move {

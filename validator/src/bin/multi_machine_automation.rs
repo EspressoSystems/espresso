@@ -218,13 +218,11 @@ async fn main() {
             }
             let mut esqs_args = vec![];
             if let Some(full_node_esqs::Command::Esqs(opt)) = &options.esqs {
-                esqs_args = vec![
-                    "esqs".to_string(),
-                    "-p".to_string(),
-                    opt.port.to_string(),
-                    "--metastate-api-path".to_string(),
-                    opt.metastate.api_path.display().to_string(),
-                ];
+                esqs_args = vec!["esqs".to_string(), "-p".to_string(), opt.port.to_string()];
+                if let Some(path) = &opt.metastate.api_path {
+                    esqs_args.push("--metastate-api-path".to_string());
+                    esqs_args.push(path.display().to_string());
+                }
             }
             for arg in &esqs_args {
                 this_args.push(arg);
