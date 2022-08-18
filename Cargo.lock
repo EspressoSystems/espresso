@@ -17,7 +17,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "bincode",
- "clap 3.2.14",
+ "clap 3.2.17",
  "config",
  "dirs",
  "espresso-systems-common 0.2.0 (git+ssh://git@github.com/EspressoSystems/espresso-systems-common.git?tag=0.2.0)",
@@ -1224,9 +1224,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.14"
+version = "3.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54635806b078b7925d6e36810b1755f2a4b5b4d57560432c1ecf60bcbe10602b"
+checksum = "29e724a68d9319343bb3328c9cc2dfde263f4b3142ee1059a9980580171c954b"
 dependencies = [
  "atty",
  "bitflags",
@@ -1241,9 +1241,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "3.2.7"
+version = "3.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "759bf187376e1afa7b85b959e6a664a3e7a95203415dba952ad19139e798f902"
+checksum = "13547f7012c01ab4a0e8f8967730ada8f9fdf419e8b6c792788f39cf4e46eefa"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -2423,6 +2423,7 @@ dependencies = [
  "async-trait",
  "async-tungstenite 0.15.0",
  "bincode",
+ "clap 3.2.17",
  "cld",
  "dirs",
  "escargot",
@@ -2457,7 +2458,6 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "snafu",
- "structopt",
  "strum 0.24.1",
  "strum_macros",
  "surf",
@@ -6939,7 +6939,7 @@ dependencies = [
  "async-std",
  "async-trait",
  "bincode",
- "clap 3.2.14",
+ "clap 3.2.17",
  "config",
  "derive_more",
  "dirs",

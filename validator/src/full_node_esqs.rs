@@ -12,6 +12,7 @@
 
 use crate::QueryData;
 use async_std::sync::{Arc, RwLock};
+use clap::Args;
 use espresso_metastate_api::api::MetastateApiError;
 use futures::Future;
 use serde::{Deserialize, Serialize};
@@ -20,19 +21,18 @@ use std::fmt::Display;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use structopt::StructOpt;
 use tide_disco::{App, StatusCode};
 
-#[derive(StructOpt)]
+#[derive(Args)]
 pub struct Options {
-    #[structopt(
+    #[clap(
         long = "esqs-port",
         env = "ESPRESSO_ESQS_PORT",
         requires = "metastate-api-path"
     )]
     pub port: Option<u16>,
 
-    #[structopt(long, env = "ESPRESSO_METASTATE_API_PATH")]
+    #[clap(long, env = "ESPRESSO_METASTATE_API_PATH")]
     pub metastate_api_path: Option<PathBuf>,
 }
 

@@ -11,6 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use async_std::task::{sleep, spawn_blocking};
+use clap::Parser;
 use escargot::CargoBuild;
 use espresso_validator::{full_node_esqs, NodeOpt};
 use jf_cap::keys::UserPubKey;
@@ -18,20 +19,19 @@ use std::env;
 use std::io::{BufRead, BufReader};
 use std::process::{exit, Command, Stdio};
 use std::time::Duration;
-use structopt::StructOpt;
 
-#[derive(StructOpt)]
-#[structopt(
+#[derive(Parser)]
+#[clap(
     name = "Multi-machine consensus",
     about = "Simulates consensus among multiple machines"
 )]
 struct Options {
-    #[structopt(flatten)]
+    #[clap(flatten)]
     node_opt: NodeOpt,
 
     /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of
     /// non-bootstrap nodes.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
+    #[clap(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
     pub num_nodes: usize,
 
     /// Public key which should own a faucet record in the genesis block.
@@ -41,37 +41,37 @@ struct Options {
     ///
     /// This option may be passed multiple times to initialize the ledger with multiple native
     /// token records.
-    #[structopt(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ",")]
+    #[clap(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ',')]
     pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.
     ///
     /// If not provided, the validator will wait for externally submitted transactions.
-    #[structopt(long, short, conflicts_with("faucet-pub-key"))]
+    #[clap(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txn: Option<u64>,
 
     /// Wait for web server to exit after transactions complete.
-    #[structopt(long, short)]
+    #[clap(long, short)]
     pub wait: bool,
 
     /// Options for the new EsQS.
-    #[structopt(flatten)]
+    #[clap(flatten)]
     pub esqs: full_node_esqs::Options,
 
-    #[structopt(long, short)]
+    #[clap(long, short)]
     verbose: bool,
 
     /// Number of nodes to run only `fail_after_txn` rounds.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
-    #[structopt(long)]
+    #[clap(long)]
     num_fail_nodes: Option<usize>,
 
     /// Number of rounds that all nodes will be running, after which `num_fail_nodes` nodes will be
     /// killed.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
-    #[structopt(long, requires("num-fail-nodes"))]
+    #[clap(long, requires("num-fail-nodes"))]
     fail_after_txn: Option<usize>,
 }
 

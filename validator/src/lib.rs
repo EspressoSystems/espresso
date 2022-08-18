@@ -21,6 +21,7 @@ use ark_serialize::*;
 use async_std::sync::{Arc, RwLock};
 use async_std::task;
 use async_trait::async_trait;
+use clap::{Args, Parser};
 use cld::ClDuration;
 use dirs::data_local_dir;
 use espresso_core::{
@@ -65,7 +66,7 @@ use std::num::{NonZeroUsize, ParseIntError};
 use std::path::{Path, PathBuf};
 use std::str;
 use std::str::FromStr;
-use structopt::StructOpt;
+use std::time::Duration;
 use surf::Url;
 use tide::StatusCode;
 use tide_websockets::{WebSocket, WebSocketConnection};
@@ -163,35 +164,35 @@ impl FromStr for Ratio {
     }
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 pub struct NodeOpt {
     /// Whether to reset the persisted state.
     ///
     /// If the path to a node's persistence files doesn't exist, its persisted state will be reset
     /// regardless of this argument.
-    #[structopt(long, short)]
+    #[clap(long, short)]
     pub reset_store_state: bool,
 
     /// Path to persistence files for all nodes.
     ///
     /// Persistence files will be nested under the specified directory.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_STORE_PATH")]
+    #[clap(long, short, env = "ESPRESSO_VALIDATOR_STORE_PATH")]
     pub store_path: Option<PathBuf>,
 
     /// Whether the current node should run a full node.
-    #[structopt(long, short)]
+    #[clap(long, short)]
     pub full: bool,
 
     /// Path to assets including web server files.
-    #[structopt(long = "assets", env = "ESPRESSO_VALIDATOR_WEB_PATH")]
+    #[clap(long = "assets", env = "ESPRESSO_VALIDATOR_WEB_PATH")]
     pub web_path: Option<PathBuf>,
 
     /// Path to API specification and messages.
-    #[structopt(long = "api", env = "ESPRESSO_VALIDATOR_API_PATH")]
+    #[clap(long = "api", env = "ESPRESSO_VALIDATOR_API_PATH")]
     pub api_path: Option<PathBuf>,
 
     /// Port for the query service.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_QUERY_PORT", default_value = "5000")]
+    #[clap(long, env = "ESPRESSO_VALIDATOR_QUERY_PORT", default_value = "5000")]
     pub web_server_port: u16,
 
     /// Port of the current node if it's non-bootstrap.
@@ -200,7 +201,7 @@ pub struct NodeOpt {
     ///
     /// If the node is bootstrap, thip option will be overriden by the corresponding port in
     /// `--bootstrap-nodes`.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT")]
+    #[clap(long, env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT")]
     pub nonbootstrap_port: Option<u16>,
 
     /// The base port for the non-bootstrap nodes.
@@ -208,7 +209,7 @@ pub struct NodeOpt {
     /// If specified, the consesnsu port for node `i` will be `nonbootstrap_base_port + i`.
     ///
     /// Will be overriden by `nonbootstrap_port`.
-    #[structopt(long, default_value = "9000")]
+    #[clap(long, default_value = "9000")]
     pub nonbootstrap_base_port: usize,
 
     /// Minimum time to wait for submitted transactions before proposing a block.
@@ -216,34 +217,37 @@ pub struct NodeOpt {
     /// Increasing this trades off latency for throughput: the rate of new block proposals gets
     /// slower, but each block is proportionally larger. Because of batch verification, larger
     /// blocks should lead to increased throughput.
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
-        default_value = "0s"
+        default_value = "0s",
+        parse(try_from_str = parse_duration)
     )]
-    pub min_propose_time: ClDuration,
+    pub min_propose_time: Duration,
 
     /// Maximum time to wait for submitted transactions before proposing a block.
     ///
     /// If a validator has not received any transactions after `min-propose-time`, it will wait up
     /// to `max-propose-time` before giving up and submitting an empty block.
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME",
-        default_value = "10s"
+        default_value = "10s",
+        parse(try_from_str = parse_duration)
     )]
-    pub max_propose_time: ClDuration,
+    pub max_propose_time: Duration,
 
     /// Base duration for next-view timeout.
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT",
-        default_value = "100s"
+        default_value = "100s",
+        parse(try_from_str = parse_duration)
     )]
-    pub next_view_timeout: ClDuration,
+    pub next_view_timeout: Duration,
 
     /// The exponential backoff ratio for the next-view timeout.
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_TIMEOUT_RATIO",
         default_value = "11:10"
@@ -251,19 +255,21 @@ pub struct NodeOpt {
     pub timeout_ratio: Ratio,
 
     /// The delay a leader inserts before starting pre-commit.
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_ROUND_START_DELAY",
-        default_value = "1ms"
+        default_value = "1ms",
+        parse(try_from_str = parse_duration)
     )]
-    pub round_start_delay: ClDuration,
+    pub round_start_delay: Duration,
 
     /// Delay after init before starting consensus.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_START_DELAY", default_value = "1ms")]
-    pub start_delay: ClDuration,
+    #[clap(long, env = "ESPRESSO_VALIDATOR_START_DELAY", default_value = "1ms",
+        parse(try_from_str = parse_duration))]
+    pub start_delay: Duration,
 
     /// Maximum number of transactions in a block.
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_MAX_TRANSACTIONS",
         default_value = "10000"
@@ -271,9 +277,23 @@ pub struct NodeOpt {
     pub max_transactions: NonZeroUsize,
 }
 
+#[derive(Clone, Debug, Snafu)]
+pub struct ParseDurationError {
+    reason: String,
+}
+
+/// Parse a [Duration] from a string using [ClDuration], converting to a [Snafu] error.
+pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
+    ClDuration::from_str(s)
+        .map(Duration::from)
+        .map_err(|err| ParseDurationError {
+            reason: err.to_string(),
+        })
+}
+
 impl Default for NodeOpt {
     fn default() -> Self {
-        Self::from_iter(std::iter::empty::<String>())
+        Self::parse_from(std::iter::empty::<String>())
     }
 }
 
@@ -339,63 +359,63 @@ impl From<SecretKeySeed> for [u8; 32] {
 /// the following requirements.
 /// 1. `mesh_outbound_min <= mesh_n_low <= mesh_n <= mesh_n_high`.
 /// 2. `mesh_outbound_min <= mesh_n / 2`.
-#[derive(Clone, Debug, StructOpt)]
+#[derive(Clone, Debug, Args)]
 pub struct ConsensusOpt {
     /// Seed number used to generate secret key set for all nodes.
-    #[structopt(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
+    #[clap(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
     pub secret_key_seed: Option<SecretKeySeed>,
 
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_REPLICATION_FACTOR",
         default_value = "5"
     )]
     pub replication_factor: usize,
 
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH",
         default_value = "50"
     )]
     pub bootstrap_mesh_n_high: usize,
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW",
         default_value = "10"
     )]
     pub bootstrap_mesh_n_low: usize,
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN",
         default_value = "5"
     )]
     pub bootstrap_mesh_outbound_min: usize,
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N",
         default_value = "15"
     )]
     pub bootstrap_mesh_n: usize,
 
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH",
         default_value = "15"
     )]
     pub nonbootstrap_mesh_n_high: usize,
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW",
         default_value = "8"
     )]
     pub nonbootstrap_mesh_n_low: usize,
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN",
         default_value = "4"
     )]
     pub nonbootstrap_mesh_outbound_min: usize,
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N",
         default_value = "12"
@@ -403,11 +423,11 @@ pub struct ConsensusOpt {
     pub nonbootstrap_mesh_n: usize,
 
     /// URLs of the bootstrap nodes, in the format of `<host>:<port>`.
-    #[structopt(
+    #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_BOOTSTRAP_NODES",
         default_value = "localhost:9000,localhost:9001,localhost:9002,localhost:9003,localhost:9004,localhost:9005,localhost:9006",
-        value_delimiter = ","
+        value_delimiter = ','
     )]
     pub bootstrap_nodes: Vec<Url>,
 }
@@ -651,8 +671,8 @@ async fn init_hotshot(
         timeout_ratio: options.timeout_ratio.into(),
         round_start_delay: options.round_start_delay.as_millis() as u64,
         start_delay: options.start_delay.as_millis() as u64,
-        propose_min_round_time: *options.min_propose_time,
-        propose_max_round_time: *options.max_propose_time,
+        propose_min_round_time: options.min_propose_time,
+        propose_max_round_time: options.max_propose_time,
         num_bootstrap,
     };
     debug!(?config);
