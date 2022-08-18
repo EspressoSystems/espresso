@@ -38,7 +38,7 @@ dependencies = [
  "strum 0.20.0",
  "strum_macros",
  "surf",
- "tagged-base64 0.2.0",
+ "tagged-base64",
  "tempdir",
  "tide",
  "tide-disco",
@@ -2284,7 +2284,7 @@ dependencies = [
  "snafu",
  "structopt",
  "surf",
- "tagged-base64 0.2.0",
+ "tagged-base64",
  "tempdir",
  "toml",
  "tracing",
@@ -2352,7 +2352,7 @@ dependencies = [
  "strum 0.20.0",
  "strum_macros",
  "surf",
- "tagged-base64 0.2.0",
+ "tagged-base64",
  "tempdir",
  "tide",
  "tracing",
@@ -2461,7 +2461,7 @@ dependencies = [
  "strum 0.24.1",
  "strum_macros",
  "surf",
- "tagged-base64 0.2.0",
+ "tagged-base64",
  "tempdir",
  "tide",
  "tide-disco",
@@ -3139,7 +3139,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "snafu",
- "tagged-base64 0.2.0",
+ "tagged-base64",
  "tracing",
 ]
 
@@ -3582,7 +3582,7 @@ dependencies = [
  "serde",
  "sha2 0.10.2",
  "snafu",
- "tagged-base64 0.2.0",
+ "tagged-base64",
 ]
 
 [[package]]
@@ -4387,6 +4387,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3e378b66a060d48947b590737b30a1be76706c8dd7b8ba0f2fe3989c68a853f"
 
 [[package]]
+name = "maud"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7384febb4f8fc970cc2efab1650a6f48cac2e79b0b29587c90497b646fb10e1e"
+dependencies = [
+ "maud_macros",
+ "tide",
+]
+
+[[package]]
+name = "maud_macros"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "423430ac467408136d7de93f2929debd8a7bc3e795c92476f45e259b158e3355"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "memchr"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4561,7 +4583,7 @@ dependencies = [
  "serde_json",
  "snafu",
  "surf",
- "tagged-base64 0.2.0",
+ "tagged-base64",
  "tide",
  "tracing",
 ]
@@ -6092,7 +6114,7 @@ dependencies = [
  "strum 0.24.1",
  "strum_macros",
  "surf",
- "tagged-base64 0.2.0",
+ "tagged-base64",
  "tempdir",
  "tracing",
  "zeroize",
@@ -6779,22 +6801,6 @@ dependencies = [
 
 [[package]]
 name = "tagged-base64"
-version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.1.0#204224e93ed31345e2e535c5da32072b38018b0c"
-dependencies = [
- "base64 0.13.0",
- "console_error_panic_hook",
- "crc-any",
- "futures-channel",
- "js-sys",
- "structopt",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
-name = "tagged-base64"
 version = "0.2.0"
 source = "git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.2.0#c393e135a14a585707012fe2d7f9790f6c5f61d9"
 dependencies = [
@@ -6927,7 +6933,7 @@ dependencies = [
 [[package]]
 name = "tide-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#45e834a0a89afa06553fdd1e0f9dbf8072b32474"
+source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#70431b1e9e82201e97b0751b4a9cd22b69319373"
 dependencies = [
  "ark-serialize",
  "async-std",
@@ -6945,6 +6951,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "markdown",
+ "maud",
  "parking_lot 0.12.1",
  "routefinder",
  "semver 1.0.12",
@@ -6958,7 +6965,7 @@ dependencies = [
  "strum 0.20.0",
  "strum_macros",
  "surf",
- "tagged-base64 0.1.0",
+ "tagged-base64",
  "tide",
  "tide-websockets",
  "toml",
