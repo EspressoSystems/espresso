@@ -223,6 +223,10 @@ async fn main() {
                     esqs_args.push("--metastate-api-path".to_string());
                     esqs_args.push(path.display().to_string());
                 }
+                if let Some(path) = &opt.status.api_path {
+                    esqs_args.push("--status-api-path".to_string());
+                    esqs_args.push(path.display().to_string());
+                }
             }
             for arg in &esqs_args {
                 this_args.push(arg);

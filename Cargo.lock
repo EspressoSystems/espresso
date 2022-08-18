@@ -2385,6 +2385,7 @@ name = "espresso-metastate-api"
 version = "0.1.0"
 dependencies = [
  "clap 3.2.17",
+ "derive_more",
  "espresso-core",
  "futures",
  "jf-cap",
@@ -2398,9 +2399,16 @@ dependencies = [
 name = "espresso-status-api"
 version = "0.1.0"
 dependencies = [
+ "clap 3.2.17",
+ "derive_more",
  "espresso-core",
+ "futures",
  "hotshot",
  "jf-cap",
+ "serde",
+ "snafu",
+ "tide-disco",
+ "toml",
 ]
 
 [[package]]
@@ -2426,6 +2434,7 @@ dependencies = [
  "bincode",
  "clap 3.2.17",
  "cld",
+ "derive_more",
  "dirs",
  "escargot",
  "espresso-availability-api",

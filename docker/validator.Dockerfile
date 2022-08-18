@@ -35,8 +35,6 @@ EXPOSE $ESPRESSO_VALIDATOR_QUERY_PORT
 # The new query service runs at 50001. It is under construction, but when it is finished it will
 # replace the old query service at 50000.
 ENV ESPRESSO_ESQS_PORT=50001
-COPY apis/metastate/api/api.toml /api/metastate.toml
-ENV ESPRESSO_METASTATE_API_PATH=/api/metastate.toml
 
 # Set a default number of nodes.
 ENV ESPRESSO_VALIDATOR_NUM_NODES=10

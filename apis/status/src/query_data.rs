@@ -16,13 +16,15 @@ use espresso_core::{
     PubKey,
 };
 use hotshot::{data::QuorumCertificate, H_256};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PeerInfo {
     pub peer_id: PubKey,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Debug, Deserialize, Serialize)]
 pub struct MempoolInfo {
     pub transaction_count: u64,
     pub output_count: u64,
