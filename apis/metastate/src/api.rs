@@ -11,29 +11,37 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::data_source::MetaStateDataSource;
+use clap::Args;
 use espresso_core::state::SetMerkleProof;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, Snafu};
+use std::path::PathBuf;
 use tide_disco::{
     api::{Api, ApiError},
     method::ReadState,
     RequestError, StatusCode,
 };
 
+#[derive(Args)]
+pub struct Options {
+    #[clap(long = "metastate-api-path", env = "ESPRESSO_METASTATE_API_PATH")]
+    pub api_path: PathBuf,
+}
+
 #[derive(Clone, Debug, Snafu, Deserialize, Serialize)]
-pub enum MetastateApiError {
+pub enum Error {
     Request { source: RequestError },
     InvalidBlockId { block_id: u64 },
 }
 
-impl From<RequestError> for MetastateApiError {
+impl From<RequestError> for Error {
     fn from(source: RequestError) -> Self {
         Self::Request { source }
     }
 }
 
-impl MetastateApiError {
+impl Error {
     pub fn status(&self) -> StatusCode {
         match self {
             Self::Request { .. } => StatusCode::BadRequest,
@@ -48,12 +56,12 @@ pub struct NullifierCheck {
     proof: SetMerkleProof,
 }
 
-pub fn define_api<State>(api_toml: toml::Value) -> Result<Api<State, MetastateApiError>, ApiError>
+pub fn define_api<State>(options: &Options) -> Result<Api<State, Error>, ApiError>
 where
     State: 'static + Send + Sync + ReadState,
     <State as ReadState>::State: Sync + MetaStateDataSource,
 {
-    let mut api = Api::<State, MetastateApiError>::new(api_toml)?;
+    let mut api = Api::<State, Error>::from_file(&options.api_path)?;
     api.with_version(env!("CARGO_PKG_VERSION").parse().unwrap())
         .get("check_nullifier", |req, state| {
             async move {

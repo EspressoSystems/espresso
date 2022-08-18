@@ -78,8 +78,8 @@ struct Options {
     #[clap(long, env = "ESPRESSO_COLORED_LOGS")]
     pub colored_logs: bool,
 
-    #[clap(flatten)]
-    pub esqs: full_node_esqs::Options,
+    #[clap(subcommand)]
+    pub esqs: Option<full_node_esqs::Command>,
 }
 
 async fn generate_transactions(
@@ -302,11 +302,13 @@ async fn main() -> Result<(), std::io::Error> {
     )
     .await;
 
+    // Start an EsQS server if requested.
+    if let Some(esqs) = &options.esqs {
+        async_std::task::spawn(full_node_esqs::init_server(esqs, data_source)?);
+    }
+
     // If we are running a full node, also host a query API to inspect the accumulated state.
     let web_server = if let Node::Full(node) = &hotshot {
-        if options.esqs.port.is_some() {
-            async_std::task::spawn(full_node_esqs::init_server(&options.esqs, data_source)?);
-        }
         Some(
             init_web_server(&options.node_opt, node.clone())
                 .expect("Failed to initialize web server"),

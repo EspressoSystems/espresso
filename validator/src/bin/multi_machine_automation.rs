@@ -55,8 +55,8 @@ struct Options {
     pub wait: bool,
 
     /// Options for the new EsQS.
-    #[clap(flatten)]
-    pub esqs: full_node_esqs::Options,
+    #[clap(subcommand)]
+    pub esqs: Option<full_node_esqs::Command>,
 
     #[clap(long, short)]
     verbose: bool,
@@ -178,22 +178,6 @@ async fn main() {
         args.push("--faucet-pub-key");
         args.push(pub_key);
     }
-    let esqs_port;
-    let esqs_metastate_api_path;
-    if let Some(port) = options.esqs.port {
-        esqs_port = port.to_string();
-        esqs_metastate_api_path = options
-            .esqs
-            .metastate_api_path
-            .as_ref()
-            .unwrap()
-            .display()
-            .to_string();
-        args.push("--esqs-port");
-        args.push(&esqs_port);
-        args.push("--metastate-api-path");
-        args.push(&esqs_metastate_api_path);
-    }
 
     let num_txn_str = match options.num_txn {
         Some(num_txn) => num_txn.to_string(),
@@ -231,6 +215,19 @@ async fn main() {
             } else if !num_txn_str.is_empty() {
                 this_args.push("--num-txn");
                 this_args.push(&num_txn_str);
+            }
+            let mut esqs_args = vec![];
+            if let Some(full_node_esqs::Command::Esqs(opt)) = &options.esqs {
+                esqs_args = vec![
+                    "esqs".to_string(),
+                    "-p".to_string(),
+                    opt.port.to_string(),
+                    "--metastate-api-path".to_string(),
+                    opt.metastate.api_path.display().to_string(),
+                ];
+            }
+            for arg in &esqs_args {
+                this_args.push(arg);
             }
             if options.verbose {
                 println!("espresso-validator {}", this_args.join(" "));
