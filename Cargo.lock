@@ -3331,6 +3331,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "include_dir"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "482a2e29200b7eed25d7fdbd14423326760b7f6658d21a4cf12d55a50713c69f"
+dependencies = [
+ "include_dir_macros",
+]
+
+[[package]]
+name = "include_dir_macros"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e074c19deab2501407c91ba1860fa3d6820bfde307db6d8cb851b55a10be89b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
 name = "indenter"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6943,7 +6962,7 @@ dependencies = [
 [[package]]
 name = "tide-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#70431b1e9e82201e97b0751b4a9cd22b69319373"
+source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#1d6d0767d954717a8f1f71817696bef3a68e417d"
 dependencies = [
  "ark-serialize",
  "async-std",
@@ -6957,6 +6976,7 @@ dependencies = [
  "futures",
  "futures-util",
  "http",
+ "include_dir",
  "jf-utils",
  "lazy_static",
  "libc",
