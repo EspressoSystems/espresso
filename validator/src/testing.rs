@@ -11,7 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    full_node_mem_data_source::QueryData, gen_keys, init_validator, init_web_server, ConsensusOpt,
+    full_node_data_source::QueryData, gen_keys, init_validator, init_web_server, ConsensusOpt,
     GenesisState, Node, NodeOpt, MINIMUM_NODES,
 };
 use address_book::store::FileStore;
@@ -188,6 +188,10 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
 
         store_path.push(i.to_string());
         async move {
+            let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(
+                QueryData::new(&store_path).unwrap(),
+            ));
+
             let mut node_opt = NodeOpt {
                 store_path: Some(store_path),
                 nonbootstrap_base_port: base_port as usize,
@@ -198,9 +202,6 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 node_opt.full = true;
                 node_opt.web_server_port = pick_unused_port().unwrap();
             }
-            let data_source =
-                async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
-
             let node = init_validator(
                 &node_opt,
                 &consensus_opt,

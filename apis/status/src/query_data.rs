@@ -24,14 +24,14 @@ pub struct PeerInfo {
     pub peer_id: PubKey,
 }
 
-#[derive(Default, Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct MempoolInfo {
     pub transaction_count: u64,
     pub output_count: u64,
     pub memory_footprint: u64,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ValidatorStatus {
     pub peer_list: Vec<PeerInfo>,
     // TBD; these are going to correspond to active views, possibly want to also retain recent views?

@@ -14,16 +14,19 @@
 
 use async_std::task::{sleep, spawn_blocking};
 use clap::Parser;
+use dirs::data_local_dir;
 use espresso_core::testing::MultiXfrRecordSpecTransaction;
 use espresso_core::{
     state::ElaboratedBlock,
     testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo},
 };
-use espresso_validator::full_node_mem_data_source::QueryData;
+use espresso_validator::full_node_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
+use std::env;
+use std::path::PathBuf;
 use std::process::exit;
 use std::time::Duration;
 use tagged_base64::TaggedBase64;
@@ -259,6 +262,15 @@ async fn generate_transactions(
     sleep(Duration::from_secs(10)).await;
 }
 
+fn default_store_path(node_id: usize) -> PathBuf {
+    let mut data_dir = data_local_dir()
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("./")));
+    data_dir.push("espresso");
+    data_dir.push("validator");
+    data_dir.push(format!("node{}", node_id));
+    data_dir
+}
+
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::from_args();
@@ -273,9 +285,14 @@ async fn main() -> Result<(), std::io::Error> {
         .init();
 
     // Get the consensus configuration.
-    let consensus_opt = options.consensus_opt;
-
-    let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
+    let store_path = options
+        .node_opt
+        .store_path
+        .clone()
+        .unwrap_or_else(|| default_store_path(options.id));
+    let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(
+        QueryData::new(&store_path).unwrap(),
+    ));
 
     let own_id = options.id;
     // Initialize the state and hotshot
@@ -287,13 +304,13 @@ async fn main() -> Result<(), std::io::Error> {
     } else {
         (GenesisState::new(options.faucet_pub_key.clone()), None)
     };
-    let keys = gen_keys(&consensus_opt, options.num_nodes);
+    let keys = gen_keys(&options.consensus_opt, options.num_nodes);
     let priv_key = keys[own_id].private.clone();
     let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
 
     let hotshot = init_validator(
         &options.node_opt,
-        &consensus_opt,
+        &options.consensus_opt,
         priv_key,
         known_nodes,
         genesis,
