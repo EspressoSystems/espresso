@@ -21,14 +21,14 @@ use typenum::U1;
 /// A hash function usable for sparse merkle tree implementations.
 ///
 /// Inherits several other traits for `#[derive]` ergonomics
-pub trait KVTreeHash: Copy + Clone + PartialEq + Eq + Debug {
+pub trait KVTreeHash: Clone + PartialEq + Eq + Debug {
     /// The output of the hash function
     type Digest: core::hash::Hash
         + Debug
         + Eq
         + PartialEq
-        + Copy
         + Clone
+        + Copy
         + CanonicalSerialize
         + CanonicalDeserialize;
     /// A data type for keys
@@ -292,25 +292,25 @@ pub mod committable_hash {
     use core::marker::PhantomData;
     use typenum::Unsigned;
 
-    pub trait CommitableHashTag: Copy + Clone + Debug + PartialEq + Eq {
+    pub trait CommitableHashTag: Clone + Debug + PartialEq + Eq {
         fn commitment_diversifier() -> &'static str;
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq, Copy)]
+    #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct CommitableHash<K, V, T>
     where
-        K: Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-        V: Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        K: Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        V: Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
         T: CommitableHashTag,
     {
         _data: PhantomData<(K, V, T)>,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub enum CommitableHashNode<K, V, T>
     where
-        K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-        V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        K: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        V: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
         T: CommitableHashTag,
     {
         Empty,
@@ -332,8 +332,8 @@ pub mod committable_hash {
 
     impl<K, V, T> commit::Committable for CommitableHashNode<K, V, T>
     where
-        K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-        V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        K: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        V: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
         T: CommitableHashTag,
     {
         fn commit(&self) -> commit::Commitment<Self> {
@@ -368,8 +368,8 @@ pub mod committable_hash {
 
     impl<K, V, T> KVTreeHash for CommitableHash<K, V, T>
     where
-        K: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-        V: Debug + Copy + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        K: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        V: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
         T: CommitableHashTag,
     {
         type Digest = Commitment<CommitableHashNode<K, V, T>>;

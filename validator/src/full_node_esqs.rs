@@ -12,34 +12,47 @@
 
 use crate::QueryData;
 use async_std::sync::{Arc, RwLock};
-use espresso_metastate_api::api::MetastateApiError;
+use clap::{Args, Subcommand};
+use derive_more::From;
+use espresso_metastate_api::api as metastate;
+use espresso_status_api::api as status;
 use futures::Future;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::fmt::Display;
-use std::fs;
 use std::io;
-use std::path::PathBuf;
-use structopt::StructOpt;
 use tide_disco::{App, StatusCode};
 
-#[derive(StructOpt)]
+#[derive(Args)]
 pub struct Options {
-    #[structopt(
-        long = "esqs-port",
-        env = "ESPRESSO_ESQS_PORT",
-        requires = "metastate-api-path"
-    )]
-    pub port: Option<u16>,
+    #[clap(short, long, env = "ESPRESSO_ESQS_PORT")]
+    pub port: u16,
 
-    #[structopt(long, env = "ESPRESSO_METASTATE_API_PATH")]
-    pub metastate_api_path: Option<PathBuf>,
+    #[clap(flatten)]
+    pub metastate: metastate::Options,
+
+    #[clap(flatten)]
+    pub status: status::Options,
 }
 
-#[derive(Clone, Debug, Snafu, Deserialize, Serialize)]
+#[derive(Subcommand)]
+pub enum Command {
+    Esqs(Options),
+}
+
+#[derive(Clone, Debug, From, Snafu, Deserialize, Serialize)]
 pub enum ApiError {
-    Metastate { source: MetastateApiError },
-    Internal { status: StatusCode, reason: String },
+    Metastate {
+        source: metastate::Error,
+    },
+    Status {
+        source: status::Error,
+    },
+    #[from(ignore)]
+    Internal {
+        status: StatusCode,
+        reason: String,
+    },
 }
 
 impl tide_disco::Error for ApiError {
@@ -50,35 +63,28 @@ impl tide_disco::Error for ApiError {
     fn status(&self) -> StatusCode {
         match self {
             Self::Metastate { source } => source.status(),
+            Self::Status { source } => source.status(),
             Self::Internal { status, .. } => *status,
         }
     }
 }
 
-impl From<MetastateApiError> for ApiError {
-    fn from(source: MetastateApiError) -> Self {
-        Self::Metastate { source }
-    }
-}
-
 pub fn init_server(
-    opt: &Options,
+    command: &Command,
     data_source: Arc<RwLock<QueryData>>,
 ) -> io::Result<impl Future<Output = io::Result<()>>> {
-    let port = match opt.port {
-        Some(port) => port,
-        None => return Err(io_error("port not specified")),
-    };
-
-    let metastate_api_toml =
-        toml::from_slice(&fs::read(opt.metastate_api_path.as_ref().unwrap())?)?;
-    let metastate_api = espresso_metastate_api::define_api(metastate_api_toml).map_err(io_error)?;
+    let Command::Esqs(opt) = command;
+    let metastate_api = metastate::define_api(&opt.metastate).map_err(io_error)?;
+    let status_api = status::define_api(&opt.status).map_err(io_error)?;
 
     let mut app = App::<_, ApiError>::with_state(data_source);
     app.with_version(env!("CARGO_PKG_VERSION").parse().unwrap())
         .register_module("metastate", metastate_api)
+        .map_err(io_error)?
+        .register_module("status", status_api)
         .map_err(io_error)?;
 
+    let port = opt.port;
     Ok(async move {
         if let Err(err) = app.serve(format!("0.0.0.0:{}", port)).await {
             tracing::error!("EsQS exited due to {}", err);
