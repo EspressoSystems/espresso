@@ -11,6 +11,8 @@
 # see <https://www.gnu.org/licenses/>.
 
 [meta]
+NAME = "espresso-status"
+DESCRIPTION = "Snapshots of consensus related state"
 FORMAT_VERSION = "0.1.0"
 
 [route.list_peers]
