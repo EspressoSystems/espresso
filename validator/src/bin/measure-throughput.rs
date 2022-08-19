@@ -11,32 +11,31 @@
 // see <https://www.gnu.org/licenses/>.
 
 use async_std::task::sleep;
-use cld::ClDuration;
+use clap::Parser;
 use human_bytes::human_bytes;
 use net::client::response_body;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Sub;
 use std::time::{Duration, Instant};
-use structopt::StructOpt;
 use surf::Url;
 use tracing::{error, info};
 use validator_node::node::LedgerSummary;
 
 /// Measure system throughput over time by polling a query service.
-#[derive(StructOpt)]
+#[derive(Parser)]
 struct Options {
     /// The frequency at which to poll current throughput.
-    #[structopt(short, long, default_value = "60s")]
-    frequency: ClDuration,
+    #[clap(short, long, default_value = "60s", parse(try_from_str = espresso_validator::parse_duration))]
+    frequency: Duration,
 
     /// The total duration over which to measure throughput.
     ///
     /// If not provided, runs until killed.
-    #[structopt(short, long)]
-    total: Option<ClDuration>,
+    #[clap(short, long, parse(try_from_str = espresso_validator::parse_duration))]
+    total: Option<Duration>,
 
     /// The query service to poll for ledger state.
-    #[structopt(short = "q", long, env = "ESPRESSO_ESQS_URL")]
+    #[clap(short = 'q', long, env = "ESPRESSO_ESQS_URL")]
     esqs_url: Url,
 }
 
@@ -99,7 +98,7 @@ async fn main() -> surf::Result<()> {
         .init();
 
     let opt = Options::from_args();
-    let frequency = Duration::from(opt.frequency);
+    let frequency = opt.frequency;
     let total = opt.total.map(Duration::from);
 
     let initial = Snapshot::new(&opt.esqs_url).await?;

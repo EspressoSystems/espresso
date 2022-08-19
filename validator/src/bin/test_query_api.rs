@@ -32,6 +32,7 @@
 
 use async_std::future::timeout;
 use async_tungstenite::async_std::connect_async;
+use clap::Parser;
 use espresso_core::state::EspressoTransaction;
 use espresso_core::{
     ledger::EspressoLedger, state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM,
@@ -47,7 +48,6 @@ use snafu::ResultExt;
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::time::Duration;
-use structopt::StructOpt;
 use tempdir::TempDir;
 use tracing::{event, Level};
 use validator_node::{
@@ -57,14 +57,14 @@ use validator_node::{
     node::{LedgerSummary, QueryServiceError},
 };
 
-#[derive(StructOpt)]
+#[derive(Parser)]
 struct Args {
     /// Hostname or IP address of the query server.
-    #[structopt(short = "-H", long = "--host", default_value = "localhost")]
+    #[clap(short = 'H', long = "--host", default_value = "localhost")]
     host: String,
 
     /// Port number of the query service.
-    #[structopt(short = "-P", long = "--port", default_value = "50000")]
+    #[clap(short = 'P', long = "--port", default_value = "50000")]
     port: u64,
 }
 

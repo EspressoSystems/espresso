@@ -58,4 +58,4 @@ ENV ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N=12
 
 HEALTHCHECK CMD curl -f 127.0.0.1:$ESPRESSO_VALIDATOR_QUERY_PORT/healthcheck || exit 1
 
-CMD [ "/bin/espresso-validator", "--full"]
+CMD [ "/bin/espresso-validator", "--full", "esqs"]

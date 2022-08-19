@@ -11,6 +11,8 @@
 # see <https://www.gnu.org/licenses/>.
 
 [meta]
+NAME = "espresso-metastate"
+DESCRIPTION = "Auxiliary state, derived from chain state and used to build transactions"
 FORMAT_VERSION = "0.1.0"
 
 [route.check_nullifier]
@@ -23,12 +25,12 @@ Get a proof that a nullifier was spent or unspent after a given block.
 Returns
 ```
 {
-	"spent": bool
-	"proof": SetMerkleProof
+    "spent": bool
+    "proof": SetMerkleProof
 }
 ```
 
-`spent` indicates whether the given nullifier was spent after the block with the given index (block
-0 being the genesis block). `proof` authenticates the spent/unspent status relative to the nullifier
-set root hash in the state after `block_id`.
+`spent` indicates whether the given nullifier was spent after the block with the given index
+(block 0 being the genesis block). `proof` authenticates the spent/unspent status relative to the
+nullifier set root hash in the state after `block_id`.
 """
