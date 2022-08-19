@@ -19,6 +19,7 @@ use jf_cap::Signature;
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
 pub use crate::lw_persistence::LWPersistence;
+use crate::reward::CollectRewardNote;
 pub use crate::set_merkle_tree::*;
 pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
@@ -58,22 +59,29 @@ pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 /// A transaction tht can be either a CAP transaction or a collect reward transaction
 pub enum EspressoTransaction {
     CAP(TransactionNote),
+    Reward(CollectRewardNote),
 }
 
 impl CanonicalSerialize for EspressoTransaction {
     fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
         match self {
-            EspressoTransaction::CAP(txn) => {
+            Self::CAP(txn) => {
                 let flag = 0;
                 writer.write_all(&[flag])?;
                 <TransactionNote as CanonicalSerialize>::serialize(txn, &mut writer)
+            }
+            Self::Reward(reward_note) => {
+                let flag = 1;
+                writer.write_all(&[flag])?;
+                <CollectRewardNote as CanonicalSerialize>::serialize(reward_note, &mut writer)
             }
         }
     }
 
     fn serialized_size(&self) -> usize {
         match self {
-            EspressoTransaction::CAP(txn) => txn.serialized_size() + 1,
+            Self::CAP(txn) => txn.serialized_size() + 1,
+            Self::Reward(reward) => reward.serialized_size() + 1,
         }
     }
 }
@@ -88,6 +96,9 @@ impl CanonicalDeserialize for EspressoTransaction {
         match flag[0] {
             0 => Ok(Self::CAP(
                 <TransactionNote as CanonicalDeserialize>::deserialize(&mut r)?,
+            )),
+            1 => Ok(Self::Reward(
+                <CollectRewardNote as CanonicalDeserialize>::deserialize(&mut r)?,
             )),
             _ => Err(SerializationError::InvalidData),
         }
@@ -843,7 +854,7 @@ impl CanonicalDeserialize for StakeTableKey {
 }
 
 #[tagged_blob("STAKEVALUE")]
-#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 pub struct StakeTableValue(u64);
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
@@ -858,11 +869,11 @@ type StakeTableHash = CommitableHash<StakeTableKey, StakeTableValue, StakeTableT
 
 // Stores commitment hash of previous rounds' stake tables in (block_num, stake table commitment) kv pairs
 #[tagged_blob("STAKECOMMKEY")]
-#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 pub struct StakeTableCommitmentKey(u64);
 
 #[tagged_blob("STAKECOMMVALUE")]
-#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 pub struct StakeTableCommitmentValue(<StakeTableHash as KVTreeHash>::Digest);
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -878,7 +889,7 @@ type StakeTableCommitmentsHash =
 
 // Set Merkle tree for all of the previously-collected rewards
 #[tagged_blob("COLLECTED-REWARD")]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CollectedRewards((PubKey, u64));
 
 impl CanonicalSerialize for CollectedRewards {
@@ -905,7 +916,7 @@ impl CanonicalDeserialize for CollectedRewards {
     }
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CollectedRewardsTag();
 impl CommitableHashTag for CollectedRewardsTag {
     fn commitment_diversifier() -> &'static str {
@@ -913,7 +924,7 @@ impl CommitableHashTag for CollectedRewardsTag {
     }
 }
 
-type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
+pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
 
 /// The working state of the ledger
 ///
@@ -1044,6 +1055,7 @@ impl ValidatorState {
         let verif_keys = txns
             .0
             .iter()
+            .filter(|txn| matches!(txn, EspressoTransaction::CAP(_)))
             .map(|txn| match txn {
                 EspressoTransaction::CAP(cap_txn) => match cap_txn {
                     TransactionNote::Mint(_) => Ok(&self.verif_crs.mint),
@@ -1067,12 +1079,14 @@ impl ValidatorState {
                             .ok_or(UnsupportedFreezeSize { num_inputs })
                     }
                 },
+                EspressoTransaction::Reward(_reward_note) => Err(ValidationError::Failed {}), // unreachable
             })
             .collect::<Result<Vec<_>, _>>()?;
         // filter cap transactions to be validated first
         let mut cap_txns = vec![];
+        let mut reward_txns = vec![];
         let mut merkle_roots = vec![];
-        for espresso_txn in txns.0.iter() {
+        for espresso_txn in txns.0.into_iter() {
             match espresso_txn {
                 EspressoTransaction::CAP(cap_note) => {
                     let note_mt_root = cap_note.merkle_root();
@@ -1083,8 +1097,11 @@ impl ValidatorState {
                     } else {
                         return Err(BadMerkleRoot {});
                     }
-                    cap_txns.push(cap_note.clone());
-                } // _ => {}
+                    cap_txns.push(cap_note);
+                }
+                EspressoTransaction::Reward(reward_note) => {
+                    reward_txns.push(EspressoTransaction::Reward(reward_note))
+                }
             }
         }
         // cap transactions validates first
@@ -1094,8 +1111,8 @@ impl ValidatorState {
         }
         //TODO (fernando) verify CollectRewards
 
-        let txns: Vec<_> = cap_txns.into_iter().map(EspressoTransaction::CAP).collect();
-        // TODO(fernando) append CollectRewardsTransactions
+        let mut txns: Vec<_> = cap_txns.into_iter().map(EspressoTransaction::CAP).collect();
+        txns.append(&mut reward_txns);
 
         Ok((Block(txns), proofs))
     }

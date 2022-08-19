@@ -32,7 +32,7 @@ use std::fmt::Display;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum_macros::Display)]
 pub enum EspressoTransactionKind {
     CAP(reef::cap::TransactionKind),
-    // REWARD TODO (fernando)
+    REWARD,
 }
 
 impl traits::TransactionKind for EspressoTransactionKind {
@@ -107,6 +107,7 @@ impl EspressoTransaction {
             Self::CAP(txn) => {
                 reef::traits::Transaction::open_viewing_memo(txn, viewable_assets, viewing_keys)
             }
+            Self::Reward(_) => Err(ViewingError::NoViewingMemos),
         }
     }
 
@@ -114,6 +115,7 @@ impl EspressoTransaction {
     pub fn output_commitments(&self) -> Vec<RecordCommitment> {
         match self {
             Self::CAP(txn) => txn.output_commitments(),
+            Self::Reward(_) => vec![],
         }
     }
 
@@ -125,7 +127,8 @@ impl EspressoTransaction {
     /// Retrieve kind of transaction.
     pub fn kind(&self) -> EspressoTransactionKind {
         match self {
-            EspressoTransaction::CAP(txn) => EspressoTransactionKind::CAP(txn.kind()),
+            Self::CAP(txn) => EspressoTransactionKind::CAP(txn.kind()),
+            Self::Reward(_) => EspressoTransactionKind::REWARD,
         }
     }
 
@@ -133,6 +136,7 @@ impl EspressoTransaction {
     pub fn output_len(&self) -> usize {
         match self {
             Self::CAP(txn) => txn.output_len(),
+            Self::Reward(_) => 0,
         }
     }
 
@@ -140,6 +144,7 @@ impl EspressoTransaction {
     pub fn input_nullifiers(&self) -> Vec<Nullifier> {
         match self {
             Self::CAP(txn) => txn.input_nullifiers(),
+            Self::Reward(_) => vec![],
         }
     }
 }

@@ -1,4 +1,3 @@
-#![deny(warnings)]
 // Copyright (c) 2022 Espresso Systems (espressosys.com)
 // This file is part of the Espresso library.
 //
@@ -11,20 +10,15 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-pub mod committee;
-pub mod full_persistence;
-pub mod kv_merkle_tree;
-pub mod ledger;
-pub mod lw_persistence;
-pub mod reward;
-pub mod set_merkle_tree;
-pub mod state;
-pub mod testing;
-pub mod tree_hash;
-pub mod universal_params;
-mod util;
+use crate::state::CollectedRewardsHash;
+use ark_serialize::*;
+use core::hash::Hash;
+use jf_utils::tagged_blob;
 
-extern crate espresso_macros;
-
-pub type PubKey = hotshot::types::ed25519::Ed25519Pub;
-pub type PrivKey = hotshot::types::ed25519::Ed25519Priv;
+#[tagged_blob("RewardTxn")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+pub struct CollectRewardNote {
+    block_number: u64, //TODO (fernando) what's the correct type for it?
+    merkle_proof: crate::kv_merkle_tree::KVMerkleProof<CollectedRewardsHash>,
+    blind_factor: jf_cap::BaseField,
+}

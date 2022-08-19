@@ -161,10 +161,9 @@ async fn validate_committed_block(
 
         // Check memos.
         assert_eq!(tx.output_memos.len(), tx.data.output_len());
-        match &tx.data {
-            EspressoTransaction::CAP(txn) => txn
-                .verify_receiver_memos_signature(&tx.output_memos, &tx.memos_signature)
-                .unwrap(), // TODO _ => {}
+        if let EspressoTransaction::CAP(txn) = &tx.data {
+            txn.verify_receiver_memos_signature(&tx.output_memos, &tx.memos_signature)
+                .unwrap()
         }
 
         // Check outputs.
