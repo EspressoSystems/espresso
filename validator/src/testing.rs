@@ -196,6 +196,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 store_path: Some(store_path),
                 nonbootstrap_base_port: base_port as usize,
                 next_view_timeout: Duration::from_secs(10 * 60),
+                reset_store_state: true,
                 ..NodeOpt::default()
             };
             if i == 0 {
