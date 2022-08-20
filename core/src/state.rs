@@ -1031,33 +1031,42 @@ impl ValidatorState {
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
     ) -> Result<(Block, NullifierProofs), ValidationError> {
-        let mut nulls = HashSet::new();
-        use ValidationError::*;
+        let mut cap_txns = vec![];
+        let mut reward_txns = vec![];
+        for txn in txns.0.into_iter() {
+            match txn {
+                EspressoTransaction::CAP(cap_txn) => {
+                    cap_txns.push(cap_txn);
+                }
+                EspressoTransaction::Reward(reward_txn) => reward_txns.push(reward_txn),
+            }
+        }
         let mut proofs = NullifierProofs::new();
-
-        let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
-        for (pf, n) in null_pfs
-            .into_iter()
-            .zip(txns.0.iter())
-            .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.input_nullifiers().into_iter()))
         {
-            if nulls.contains(&n) {
-                return Err(NullifierAlreadyExists { nullifier: n });
+            // verify cap_txns
+            let mut nulls = HashSet::new();
+            use ValidationError::*;
+
+            let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
+            for (pf, n) in null_pfs
+                .into_iter()
+                .zip(cap_txns.iter())
+                .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.nullifiers().into_iter()))
+            {
+                if nulls.contains(&n) {
+                    return Err(NullifierAlreadyExists { nullifier: n });
+                }
+
+                let root = self
+                    .past_nullifiers
+                    .check_unspent(&recent_nullifiers, &pf, n)?;
+                proofs.push((n, pf, root));
+                nulls.insert(n);
             }
 
-            let root = self
-                .past_nullifiers
-                .check_unspent(&recent_nullifiers, &pf, n)?;
-            proofs.push((n, pf, root));
-            nulls.insert(n);
-        }
-
-        let verif_keys = txns
-            .0
-            .iter()
-            .filter(|txn| matches!(txn, EspressoTransaction::CAP(_)))
-            .map(|txn| match txn {
-                EspressoTransaction::CAP(cap_txn) => match cap_txn {
+            let verif_keys = cap_txns
+                .iter()
+                .map(|txn| match txn {
                     TransactionNote::Mint(_) => Ok(&self.verif_crs.mint),
                     TransactionNote::Transfer(note) => {
                         let num_inputs = note.inputs_nullifiers.len();
@@ -1078,40 +1087,34 @@ impl ValidatorState {
                             .key_for_size(num_inputs, num_outputs)
                             .ok_or(UnsupportedFreezeSize { num_inputs })
                     }
-                },
-                EspressoTransaction::Reward(_reward_note) => Err(ValidationError::Failed {}), // unreachable
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        // filter cap transactions to be validated first
-        let mut cap_txns = vec![];
-        let mut reward_txns = vec![];
-        let mut merkle_roots = vec![];
-        for espresso_txn in txns.0.into_iter() {
-            match espresso_txn {
-                EspressoTransaction::CAP(cap_note) => {
-                    let note_mt_root = cap_note.merkle_root();
-                    if self.record_merkle_commitment.root_value == note_mt_root
-                        || self.past_record_merkle_roots.0.contains(&note_mt_root)
-                    {
-                        merkle_roots.push(note_mt_root)
-                    } else {
-                        return Err(BadMerkleRoot {});
-                    }
-                    cap_txns.push(cap_note);
-                }
-                EspressoTransaction::Reward(reward_note) => {
-                    reward_txns.push(EspressoTransaction::Reward(reward_note))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut merkle_roots = vec![];
+            for cap_note in cap_txns.iter() {
+                let note_mt_root = cap_note.merkle_root();
+                if self.record_merkle_commitment.root_value == note_mt_root
+                    || self.past_record_merkle_roots.0.contains(&note_mt_root)
+                {
+                    merkle_roots.push(note_mt_root)
+                } else {
+                    return Err(BadMerkleRoot {});
                 }
             }
+            // cap transactions validates first
+            if !cap_txns.is_empty() {
+                txn_batch_verify(&cap_txns[..], &merkle_roots, now, &verif_keys)
+                    .map_err(|err| CryptoError { err: Ok(err) })?;
+            }
         }
-        // cap transactions validates first
-        if !cap_txns.is_empty() {
-            txn_batch_verify(&cap_txns[..], &merkle_roots, now, &verif_keys)
-                .map_err(|err| CryptoError { err: Ok(err) })?;
+        {
+            //TODO (fernando) verify CollectRewards
         }
-        //TODO (fernando) verify CollectRewards
-
+        // assemble Block
         let mut txns: Vec<_> = cap_txns.into_iter().map(EspressoTransaction::CAP).collect();
+        let mut reward_txns = reward_txns
+            .into_iter()
+            .map(EspressoTransaction::Reward)
+            .collect();
         txns.append(&mut reward_txns);
 
         Ok((Block(txns), proofs))
