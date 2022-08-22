@@ -13,7 +13,7 @@
 use crate::data_source::CatchUpDataSource;
 use clap::Args;
 use derive_more::From;
-use futures::FutureExt;
+use futures::{stream::iter, FutureExt, StreamExt, TryFutureExt};
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::path::PathBuf;
@@ -72,6 +72,38 @@ where
                 }
                 Ok(events.to_vec())
             }
+            .boxed()
+        })?
+        .stream("subscribe_for_events", |req, state| {
+            async move {
+                let mut first = req.integer_param("first")?;
+                let (prefix, receiver) = state
+                    .read(|state| {
+                        async move {
+                            let prefix = if first >= state.len() {
+                                vec![]
+                            } else {
+                                state.get_nth_event_iter(first).as_ref().to_vec()
+                            };
+                            (prefix, state.subscribe())
+                        }
+                        .boxed()
+                    })
+                    .await;
+                // We will yield all the events we already have buffered, then subscribe to future
+                // events starting from there.
+                first += prefix.len();
+                Ok(iter(prefix)
+                    .map(Ok)
+                    .chain(receiver.filter_map(move |(i, e)| async move {
+                        if i >= first {
+                            Some(Ok(e))
+                        } else {
+                            None
+                        }
+                    })))
+            }
+            .try_flatten_stream()
             .boxed()
         })?;
     Ok(api)
