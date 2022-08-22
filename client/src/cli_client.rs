@@ -258,7 +258,13 @@ impl CliClient {
         let bootstrap_port = pick_unused_port().unwrap();
         let ret = block_on(futures::future::join_all(
             server_ports.iter().enumerate().map(|(i, port)| {
-                let mut v = Validator::new(store_dir, pub_key.clone(), i, *port, bootstrap_port);
+                let mut v = Validator::new(
+                    &store_dir.join(i.to_string()),
+                    pub_key.clone(),
+                    i,
+                    *port,
+                    bootstrap_port,
+                );
                 async move {
                     v.open(server_ports.len()).await?;
                     Ok(v)
@@ -534,6 +540,7 @@ impl Validator {
                     "12",
                     "--bootstrap-nodes",
                     &format!("localhost:{}", bootstrap_port),
+                    "--reset-store-state",
                 ])
                 .env("ESPRESSO_VALIDATOR_QUERY_PORT", server_port.to_string())
                 .env(
