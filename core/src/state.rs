@@ -832,13 +832,13 @@ impl StakingKey {
 // cannot derive CanonicalSerialize because PubKey does not implement it
 impl CanonicalSerialize for StakingKey {
     fn serialized_size(&self) -> usize {
-        (self.0).to_string().serialized_size()
+        bincode::serialize(&self.0).unwrap().len()
     }
     fn serialize<W: ark_serialize::Write>(
         &self,
         mut w: W,
     ) -> Result<(), ark_serialize::SerializationError> {
-        CanonicalSerialize::serialize(&bincode::serialize(&(self.0)).unwrap(), &mut w)?;
+        CanonicalSerialize::serialize(&bincode::serialize(&self.0).unwrap(), &mut w)?;
         Ok(())
     }
 }
