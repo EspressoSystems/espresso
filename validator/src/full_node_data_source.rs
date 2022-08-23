@@ -12,7 +12,12 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::convert::From;
+use std::path::Path;
 
+use atomic_store::{
+    load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
+    RollingLog,
+};
 use espresso_availability_api::data_source::{AvailabilityDataSource, UpdateAvailabilityData};
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
 use espresso_catchup_api::data_source::{CatchUpDataSource, UpdateCatchUpData};
@@ -24,18 +29,24 @@ use espresso_status_api::query_data::ValidatorStatus;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use seahorse::events::LedgerEvent;
+use tracing::warn;
 use validator_node::api::EspressoError;
 use validator_node::node::QueryServiceError;
 
-#[derive(Default)]
 pub struct QueryData {
     blocks: Vec<BlockQueryData>,
     states: Vec<StateQueryData>,
     index_by_block_hash: HashMap<BlockCommitment, u64>,
     index_by_txn_hash: HashMap<TransactionCommitment, (u64, u64)>,
     events: Vec<LedgerEvent<EspressoLedger>>,
+    event_sender: async_channel::Sender<(usize, LedgerEvent<EspressoLedger>)>,
+    event_receiver: async_channel::Receiver<(usize, LedgerEvent<EspressoLedger>)>,
     cached_nullifier_sets: BTreeMap<u64, SetMerkleTree>,
     node_status: ValidatorStatus,
+    state_storage: AtomicStore,
+    block_storage: AppendLog<BincodeLoadStore<(BlockQueryData, StateQueryData)>>,
+    event_storage: AppendLog<BincodeLoadStore<LedgerEvent<EspressoLedger>>>,
+    status_storage: RollingLog<BincodeLoadStore<ValidatorStatus>>,
 }
 
 // We implement [AvailabilityDataSource] for `&'a QueryData`, not `QueryData`, so that we can name
@@ -127,6 +138,17 @@ impl UpdateAvailabilityData for QueryData {
                     .insert(*txn_hash, (block_index, index as u64));
             }
         }
+        blocks.iter().zip(states.iter()).for_each(|(block, state)| {
+            if let Err(e) = self
+                .block_storage
+                .store_resource(&(block.clone(), state.clone()))
+            {
+                warn!(
+                    "Failed to store block {:?} and state {:?}: Error: {}",
+                    block, state, e
+                );
+            }
+        });
         self.blocks.append(blocks);
         self.states.append(states);
         Ok(())
@@ -150,6 +172,9 @@ impl<'a> CatchUpDataSource for &'a QueryData {
     fn is_empty(&self) -> bool {
         self.events.is_empty()
     }
+    fn subscribe(&self) -> async_channel::Receiver<(usize, LedgerEvent<EspressoLedger>)> {
+        self.event_receiver.clone()
+    }
 }
 
 impl UpdateCatchUpData for QueryData {
@@ -158,7 +183,18 @@ impl UpdateCatchUpData for QueryData {
         &mut self,
         events: &mut Vec<LedgerEvent<EspressoLedger>>,
     ) -> Result<(), Self::Error> {
-        self.events.append(events);
+        for e in std::mem::take(events) {
+            if let Err(err) = self.event_storage.store_resource(&e) {
+                warn!("Failed to store event {:?}, Error: {}", e, err);
+            }
+
+            // `try_send` fails if the channel is full or closed. The channel cannot be full because
+            // it is unbounded, and cannot be closed because `self` owns copies of both ends.
+            self.event_sender
+                .try_send((self.events.len(), e.clone()))
+                .expect("unexpected failure when broadcasting event");
+            self.events.push(e);
+        }
         Ok(())
     }
 
@@ -250,6 +286,12 @@ impl UpdateStatusData for QueryData {
 
     fn set_status(&mut self, status: ValidatorStatus) -> Result<(), Self::Error> {
         self.node_status = status;
+        if let Err(e) = self.status_storage.store_resource(&self.node_status) {
+            warn!(
+                "Failed to store status {:?}, Error {}",
+                &self.node_status, e
+            );
+        }
         Ok(())
     }
     fn edit_status<U, F>(&mut self, op: F) -> Result<(), Self::Error>
@@ -258,20 +300,140 @@ impl UpdateStatusData for QueryData {
         Self::Error: From<U>,
     {
         op(&mut self.node_status).map_err(EspressoError::from)?;
+        if let Err(e) = self.status_storage.store_resource(&self.node_status) {
+            warn!(
+                "Failed to store status {:?}, Error {}",
+                &self.node_status, e
+            );
+        }
         Ok(())
     }
 }
 
+const STATUS_STORAGE_COUNT: u32 = 10u32;
+
 impl QueryData {
-    pub fn new() -> QueryData {
-        QueryData {
+    pub fn new(store_path: &Path) -> Result<QueryData, PersistenceError> {
+        let key_tag = "query_data_store";
+        let blocks_tag = format!("{}_blocks", key_tag);
+        let events_tag = format!("{}_events", key_tag);
+        let status_tag = format!("{}_status", key_tag);
+        let mut loader = AtomicStoreLoader::create(store_path, key_tag)?;
+        let block_storage = AppendLog::create(&mut loader, Default::default(), &blocks_tag, 1024)?;
+        let event_storage = AppendLog::create(&mut loader, Default::default(), &events_tag, 1024)?;
+        let mut status_storage =
+            RollingLog::create(&mut loader, Default::default(), &status_tag, 1024)?;
+        // this should be loaded from a config setting...
+        status_storage.set_retained_entries(STATUS_STORAGE_COUNT);
+
+        let state_storage = AtomicStore::open(loader)?;
+
+        let (event_sender, event_receiver) = async_channel::unbounded();
+        Ok(QueryData {
             blocks: Vec::new(),
             states: Vec::new(),
             index_by_block_hash: HashMap::new(),
             index_by_txn_hash: HashMap::new(),
             events: Vec::new(),
+            event_sender,
+            event_receiver,
             cached_nullifier_sets: BTreeMap::new(),
             node_status: ValidatorStatus::default(),
+            state_storage,
+            block_storage,
+            event_storage,
+            status_storage,
+        })
+    }
+
+    pub fn load(store_path: &Path) -> Result<QueryData, PersistenceError> {
+        let key_tag = "query_data_store";
+        let blocks_tag = format!("{}_blocks", key_tag);
+        let events_tag = format!("{}_events", key_tag);
+        let status_tag = format!("{}_status", key_tag);
+        let mut loader = AtomicStoreLoader::load(store_path, key_tag)?;
+        let block_storage = AppendLog::load(&mut loader, Default::default(), &blocks_tag, 1024)?;
+        let event_storage = AppendLog::load(&mut loader, Default::default(), &events_tag, 1024)?;
+        let mut status_storage =
+            RollingLog::load(&mut loader, Default::default(), &status_tag, 1024)?;
+        // this should be loaded from a config setting...
+        status_storage.set_retained_entries(STATUS_STORAGE_COUNT);
+        let state_storage = AtomicStore::open(loader)?;
+
+        let (blocks, states): (Vec<BlockQueryData>, Vec<StateQueryData>) =
+            block_storage.iter().filter_map(|t| t.ok()).unzip();
+        let mut index_by_txn_hash = HashMap::new();
+        let mut cached_nullifier_sets = BTreeMap::new();
+        let mut running_nullifier_set = SetMerkleTree::default();
+        let index_by_block_hash = blocks
+            .iter()
+            .map(|block| {
+                block
+                    .txn_hashes
+                    .iter()
+                    .enumerate()
+                    .for_each(|(id, txn_hash)| {
+                        index_by_txn_hash.insert(*txn_hash, (block.block_id, id as u64));
+                    });
+                block.raw_block.block.0.iter().for_each(|txn| {
+                    for n in txn.input_nullifiers() {
+                        running_nullifier_set.insert(n);
+                    }
+                });
+                if Self::calculate_sparse_cache(block.block_id, blocks.len() as u64) {
+                    cached_nullifier_sets.insert(block.block_id, running_nullifier_set.clone());
+                }
+                (block.block_hash, block.block_id)
+            })
+            .collect();
+
+        let (event_sender, event_receiver) = async_channel::unbounded();
+        let events = event_storage.iter().filter_map(|e| e.ok()).collect();
+        let node_status = status_storage.load_latest()?;
+
+        Ok(QueryData {
+            blocks,
+            states,
+            index_by_block_hash,
+            index_by_txn_hash,
+            events,
+            event_sender,
+            event_receiver,
+            cached_nullifier_sets,
+            node_status,
+            state_storage,
+            block_storage,
+            event_storage,
+            status_storage,
+        })
+    }
+
+    pub fn commit_all(&mut self) {
+        if let Err(e) = self.block_storage.commit_version() {
+            warn!("Failed to commit block storage: Error {}", e);
         }
+        if let Err(e) = self.event_storage.commit_version() {
+            warn!("Failed to commit event storage: Error {}", e);
+        }
+        if let Err(e) = self.status_storage.commit_version() {
+            warn!("Failed to commit status storage: Error {}", e);
+        }
+        if let Err(e) = self.state_storage.commit_version() {
+            warn!("Failed to commit query state storage: Error {}", e);
+        }
+        if let Err(e) = self.status_storage.prune_file_entries() {
+            warn!("Failed to prune status storage: Error {}", e);
+        }
+    }
+
+    fn calculate_sparse_cache(_index: u64, _total_size: u64) -> bool {
+        // issue: make this an inverse geometric function, with inflection at ~10%
+        true
+    }
+}
+
+impl validator_node::update_query_data_source::EventProcessedHandler for QueryData {
+    fn on_event_processing_complete(&mut self) {
+        self.commit_all();
     }
 }

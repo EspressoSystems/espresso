@@ -10,6 +10,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+use async_channel::Receiver;
 use espresso_core::ledger::EspressoLedger;
 use seahorse::events::LedgerEvent;
 use std::error::Error;
@@ -21,6 +22,9 @@ pub trait CatchUpDataSource {
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;
     fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType;
+    fn subscribe(&self) -> Receiver<(usize, LedgerEvent<EspressoLedger>)> {
+        unimplemented!()
+    }
 }
 
 pub trait UpdateCatchUpData {

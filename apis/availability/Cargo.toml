@@ -20,3 +20,4 @@ edition = "2021"
 commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.1.0" }
 espresso-core = { path = "../../core/" }
 jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
+serde = { version = "1.0", features = ["derive"] }

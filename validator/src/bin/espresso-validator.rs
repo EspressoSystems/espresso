@@ -13,45 +13,48 @@
 #![deny(warnings)]
 
 use async_std::task::{sleep, spawn_blocking};
+use clap::Parser;
+use dirs::data_local_dir;
 use espresso_core::testing::MultiXfrRecordSpecTransaction;
 use espresso_core::{
     state::ElaboratedBlock,
     testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo},
 };
-use espresso_validator::full_node_mem_data_source::QueryData;
+use espresso_validator::full_node_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
+use std::env;
+use std::path::PathBuf;
 use std::process::exit;
 use std::time::Duration;
-use structopt::StructOpt;
 use tagged_base64::TaggedBase64;
 use tracing::info;
 use validator_node::node::Validator;
 
-#[derive(StructOpt)]
-#[structopt(
+#[derive(Parser)]
+#[clap(
     name = "Multi-machine consensus",
     about = "Simulates consensus among multiple machines"
 )]
 struct Options {
-    #[structopt(flatten)]
+    #[clap(flatten)]
     node_opt: NodeOpt,
 
-    #[structopt(flatten)]
+    #[clap(flatten)]
     consensus_opt: ConsensusOpt,
 
     /// Id of the current node.
     ///
     /// If the node ID is 0, it will propose and try to add transactions.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_ID")]
-    #[structopt(requires("num-nodes"))]
+    #[clap(long, short, env = "ESPRESSO_VALIDATOR_ID")]
+    #[clap(requires("num-nodes"))]
     pub id: usize,
 
     /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
     /// bootstrap nodes.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
+    #[clap(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
     pub num_nodes: usize,
 
     /// Public key which should own a faucet record in the genesis block.
@@ -61,25 +64,25 @@ struct Options {
     ///
     /// This option may be passed multiple times to initialize the ledger with multiple native
     /// token records.
-    #[structopt(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ",")]
+    #[clap(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ',')]
     pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.
     ///
     /// If not provided, the validator will wait for externally submitted transactions.
-    #[structopt(long, short, conflicts_with("faucet-pub-key"))]
+    #[clap(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txn: Option<u64>,
 
     /// Wait for web server to exit after transactions complete.
-    #[structopt(long)]
+    #[clap(long)]
     pub wait: bool,
 
     /// Whether to color log output with ANSI color codes.
-    #[structopt(long, env = "ESPRESSO_COLORED_LOGS")]
+    #[clap(long, env = "ESPRESSO_COLORED_LOGS")]
     pub colored_logs: bool,
 
-    #[structopt(flatten)]
-    pub esqs: full_node_esqs::Options,
+    #[clap(subcommand)]
+    pub esqs: Option<full_node_esqs::Command>,
 }
 
 async fn generate_transactions(
@@ -259,6 +262,15 @@ async fn generate_transactions(
     sleep(Duration::from_secs(10)).await;
 }
 
+fn default_store_path(node_id: usize) -> PathBuf {
+    let mut data_dir = data_local_dir()
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("./")));
+    data_dir.push("espresso");
+    data_dir.push("validator");
+    data_dir.push(format!("node{}", node_id));
+    data_dir
+}
+
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::from_args();
@@ -273,9 +285,14 @@ async fn main() -> Result<(), std::io::Error> {
         .init();
 
     // Get the consensus configuration.
-    let consensus_opt = options.consensus_opt;
-
-    let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
+    let store_path = options
+        .node_opt
+        .store_path
+        .clone()
+        .unwrap_or_else(|| default_store_path(options.id));
+    let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(
+        QueryData::new(&store_path).unwrap(),
+    ));
 
     let own_id = options.id;
     // Initialize the state and hotshot
@@ -287,13 +304,13 @@ async fn main() -> Result<(), std::io::Error> {
     } else {
         (GenesisState::new(options.faucet_pub_key.clone()), None)
     };
-    let keys = gen_keys(&consensus_opt, options.num_nodes);
+    let keys = gen_keys(&options.consensus_opt, options.num_nodes);
     let priv_key = keys[own_id].private.clone();
     let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
 
     let hotshot = init_validator(
         &options.node_opt,
-        &consensus_opt,
+        &options.consensus_opt,
         priv_key,
         known_nodes,
         genesis,
@@ -302,11 +319,13 @@ async fn main() -> Result<(), std::io::Error> {
     )
     .await;
 
+    // Start an EsQS server if requested.
+    if let Some(esqs) = &options.esqs {
+        async_std::task::spawn(full_node_esqs::init_server(esqs, data_source)?);
+    }
+
     // If we are running a full node, also host a query API to inspect the accumulated state.
     let web_server = if let Node::Full(node) = &hotshot {
-        if options.esqs.port.is_some() {
-            async_std::task::spawn(full_node_esqs::init_server(&options.esqs, data_source)?);
-        }
         Some(
             init_web_server(&options.node_opt, node.clone())
                 .expect("Failed to initialize web server"),

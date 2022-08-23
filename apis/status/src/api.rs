@@ -10,14 +10,14 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::data_source::MetaStateDataSource;
+use crate::data_source::StatusDataSource;
 use clap::Args;
 use derive_more::From;
-use espresso_core::state::SetMerkleProof;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
-use snafu::{OptionExt, Snafu};
+use snafu::Snafu;
 use std::path::PathBuf;
+use std::time::Duration;
 use tide_disco::{
     api::{Api, ApiError},
     method::ReadState,
@@ -26,35 +26,35 @@ use tide_disco::{
 
 #[derive(Args)]
 pub struct Options {
-    #[clap(long = "metastate-api-path", env = "ESPRESSO_METASTATE_API_PATH")]
+    #[clap(long = "status-api-path", env = "ESPRESSO_STATUS_API_PATH")]
     pub api_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, From, Snafu, Deserialize, Serialize)]
 pub enum Error {
     Request { source: RequestError },
-    InvalidBlockId { block_id: u64 },
 }
 
 impl Error {
     pub fn status(&self) -> StatusCode {
         match self {
             Self::Request { .. } => StatusCode::BadRequest,
-            Self::InvalidBlockId { .. } => StatusCode::BadRequest,
         }
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct NullifierCheck {
-    spent: bool,
-    proof: SetMerkleProof,
+pub struct Throughput {
+    blocks_finalized: u64,
+    transactions_finalized: u64,
+    bytes_finalized: u64,
+    time_operational: Duration,
 }
 
 pub fn define_api<State>(options: &Options) -> Result<Api<State, Error>, ApiError>
 where
     State: 'static + Send + Sync + ReadState,
-    <State as ReadState>::State: Sync + MetaStateDataSource,
+    <State as ReadState>::State: Sync + StatusDataSource,
 {
     let mut api = match &options.api_path {
         Some(path) => Api::<State, Error>::from_file(path)?,
@@ -68,14 +68,43 @@ where
         }
     };
     api.with_version(env!("CARGO_PKG_VERSION").parse().unwrap())
-        .get("check_nullifier", |req, state| {
+        .get("list_peers", |_, state| {
             async move {
-                let block_id = req.integer_param("block_id")?;
-                let nullifier = req.blob_param("nullifier")?;
-                let (spent, proof) = state
-                    .get_nullifier_proof_for(block_id, nullifier)
-                    .context(InvalidBlockIdSnafu { block_id })?;
-                Ok(NullifierCheck { spent, proof })
+                let status = state.get_validator_status();
+                Ok(status.peer_list.clone())
+            }
+            .boxed()
+        })?
+        .get("latest_block_id", |_, state| {
+            async move {
+                let status = state.get_validator_status();
+                Ok(status.latest_block_id)
+            }
+            .boxed()
+        })?
+        .get("mempool_info", |_, state| {
+            async move {
+                let status = state.get_validator_status();
+                Ok(status.mempool_info.clone())
+            }
+            .boxed()
+        })?
+        .get("success_rate", |_, state| {
+            async move {
+                let status = state.get_validator_status();
+                Ok(status.decided_block_count as f64 / status.proposed_block_count as f64)
+            }
+            .boxed()
+        })?
+        .get("throughput", |_, state| {
+            async move {
+                let status = state.get_validator_status();
+                Ok(Throughput {
+                    blocks_finalized: status.decided_block_count,
+                    transactions_finalized: status.cumulative_txn_count,
+                    bytes_finalized: status.cumulative_size,
+                    time_operational: status.time_operational,
+                })
             }
             .boxed()
         })?;

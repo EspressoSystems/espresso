@@ -11,6 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use async_std::task::{sleep, spawn_blocking};
+use clap::Parser;
 use escargot::CargoBuild;
 use espresso_validator::{full_node_esqs, NodeOpt};
 use jf_cap::keys::UserPubKey;
@@ -18,20 +19,19 @@ use std::env;
 use std::io::{BufRead, BufReader};
 use std::process::{exit, Command, Stdio};
 use std::time::Duration;
-use structopt::StructOpt;
 
-#[derive(StructOpt)]
-#[structopt(
+#[derive(Parser)]
+#[clap(
     name = "Multi-machine consensus",
     about = "Simulates consensus among multiple machines"
 )]
 struct Options {
-    #[structopt(flatten)]
+    #[clap(flatten)]
     node_opt: NodeOpt,
 
     /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of
     /// non-bootstrap nodes.
-    #[structopt(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
+    #[clap(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
     pub num_nodes: usize,
 
     /// Public key which should own a faucet record in the genesis block.
@@ -41,37 +41,37 @@ struct Options {
     ///
     /// This option may be passed multiple times to initialize the ledger with multiple native
     /// token records.
-    #[structopt(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ",")]
+    #[clap(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ',')]
     pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.
     ///
     /// If not provided, the validator will wait for externally submitted transactions.
-    #[structopt(long, short, conflicts_with("faucet-pub-key"))]
+    #[clap(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txn: Option<u64>,
 
     /// Wait for web server to exit after transactions complete.
-    #[structopt(long, short)]
+    #[clap(long, short)]
     pub wait: bool,
 
     /// Options for the new EsQS.
-    #[structopt(flatten)]
-    pub esqs: full_node_esqs::Options,
+    #[clap(subcommand)]
+    pub esqs: Option<full_node_esqs::Command>,
 
-    #[structopt(long, short)]
+    #[clap(long, short)]
     verbose: bool,
 
     /// Number of nodes to run only `fail_after_txn` rounds.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
-    #[structopt(long)]
+    #[clap(long)]
     num_fail_nodes: Option<usize>,
 
     /// Number of rounds that all nodes will be running, after which `num_fail_nodes` nodes will be
     /// killed.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
-    #[structopt(long, requires("num-fail-nodes"))]
+    #[clap(long, requires("num-fail-nodes"))]
     fail_after_txn: Option<usize>,
 }
 
@@ -178,22 +178,6 @@ async fn main() {
         args.push("--faucet-pub-key");
         args.push(pub_key);
     }
-    let esqs_port;
-    let esqs_metastate_api_path;
-    if let Some(port) = options.esqs.port {
-        esqs_port = port.to_string();
-        esqs_metastate_api_path = options
-            .esqs
-            .metastate_api_path
-            .as_ref()
-            .unwrap()
-            .display()
-            .to_string();
-        args.push("--esqs-port");
-        args.push(&esqs_port);
-        args.push("--metastate-api-path");
-        args.push(&esqs_metastate_api_path);
-    }
 
     let num_txn_str = match options.num_txn {
         Some(num_txn) => num_txn.to_string(),
@@ -231,6 +215,21 @@ async fn main() {
             } else if !num_txn_str.is_empty() {
                 this_args.push("--num-txn");
                 this_args.push(&num_txn_str);
+            }
+            let mut esqs_args = vec![];
+            if let Some(full_node_esqs::Command::Esqs(opt)) = &options.esqs {
+                esqs_args = vec!["esqs".to_string(), "-p".to_string(), opt.port.to_string()];
+                if let Some(path) = &opt.metastate.api_path {
+                    esqs_args.push("--metastate-api-path".to_string());
+                    esqs_args.push(path.display().to_string());
+                }
+                if let Some(path) = &opt.status.api_path {
+                    esqs_args.push("--status-api-path".to_string());
+                    esqs_args.push(path.display().to_string());
+                }
+            }
+            for arg in &esqs_args {
+                this_args.push(arg);
             }
             if options.verbose {
                 println!("espresso-validator {}", this_args.join(" "));
