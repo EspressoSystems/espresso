@@ -822,23 +822,22 @@ pub mod state_comm {
 pub struct StakingKey(PubKey);
 
 impl StakingKey {
-    fn random(rng: &mut ChaChaRng) -> Self {
-        StakingKey(PubKey::from_private(&PrivKey::generate_from_seed(
-            rng.get_seed(),
-        )))
+    fn random(_rng: &mut ChaChaRng) -> Self {
+        StakingKey(PubKey::from_private(&PrivKey::generate()))
     }
 }
 
 // cannot derive CanonicalSerialize because PubKey does not implement it
 impl CanonicalSerialize for StakingKey {
     fn serialized_size(&self) -> usize {
-        bincode::serialize(&self.0).unwrap().len()
+        bincode::serialize(&self.0.to_bytes()).unwrap().len()
     }
     fn serialize<W: ark_serialize::Write>(
         &self,
         mut w: W,
     ) -> Result<(), ark_serialize::SerializationError> {
-        CanonicalSerialize::serialize(&bincode::serialize(&self.0).unwrap(), &mut w)?;
+        let bytes = bincode::serialize(&self.0.to_bytes()).unwrap();
+        CanonicalSerialize::serialize(&bytes, &mut w)?;
         Ok(())
     }
 }
