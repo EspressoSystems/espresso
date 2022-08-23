@@ -10,11 +10,13 @@
 // General Public License for more details.
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
+#![allow(dead_code)]
 
 use espresso_macros::*;
-//use hotshot::types::Commit;
+use hotshot::types::SignatureKey;
 use jf_cap::structs::ReceiverMemo;
 use jf_cap::Signature;
+use rand_chacha::ChaChaRng;
 
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
@@ -24,6 +26,7 @@ pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
 pub use crate::util::canonical;
 pub use crate::PubKey;
+pub use crate::PrivKey;
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use canonical::deserialize_canonical_bytes;
@@ -47,7 +50,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::iter::once;
-use std::str::FromStr;
 use std::sync::Arc;
 
 /// Height of the records Merkle tree
@@ -814,13 +816,20 @@ pub mod state_comm {
     }
 }
 
-// Stake table for each round
-#[tagged_blob("STAKEKEY")]
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
-pub struct StakeTableKey(PubKey);
+
+/// PubKey used for stake table key
+#[ser_test(random)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq, Serialize, Deserialize)]
+pub struct StakingKey(PubKey);
+
+impl StakingKey {
+    fn random(rng: &mut ChaChaRng) -> Self {
+        StakingKey(PubKey::from_private(&PrivKey::generate_from_seed(rng.get_seed())))
+    }
+}
 
 // cannot derive CanonicalSerialize because PubKey does not implement it
-impl CanonicalSerialize for StakeTableKey {
+impl CanonicalSerialize for StakingKey {
     fn serialized_size(&self) -> usize {
         (self.0).to_string().serialized_size()
     }
@@ -828,19 +837,26 @@ impl CanonicalSerialize for StakeTableKey {
         &self,
         mut w: W,
     ) -> Result<(), ark_serialize::SerializationError> {
-        CanonicalSerialize::serialize(&(self.0).to_string(), &mut w)?;
+        CanonicalSerialize::serialize(&bincode::serialize(&(self.0)).unwrap(), &mut w)?;
         Ok(())
     }
 }
-impl CanonicalDeserialize for StakeTableKey {
+impl CanonicalDeserialize for StakingKey {
     fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
     where
         R: ark_serialize::Read,
     {
-        let pubkey: String = CanonicalDeserialize::deserialize(&mut r)?;
-        Ok(Self(PubKey::from_str(&pubkey).unwrap()))
+        let bytes: Vec<u8> = CanonicalDeserialize::deserialize(&mut r)?;
+        let pubkey = bincode::deserialize(&bytes).unwrap();
+        Ok(Self(PubKey::from_bytes(&pubkey).unwrap()))
     }
 }
+
+
+/// Stake table for each round
+#[tagged_blob("STAKEKEY")]
+#[derive(Debug, Clone, PartialEq, Hash, Eq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct StakeTableKey(StakingKey);
 
 #[tagged_blob("STAKEVALUE")]
 #[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
@@ -856,7 +872,7 @@ impl CommitableHashTag for StakeTableTag {
 
 type StakeTableHash = CommitableHash<StakeTableKey, StakeTableValue, StakeTableTag>;
 
-// Stores commitment hash of previous rounds' stake tables in (block_num, stake table commitment) kv pairs
+/// Stores commitment hash of previous rounds' stake tables in (block_num, stake table commitment) kv pairs
 #[tagged_blob("STAKECOMMKEY")]
 #[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct StakeTableCommitmentKey(u64);
@@ -876,34 +892,10 @@ impl CommitableHashTag for StakeTableCommitmentTag {
 type StakeTableCommitmentsHash =
     CommitableHash<StakeTableCommitmentKey, StakeTableCommitmentValue, StakeTableCommitmentTag>;
 
-// Set Merkle tree for all of the previously-collected rewards
+/// Set Merkle tree for all of the previously-collected rewards
 #[tagged_blob("COLLECTED-REWARD")]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CollectedRewards((PubKey, u64));
-
-impl CanonicalSerialize for CollectedRewards {
-    fn serialized_size(&self) -> usize {
-        0u64.serialized_size() + ((self.0).0).to_string().serialized_size()
-    }
-    fn serialize<W: ark_serialize::Write>(
-        &self,
-        mut w: W,
-    ) -> Result<(), ark_serialize::SerializationError> {
-        CanonicalSerialize::serialize(&((self.0).0).to_string(), &mut w)?;
-        CanonicalSerialize::serialize(&((self.0).1), &mut w)?;
-        Ok(())
-    }
-}
-impl CanonicalDeserialize for CollectedRewards {
-    fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
-    where
-        R: ark_serialize::Read,
-    {
-        let pubkey: String = CanonicalDeserialize::deserialize(&mut r)?;
-        let block_num = CanonicalDeserialize::deserialize(&mut r)?;
-        Ok(Self((PubKey::from_str(&pubkey).unwrap(), block_num)))
-    }
-}
+#[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct CollectedRewards((StakingKey, u64));
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CollectedRewardsTag();
@@ -934,11 +926,11 @@ pub struct ValidatorState {
     /// Nullifiers from recent blocks, which allows validating slightly out-of-date-transactions
     pub past_nullifiers: NullifierHistory,
     pub prev_block: BlockCommitment,
-    // Staking table. For fixed-stake, this will be the same each round
+    /// Staking table. For fixed-stake, this will be the same each round
     pub stake_table: KVMerkleTree<StakeTableHash>,
-    // Keeps track of previous stake tables
+    /// Keeps track of previous stake tables
     pub stake_table_commitments: KVMerkleTree<StakeTableCommitmentsHash>,
-    // Track already-collected rewards via (staking_key, block number) tuples
+    /// Track already-collected rewards via (staking_key, block number) tuples
     pub collected_rewards: KVMerkleTree<CollectedRewardsHash>,
 }
 
