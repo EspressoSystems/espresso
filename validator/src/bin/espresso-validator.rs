@@ -14,19 +14,15 @@
 
 use async_std::task::{sleep, spawn_blocking};
 use clap::Parser;
-use dirs::data_local_dir;
 use espresso_core::testing::MultiXfrRecordSpecTransaction;
 use espresso_core::{
     state::ElaboratedBlock,
     testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo},
 };
-use espresso_validator::full_node_data_source::QueryData;
 use espresso_validator::*;
 use futures::{future::pending, StreamExt};
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
-use std::env;
-use std::path::PathBuf;
 use std::process::exit;
 use std::time::Duration;
 use tagged_base64::TaggedBase64;
@@ -262,18 +258,9 @@ async fn generate_transactions(
     sleep(Duration::from_secs(10)).await;
 }
 
-fn default_store_path(node_id: usize) -> PathBuf {
-    let mut data_dir = data_local_dir()
-        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("./")));
-    data_dir.push("espresso");
-    data_dir.push("validator");
-    data_dir.push(format!("node{}", node_id));
-    data_dir
-}
-
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
-    let options = Options::from_args();
+    let mut options = Options::from_args();
     if let Err(msg) = options.node_opt.check() {
         eprintln!("{}", msg);
         exit(1);
@@ -284,17 +271,8 @@ async fn main() -> Result<(), std::io::Error> {
         .with_ansi(options.colored_logs)
         .init();
 
-    // Get the consensus configuration.
-    let store_path = options
-        .node_opt
-        .store_path
-        .clone()
-        .unwrap_or_else(|| default_store_path(options.id));
-    let data_source = async_std::sync::Arc::new(async_std::sync::RwLock::new(
-        QueryData::new(&store_path).unwrap(),
-    ));
-
     let own_id = options.id;
+    let data_source = open_data_source(&mut options.node_opt, own_id);
     // Initialize the state and hotshot
     let (genesis, state) = if options.num_txn.is_some() {
         // If we are going to generate transactions, we need to initialize the ledger with a

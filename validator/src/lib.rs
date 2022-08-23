@@ -480,12 +480,6 @@ fn get_secret_key_seed(consensus_opt: &ConsensusOpt) -> [u8; 32] {
         .into()
 }
 
-/// Removes the contents in the persistence files.
-fn reset_store_dir(store_dir: PathBuf) {
-    let path = store_dir.as_path();
-    fs::remove_dir_all(path).expect("Failed to remove persistence files");
-}
-
 pub struct UpdateQueryDataSourceTypesBinder;
 
 impl UpdateQueryDataSourceTypes for UpdateQueryDataSourceTypesBinder {
@@ -690,23 +684,13 @@ async fn init_hotshot(
 
     let storage = get_store_dir(options, node_id);
     let storage_path = Path::new(&storage);
-    let reset_store_state = if storage_path.exists() {
-        if options.reset_store_state {
-            reset_store_dir(storage.clone());
-            true
-        } else {
-            false
-        }
-    } else {
-        true
-    };
-    if reset_store_state {
+    if options.reset_store_state {
         debug!("Initializing new session");
     } else {
         debug!("Restoring from persisted session");
     }
     let lw_persistence = LWPersistence::new(storage_path, "validator").unwrap();
-    let stored_state = if reset_store_state {
+    let stored_state = if options.reset_store_state {
         state.validator.clone()
     } else {
         lw_persistence
@@ -748,7 +732,7 @@ async fn init_hotshot(
     let validator = if full_node {
         let full_persisted = FullPersistence::new(&node_persistence, "full_node").unwrap();
 
-        let records = if reset_store_state {
+        let records = if options.reset_store_state {
             state.records
         } else {
             let mut builder = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
@@ -757,7 +741,7 @@ async fn init_hotshot(
             }
             builder.build()
         };
-        let nullifiers = if reset_store_state {
+        let nullifiers = if options.reset_store_state {
             state.nullifiers
         } else {
             full_persisted
@@ -1230,4 +1214,25 @@ pub async fn init_validator(
         num_bootstrap,
     )
     .await
+}
+
+pub fn open_data_source(options: &mut NodeOpt, id: usize) -> Arc<RwLock<QueryData>> {
+    let storage = get_store_dir(options, id);
+    options.reset_store_state = if storage.exists() {
+        if options.reset_store_state {
+            reset_store_dir(&storage);
+            true
+        } else {
+            false
+        }
+    } else {
+        true
+    };
+
+    Arc::new(RwLock::new(QueryData::new(&storage).unwrap()))
+}
+
+/// Removes the contents in the persistence files.
+fn reset_store_dir(store_dir: &Path) {
+    fs::remove_dir_all(store_dir).expect("Failed to remove persistence files");
 }
