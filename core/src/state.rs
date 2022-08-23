@@ -25,8 +25,8 @@ pub use crate::set_merkle_tree::*;
 pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
 pub use crate::util::canonical;
-pub use crate::PubKey;
 pub use crate::PrivKey;
+pub use crate::PubKey;
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use canonical::deserialize_canonical_bytes;
@@ -816,7 +816,6 @@ pub mod state_comm {
     }
 }
 
-
 /// PubKey used for stake table key
 #[ser_test(random)]
 #[derive(Debug, Clone, PartialEq, Hash, Eq, Serialize, Deserialize)]
@@ -824,7 +823,9 @@ pub struct StakingKey(PubKey);
 
 impl StakingKey {
     fn random(rng: &mut ChaChaRng) -> Self {
-        StakingKey(PubKey::from_private(&PrivKey::generate_from_seed(rng.get_seed())))
+        StakingKey(PubKey::from_private(&PrivKey::generate_from_seed(
+            rng.get_seed(),
+        )))
     }
 }
 
@@ -851,7 +852,6 @@ impl CanonicalDeserialize for StakingKey {
         Ok(Self(PubKey::from_bytes(&pubkey).unwrap()))
     }
 }
-
 
 /// Stake table for each round
 #[tagged_blob("STAKEKEY")]
