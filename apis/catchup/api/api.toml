@@ -10,20 +10,24 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <https://www.gnu.org/licenses/>.
 
-[package]
-name = "espresso-catchup-api"
-version = "0.1.0"
-edition = "2021"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[meta]
+NAME = "espresso-catchup"
+DESCRIPTION = "Event streams allowing clients to replicate on-chain state changes"
+FORMAT_VERSION = "0.1.0"
 
-[dependencies]
-async-channel = "1.6"
-clap = { version = "3.2.17", features = ["derive", "env"] }
-derive_more = "0.99"
-espresso-core = { path = "../../core/" }
-futures = "0.3.21"
-seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
-serde = { version = "1.0.139", features = ["derive", "rc"] }
-snafu = { version = "0.7", features = ["backtraces"] }
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main" }
-toml = "0.5"
+[route.get_events_since]
+PATH = ["/get_events_since/:first", "/get_events_since/:first/:count"]
+METHOD = "GET"
+":first" = "Integer"
+":count" = "Integer"
+DOC = """
+Get an ordered list of events starting at `:first`.
+"""
+
+[route.subscribe_for_events]
+PATH = ["/subscribe_for_events/:first"]
+METHOD = "SOCKET"
+":first" = "Integer"
+DOC = """
+Subscribe to an ordered stream of events starting at `:first`.
+"""

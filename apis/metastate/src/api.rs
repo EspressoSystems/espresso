@@ -70,7 +70,7 @@ where
     api.with_version(env!("CARGO_PKG_VERSION").parse().unwrap())
         .get("check_nullifier", |req, state| {
             async move {
-                let block_id = req.u64_param("block_id")?;
+                let block_id = req.integer_param("block_id")?;
                 let nullifier = req.blob_param("nullifier")?;
                 let (spent, proof) = state
                     .get_nullifier_proof_for(block_id, nullifier)

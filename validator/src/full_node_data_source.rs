@@ -39,6 +39,8 @@ pub struct QueryData {
     index_by_block_hash: HashMap<BlockCommitment, u64>,
     index_by_txn_hash: HashMap<TransactionCommitment, (u64, u64)>,
     events: Vec<LedgerEvent<EspressoLedger>>,
+    event_sender: async_channel::Sender<(usize, LedgerEvent<EspressoLedger>)>,
+    event_receiver: async_channel::Receiver<(usize, LedgerEvent<EspressoLedger>)>,
     cached_nullifier_sets: BTreeMap<u64, SetMerkleTree>,
     node_status: ValidatorStatus,
     state_storage: AtomicStore,
@@ -170,6 +172,9 @@ impl<'a> CatchUpDataSource for &'a QueryData {
     fn is_empty(&self) -> bool {
         self.events.is_empty()
     }
+    fn subscribe(&self) -> async_channel::Receiver<(usize, LedgerEvent<EspressoLedger>)> {
+        self.event_receiver.clone()
+    }
 }
 
 impl UpdateCatchUpData for QueryData {
@@ -178,12 +183,18 @@ impl UpdateCatchUpData for QueryData {
         &mut self,
         events: &mut Vec<LedgerEvent<EspressoLedger>>,
     ) -> Result<(), Self::Error> {
-        events.iter().for_each(|event| {
-            if let Err(e) = self.event_storage.store_resource(event) {
-                warn!("Failed to store event {:?}, Error: {}", event, e);
+        for e in std::mem::take(events) {
+            if let Err(err) = self.event_storage.store_resource(&e) {
+                warn!("Failed to store event {:?}, Error: {}", e, err);
             }
-        });
-        self.events.append(events);
+
+            // `try_send` fails if the channel is full or closed. The channel cannot be full because
+            // it is unbounded, and cannot be closed because `self` owns copies of both ends.
+            self.event_sender
+                .try_send((self.events.len(), e.clone()))
+                .expect("unexpected failure when broadcasting event");
+            self.events.push(e);
+        }
         Ok(())
     }
 
@@ -317,12 +328,15 @@ impl QueryData {
 
         let state_storage = AtomicStore::open(loader)?;
 
+        let (event_sender, event_receiver) = async_channel::unbounded();
         Ok(QueryData {
             blocks: Vec::new(),
             states: Vec::new(),
             index_by_block_hash: HashMap::new(),
             index_by_txn_hash: HashMap::new(),
             events: Vec::new(),
+            event_sender,
+            event_receiver,
             cached_nullifier_sets: BTreeMap::new(),
             node_status: ValidatorStatus::default(),
             state_storage,
@@ -373,6 +387,7 @@ impl QueryData {
             })
             .collect();
 
+        let (event_sender, event_receiver) = async_channel::unbounded();
         let events = event_storage.iter().filter_map(|e| e.ok()).collect();
         let node_status = status_storage.load_latest()?;
 
@@ -382,6 +397,8 @@ impl QueryData {
             index_by_block_hash,
             index_by_txn_hash,
             events,
+            event_sender,
+            event_receiver,
             cached_nullifier_sets,
             node_status,
             state_storage,

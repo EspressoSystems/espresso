@@ -14,6 +14,7 @@ use crate::QueryData;
 use async_std::sync::{Arc, RwLock};
 use clap::{Args, Subcommand};
 use derive_more::From;
+use espresso_catchup_api::api as catchup;
 use espresso_metastate_api::api as metastate;
 use espresso_status_api::api as status;
 use futures::Future;
@@ -29,6 +30,9 @@ pub struct Options {
     pub port: u16,
 
     #[clap(flatten)]
+    pub catchup: catchup::Options,
+
+    #[clap(flatten)]
     pub metastate: metastate::Options,
 
     #[clap(flatten)]
@@ -42,6 +46,9 @@ pub enum Command {
 
 #[derive(Clone, Debug, From, Snafu, Deserialize, Serialize)]
 pub enum ApiError {
+    CatchUp {
+        source: catchup::Error,
+    },
     Metastate {
         source: metastate::Error,
     },
@@ -62,6 +69,7 @@ impl tide_disco::Error for ApiError {
 
     fn status(&self) -> StatusCode {
         match self {
+            Self::CatchUp { source } => source.status(),
             Self::Metastate { source } => source.status(),
             Self::Status { source } => source.status(),
             Self::Internal { status, .. } => *status,
@@ -74,11 +82,14 @@ pub fn init_server(
     data_source: Arc<RwLock<QueryData>>,
 ) -> io::Result<impl Future<Output = io::Result<()>>> {
     let Command::Esqs(opt) = command;
+    let catchup_api = catchup::define_api(&opt.catchup).map_err(io_error)?;
     let metastate_api = metastate::define_api(&opt.metastate).map_err(io_error)?;
     let status_api = status::define_api(&opt.status).map_err(io_error)?;
 
     let mut app = App::<_, ApiError>::with_state(data_source);
     app.with_version(env!("CARGO_PKG_VERSION").parse().unwrap())
+        .register_module("catchup", catchup_api)
+        .map_err(io_error)?
         .register_module("metastate", metastate_api)
         .map_err(io_error)?
         .register_module("status", status_api)

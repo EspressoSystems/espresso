@@ -22,6 +22,7 @@ default-run = "espresso-validator"
 address-book = { path = "../address-book" }
 ark-serialize = { version = "0.3.0", features = ["derive"] }
 ark-std = { version = "0.3.0", default-features = false }
+async-channel = "1.6"
 async-std = { version = "1.9.0", features = ["unstable", "attributes"] }
 async-trait = "0.1.56"
 async-tungstenite = { version = "0.15.0", features = ["async-std-runtime"] }
