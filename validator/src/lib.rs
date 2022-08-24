@@ -639,7 +639,12 @@ impl GenesisState {
         )
         .unwrap();
 
-        let validator = state.validator.clone();
+        let mut validator = state.validator.clone();
+        // It's important for the EsQS (and as a general consistency thing) that `prev_commit_time`
+        // for the genesis state is 0. This effectively wipes the mint transactions from
+        // `MultiXfrTestState` out of the history, but keeps their effects on the starting state.
+        validator.prev_commit_time = 0;
+
         let records = state.record_merkle_tree.clone();
         let nullifiers = state.nullifiers.clone();
         let memos = state.unspent_memos();
