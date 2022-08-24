@@ -290,13 +290,14 @@ pub mod committable_hash {
     use super::*;
     use commit::{Commitment, Committable};
     use core::marker::PhantomData;
+    use serde::{Deserialize, Serialize};
     use typenum::Unsigned;
 
     pub trait CommitableHashTag: Clone + Debug + PartialEq + Eq {
         fn commitment_diversifier() -> &'static str;
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq)]
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
     pub struct CommitableHash<K, V, T>
     where
         K: Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
