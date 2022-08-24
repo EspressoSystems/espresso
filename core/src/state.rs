@@ -10,13 +10,11 @@
 // General Public License for more details.
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
-#![allow(dead_code)]
 
 use espresso_macros::*;
 use hotshot::types::SignatureKey;
 use jf_cap::structs::ReceiverMemo;
 use jf_cap::Signature;
-use rand_chacha::ChaChaRng;
 
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
@@ -26,6 +24,7 @@ pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
 pub use crate::util::canonical;
 pub use crate::PrivKey;
+
 pub use crate::PubKey;
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
@@ -817,14 +816,17 @@ pub mod state_comm {
 }
 
 /// PubKey used for stake table key
-#[ser_test(random)]
-#[derive(Debug, Clone, PartialEq, Hash, Eq, Serialize, Deserialize)]
+#[tagged_blob("STAKING_KEY")] 
+#[ser_test(random(random_for_test))]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct StakingKey(PubKey);
 
 impl StakingKey {
-    fn random(_rng: &mut ChaChaRng) -> Self {
+    #[cfg(test)] 
+    fn random_for_test(_rng: &mut rand_chacha::ChaChaRng) -> Self {
         StakingKey(PubKey::from_private(&PrivKey::generate()))
     }
+    
 }
 
 // cannot derive CanonicalSerialize because PubKey does not implement it
@@ -858,10 +860,10 @@ impl CanonicalDeserialize for StakingKey {
 pub struct StakeTableKey(StakingKey);
 
 #[tagged_blob("STAKEVALUE")]
-#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Hash, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct StakeTableValue(u64);
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub struct StakeTableTag();
 impl CommitableHashTag for StakeTableTag {
     fn commitment_diversifier() -> &'static str {
@@ -869,18 +871,19 @@ impl CommitableHashTag for StakeTableTag {
     }
 }
 
-type StakeTableHash = CommitableHash<StakeTableKey, StakeTableValue, StakeTableTag>;
+pub type StakeTableHash = CommitableHash<StakeTableKey, StakeTableValue, StakeTableTag>;
 
 /// Stores commitment hash of previous rounds' stake tables in (block_num, stake table commitment) kv pairs
 #[tagged_blob("STAKECOMMKEY")]
-#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Hash)]
 pub struct StakeTableCommitmentKey(u64);
 
 #[tagged_blob("STAKECOMMVALUE")]
-#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Hash)]
+
 pub struct StakeTableCommitmentValue(<StakeTableHash as KVTreeHash>::Digest);
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct StakeTableCommitmentTag();
 impl CommitableHashTag for StakeTableCommitmentTag {
     fn commitment_diversifier() -> &'static str {
@@ -888,15 +891,16 @@ impl CommitableHashTag for StakeTableCommitmentTag {
     }
 }
 
-type StakeTableCommitmentsHash =
+
+pub type StakeTableCommitmentsHash =
     CommitableHash<StakeTableCommitmentKey, StakeTableCommitmentValue, StakeTableCommitmentTag>;
 
 /// Set Merkle tree for all of the previously-collected rewards
 #[tagged_blob("COLLECTED-REWARD")]
-#[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Hash)]
 pub struct CollectedRewards((StakingKey, u64));
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct CollectedRewardsTag();
 impl CommitableHashTag for CollectedRewardsTag {
     fn commitment_diversifier() -> &'static str {
@@ -904,7 +908,7 @@ impl CommitableHashTag for CollectedRewardsTag {
     }
 }
 
-type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
+pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
 
 /// The working state of the ledger
 ///
