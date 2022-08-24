@@ -19,14 +19,11 @@ use async_std::sync::{Arc, RwLock};
 use async_std::task::block_on;
 use commit::Committable;
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
-use espresso_core::state::{
-    BlockCommitment, ElaboratedTransaction, TransactionCommitment, ValidatorState,
-};
+use espresso_core::state::{BlockCommitment, TransactionCommitment, ValidatorState};
 use futures::task::SpawnError;
 use hotshot::types::EventType;
 use itertools::izip;
 use jf_primitives::merkle_tree::FilledMTBuilder;
-use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 
 use crate::node::{ConsensusEvent, EventStream};
@@ -105,7 +102,7 @@ where
                 // A block has been committed. Update our mirror of the ValidatorState by applying
                 // the new block, and generate a Commit event.
 
-                let block_index = self.validator_state.prev_commit_time + 1;
+                let block_index = self.validator_state.prev_commit_time;
                 let mut merkle_builder = FilledMTBuilder::from_frontier(
                     &self.validator_state.record_merkle_commitment,
                     &self.validator_state.record_merkle_frontier,
@@ -177,14 +174,8 @@ where
                             let merkle_tree = merkle_builder.build();
                             // Use the Merkle paths to construct the Memos events for this block.
                             let mut first_uid = 0;
-                            for (txn_id, (((txn, proofs), memos), signature)) in block
-                                .block
-                                .0
-                                .iter()
-                                .zip(block.proofs.iter())
-                                .zip(block.memos.iter())
-                                .zip(block.signatures.iter())
-                                .enumerate()
+                            for (txn_id, (txn, memos)) in
+                                block.block.0.iter().zip(block.memos.iter()).enumerate()
                             {
                                 let txn_uids = &uids[first_uid..first_uid + txn.output_len()];
                                 first_uid += txn.output_len();
@@ -194,13 +185,6 @@ where
                                         merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path
                                     })
                                     .collect::<Vec<_>>();
-                                let hash = ElaboratedTransaction {
-                                    txn: txn.clone(),
-                                    proofs: proofs.clone(),
-                                    memos: memos.clone(),
-                                    signature: signature.clone(),
-                                }
-                                .hash();
                                 events.push(LedgerEvent::Memos {
                                     outputs: izip!(
                                         memos.clone(),
@@ -212,7 +196,7 @@ where
                                     transaction: Some((
                                         block_index,
                                         txn_id as u64,
-                                        hash,
+                                        txn.hash(),
                                         txn.kind(),
                                     )),
                                 })

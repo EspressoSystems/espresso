@@ -74,9 +74,9 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
     fn get_record_index_by_uid(&self, uid: u64) -> Option<(u64, u64, u64)> {
         if let Ok(index) = self.blocks.binary_search_by(|bqd| {
             if uid < bqd.records_from {
-                std::cmp::Ordering::Less
-            } else if uid >= bqd.records_from + bqd.record_count {
                 std::cmp::Ordering::Greater
+            } else if uid >= bqd.records_from + bqd.record_count {
+                std::cmp::Ordering::Less
             } else {
                 std::cmp::Ordering::Equal
             }
