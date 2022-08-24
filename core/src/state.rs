@@ -853,15 +853,17 @@ impl CanonicalDeserialize for StakingKey {
     }
 }
 
-/// Stake table for each round
+///The StakeTableKey is the key identifying a user who had stake in a given round
 #[tagged_blob("STAKEKEY")]
 #[derive(Debug, Clone, PartialEq, Hash, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct StakeTableKey(StakingKey);
 
+///The values in the stake table are the amount staked by the holder of the associated StakingTableKey
 #[tagged_blob("STAKEVALUE")]
 #[derive(Clone, Debug, Copy, PartialEq, Hash, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct StakeTableValue(u64);
 
+///Identifying tag for a StakeTable
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub struct StakeTableTag();
 impl CommitableHashTag for StakeTableTag {
@@ -870,18 +872,21 @@ impl CommitableHashTag for StakeTableTag {
     }
 }
 
+/// Hash function for the Stake Table
 pub type StakeTableHash = CommitableHash<StakeTableKey, StakeTableValue, StakeTableTag>;
 
-/// Stores commitment hash of previous rounds' stake tables in (block_num, stake table commitment) kv pairs
+///Block number for a given stake table commitment
 #[tagged_blob("STAKECOMMKEY")]
 #[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Hash)]
 pub struct StakeTableCommitmentKey(u64);
 
+///Commitment hash for the associated block's stake table
 #[tagged_blob("STAKECOMMVALUE")]
 #[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Hash)]
 
 pub struct StakeTableCommitmentValue(<StakeTableHash as KVTreeHash>::Digest);
 
+///Identifying tag for a StakeTableCommitment
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct StakeTableCommitmentTag();
 impl CommitableHashTag for StakeTableCommitmentTag {
@@ -890,14 +895,16 @@ impl CommitableHashTag for StakeTableCommitmentTag {
     }
 }
 
+/// Hash for tree which stores commitment hash of previous rounds' stake tables in (block_num, stake table commitment) kv pairs
 pub type StakeTableCommitmentsHash =
     CommitableHash<StakeTableCommitmentKey, StakeTableCommitmentValue, StakeTableCommitmentTag>;
 
-/// Set Merkle tree for all of the previously-collected rewards
+///Previously collected rewards are recorded in (StakingKey, amount) pairs
 #[tagged_blob("COLLECTED-REWARD")]
 #[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Hash)]
 pub struct CollectedRewards((StakingKey, u64));
 
+///Identifying tag for CollectedReward
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct CollectedRewardsTag();
 impl CommitableHashTag for CollectedRewardsTag {
@@ -906,6 +913,7 @@ impl CommitableHashTag for CollectedRewardsTag {
     }
 }
 
+/// Hash for set Merkle tree for all of the previously-collected rewards
 pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
 
 /// The working state of the ledger
