@@ -816,17 +816,16 @@ pub mod state_comm {
 }
 
 /// PubKey used for stake table key
-#[tagged_blob("STAKING_KEY")] 
+#[tagged_blob("STAKING_KEY")]
 #[ser_test(random(random_for_test))]
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct StakingKey(PubKey);
 
 impl StakingKey {
-    #[cfg(test)] 
+    #[cfg(test)]
     fn random_for_test(_rng: &mut rand_chacha::ChaChaRng) -> Self {
         StakingKey(PubKey::from_private(&PrivKey::generate()))
     }
-    
 }
 
 // cannot derive CanonicalSerialize because PubKey does not implement it
@@ -890,7 +889,6 @@ impl CommitableHashTag for StakeTableCommitmentTag {
         "Stake Table Commitment"
     }
 }
-
 
 pub type StakeTableCommitmentsHash =
     CommitableHash<StakeTableCommitmentKey, StakeTableCommitmentValue, StakeTableCommitmentTag>;
