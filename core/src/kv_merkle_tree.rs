@@ -253,7 +253,7 @@ where
 {
     fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
         self.terminal_node.serialize(&mut writer)?;
-        writer.write_all(&[self.path.len() as u8])?; // as u8, path are short
+        writer.write_all(&[self.path.len() as u8])?; // as u8, paths are short
         for node in self.path.iter() {
             writer.write_all(&[node.len() as u8])?; // as u8, arity is short
             for digest in node {

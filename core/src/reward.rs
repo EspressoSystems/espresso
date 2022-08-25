@@ -15,10 +15,11 @@ use ark_serialize::*;
 use core::hash::Hash;
 use jf_utils::tagged_blob;
 
+/// Reward Collection Transaction Note
 #[tagged_blob("RewardTxn")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 pub struct CollectRewardNote {
-    block_number: u64, //TODO (fernando) what's the correct type for it?
+    block_number: u64,
     merkle_proof: crate::kv_merkle_tree::KVMerkleProof<CollectedRewardsHash>,
     blind_factor: jf_cap::BaseField,
 }
