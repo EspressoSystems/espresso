@@ -66,9 +66,11 @@ where
                     return Ok(vec![]);
                 }
                 let iter = state.get_nth_event_iter(first);
-                let count = req.integer_param("count")?;
-                let events = iter.take(count);
-                Ok(events.collect())
+                if let Some(count) = req.opt_integer_param("count")? {
+                    Ok(iter.take(count).collect())
+                } else {
+                    Ok(iter.collect())
+                }
             }
             .boxed()
         })?

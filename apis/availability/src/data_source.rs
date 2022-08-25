@@ -22,9 +22,9 @@ pub const H_256: usize = 32;
 
 /// Trait to be implemented on &'a DataSource for lifetime management purposes
 pub trait AvailabilityDataSource {
-    type BlockIterType: Iterator;
-    type StateIterType: Iterator;
-    type QCertIterType: Iterator;
+    type BlockIterType: Iterator<Item = BlockQueryData>;
+    type StateIterType: Iterator<Item = StateQueryData>;
+    type QCertIterType: Iterator<Item = QuorumCertificate<H_256>>;
     fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType;
     fn get_nth_state_iter(&self, n: usize) -> Self::StateIterType;
     fn get_nth_qcert_iter(&self, n: usize) -> Self::QCertIterType;
