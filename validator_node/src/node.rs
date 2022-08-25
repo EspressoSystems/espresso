@@ -971,10 +971,7 @@ mod tests {
     use crate::api::EspressoError;
     use crate::update_query_data_source::EventProcessedHandler;
     use async_std::task::block_on;
-    use espresso_availability_api::{
-        data_source::UpdateAvailabilityData,
-        query_data::{BlockQueryData, StateQueryData},
-    };
+    use espresso_availability_api::data_source::{BlockAndAssociated, UpdateAvailabilityData};
     use espresso_catchup_api::data_source::UpdateCatchUpData;
     use espresso_core::{
         testing::{MultiXfrRecordSpec, MultiXfrTestState, TestTxSpec, TxnPrintInfo},
@@ -982,7 +979,7 @@ mod tests {
     };
     use espresso_metastate_api::data_source::UpdateMetaStateData;
     use espresso_status_api::data_source::UpdateStatusData;
-    use hotshot::data::{QuorumCertificate, VecQuorumCertificate};
+    use hotshot::data::VecQuorumCertificate;
     use jf_cap::{MerkleLeafProof, MerkleTree, Signature};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
@@ -1137,12 +1134,7 @@ mod tests {
     impl UpdateAvailabilityData for TestOnlyMockAllStores {
         type Error = EspressoError;
 
-        fn append_blocks(
-            &mut self,
-            _blocks: &mut Vec<BlockQueryData>,
-            _states: &mut Vec<StateQueryData>,
-            _qcerts: &mut Vec<QuorumCertificate<H_256>>,
-        ) -> Result<(), Self::Error> {
+        fn append_blocks(&mut self, _blocks: Vec<BlockAndAssociated>) -> Result<(), Self::Error> {
             Ok(())
         }
     }
@@ -1151,7 +1143,7 @@ mod tests {
         type Error = EspressoError;
         fn append_events(
             &mut self,
-            _events: &mut Vec<LedgerEvent<EspressoLedger>>,
+            _events: Vec<Option<LedgerEvent<EspressoLedger>>>,
         ) -> Result<(), Self::Error> {
             Ok(())
         }

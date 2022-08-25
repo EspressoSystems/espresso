@@ -161,11 +161,11 @@ where
                             .collect();
 
                         {
-                            let mut events = vec![LedgerEvent::Commit {
+                            let mut events = vec![Some(LedgerEvent::Commit {
                                 block: block.clone(),
                                 block_id: block_index as u64,
                                 state_comm: self.validator_state.commit(),
-                            }];
+                            })];
 
                             // Get a Merkle tree with in-memory paths for each output in this block.
                             for output in block
@@ -203,7 +203,7 @@ where
                                     signature: signature.clone(),
                                 }
                                 .hash();
-                                events.push(LedgerEvent::Memos {
+                                events.push(Some(LedgerEvent::Memos {
                                     outputs: izip!(
                                         memos.clone(),
                                         txn.output_commitments(),
@@ -217,12 +217,12 @@ where
                                         hash,
                                         txn.kind(),
                                     )),
-                                })
+                                }))
                             }
 
                             let mut catchup_store = block_on(self.catchup_store.write());
                             event_index = catchup_store.event_count() as u64;
-                            if let Err(e) = catchup_store.append_events(&mut events) {
+                            if let Err(e) = catchup_store.append_events(events) {
                                 tracing::warn!("append_events returned error {}", e);
                             }
                         }
@@ -231,30 +231,30 @@ where
                                 qcert.block_hash.try_into().unwrap_or([0u8; H_256]);
                             let block_hash = BlockHash::<H_256>::from_array(qcert_block_hash);
                             let mut availability_store = block_on(self.availability_store.write());
-                            if let Err(e) = availability_store.append_blocks(
-                                &mut vec![BlockQueryData {
+                            if let Err(e) = availability_store.append_blocks(vec![(
+                                Some(BlockQueryData {
                                     raw_block: block.clone(),
                                     block_hash: BlockCommitment(block.block.commit()),
                                     block_id: block_index as u64,
                                     records_from,
                                     record_count: uids.len() as u64,
                                     txn_hashes,
-                                }],
-                                &mut vec![StateQueryData {
+                                }),
+                                Some(StateQueryData {
                                     state: state.clone(),
                                     commitment: state.commit(),
                                     block_id: block_index as u64,
                                     event_index,
-                                }],
-                                &mut vec![QuorumCertificate {
+                                }),
+                                Some(QuorumCertificate {
                                     block_hash,
                                     leaf_hash: LeafHash::default(),
                                     view_number: qcert.view_number,
                                     stage: qcert.stage,
                                     signatures: qcert.signatures,
                                     genesis: qcert.genesis,
-                                }],
-                            ) {
+                                }),
+                            )]) {
                                 tracing::warn!("append_blocks returned error {}", e);
                             }
                         }

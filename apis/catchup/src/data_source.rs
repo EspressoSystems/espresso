@@ -17,7 +17,7 @@ use std::error::Error;
 use std::fmt::Debug;
 
 pub trait CatchUpDataSource {
-    type EventIterType: Iterator<Item = LedgerEvent<EspressoLedger>>;
+    type EventIterType: Iterator<Item = Option<LedgerEvent<EspressoLedger>>>;
 
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;
@@ -34,6 +34,6 @@ pub trait UpdateCatchUpData {
 
     fn append_events(
         &mut self,
-        events: &mut Vec<LedgerEvent<EspressoLedger>>,
+        events: Vec<Option<LedgerEvent<EspressoLedger>>>,
     ) -> Result<(), Self::Error>;
 }

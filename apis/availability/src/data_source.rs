@@ -20,11 +20,17 @@ use std::fmt::Debug;
 // this goes away in the very near future, and I don't want a dangling dependency when we only need the types.
 pub const H_256: usize = 32;
 
+pub type BlockAndAssociated = (
+    Option<BlockQueryData>,
+    Option<StateQueryData>,
+    Option<QuorumCertificate<H_256>>,
+);
+
 /// Trait to be implemented on &'a DataSource for lifetime management purposes
 pub trait AvailabilityDataSource {
-    type BlockIterType: Iterator<Item = BlockQueryData>;
-    type StateIterType: Iterator<Item = StateQueryData>;
-    type QCertIterType: Iterator<Item = QuorumCertificate<H_256>>;
+    type BlockIterType: Iterator<Item = Option<BlockQueryData>>;
+    type StateIterType: Iterator<Item = Option<StateQueryData>>;
+    type QCertIterType: Iterator<Item = Option<QuorumCertificate<H_256>>>;
     fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType;
     fn get_nth_state_iter(&self, n: usize) -> Self::StateIterType;
     fn get_nth_qcert_iter(&self, n: usize) -> Self::QCertIterType;
@@ -38,10 +44,5 @@ pub trait AvailabilityDataSource {
 
 pub trait UpdateAvailabilityData {
     type Error: Error + Debug;
-    fn append_blocks(
-        &mut self,
-        blocks: &mut Vec<BlockQueryData>,
-        states: &mut Vec<StateQueryData>,
-        qcerts: &mut Vec<QuorumCertificate<H_256>>,
-    ) -> Result<(), Self::Error>;
+    fn append_blocks(&mut self, blocks: Vec<BlockAndAssociated>) -> Result<(), Self::Error>;
 }

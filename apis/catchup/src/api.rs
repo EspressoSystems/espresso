@@ -97,7 +97,7 @@ where
                     .map(Ok)
                     .chain(receiver.filter_map(move |(i, e)| async move {
                         if i >= first {
-                            Some(Ok(e))
+                            Some(Ok(Some(e)))
                         } else {
                             None
                         }
