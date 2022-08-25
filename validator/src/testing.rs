@@ -11,8 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    full_node_mem_data_source::QueryData, gen_keys, init_validator, init_web_server, ConsensusOpt,
-    GenesisState, Node, NodeOpt, MINIMUM_NODES,
+    gen_keys, init_validator, init_web_server, open_data_source, ConsensusOpt, GenesisState, Node,
+    NodeOpt, MINIMUM_NODES,
 };
 use address_book::store::FileStore;
 use async_std::task::{block_on, spawn, JoinHandle};
@@ -191,16 +191,14 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             let mut node_opt = NodeOpt {
                 store_path: Some(store_path),
                 nonbootstrap_base_port: base_port as usize,
-                next_view_timeout: Duration::from_secs(10 * 60).into(),
+                next_view_timeout: Duration::from_secs(10 * 60),
                 ..NodeOpt::default()
             };
             if i == 0 {
                 node_opt.full = true;
                 node_opt.web_server_port = pick_unused_port().unwrap();
             }
-            let data_source =
-                async_std::sync::Arc::new(async_std::sync::RwLock::new(QueryData::new()));
-
+            let data_source = open_data_source(&mut node_opt, i);
             let node = init_validator(
                 &node_opt,
                 &consensus_opt,
