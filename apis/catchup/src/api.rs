@@ -66,11 +66,9 @@ where
                     return Ok(vec![]);
                 }
                 let iter = state.get_nth_event_iter(first);
-                let mut events = iter.as_ref();
-                if let Some(count) = req.opt_integer_param("count")? {
-                    events = &events[..count];
-                }
-                Ok(events.to_vec())
+                let count = req.integer_param("count")?;
+                let events = iter.take(count);
+                Ok(events.collect())
             }
             .boxed()
         })?
@@ -83,7 +81,7 @@ where
                             let prefix = if first >= state.len() {
                                 vec![]
                             } else {
-                                state.get_nth_event_iter(first).as_ref().to_vec()
+                                state.get_nth_event_iter(first).collect()
                             };
                             (prefix, state.subscribe())
                         }

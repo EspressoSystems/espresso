@@ -2228,6 +2228,7 @@ version = "0.1.0"
 dependencies = [
  "commit",
  "espresso-core",
+ "hotshot-types",
  "jf-cap",
  "serde",
 ]

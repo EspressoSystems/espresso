@@ -17,7 +17,7 @@ use std::error::Error;
 use std::fmt::Debug;
 
 pub trait CatchUpDataSource {
-    type EventIterType: AsRef<[LedgerEvent<EspressoLedger>]>;
+    type EventIterType: Iterator<Item = LedgerEvent<EspressoLedger>>;
 
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;

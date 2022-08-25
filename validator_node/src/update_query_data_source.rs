@@ -21,7 +21,9 @@ use commit::Committable;
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
 use espresso_core::state::{BlockCommitment, TransactionCommitment, ValidatorState};
 use futures::task::SpawnError;
+use hotshot::data::{BlockHash, LeafHash, QuorumCertificate};
 use hotshot::types::EventType;
+use hotshot::H_256;
 use seahorse::events::LedgerEvent;
 
 use crate::node::{ConsensusEvent, EventStream};
@@ -31,6 +33,7 @@ use espresso_metastate_api::data_source::UpdateMetaStateData;
 use espresso_status_api::data_source::UpdateStatusData;
 use futures::StreamExt;
 use futures::{future::RemoteHandle, task::SpawnExt};
+use itertools::izip;
 
 pub trait UpdateQueryDataSourceTypes {
     type CU: UpdateCatchUpData + Sized + Send + Sync;
@@ -87,16 +90,13 @@ where
 
     fn update(&mut self, event: impl ConsensusEvent) {
         use EventType::*;
-        if let Decide {
-            block,
-            state,
-            qcs: _,
-        } = event.into_event()
-        {
+        if let Decide { block, state, qcs } = event.into_event() {
             let mut num_txns = 0usize;
             let mut cumulative_size = 0usize;
 
-            for (mut block, state) in block.iter().cloned().zip(state.iter()).rev() {
+            for (mut block, state, qcert) in
+                izip!(block.iter().cloned(), state.iter(), qcs.iter().cloned()).rev()
+            {
                 // A block has been committed. Update our mirror of the ValidatorState by applying
                 // the new block, and generate a Commit event.
 
@@ -162,6 +162,9 @@ where
                             }
                         }
                         {
+                            let qcert_block_hash: [u8; H_256] =
+                                qcert.block_hash.try_into().unwrap_or([0u8; H_256]);
+                            let block_hash = BlockHash::<H_256>::from_array(qcert_block_hash);
                             let mut availability_store = block_on(self.availability_store.write());
                             if let Err(e) = availability_store.append_blocks(
                                 &mut vec![BlockQueryData {
@@ -177,6 +180,14 @@ where
                                     commitment: state.commit(),
                                     block_id: block_index as u64,
                                     event_index,
+                                }],
+                                &mut vec![QuorumCertificate {
+                                    block_hash,
+                                    leaf_hash: LeafHash::default(),
+                                    view_number: qcert.view_number,
+                                    stage: qcert.stage,
+                                    signatures: qcert.signatures,
+                                    genesis: qcert.genesis,
                                 }],
                             ) {
                                 tracing::warn!("append_blocks returned error {}", e);

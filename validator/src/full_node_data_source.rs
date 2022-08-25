@@ -15,8 +15,8 @@ use std::convert::From;
 use std::path::Path;
 
 use atomic_store::{
-    load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
-    RollingLog,
+    append_log::Iter as ALIter, load_store::BincodeLoadStore, AppendLog, AtomicStore,
+    AtomicStoreLoader, PersistenceError, RollingLog,
 };
 use espresso_availability_api::data_source::{AvailabilityDataSource, UpdateAvailabilityData};
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
@@ -26,6 +26,7 @@ use espresso_core::state::{BlockCommitment, SetMerkleProof, SetMerkleTree, Trans
 use espresso_metastate_api::data_source::{MetaStateDataSource, UpdateMetaStateData};
 use espresso_status_api::data_source::{StatusDataSource, UpdateStatusData};
 use espresso_status_api::query_data::ValidatorStatus;
+use hotshot::{data::QuorumCertificate, H_256};
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use seahorse::events::LedgerEvent;
@@ -33,20 +34,102 @@ use tracing::warn;
 use validator_node::api::EspressoError;
 use validator_node::node::QueryServiceError;
 
+// This should probably be taken from a passed-in configuration, and stored locally.
+const CACHED_BLOCKS_COUNT: usize = 50;
+const CACHED_EVENTS_COUNT: usize = 500;
+// const CACHED_NULLIFIERS_COUNT: usize = 50;
+
 pub struct QueryData {
+    cached_blocks_start: usize,
     blocks: Vec<BlockQueryData>,
     states: Vec<StateQueryData>,
+    qcerts: Vec<QuorumCertificate<H_256>>,
     index_by_block_hash: HashMap<BlockCommitment, u64>,
     index_by_txn_hash: HashMap<TransactionCommitment, (u64, u64)>,
+    index_by_last_record_id: BTreeMap<u64, u64>,
+    cached_events_start: usize,
     events: Vec<LedgerEvent<EspressoLedger>>,
     event_sender: async_channel::Sender<(usize, LedgerEvent<EspressoLedger>)>,
     event_receiver: async_channel::Receiver<(usize, LedgerEvent<EspressoLedger>)>,
     cached_nullifier_sets: BTreeMap<u64, SetMerkleTree>,
     node_status: ValidatorStatus,
-    state_storage: AtomicStore,
-    block_storage: AppendLog<BincodeLoadStore<(BlockQueryData, StateQueryData)>>,
+    query_storage: AtomicStore,
+    block_storage: AppendLog<BincodeLoadStore<BlockQueryData>>,
+    state_storage: AppendLog<BincodeLoadStore<StateQueryData>>,
+    qcert_storage: AppendLog<BincodeLoadStore<QuorumCertificate<H_256>>>,
     event_storage: AppendLog<BincodeLoadStore<LedgerEvent<EspressoLedger>>>,
     status_storage: RollingLog<BincodeLoadStore<ValidatorStatus>>,
+}
+
+pub struct DynamicPersistenceIterator<'a, T, LogIter>
+where
+    LogIter: Iterator,
+{
+    index: usize,
+    slice_start: usize,
+    slice: &'a [T],
+    from_fs: LogIter,
+}
+
+impl<'a, T, LogIter> DynamicPersistenceIterator<'a, T, LogIter>
+where
+    LogIter: Iterator<Item = Result<T, PersistenceError>> + ExactSizeIterator,
+    T: Clone,
+{
+    fn impl_nth(&mut self, n: usize) -> Option<T> {
+        self.index += n;
+        let got = if self.index >= self.slice_start {
+            if self.index < self.slice_start + self.slice.len() {
+                self.slice.get(self.index - self.slice_start).cloned()
+            } else {
+                None
+            }
+        } else {
+            self.from_fs.nth(n).and_then(|res| res.ok())
+        };
+
+        self.index += 1;
+
+        got
+    }
+}
+
+impl<'a, T, LogIter> Iterator for DynamicPersistenceIterator<'a, T, LogIter>
+where
+    LogIter: Iterator<Item = Result<T, PersistenceError>> + ExactSizeIterator,
+    T: Clone,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.impl_nth(0)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.from_fs.len() - self.index;
+        (remaining, Some(remaining))
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.impl_nth(n)
+    }
+}
+
+fn dynamic_persistence_iter<T, LogIter>(
+    index: usize,
+    slice_start: usize,
+    slice: &[T],
+    from_fs: LogIter,
+) -> DynamicPersistenceIterator<T, LogIter>
+where
+    LogIter: Iterator<Item = Result<T, PersistenceError>> + ExactSizeIterator,
+{
+    DynamicPersistenceIterator {
+        index,
+        slice_start,
+        slice,
+        from_fs,
+    }
 }
 
 // We implement [AvailabilityDataSource] for `&'a QueryData`, not `QueryData`, so that we can name
@@ -56,14 +139,43 @@ pub struct QueryData {
 //      type BlockIterType<'a> = &'a [BlockQueryData];
 //      fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType<'_>;
 impl<'a> AvailabilityDataSource for &'a QueryData {
-    type BlockIterType = &'a [BlockQueryData];
-    type StateIterType = &'a [StateQueryData];
+    type BlockIterType = DynamicPersistenceIterator<
+        'a,
+        BlockQueryData,
+        ALIter<'a, BincodeLoadStore<BlockQueryData>>,
+    >;
+    type StateIterType = DynamicPersistenceIterator<
+        'a,
+        StateQueryData,
+        ALIter<'a, BincodeLoadStore<StateQueryData>>,
+    >;
+
+    type QCertIterType = DynamicPersistenceIterator<
+        'a,
+        QuorumCertificate<H_256>,
+        ALIter<'a, BincodeLoadStore<QuorumCertificate<H_256>>>,
+    >;
 
     fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType {
-        self.blocks.split_at(n).1
+        let mut iter = self.block_storage.iter();
+        if n > 0 {
+            iter.nth(n - 1);
+        }
+        dynamic_persistence_iter(n, self.cached_blocks_start, &self.blocks, iter)
     }
     fn get_nth_state_iter(&self, n: usize) -> Self::StateIterType {
-        self.states.split_at(n).1
+        let mut iter = self.state_storage.iter();
+        if n > 0 {
+            iter.nth(n - 1);
+        }
+        dynamic_persistence_iter(n, self.cached_blocks_start, &self.states, iter)
+    }
+    fn get_nth_qcert_iter(&self, n: usize) -> Self::QCertIterType {
+        let mut iter = self.qcert_storage.iter();
+        if n > 0 {
+            iter.nth(n - 1);
+        }
+        dynamic_persistence_iter(n, self.cached_blocks_start, &self.qcerts, iter)
     }
     fn get_block_index_by_hash(&self, hash: BlockCommitment) -> Option<u64> {
         self.index_by_block_hash.get(&hash).cloned()
@@ -72,16 +184,7 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
         self.index_by_txn_hash.get(&hash).cloned()
     }
     fn get_record_index_by_uid(&self, uid: u64) -> Option<(u64, u64, u64)> {
-        if let Ok(index) = self.blocks.binary_search_by(|bqd| {
-            if uid < bqd.records_from {
-                std::cmp::Ordering::Less
-            } else if uid >= bqd.records_from + bqd.record_count {
-                std::cmp::Ordering::Greater
-            } else {
-                std::cmp::Ordering::Equal
-            }
-        }) {
-            let block = &self.blocks[index];
+        let apply = |block: &BlockQueryData| {
             let mut remainder = uid - block.records_from;
             let mut got_txn_idx = None;
             for (txn_idx, txn) in block.raw_block.block.0.iter().enumerate() {
@@ -94,22 +197,63 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
                 }
             }
             if let Some(txn_idx) = got_txn_idx {
-                Some((index as u64, txn_idx, remainder))
+                Some((block.block_id, txn_idx, remainder))
             } else {
                 // This should never happen.
-                tracing::error!("QueryData::get_record_index_by_uid encountered bad state for uid {}; found block {} with uid range {}+{}, but transaction outputs did not match", uid, index, block.records_from, block.record_count);
+                tracing::error!("QueryData::get_record_index_by_uid encountered bad state for uid {}; found block {} with uid range {}+{}, but transaction outputs did not match", uid, block.block_id, block.records_from, block.record_count);
                 None
+            }
+        };
+
+        if let Some((_, &lower_bound)) = self.index_by_last_record_id.range(uid..).next() {
+            let lower_bound = lower_bound as usize;
+            if lower_bound >= self.cached_blocks_start {
+                if lower_bound >= self.cached_blocks_start + self.blocks.len() {
+                    return None;
+                }
+                apply(&self.blocks[lower_bound - self.cached_blocks_start])
+            } else {
+                let qd = self
+                    .block_storage
+                    .iter()
+                    .nth(lower_bound)?
+                    .map_err(|err| {
+                        warn!("{}", err);
+                        err
+                    })
+                    .ok()?;
+                apply(&qd)
             }
         } else {
             None
         }
     }
+
     fn get_record_merkle_tree_at_block_index(&self, n: usize) -> Option<MerkleTree> {
-        let state = &self.states[n].state;
-        MerkleTree::restore_from_frontier(
-            state.record_merkle_commitment,
-            &state.record_merkle_frontier,
-        )
+        let apply = |state: &StateQueryData| {
+            let state = &state.state;
+            MerkleTree::restore_from_frontier(
+                state.record_merkle_commitment,
+                &state.record_merkle_frontier,
+            )
+        };
+        if n >= self.cached_blocks_start {
+            if n >= self.cached_blocks_start + self.states.len() {
+                return None;
+            }
+            apply(&self.states[n - self.cached_blocks_start])
+        } else {
+            let qd = self
+                .state_storage
+                .iter()
+                .nth(n)?
+                .map_err(|err| {
+                    warn!("{}", err);
+                    err
+                })
+                .ok()?;
+            apply(&qd)
+        }
     }
 }
 
@@ -120,6 +264,7 @@ impl UpdateAvailabilityData for QueryData {
         &mut self,
         blocks: &mut Vec<BlockQueryData>,
         states: &mut Vec<StateQueryData>,
+        qcerts: &mut Vec<QuorumCertificate<H_256>>,
     ) -> Result<(), Self::Error> {
         if blocks.len() != states.len() {
             // this isn't really supposed to be possible; the calling code for this impl will be
@@ -133,24 +278,43 @@ impl UpdateAvailabilityData for QueryData {
             let block_index = (index + start_index) as u64;
             self.index_by_block_hash
                 .insert(block.block_hash, block_index);
+            if block.record_count > 0 {
+                self.index_by_last_record_id
+                    .insert(block.records_from + block.record_count - 1, block_index);
+            }
             for (index, txn_hash) in block.txn_hashes.iter().enumerate() {
                 self.index_by_txn_hash
                     .insert(*txn_hash, (block_index, index as u64));
             }
         }
-        blocks.iter().zip(states.iter()).for_each(|(block, state)| {
-            if let Err(e) = self
-                .block_storage
-                .store_resource(&(block.clone(), state.clone()))
-            {
+        blocks.iter().for_each(|block| {
+            if let Err(e) = self.block_storage.store_resource(block) {
+                warn!("Failed to store block {:?}: Error: {}", block, e);
+            }
+        });
+        states.iter().for_each(|state| {
+            if let Err(e) = self.state_storage.store_resource(state) {
+                warn!("Failed to store state {:?}: Error: {}", state, e);
+            }
+        });
+        qcerts.iter().for_each(|qcert| {
+            if let Err(e) = self.qcert_storage.store_resource(qcert) {
                 warn!(
-                    "Failed to store block {:?} and state {:?}: Error: {}",
-                    block, state, e
+                    "Failed to store QuorumCertificate {:?}: Error: {}",
+                    qcert, e
                 );
             }
         });
         self.blocks.append(blocks);
         self.states.append(states);
+        self.qcerts.append(qcerts);
+        if self.blocks.len() > CACHED_BLOCKS_COUNT {
+            let prune_by = self.blocks.len() - CACHED_BLOCKS_COUNT;
+            self.cached_blocks_start += prune_by;
+            self.blocks.drain(..prune_by);
+            self.states.drain(..prune_by);
+            self.qcerts.drain(..prune_by);
+        }
         Ok(())
     }
 }
@@ -162,12 +326,20 @@ impl UpdateAvailabilityData for QueryData {
 //      type EventIterType<'a> = &'a [LedgerEvent<EspressoLedger>];
 //      fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType<'_>;
 impl<'a> CatchUpDataSource for &'a QueryData {
-    type EventIterType = &'a [LedgerEvent<EspressoLedger>];
+    type EventIterType = DynamicPersistenceIterator<
+        'a,
+        LedgerEvent<EspressoLedger>,
+        ALIter<'a, BincodeLoadStore<LedgerEvent<EspressoLedger>>>,
+    >;
     fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType {
-        self.events.split_at(n).1
+        let mut iter = self.event_storage.iter();
+        if n > 0 {
+            iter.nth(n - 1);
+        }
+        dynamic_persistence_iter(n, self.cached_events_start, &self.events, iter)
     }
     fn len(&self) -> usize {
-        self.events.len()
+        self.events.len() + self.cached_events_start
     }
     fn is_empty(&self) -> bool {
         self.events.is_empty()
@@ -195,11 +367,16 @@ impl UpdateCatchUpData for QueryData {
                 .expect("unexpected failure when broadcasting event");
             self.events.push(e);
         }
+        if self.events.len() > CACHED_EVENTS_COUNT {
+            let prune_by = self.events.len() - CACHED_EVENTS_COUNT;
+            self.cached_events_start += prune_by;
+            self.events.drain(..prune_by);
+        }
         Ok(())
     }
 
     fn event_count(&self) -> usize {
-        self.events.len()
+        self.events.len() + self.cached_events_start
     }
 }
 
@@ -320,27 +497,35 @@ impl QueryData {
         let status_tag = format!("{}_status", key_tag);
         let mut loader = AtomicStoreLoader::create(store_path, key_tag)?;
         let block_storage = AppendLog::create(&mut loader, Default::default(), &blocks_tag, 1024)?;
+        let state_storage = AppendLog::create(&mut loader, Default::default(), &blocks_tag, 1024)?;
+        let qcert_storage = AppendLog::create(&mut loader, Default::default(), &blocks_tag, 1024)?;
         let event_storage = AppendLog::create(&mut loader, Default::default(), &events_tag, 1024)?;
         let mut status_storage =
             RollingLog::create(&mut loader, Default::default(), &status_tag, 1024)?;
         // this should be loaded from a config setting...
         status_storage.set_retained_entries(STATUS_STORAGE_COUNT);
 
-        let state_storage = AtomicStore::open(loader)?;
+        let query_storage = AtomicStore::open(loader)?;
 
         let (event_sender, event_receiver) = async_channel::unbounded();
         Ok(QueryData {
+            cached_blocks_start: 0usize,
             blocks: Vec::new(),
             states: Vec::new(),
+            qcerts: Vec::new(),
             index_by_block_hash: HashMap::new(),
             index_by_txn_hash: HashMap::new(),
+            index_by_last_record_id: BTreeMap::new(),
+            cached_events_start: 0usize,
             events: Vec::new(),
             event_sender,
             event_receiver,
             cached_nullifier_sets: BTreeMap::new(),
             node_status: ValidatorStatus::default(),
-            state_storage,
+            query_storage,
             block_storage,
+            state_storage,
+            qcert_storage,
             event_storage,
             status_storage,
         })
@@ -353,16 +538,29 @@ impl QueryData {
         let status_tag = format!("{}_status", key_tag);
         let mut loader = AtomicStoreLoader::load(store_path, key_tag)?;
         let block_storage = AppendLog::load(&mut loader, Default::default(), &blocks_tag, 1024)?;
+        let state_storage = AppendLog::load(&mut loader, Default::default(), &blocks_tag, 1024)?;
+        let qcert_storage = AppendLog::load(&mut loader, Default::default(), &blocks_tag, 1024)?;
         let event_storage = AppendLog::load(&mut loader, Default::default(), &events_tag, 1024)?;
         let mut status_storage =
             RollingLog::load(&mut loader, Default::default(), &status_tag, 1024)?;
         // this should be loaded from a config setting...
         status_storage.set_retained_entries(STATUS_STORAGE_COUNT);
-        let state_storage = AtomicStore::open(loader)?;
+        let query_storage = AtomicStore::open(loader)?;
 
-        let (blocks, states): (Vec<BlockQueryData>, Vec<StateQueryData>) =
-            block_storage.iter().filter_map(|t| t.ok()).unzip();
+        let blocks: Vec<BlockQueryData> = block_storage.iter().filter_map(|t| t.ok()).collect();
+        let cached_blocks_start = core::cmp::max(blocks.len() - CACHED_BLOCKS_COUNT, 0);
+        let states: Vec<StateQueryData> = state_storage
+            .iter()
+            .skip(cached_blocks_start)
+            .filter_map(|t| t.ok())
+            .collect();
+        let qcerts: Vec<QuorumCertificate<H_256>> = qcert_storage
+            .iter()
+            .skip(cached_blocks_start)
+            .filter_map(|t| t.ok())
+            .collect();
         let mut index_by_txn_hash = HashMap::new();
+        let mut index_by_last_record_id = BTreeMap::new();
         let mut cached_nullifier_sets = BTreeMap::new();
         let mut running_nullifier_set = SetMerkleTree::default();
         let index_by_block_hash = blocks
@@ -383,26 +581,43 @@ impl QueryData {
                 if Self::calculate_sparse_cache(block.block_id, blocks.len() as u64) {
                     cached_nullifier_sets.insert(block.block_id, running_nullifier_set.clone());
                 }
+                if block.record_count > 0 {
+                    index_by_last_record_id
+                        .insert(block.records_from + block.record_count - 1, block.block_id);
+                }
                 (block.block_hash, block.block_id)
             })
             .collect();
+        let blocks = blocks.split_at(cached_blocks_start).1.to_vec();
 
         let (event_sender, event_receiver) = async_channel::unbounded();
-        let events = event_storage.iter().filter_map(|e| e.ok()).collect();
+        let events_loader = event_storage.iter();
+        let events_count = events_loader.len();
+        let cached_events_start = core::cmp::max(events_count - CACHED_EVENTS_COUNT, 0);
+        let events = events_loader
+            .skip(cached_events_start)
+            .filter_map(|ev| ev.ok())
+            .collect();
         let node_status = status_storage.load_latest()?;
 
         Ok(QueryData {
+            cached_blocks_start,
             blocks,
             states,
+            qcerts,
             index_by_block_hash,
             index_by_txn_hash,
+            index_by_last_record_id,
+            cached_events_start,
             events,
             event_sender,
             event_receiver,
             cached_nullifier_sets,
             node_status,
-            state_storage,
+            query_storage,
             block_storage,
+            state_storage,
+            qcert_storage,
             event_storage,
             status_storage,
         })
@@ -412,13 +627,19 @@ impl QueryData {
         if let Err(e) = self.block_storage.commit_version() {
             warn!("Failed to commit block storage: Error {}", e);
         }
+        if let Err(e) = self.state_storage.commit_version() {
+            warn!("Failed to commit state storage: Error {}", e);
+        }
+        if let Err(e) = self.qcert_storage.commit_version() {
+            warn!("Failed to commit qcert storage: Error {}", e);
+        }
         if let Err(e) = self.event_storage.commit_version() {
             warn!("Failed to commit event storage: Error {}", e);
         }
         if let Err(e) = self.status_storage.commit_version() {
             warn!("Failed to commit status storage: Error {}", e);
         }
-        if let Err(e) = self.state_storage.commit_version() {
+        if let Err(e) = self.query_storage.commit_version() {
             warn!("Failed to commit query state storage: Error {}", e);
         }
         if let Err(e) = self.status_storage.prune_file_entries() {

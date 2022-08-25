@@ -982,7 +982,7 @@ mod tests {
     };
     use espresso_metastate_api::data_source::UpdateMetaStateData;
     use espresso_status_api::data_source::UpdateStatusData;
-    use hotshot::data::VecQuorumCertificate;
+    use hotshot::data::{QuorumCertificate, VecQuorumCertificate};
     use jf_cap::{MerkleLeafProof, MerkleTree, Signature};
     use quickcheck::QuickCheck;
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
@@ -1141,6 +1141,7 @@ mod tests {
             &mut self,
             _blocks: &mut Vec<BlockQueryData>,
             _states: &mut Vec<StateQueryData>,
+            _qcerts: &mut Vec<QuorumCertificate<H_256>>,
         ) -> Result<(), Self::Error> {
             Ok(())
         }
