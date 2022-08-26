@@ -11,8 +11,11 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::kv_merkle_tree::KVMerkleProof;
-use crate::kvmt_instances::{BlockToViewCommittableHash, StakeKeyToStakeAmountCommittableHash};
-use crate::state::{CollectedRewardsHash, StakeTableCommitmentsHash, StakingKey};
+use crate::kvmt_instances::{
+    BlockToViewCommittableHash, CollectedRewardsHash, StakeKeyToStakeAmountCommittableHash,
+    StakeTableCommitmentsHash,
+};
+use crate::state::StakingKey;
 use crate::tree_hash::KVTreeHash;
 use ark_serialize::*;
 use core::hash::Hash;
