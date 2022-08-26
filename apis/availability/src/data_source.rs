@@ -12,16 +12,28 @@
 
 use crate::query_data::{BlockQueryData, StateQueryData};
 use espresso_core::state::{BlockCommitment, TransactionCommitment};
+use hotshot_types::data::QuorumCertificate;
 use jf_cap::MerkleTree;
 use std::error::Error;
 use std::fmt::Debug;
 
+// this goes away in the very near future, and I don't want a dangling dependency when we only need the types.
+pub const H_256: usize = 32;
+
+pub type BlockAndAssociated = (
+    Option<BlockQueryData>,
+    Option<StateQueryData>,
+    Option<QuorumCertificate<H_256>>,
+);
+
 /// Trait to be implemented on &'a DataSource for lifetime management purposes
 pub trait AvailabilityDataSource {
-    type BlockIterType: AsRef<[BlockQueryData]>;
-    type StateIterType: AsRef<[StateQueryData]>;
+    type BlockIterType: Iterator<Item = Option<BlockQueryData>>;
+    type StateIterType: Iterator<Item = Option<StateQueryData>>;
+    type QCertIterType: Iterator<Item = Option<QuorumCertificate<H_256>>>;
     fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType;
     fn get_nth_state_iter(&self, n: usize) -> Self::StateIterType;
+    fn get_nth_qcert_iter(&self, n: usize) -> Self::QCertIterType;
     fn get_block_index_by_hash(&self, hash: BlockCommitment) -> Option<u64>;
     fn get_txn_index_by_hash(&self, hash: TransactionCommitment) -> Option<(u64, u64)>;
     fn get_record_index_by_uid(&self, uid: u64) -> Option<(u64, u64, u64)>; // None if OOB
@@ -32,9 +44,5 @@ pub trait AvailabilityDataSource {
 
 pub trait UpdateAvailabilityData {
     type Error: Error + Debug;
-    fn append_blocks(
-        &mut self,
-        blocks: &mut Vec<BlockQueryData>,
-        states: &mut Vec<StateQueryData>,
-    ) -> Result<(), Self::Error>;
+    fn append_blocks(&mut self, blocks: Vec<BlockAndAssociated>) -> Result<(), Self::Error>;
 }
