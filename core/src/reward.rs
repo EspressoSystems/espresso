@@ -30,30 +30,21 @@ use jf_utils::tagged_blob;
 #[tagged_blob("RewardTxn")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 pub struct CollectRewardNote {
+    /// block number of reward claim
     block_number: u64,
+    /// Blinding factor for reward record commitment on CAP native asset
     blind_factor: BlindFactor,
+    /// Address that owns the reward
     cap_address: UserAddress,
+    /// Reward amount
     reward_amount: Amount,
-    vrf_witness: VrfWitness,
+    /// Staking `pub_key`, `view` number and a proof that staking key was selected for committee election on `view`
+    vrf_witness_info: VrfWitness,
+    /// Auxiliary info and proof of validity for reward
     auxiliary_info: RewardNoteAuxInfo,
 }
 
 impl CollectRewardNote {
-    /*
-    #[cfg(test)]
-    fn random_for_test(rng: &mut rand_chacha::ChaChaRng) -> Self {
-        let user_key = UserPubKey::default();
-
-        CollectRewardNote {
-           block_number: 0,
-           blind_factor: BlindFactor::rand(rng),
-           cap_address: user_key.address(),
-           reward_amount: Amount::default(),
-           vrf_witness: VrfWitness::random_for_test(rng);
-           auxiliary_info: RewardNoteAuxInfo::random_for_test(rng)
-       }
-    }
-    */
     pub(crate) fn output_commitment(&self) -> RecordCommitment {
         RecordCommitment::from(&self.output_opening())
     }
@@ -73,30 +64,34 @@ impl CollectRewardNote {
 #[ser_test(random(random_for_test))]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 struct VrfWitness {
+    /// Staking public key
     staking_key: StakingKey,
+    /// View number for wich the key was elected
     view_number: u64,
-    // proof TODO
+    /// amount of stake on reward to be claimed block
+    stake_amount: u64, /*
+                       /// VRF Proof
+                       proof:
+                       */
 }
 
-impl VrfWitness {
-    #[cfg(test)]
-    fn random_for_test(_rng: &mut rand_chacha::ChaChaRng) -> Self {
-        let staking_key =
-            <crate::PubKey as hotshot_types::traits::signature_key::SignatureKey>::from_private(
-                &crate::PrivKey::generate(),
-            );
-        VrfWitness {
-            staking_key: StakingKey(staking_key),
-            view_number: 0,
-        }
-    }
-}
-
+/// Auxiliary info and proof for CollectRewardNote
+///  * Stake table commitment `comm` on `block_number`
+///  * `pub_key` is eligible for reward
+///  * * Proof that block was produced on view `view`
+///  * * Proof `comm` is valid commitment for `block_number`
+///  * * Proof for `stake_amount` for `pub_key` on `block_number`
+///  *  Proof that reward hasn't been collected
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 struct RewardNoteAuxInfo {
-    block_number_stake_table_commitment: <StakeTableCommitmentsHash as KVTreeHash>::Digest,
+    /// Stake table commmitment for the block number reward
+    stake_table_commitment: <StakeTableCommitmentsHash as KVTreeHash>::Digest,
+    /// Proof for view number matches block number
     block_number_to_view_proof: KVMerkleProof<BlockToViewCommittableHash>,
+    /// Proof that reward hasn't been collected
     uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+    /// Proof for stake_table_commitment
     block_number_to_stake_table_commitment: KVMerkleProof<StakeTableCommitmentsHash>,
-    staking_key_to_staked_amount: KVMerkleProof<StakeKeyToStakeAmountCommittableHash>,
+    /// Proof for stake_amount for staking key on that block number
+    staking_key_to_stake_amount: KVMerkleProof<StakeKeyToStakeAmountCommittableHash>,
 }
