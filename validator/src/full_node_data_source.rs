@@ -589,7 +589,6 @@ impl QueryData {
         status_storage.set_retained_entries(STATUS_STORAGE_COUNT);
         let query_storage = AtomicStore::open(loader)?;
 
-        let blocks: Vec<BlockQueryData> = block_storage.iter().filter_map(|t| t.ok()).collect();
         let stored_blocks_len = block_storage.iter().len();
         let cached_blocks_start = if stored_blocks_len > CACHED_BLOCKS_COUNT {
             stored_blocks_len - CACHED_BLOCKS_COUNT
@@ -623,11 +622,12 @@ impl QueryData {
         let mut running_nullifier_set = SetMerkleTree::default();
         let index_by_block_hash = block_storage
             .iter()
-            .filter_map(|res: Result<BlockQueryData, PersistenceError>| {
-                if let Err(e) = res {
+            .filter_map(|res: Result<BlockQueryData, PersistenceError>| match res {
+                Err(e) => {
                     warn!("failed to load block. Error: {}", e);
                     None
-                } else if let Ok(block) = res {
+                }
+                Ok(block) => {
                     block
                         .txn_hashes
                         .iter()
@@ -640,7 +640,10 @@ impl QueryData {
                             running_nullifier_set.insert(n);
                         }
                     });
-                    if Self::calculate_sparse_cache(block.block_id, blocks.len() as u64) {
+                    if Self::calculate_sparse_cache(
+                        block.block_id,
+                        block_storage.iter().len() as u64,
+                    ) {
                         cached_nullifier_sets.insert(block.block_id, running_nullifier_set.clone());
                     }
                     if block.record_count > 0 {
@@ -648,8 +651,6 @@ impl QueryData {
                             .insert(block.records_from + block.record_count - 1, block.block_id);
                     }
                     Some((block.block_hash, block.block_id))
-                } else {
-                    None
                 }
             })
             .collect();
