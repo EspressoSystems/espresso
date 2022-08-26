@@ -17,6 +17,7 @@ use crate::tree_hash::*;
 use ark_serialize::*;
 use core::fmt::Debug;
 use core::mem;
+use espresso_macros::*;
 use generic_array::{arr::AddLength, ArrayLength, GenericArray};
 use serde::{Deserialize, Serialize};
 use typenum::{Unsigned, U1};
@@ -127,6 +128,7 @@ where
 
 /// Terminal nodes in a KVMT are either a leaf or an empty subtree
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[ser_test(random(random_for_test), serde(false), types(test_structs::TestKVHash))]
 pub enum KVMerkleTerminalNode<KVHash>
 where
     KVHash: KVTreeHash + Clone,
@@ -231,8 +233,44 @@ where
     }
 }
 
+#[cfg(test)]
+mod test_structs {
+    use crate::state::{CommitableHash, CommitableHashTag, KVMerkleProof, KVMerkleTerminalNode};
+    use crate::tree_hash::KVTreeHash;
+    use generic_array::arr;
+    use serde::{Deserialize, Serialize};
+    #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
+    pub(crate) struct TestTag();
+    impl CommitableHashTag for TestTag {
+        fn commitment_diversifier() -> &'static str {
+            "TestTag"
+        }
+    }
+    pub(crate) type TestKVHash = CommitableHash<u64, u64, TestTag>;
+
+    impl KVMerkleTerminalNode<TestKVHash> {
+        pub(crate) fn random_for_test(_: &mut rand_chacha::ChaChaRng) -> Self {
+            KVMerkleTerminalNode::Leaf {
+                height: 3,
+                key: 0,
+                value: 1,
+            }
+        }
+    }
+    impl KVMerkleProof<TestKVHash> {
+        pub(crate) fn random_for_test(rng: &mut rand_chacha::ChaChaRng) -> Self {
+            let array1 = arr![<TestKVHash as KVTreeHash>::Digest; <TestKVHash as KVTreeHash>::hash_leaf(10,20)];
+            let array2 = arr![<TestKVHash as KVTreeHash>::Digest; <TestKVHash as KVTreeHash>::hash_leaf(100,200)];
+            KVMerkleProof {
+                terminal_node: KVMerkleTerminalNode::random_for_test(rng),
+                path: vec![array1, array2],
+            }
+        }
+    }
+}
 /// Structure for proofs in the KVMT
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[ser_test(random(random_for_test), serde(false), types(test_structs::TestKVHash))]
 pub struct KVMerkleProof<KVHash>
 where
     KVHash: KVTreeHash,
@@ -264,7 +302,7 @@ where
     }
 
     fn serialized_size(&self) -> usize {
-        let mut size = self.terminal_node.serialized_size() + 1 + self.path.len();
+        let mut size = self.terminal_node.serialized_size() + 1;
         for node in self.path.iter() {
             size += 1;
             for e in node {

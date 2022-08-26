@@ -830,7 +830,7 @@ pub mod state_comm {
 #[tagged_blob("STAKING_KEY")]
 #[ser_test(random(random_for_test))]
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
-pub struct StakingKey(PubKey);
+pub struct StakingKey(pub(crate) PubKey);
 
 impl StakingKey {
     #[cfg(test)]

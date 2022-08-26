@@ -19,6 +19,7 @@ use crate::state::StakingKey;
 use crate::tree_hash::KVTreeHash;
 use ark_serialize::*;
 use core::hash::Hash;
+use espresso_macros::ser_test;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::structs::{
     Amount, AssetDefinition, BlindFactor, FreezeFlag, RecordCommitment, RecordOpening,
@@ -38,6 +39,21 @@ pub struct CollectRewardNote {
 }
 
 impl CollectRewardNote {
+    /*
+    #[cfg(test)]
+    fn random_for_test(rng: &mut rand_chacha::ChaChaRng) -> Self {
+        let user_key = UserPubKey::default();
+
+        CollectRewardNote {
+           block_number: 0,
+           blind_factor: BlindFactor::rand(rng),
+           cap_address: user_key.address(),
+           reward_amount: Amount::default(),
+           vrf_witness: VrfWitness::random_for_test(rng);
+           auxiliary_info: RewardNoteAuxInfo::random_for_test(rng)
+       }
+    }
+    */
     pub(crate) fn output_commitment(&self) -> RecordCommitment {
         RecordCommitment::from(&self.output_opening())
     }
@@ -54,11 +70,26 @@ impl CollectRewardNote {
 }
 
 #[tagged_blob("VrfWitness")]
+#[ser_test(random(random_for_test))]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 struct VrfWitness {
     staking_key: StakingKey,
     view_number: u64,
     // proof TODO
+}
+
+impl VrfWitness {
+    #[cfg(test)]
+    fn random_for_test(_rng: &mut rand_chacha::ChaChaRng) -> Self {
+        let staking_key =
+            <crate::PubKey as hotshot_types::traits::signature_key::SignatureKey>::from_private(
+                &crate::PrivKey::generate(),
+            );
+        VrfWitness {
+            staking_key: StakingKey(staking_key),
+            view_number: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
