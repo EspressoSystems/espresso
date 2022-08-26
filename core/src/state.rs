@@ -56,11 +56,10 @@ use std::sync::Arc;
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-
 /// A transaction tht can be either a CAP transaction or a collect reward transaction
 pub enum EspressoTransaction {
     CAP(TransactionNote),
-    Reward(CollectRewardNote),
+    Reward(Box<CollectRewardNote>),
 }
 
 impl CanonicalSerialize for EspressoTransaction {
@@ -98,9 +97,9 @@ impl CanonicalDeserialize for EspressoTransaction {
             0 => Ok(Self::CAP(
                 <TransactionNote as CanonicalDeserialize>::deserialize(&mut r)?,
             )),
-            1 => Ok(Self::Reward(
+            1 => Ok(Self::Reward(Box::new(
                 <CollectRewardNote as CanonicalDeserialize>::deserialize(&mut r)?,
-            )),
+            ))),
             _ => Err(SerializationError::InvalidData),
         }
     }
@@ -1110,12 +1109,11 @@ impl ValidatorState {
             //TODO (fernando) verify CollectRewards
         }
         // assemble Block
-        let mut txns: Vec<_> = cap_txns.into_iter().map(EspressoTransaction::CAP).collect();
-        let mut reward_txns = reward_txns
+        let txns: Vec<_> = cap_txns
             .into_iter()
-            .map(EspressoTransaction::Reward)
+            .map(EspressoTransaction::CAP)
+            .chain(reward_txns.into_iter().map(EspressoTransaction::Reward))
             .collect();
-        txns.append(&mut reward_txns);
 
         Ok((Block(txns), proofs))
     }

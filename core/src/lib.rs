@@ -14,6 +14,7 @@
 pub mod committee;
 pub mod full_persistence;
 pub mod kv_merkle_tree;
+mod kvmt_instances;
 pub mod ledger;
 pub mod lw_persistence;
 pub mod reward;

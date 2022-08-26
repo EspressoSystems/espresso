@@ -18,6 +18,7 @@ use crate::util::canonical;
 use commit::{Commitment, Committable};
 use itertools::izip;
 use itertools::MultiUnzip;
+use jf_cap::structs::RecordOpening;
 use jf_cap::{
     keys::{ViewerKeyPair, ViewerPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
@@ -115,7 +116,15 @@ impl EspressoTransaction {
     pub fn output_commitments(&self) -> Vec<RecordCommitment> {
         match self {
             Self::CAP(txn) => txn.output_commitments(),
-            Self::Reward(_) => vec![],
+            Self::Reward(txn) => vec![txn.output_commitment()],
+        }
+    }
+
+    /// Retrieve transaction output openings
+    pub fn output_openings(&self) -> Option<Vec<RecordOpening>> {
+        match self {
+            Self::CAP(txn) => txn.output_openings(), // returns None
+            Self::Reward(txn) => Some(vec![txn.output_opening()]),
         }
     }
 
@@ -136,7 +145,7 @@ impl EspressoTransaction {
     pub fn output_len(&self) -> usize {
         match self {
             Self::CAP(txn) => txn.output_len(),
-            Self::Reward(_) => 0,
+            Self::Reward(_) => 1,
         }
     }
 
@@ -199,6 +208,10 @@ impl traits::Transaction for ElaboratedTransaction {
 
     fn output_len(&self) -> usize {
         self.txn.output_len()
+    }
+
+    fn output_openings(&self) -> Option<Vec<RecordOpening>> {
+        self.txn.output_openings()
     }
 
     fn hash(&self) -> Self::Hash {
