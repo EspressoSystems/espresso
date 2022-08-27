@@ -538,14 +538,14 @@ impl QueryData {
     pub fn new(store_path: &Path) -> Result<QueryData, PersistenceError> {
         let key_tag = "query_data_store";
         let blocks_tag = format!("{}_blocks", key_tag);
-        let state_tag = format!("{}_state", key_tag);
-        let qcert_tag = format!("{}_qcert", key_tag);
+        let states_tag = format!("{}_states", key_tag);
+        let qcerts_tag = format!("{}_qcerts", key_tag);
         let events_tag = format!("{}_events", key_tag);
         let status_tag = format!("{}_status", key_tag);
         let mut loader = AtomicStoreLoader::create(store_path, key_tag)?;
         let block_storage = AppendLog::create(&mut loader, Default::default(), &blocks_tag, 1024)?;
-        let state_storage = AppendLog::create(&mut loader, Default::default(), &state_tag, 1024)?;
-        let qcert_storage = AppendLog::create(&mut loader, Default::default(), &qcert_tag, 1024)?;
+        let state_storage = AppendLog::create(&mut loader, Default::default(), &states_tag, 1024)?;
+        let qcert_storage = AppendLog::create(&mut loader, Default::default(), &qcerts_tag, 1024)?;
         let event_storage = AppendLog::create(&mut loader, Default::default(), &events_tag, 1024)?;
         let mut status_storage =
             RollingLog::create(&mut loader, Default::default(), &status_tag, 1024)?;
@@ -579,14 +579,14 @@ impl QueryData {
     pub fn load(store_path: &Path) -> Result<QueryData, PersistenceError> {
         let key_tag = "query_data_store";
         let blocks_tag = format!("{}_blocks", key_tag);
-        let state_tag = format!("{}_state", key_tag);
-        let qcert_tag = format!("{}_qcert", key_tag);
+        let states_tag = format!("{}_states", key_tag);
+        let qcerts_tag = format!("{}_qcerts", key_tag);
         let events_tag = format!("{}_events", key_tag);
         let status_tag = format!("{}_status", key_tag);
         let mut loader = AtomicStoreLoader::load(store_path, key_tag)?;
         let block_storage = AppendLog::load(&mut loader, Default::default(), &blocks_tag, 1024)?;
-        let state_storage = AppendLog::load(&mut loader, Default::default(), &state_tag, 1024)?;
-        let qcert_storage = AppendLog::load(&mut loader, Default::default(), &qcert_tag, 1024)?;
+        let state_storage = AppendLog::load(&mut loader, Default::default(), &states_tag, 1024)?;
+        let qcert_storage = AppendLog::load(&mut loader, Default::default(), &qcerts_tag, 1024)?;
         let event_storage = AppendLog::load(&mut loader, Default::default(), &events_tag, 1024)?;
         let mut status_storage =
             RollingLog::load(&mut loader, Default::default(), &status_tag, 1024)?;
