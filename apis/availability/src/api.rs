@@ -10,7 +10,10 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::{data_source::AvailabilityDataSource, query_data::RecordQueryData};
+use crate::{
+    data_source::AvailabilityDataSource,
+    query_data::{BlockQueryData, RecordQueryData, StateQueryData},
+};
 use clap::Args;
 use derive_more::From;
 use espresso_core::state::{BlockCommitment, TransactionCommitment};
@@ -83,6 +86,18 @@ pub enum Error {
         txn_id: u64,
         output_index: u64,
     },
+
+    #[from(ignore)]
+    #[snafu(display("this server does not have block {}", block_id))]
+    MissingBlock {
+        block_id: u64,
+    },
+
+    #[from(ignore)]
+    #[snafu(display("this server does not have the state from block {}", block_id))]
+    MissingState {
+        block_id: u64,
+    },
 }
 
 impl Error {
@@ -95,6 +110,8 @@ impl Error {
             Self::InvalidBlockId { .. } => StatusCode::BadRequest,
             Self::InvalidTransactionId { .. } => StatusCode::BadRequest,
             Self::InvalidRecordId { .. } => StatusCode::BadRequest,
+            Self::MissingBlock { .. } => StatusCode::NotFound,
+            Self::MissingState { .. } => StatusCode::NotFound,
         }
     }
 }
@@ -106,7 +123,7 @@ impl Error {
 ///   returns the index
 /// * by its hash (a `TaggedBase64` parameter named `:hash`, usually prefixed by a literal `hash`
 ///   route segment) in which case we look up the hash in the hash-to-index table in `state`
-fn block_index<State>(req: &RequestParams, state: State) -> Result<usize, Error>
+fn block_index<State>(req: &RequestParams, state: State) -> Result<u64, Error>
 where
     State: AvailabilityDataSource,
 {
@@ -116,8 +133,30 @@ where
         let hash = req.blob_param("hash")?;
         Ok(state
             .get_block_index_by_hash(hash)
-            .context(UnknownBlockHashSnafu { hash })? as usize)
+            .context(UnknownBlockHashSnafu { hash })?)
     }
+}
+
+fn get_block<State>(state: State, block_id: u64) -> Result<BlockQueryData, Error>
+where
+    State: AvailabilityDataSource,
+{
+    state
+        .get_nth_block_iter(block_id as usize)
+        .next()
+        .context(InvalidBlockIdSnafu { block_id })?
+        .context(MissingBlockSnafu { block_id })
+}
+
+fn get_state<State>(state: State, block_id: u64) -> Result<StateQueryData, Error>
+where
+    State: AvailabilityDataSource,
+{
+    state
+        .get_nth_state_iter(block_id as usize)
+        .next()
+        .context(InvalidBlockIdSnafu { block_id })?
+        .context(MissingStateSnafu { block_id })
 }
 
 pub fn define_api<State>(options: &Options) -> Result<Api<State, Error>, ApiError>
@@ -140,42 +179,21 @@ where
         .get("getblock", |req, state| {
             async move {
                 let id = block_index(&req, state)?;
-                state
-                    .get_nth_block_iter(0)
-                    .as_ref()
-                    .get(id as usize)
-                    .context(InvalidBlockIdSnafu {
-                        block_id: id as u64,
-                    })
-                    .cloned()
+                get_block(state, id)
             }
             .boxed()
         })?
         .get("getstate", |req, state| {
             async move {
                 let id = block_index(&req, state)?;
-                state
-                    .get_nth_state_iter(0)
-                    .as_ref()
-                    .get(id)
-                    .context(InvalidBlockIdSnafu {
-                        block_id: id as u64,
-                    })
-                    .cloned()
+                get_state(state, id)
             }
             .boxed()
         })?
         .get("getstatecomm", |req, state| {
             async move {
                 let id = block_index(&req, state)?;
-                Ok(state
-                    .get_nth_state_iter(0)
-                    .as_ref()
-                    .get(id)
-                    .context(InvalidBlockIdSnafu {
-                        block_id: id as u64,
-                    })?
-                    .commitment)
+                Ok(get_state(state, id)?.commitment)
             }
             .boxed()
         })?
@@ -188,11 +206,7 @@ where
                 } else {
                     (req.integer_param("block_id")?, req.integer_param("txn_id")?)
                 };
-                let blocks = state.get_nth_block_iter(0);
-                let block = blocks
-                    .as_ref()
-                    .get(block_id as usize)
-                    .context(InvalidBlockIdSnafu { block_id })?;
+                let block = get_block(state, block_id)?;
                 block
                     .transaction(txn_id as usize)
                     .context(InvalidTransactionIdSnafu { block_id, txn_id })
@@ -213,11 +227,7 @@ where
                             req.integer_param("output_index")?,
                         )
                     };
-                let blocks = state.get_nth_block_iter(0);
-                let block = blocks
-                    .as_ref()
-                    .get(block_id as usize)
-                    .context(InvalidBlockIdSnafu { block_id })?;
+                let block = get_block(state, block_id)?;
                 let commitment = *block
                     .raw_block
                     .block

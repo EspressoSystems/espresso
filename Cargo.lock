@@ -2231,6 +2231,7 @@ dependencies = [
  "derive_more",
  "espresso-core",
  "futures",
+ "hotshot-types",
  "jf-cap",
  "serde",
  "snafu",
