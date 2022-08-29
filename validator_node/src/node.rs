@@ -484,19 +484,6 @@ impl FullState {
                                     );
                                 }
                             }
-                            /*
-                            block.proofs = block
-                                .block
-                                .0
-                                .iter()
-                                .map(|txn| {
-                                    txn.input_nullifiers()
-                                        .into_iter()
-                                        .map(|n| nullifier_proofs.contains(n).unwrap().1)
-                                        .collect()
-                                })
-                                .collect();
-                            */
 
                             // Notify subscribers of the new block.
                             self.send_event(LedgerEvent::Commit {

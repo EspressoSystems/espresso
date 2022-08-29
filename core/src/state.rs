@@ -26,7 +26,7 @@ pub use crate::tree_hash::*;
 pub use crate::util::canonical;
 pub use crate::PrivKey;
 
-use crate::kvmt_instances::{CollectedRewardsHash, StakeTableCommitmentsHash, StakeTableHash};
+use crate::stake_table::{CollectedRewardsHash, StakeTableCommitmentsHash, StakeTableHash};
 pub use crate::PubKey;
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;

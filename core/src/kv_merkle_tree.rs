@@ -19,6 +19,7 @@ use core::fmt::Debug;
 use core::mem;
 use espresso_macros::*;
 use generic_array::{arr::AddLength, ArrayLength, GenericArray};
+use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use typenum::{Unsigned, U1};
 
@@ -269,6 +270,7 @@ mod test_structs {
     }
 }
 /// Structure for proofs in the KVMT
+#[tagged_blob("KVMerkleProof")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[ser_test(random(random_for_test), serde(false), types(test_structs::TestKVHash))]
 pub struct KVMerkleProof<KVHash>
