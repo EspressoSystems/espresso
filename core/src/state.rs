@@ -41,6 +41,7 @@ use jf_cap::{
     errors::TxnApiError, structs::Nullifier, txn_batch_verify, MerkleCommitment, MerkleFrontier,
     MerkleLeafProof, MerkleTree, NodeValue, TransactionNote,
 };
+use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
 use serde::{Deserialize, Serialize};
@@ -1197,8 +1198,8 @@ impl ValidatorState {
         self.prev_block = BlockCommitment(txns.commit());
         let null_pfs = self.past_nullifiers.append_block(null_pfs)?;
 
-        let mut record_merkle_frontier = MerkleTree::restore_from_frontier(
-            self.record_merkle_commitment,
+        let mut record_merkle_builder = FilledMTBuilder::from_frontier(
+            &self.record_merkle_commitment,
             &self.record_merkle_frontier,
         )
         .expect("failed to restore MerkleTree from frontier");
@@ -1209,11 +1210,12 @@ impl ValidatorState {
             .iter()
             .flat_map(|x| x.output_commitments().into_iter())
         {
-            record_merkle_frontier.push(o.to_field_element());
+            record_merkle_builder.push(o.to_field_element());
             uids.push(uid);
             uid += 1;
-            assert_eq!(uid, record_merkle_frontier.num_leaves());
         }
+        let record_merkle_frontier = record_merkle_builder.build();
+        assert_eq!(uid, record_merkle_frontier.num_leaves());
 
         if self.past_record_merkle_roots.0.len() >= Self::HISTORY_SIZE {
             self.past_record_merkle_roots.0.pop_back();
