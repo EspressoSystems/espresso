@@ -1120,13 +1120,65 @@ impl ValidatorState {
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
     ) -> Result<(Vec<u64>, SetMerkleTree), ValidationError> {
-        // If the block successfully validates, and the nullifier
-        // proofs apply correctly, the remaining (mutating) operations
-        // cannot fail, as this would result in an inconsistent
-        // state. No operations after the first assignement to a
-        // member of self have a possible error; this must remain true
-        // if code changes.
         let (txns, null_pfs) = self.validate_block_check(now, txns, null_pfs)?;
+        // If the block successfully validates, and the nullifier proofs apply correctly, the
+        // remaining (mutating) operations cannot fail, as this would result in an inconsistent
+        // state. No operations in [apply] should fail if [validate_block_check] succeeded, hence
+        // the `unwrap`.
+        Ok(self.apply(now, txns, null_pfs).unwrap())
+    }
+
+    /// Updates the state based on the effects of a block.
+    ///
+    /// This method applies the same update that [validate_and_apply](Self::validate_and_apply)
+    /// would apply if the block is valid; however, this function does not perform validation of the
+    /// block. As such, it is much more efficient than
+    /// [validate_and_apply](Self::validate_and_apply), but it trusts the caller to provide a valid
+    /// block.
+    ///
+    /// If successful, returns
+    /// * the UIDs of the newly created records
+    /// * updated nullifier non-membership proofs for all of the nullifiers in `txns`, relative to
+    ///   the nullifier set at the time this function was invoked, in the form of a sparse
+    ///   reperesentation of a [SetMerkleTree]
+    ///
+    /// # Errors
+    /// This function may fail with any errors produced by
+    /// [validate_and_apply](Self::validate_and_apply). However, it is not guaranteed to catch any
+    /// such errors. It will only catch errors severe enough to make it impossible to compute the
+    /// udpate from `txns`. It skips many validity checks, and thus, given an invalid block,
+    /// [trust_and_apply](Self::trust_and_apply) may erroneously succeed where
+    /// [validate_and_apply](Self::validate_and_apply) would fail.
+    ///
+    /// # Panics
+    /// Panics if the record Merkle commitment is inconsistent with the record Merkle frontier.
+    pub fn trust_and_apply(
+        &mut self,
+        now: u64,
+        txns: Block,
+        null_pfs: Vec<Vec<SetMerkleProof>>,
+    ) -> Result<(Vec<u64>, SetMerkleTree), ValidationError> {
+        let mut proofs = vec![];
+        let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
+        for (pf, n) in null_pfs
+            .into_iter()
+            .zip(txns.0.iter())
+            .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.input_nullifiers().into_iter()))
+        {
+            let root = self
+                .past_nullifiers
+                .check_unspent(&recent_nullifiers, &pf, n)?;
+            proofs.push((n, pf, root));
+        }
+        self.apply(now, txns, proofs)
+    }
+
+    fn apply(
+        &mut self,
+        now: u64,
+        txns: Block,
+        null_pfs: Vec<(Nullifier, SetMerkleProof, set_hash::Hash)>,
+    ) -> Result<(Vec<u64>, SetMerkleTree), ValidationError> {
         let comm = self.commit();
         self.prev_commit_time = now;
         self.prev_block = BlockCommitment(txns.commit());

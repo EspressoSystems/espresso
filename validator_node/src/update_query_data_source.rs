@@ -111,145 +111,135 @@ where
                 )
                 .unwrap();
 
-                match self.validator_state.validate_and_apply(
-                    self.validator_state.prev_commit_time + 1,
-                    block.block.clone(),
-                    block.proofs.clone(),
-                ) {
-                    // We update our ValidatorState for each block committed by the HotShot event
-                    // source, so we shouldn't ever get out of sync.
-                    Err(_) => panic!("state is out of sync with validator"),
-                    Ok(_) if self.validator_state.commit() != state.commit() => {
-                        panic!("state is out of sync with validator")
+                // We are getting our event stream directly from a HotShot instance running in this
+                // process, so we can trust the events and use the much faster `trust_and_apply`
+                // instead of `validate_and_apply`.
+                let (uids, nullifier_proofs) = self
+                    .validator_state
+                    .trust_and_apply(
+                        self.validator_state.prev_commit_time + 1,
+                        block.block.clone(),
+                        block.proofs.clone(),
+                    )
+                    .expect("state is out of sync with validator");
+                assert_eq!(self.validator_state.commit(), state.commit());
+                let records_from = if uids.is_empty() {
+                    self.validator_state.record_merkle_commitment.num_leaves
+                } else {
+                    uids[0]
+                };
+
+                let mut txn_hashes = Vec::new();
+                let mut nullifiers_delta = Vec::new();
+                for (txn, _proofs) in block.block.0.iter().zip(block.proofs.iter()) {
+                    for n in txn.input_nullifiers() {
+                        nullifiers_delta.push(n);
+                    }
+                    let hash = TransactionCommitment(txn.commit());
+                    txn_hashes.push(hash);
+                }
+                num_txns += block.block.0.len();
+                cumulative_size += block.serialized_size();
+                let event_index;
+
+                // Update the nullifier proofs in the block so that clients do not have
+                // to worry about out of date nullifier proofs.
+                block.proofs = block
+                    .block
+                    .0
+                    .iter()
+                    .map(|txn| {
+                        txn.input_nullifiers()
+                            .into_iter()
+                            .map(|n| nullifier_proofs.contains(n).unwrap().1)
+                            .collect()
+                    })
+                    .collect();
+
+                {
+                    let mut events = vec![Some(LedgerEvent::Commit {
+                        block: block.clone(),
+                        block_id: block_index as u64,
+                        state_comm: self.validator_state.commit(),
+                    })];
+
+                    // Get a Merkle tree with in-memory paths for each output in this block.
+                    for output in block
+                        .block
+                        .0
+                        .iter()
+                        .flat_map(|txn| txn.output_commitments())
+                    {
+                        merkle_builder.push(output.to_field_element());
+                    }
+                    let merkle_tree = merkle_builder.build();
+                    // Use the Merkle paths to construct the Memos events for this block.
+                    let mut first_uid = 0;
+                    for (txn_id, (txn, memos)) in
+                        block.block.0.iter().zip(block.memos.iter()).enumerate()
+                    {
+                        let txn_uids = &uids[first_uid..first_uid + txn.output_len()];
+                        first_uid += txn.output_len();
+                        let merkle_paths = txn_uids
+                            .iter()
+                            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path)
+                            .collect::<Vec<_>>();
+                        events.push(Some(LedgerEvent::Memos {
+                            outputs: izip!(
+                                memos.clone(),
+                                txn.output_commitments(),
+                                txn_uids.iter().cloned(),
+                                merkle_paths
+                            )
+                            .collect(),
+                            transaction: Some((block_index, txn_id as u64, txn.hash(), txn.kind())),
+                        }))
                     }
 
-                    Ok((uids, nullifier_proofs)) => {
-                        let records_from = if uids.is_empty() {
-                            self.validator_state.record_merkle_commitment.num_leaves
-                        } else {
-                            uids[0]
-                        };
-
-                        let mut txn_hashes = Vec::new();
-                        let mut nullifiers_delta = Vec::new();
-                        for (txn, _proofs) in block.block.0.iter().zip(block.proofs.iter()) {
-                            for n in txn.input_nullifiers() {
-                                nullifiers_delta.push(n);
-                            }
-                            let hash = TransactionCommitment(txn.commit());
-                            txn_hashes.push(hash);
-                        }
-                        num_txns += block.block.0.len();
-                        cumulative_size += block.serialized_size();
-                        let event_index;
-
-                        // Update the nullifier proofs in the block so that clients do not have
-                        // to worry about out of date nullifier proofs.
-                        block.proofs = block
-                            .block
-                            .0
-                            .iter()
-                            .map(|txn| {
-                                txn.input_nullifiers()
-                                    .into_iter()
-                                    .map(|n| nullifier_proofs.contains(n).unwrap().1)
-                                    .collect()
-                            })
-                            .collect();
-
-                        {
-                            let mut events = vec![Some(LedgerEvent::Commit {
-                                block: block.clone(),
-                                block_id: block_index as u64,
-                                state_comm: self.validator_state.commit(),
-                            })];
-
-                            // Get a Merkle tree with in-memory paths for each output in this block.
-                            for output in block
-                                .block
-                                .0
-                                .iter()
-                                .flat_map(|txn| txn.output_commitments())
-                            {
-                                merkle_builder.push(output.to_field_element());
-                            }
-                            let merkle_tree = merkle_builder.build();
-                            // Use the Merkle paths to construct the Memos events for this block.
-                            let mut first_uid = 0;
-                            for (txn_id, (txn, memos)) in
-                                block.block.0.iter().zip(block.memos.iter()).enumerate()
-                            {
-                                let txn_uids = &uids[first_uid..first_uid + txn.output_len()];
-                                first_uid += txn.output_len();
-                                let merkle_paths = txn_uids
-                                    .iter()
-                                    .map(|uid| {
-                                        merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path
-                                    })
-                                    .collect::<Vec<_>>();
-                                events.push(Some(LedgerEvent::Memos {
-                                    outputs: izip!(
-                                        memos.clone(),
-                                        txn.output_commitments(),
-                                        txn_uids.iter().cloned(),
-                                        merkle_paths
-                                    )
-                                    .collect(),
-                                    transaction: Some((
-                                        block_index,
-                                        txn_id as u64,
-                                        txn.hash(),
-                                        txn.kind(),
-                                    )),
-                                }))
-                            }
-
-                            let mut catchup_store = block_on(self.catchup_store.write());
-                            event_index = catchup_store.event_count() as u64;
-                            if let Err(e) = catchup_store.append_events(events) {
-                                tracing::warn!("append_events returned error {}", e);
-                            }
-                        }
-                        {
-                            let qcert_block_hash: [u8; H_256] =
-                                qcert.block_hash.try_into().unwrap_or([0u8; H_256]);
-                            let block_hash = BlockHash::<H_256>::from_array(qcert_block_hash);
-                            let mut availability_store = block_on(self.availability_store.write());
-                            if let Err(e) = availability_store.append_blocks(vec![(
-                                Some(BlockQueryData {
-                                    raw_block: block.clone(),
-                                    block_hash: BlockCommitment(block.block.commit()),
-                                    block_id: block_index as u64,
-                                    records_from,
-                                    record_count: uids.len() as u64,
-                                    txn_hashes,
-                                }),
-                                Some(StateQueryData {
-                                    state: state.clone(),
-                                    commitment: state.commit(),
-                                    block_id: block_index as u64,
-                                    event_index,
-                                }),
-                                Some(QuorumCertificate {
-                                    block_hash,
-                                    leaf_hash: LeafHash::default(),
-                                    view_number: qcert.view_number,
-                                    stage: qcert.stage,
-                                    signatures: qcert.signatures,
-                                    genesis: qcert.genesis,
-                                }),
-                            )]) {
-                                tracing::warn!("append_blocks returned error {}", e);
-                            }
-                        }
-                        {
-                            let mut meta_state_store = block_on(self.meta_state_store.write());
-                            if let Err(e) = meta_state_store
-                                .append_block_nullifiers(block_index as u64, nullifiers_delta)
-                            {
-                                tracing::warn!("append_block_nullifiers returned error {}", e);
-                            }
-                        }
+                    let mut catchup_store = block_on(self.catchup_store.write());
+                    event_index = catchup_store.event_count() as u64;
+                    if let Err(e) = catchup_store.append_events(events) {
+                        tracing::warn!("append_events returned error {}", e);
+                    }
+                }
+                {
+                    let qcert_block_hash: [u8; H_256] =
+                        qcert.block_hash.try_into().unwrap_or([0u8; H_256]);
+                    let block_hash = BlockHash::<H_256>::from_array(qcert_block_hash);
+                    let mut availability_store = block_on(self.availability_store.write());
+                    if let Err(e) = availability_store.append_blocks(vec![(
+                        Some(BlockQueryData {
+                            raw_block: block.clone(),
+                            block_hash: BlockCommitment(block.block.commit()),
+                            block_id: block_index as u64,
+                            records_from,
+                            record_count: uids.len() as u64,
+                            txn_hashes,
+                        }),
+                        Some(StateQueryData {
+                            state: state.clone(),
+                            commitment: state.commit(),
+                            block_id: block_index as u64,
+                            event_index,
+                        }),
+                        Some(QuorumCertificate {
+                            block_hash,
+                            leaf_hash: LeafHash::default(),
+                            view_number: qcert.view_number,
+                            stage: qcert.stage,
+                            signatures: qcert.signatures,
+                            genesis: qcert.genesis,
+                        }),
+                    )]) {
+                        tracing::warn!("append_blocks returned error {}", e);
+                    }
+                }
+                {
+                    let mut meta_state_store = block_on(self.meta_state_store.write());
+                    if let Err(e) = meta_state_store
+                        .append_block_nullifiers(block_index as u64, nullifiers_delta)
+                    {
+                        tracing::warn!("append_block_nullifiers returned error {}", e);
                     }
                 }
             }
