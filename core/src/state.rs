@@ -916,6 +916,19 @@ impl CommitableHashTag for CollectedRewardsTag {
 /// Hash for set Merkle tree for all of the previously-collected rewards
 pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
 
+#[non_exhaustive]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ValidationOutputs {
+    /// UID for each new record created by this block.
+    pub uids: Vec<u64>,
+    /// Sparse [SetMerkleTree] containing up-to-date non-membership proofs for every nullifier in
+    /// this block, relative to the nullifier set root hash just before applying this block.
+    pub nullifier_proofs: SetMerkleTree,
+    /// Sparse [MerkleTree] containing membership profos for each new record created by this block,
+    /// relative to the record set root hash after applying this block.
+    pub record_proofs: MerkleTree,
+}
+
 /// The working state of the ledger
 ///
 /// Only the previous state is represented as a commitment. Other
@@ -1119,7 +1132,7 @@ impl ValidatorState {
         now: u64,
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
-    ) -> Result<(Vec<u64>, SetMerkleTree), ValidationError> {
+    ) -> Result<ValidationOutputs, ValidationError> {
         let (txns, null_pfs) = self.validate_block_check(now, txns, null_pfs)?;
         // If the block successfully validates, and the nullifier proofs apply correctly, the
         // remaining (mutating) operations cannot fail, as this would result in an inconsistent
@@ -1157,7 +1170,7 @@ impl ValidatorState {
         now: u64,
         txns: Block,
         null_pfs: Vec<Vec<SetMerkleProof>>,
-    ) -> Result<(Vec<u64>, SetMerkleTree), ValidationError> {
+    ) -> Result<ValidationOutputs, ValidationError> {
         let mut proofs = vec![];
         let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
         for (pf, n) in null_pfs
@@ -1178,7 +1191,7 @@ impl ValidatorState {
         now: u64,
         txns: Block,
         null_pfs: Vec<(Nullifier, SetMerkleProof, set_hash::Hash)>,
-    ) -> Result<(Vec<u64>, SetMerkleTree), ValidationError> {
+    ) -> Result<ValidationOutputs, ValidationError> {
         let comm = self.commit();
         self.prev_commit_time = now;
         self.prev_block = BlockCommitment(txns.commit());
@@ -1188,7 +1201,7 @@ impl ValidatorState {
             self.record_merkle_commitment,
             &self.record_merkle_frontier,
         )
-        .ok_or(ValidationError::BadMerklePath {})?;
+        .expect("failed to restore MerkleTree from frontier");
         let mut uids = vec![];
         let mut uid = self.record_merkle_commitment.num_leaves;
         for o in txns
@@ -1197,9 +1210,6 @@ impl ValidatorState {
             .flat_map(|x| x.output_commitments().into_iter())
         {
             record_merkle_frontier.push(o.to_field_element());
-            if uid > 0 {
-                record_merkle_frontier.forget(uid - 1).expect_ok().unwrap();
-            }
             uids.push(uid);
             uid += 1;
             assert_eq!(uid, record_merkle_frontier.num_leaves());
@@ -1214,7 +1224,11 @@ impl ValidatorState {
         self.record_merkle_commitment = record_merkle_frontier.commitment();
         self.record_merkle_frontier = record_merkle_frontier.frontier();
         self.prev_state = Some(comm);
-        Ok((uids, null_pfs))
+        Ok(ValidationOutputs {
+            uids,
+            nullifier_proofs: null_pfs,
+            record_proofs: record_merkle_frontier,
+        })
     }
 }
 

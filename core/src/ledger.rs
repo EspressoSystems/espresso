@@ -275,7 +275,7 @@ impl traits::Validator for ValidatorState {
     fn validate_and_apply(&mut self, block: Self::Block) -> Result<Vec<u64>, ValidationError> {
         Ok(self
             .validate_and_apply(self.now() + 1, block.block, block.proofs)?
-            .0)
+            .uids)
     }
 }
 

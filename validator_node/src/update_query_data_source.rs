@@ -24,7 +24,9 @@ use espresso_availability_api::{
     query_data::{BlockQueryData, StateQueryData},
 };
 use espresso_catchup_api::data_source::UpdateCatchUpData;
-use espresso_core::state::{BlockCommitment, TransactionCommitment, ValidatorState};
+use espresso_core::state::{
+    BlockCommitment, TransactionCommitment, ValidationOutputs, ValidatorState,
+};
 use espresso_metastate_api::data_source::UpdateMetaStateData;
 use espresso_status_api::data_source::UpdateStatusData;
 use futures::{
@@ -36,7 +38,6 @@ use hotshot::data::{BlockHash, LeafHash, QuorumCertificate};
 use hotshot::types::EventType;
 use hotshot::H_256;
 use itertools::izip;
-use jf_primitives::merkle_tree::FilledMTBuilder;
 use seahorse::events::LedgerEvent;
 
 pub trait UpdateQueryDataSourceTypes {
@@ -102,19 +103,16 @@ where
                 izip!(block.iter().cloned(), state.iter(), qcs.iter().cloned()).rev()
             {
                 // A block has been committed. Update our mirror of the ValidatorState by applying
-                // the new block, and generate a Commit event.
-
+                // the new block, and generate a Commit event. We are getting our event stream
+                // directly from a HotShot instance running in this process, so we can trust the
+                // events and use the much faster `trust_and_apply` instead of `validate_and_apply`.
                 let block_index = self.validator_state.prev_commit_time;
-                let mut merkle_builder = FilledMTBuilder::from_frontier(
-                    &self.validator_state.record_merkle_commitment,
-                    &self.validator_state.record_merkle_frontier,
-                )
-                .unwrap();
-
-                // We are getting our event stream directly from a HotShot instance running in this
-                // process, so we can trust the events and use the much faster `trust_and_apply`
-                // instead of `validate_and_apply`.
-                let (uids, nullifier_proofs) = self
+                let ValidationOutputs {
+                    uids,
+                    nullifier_proofs,
+                    record_proofs,
+                    ..
+                } = self
                     .validator_state
                     .trust_and_apply(
                         self.validator_state.prev_commit_time + 1,
@@ -163,17 +161,7 @@ where
                         state_comm: self.validator_state.commit(),
                     })];
 
-                    // Get a Merkle tree with in-memory paths for each output in this block.
-                    for output in block
-                        .block
-                        .0
-                        .iter()
-                        .flat_map(|txn| txn.output_commitments())
-                    {
-                        merkle_builder.push(output.to_field_element());
-                    }
-                    let merkle_tree = merkle_builder.build();
-                    // Use the Merkle paths to construct the Memos events for this block.
+                    // Construct the Memos events for this block.
                     let mut first_uid = 0;
                     for (txn_id, (txn, memos)) in
                         block.block.0.iter().zip(block.memos.iter()).enumerate()
@@ -182,7 +170,7 @@ where
                         first_uid += txn.output_len();
                         let merkle_paths = txn_uids
                             .iter()
-                            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path)
+                            .map(|uid| record_proofs.get_leaf(*uid).expect_ok().unwrap().1.path)
                             .collect::<Vec<_>>();
                         events.push(Some(LedgerEvent::Memos {
                             outputs: izip!(
