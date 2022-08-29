@@ -137,7 +137,7 @@ where
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.from_fs.len() - self.index;
+        let remaining = self.from_fs.len();
         (remaining, Some(remaining))
     }
 
@@ -484,13 +484,14 @@ impl UpdateMetaStateData for QueryData {
         block_id: u64,
         nullifiers: Vec<Nullifier>,
     ) -> Result<(), Self::Error> {
-        let nullifier_set = self.with_nullifier_set_at_block(block_id - 1, |ns| {
-            let mut nullifier_set = ns.clone();
-            for nullifier in nullifiers.iter() {
-                nullifier_set.insert(*nullifier);
-            }
-            nullifier_set
-        })?;
+        let mut nullifier_set = if block_id == 0 {
+            SetMerkleTree::default()
+        } else {
+            self.with_nullifier_set_at_block(block_id - 1, |ns| ns.clone())?
+        };
+        for nullifier in nullifiers {
+            nullifier_set.insert(nullifier);
+        }
         self.cached_nullifier_sets.insert(block_id, nullifier_set);
         Ok(())
     }
