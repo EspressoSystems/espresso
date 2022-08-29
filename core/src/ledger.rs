@@ -230,9 +230,8 @@ impl traits::Transaction for ElaboratedTransaction {
         self.txn.kind()
     }
 
-    fn set_proofs(&mut self, proofs: Vec<SetMerkleProof>) {
-        // TODO fkrell what about setting proofs for reward transactions
-        self.proofs = EspressoTxnHelperProofs::CAP(proofs);
+    fn set_proofs(&mut self, cap_nuls_proofs: Vec<SetMerkleProof>) {
+        self.proofs = EspressoTxnHelperProofs::CAP(cap_nuls_proofs);
     }
 }
 
