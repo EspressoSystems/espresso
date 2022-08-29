@@ -384,6 +384,9 @@ pub enum ValidationError {
     UnsupportedFreezeSize {
         num_inputs: usize,
     },
+
+    /// Block transaction order doesn't match helper proofs
+    InconsistentHelperProofs,
 }
 
 pub(crate) mod ser_display {
@@ -436,6 +439,7 @@ impl Clone for ValidationError {
             UnsupportedFreezeSize { num_inputs } => UnsupportedFreezeSize {
                 num_inputs: *num_inputs,
             },
+            InconsistentHelperProofs => InconsistentHelperProofs,
         }
     }
 }
@@ -1036,7 +1040,7 @@ impl ValidatorState {
                     reward_txns.push(reward_txn);
                     rewards_proofs.push(reward_pfs);
                 }
-                _ => return Err(ValidationError::Failed {}),
+                _ => return Err(ValidationError::InconsistentHelperProofs),
             }
         }
 
