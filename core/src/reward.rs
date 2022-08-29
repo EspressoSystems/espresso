@@ -19,7 +19,6 @@ use crate::state::StakingKey;
 use crate::tree_hash::KVTreeHash;
 use ark_serialize::*;
 use core::hash::Hash;
-use espresso_macros::ser_test;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::structs::{
     Amount, AssetDefinition, BlindFactor, FreezeFlag, RecordCommitment, RecordOpening,
@@ -40,8 +39,6 @@ pub struct CollectRewardNote {
     reward_amount: Amount,
     /// Staking `pub_key`, `view` number and a proof that staking key was selected for committee election on `view`
     vrf_witness_info: VrfWitness,
-    /// Auxiliary info and proof of validity for reward
-    auxiliary_info: RewardNoteAuxInfo,
 }
 
 impl CollectRewardNote {
@@ -61,7 +58,6 @@ impl CollectRewardNote {
 }
 
 #[tagged_blob("VrfWitness")]
-#[ser_test(random(random_for_test))]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 struct VrfWitness {
     /// Staking public key
@@ -82,8 +78,9 @@ struct VrfWitness {
 ///  * * Proof `comm` is valid commitment for `block_number`
 ///  * * Proof for `stake_amount` for `pub_key` on `block_number`
 ///  *  Proof that reward hasn't been collected
+#[tagged_blob("RewardNoteProof")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
-struct RewardNoteAuxInfo {
+pub struct RewardNoteProofs {
     /// Stake table commmitment for the block number reward
     stake_table_commitment: <StakeTableCommitmentsHash as KVTreeHash>::Digest,
     /// Proof for view number matches block number

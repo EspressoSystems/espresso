@@ -19,7 +19,7 @@ use jf_cap::Signature;
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
 pub use crate::lw_persistence::LWPersistence;
-use crate::reward::CollectRewardNote;
+use crate::reward::{CollectRewardNote, RewardNoteProofs};
 pub use crate::set_merkle_tree::*;
 pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
@@ -106,6 +106,56 @@ impl CanonicalDeserialize for EspressoTransaction {
     }
 }
 
+#[tagged_blob("EspressoTxnAuxProofs")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum EspressoTxnHelperProofs {
+    CAP(Vec<SetMerkleProof>),
+    Reward(Box<RewardNoteProofs>),
+}
+
+impl CanonicalSerialize for EspressoTxnHelperProofs {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        match self {
+            Self::CAP(nulls_pfs) => {
+                let flag = 0;
+                writer.write_all(&[flag])?;
+                <Vec<SetMerkleProof> as CanonicalSerialize>::serialize(nulls_pfs, &mut writer)
+            }
+            Self::Reward(reward_proofs) => {
+                let flag = 1;
+                writer.write_all(&[flag])?;
+                <RewardNoteProofs as CanonicalSerialize>::serialize(reward_proofs, &mut writer)
+            }
+        }
+    }
+
+    fn serialized_size(&self) -> usize {
+        1 + match &self {
+            Self::CAP(merkle_proofs) => merkle_proofs.serialized_size(),
+            Self::Reward(reward_proofs) => reward_proofs.serialized_size(),
+        }
+    }
+}
+
+impl CanonicalDeserialize for EspressoTxnHelperProofs {
+    fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
+    where
+        R: ark_serialize::Read,
+    {
+        let mut flag = [0u8; 1];
+        r.read_exact(&mut flag)?;
+        match flag[0] {
+            0 => Ok(Self::CAP(
+                <Vec<SetMerkleProof> as CanonicalDeserialize>::deserialize(&mut r)?,
+            )),
+            1 => Ok(Self::Reward(Box::new(
+                <RewardNoteProofs as CanonicalDeserialize>::deserialize(&mut r)?,
+            ))),
+            _ => Err(SerializationError::InvalidData),
+        }
+    }
+}
+
 /// A transaction with nullifier non-inclusion proofs
 ///
 /// Validation involves checking proofs that unspent records are unspent.
@@ -134,7 +184,7 @@ impl CanonicalDeserialize for EspressoTransaction {
 )]
 pub struct ElaboratedTransaction {
     pub txn: EspressoTransaction,
-    pub proofs: Vec<SetMerkleProof>,
+    pub proofs: EspressoTxnHelperProofs,
     pub memos: Vec<ReceiverMemo>,
     pub signature: Signature,
 }
@@ -186,7 +236,7 @@ pub struct Block(pub Vec<EspressoTransaction>);
 )]
 pub struct ElaboratedBlock {
     pub block: Block,
-    pub proofs: Vec<Vec<SetMerkleProof>>,
+    pub proofs: Vec<EspressoTxnHelperProofs>,
     pub memos: Vec<Vec<ReceiverMemo>>,
     pub signatures: Vec<Signature>,
 }
@@ -967,26 +1017,37 @@ impl ValidatorState {
         &self,
         now: u64,
         txns: Block,
-        null_pfs: Vec<Vec<SetMerkleProof>>,
+        txns_helper_proofs: Vec<EspressoTxnHelperProofs>,
     ) -> Result<(Block, NullifierProofs), ValidationError> {
         let mut cap_txns = vec![];
         let mut reward_txns = vec![];
-        for txn in txns.0.into_iter() {
-            match txn {
-                EspressoTransaction::CAP(cap_txn) => {
+        let mut cap_nulls_proofs = vec![];
+        let mut rewards_proofs = vec![];
+        for (txn, helper_proofs) in txns.0.into_iter().zip(txns_helper_proofs.into_iter()) {
+            match (txn, helper_proofs) {
+                (EspressoTransaction::CAP(cap_txn), EspressoTxnHelperProofs::CAP(cap_nuls_pfs)) => {
                     cap_txns.push(cap_txn);
+                    cap_nulls_proofs.push(cap_nuls_pfs);
                 }
-                EspressoTransaction::Reward(reward_txn) => reward_txns.push(reward_txn),
+                (
+                    EspressoTransaction::Reward(reward_txn),
+                    EspressoTxnHelperProofs::Reward(reward_pfs),
+                ) => {
+                    reward_txns.push(reward_txn);
+                    rewards_proofs.push(reward_pfs);
+                }
+                _ => return Err(ValidationError::Failed {}),
             }
         }
-        let mut proofs = NullifierProofs::new();
+
+        let mut nullifiers_proofs = NullifierProofs::new();
         {
             // verify cap_txns
             let mut nulls = HashSet::new();
             use ValidationError::*;
 
             let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
-            for (pf, n) in null_pfs
+            for (pf, n) in cap_nulls_proofs
                 .into_iter()
                 .zip(cap_txns.iter())
                 .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.nullifiers().into_iter()))
@@ -998,7 +1059,7 @@ impl ValidatorState {
                 let root = self
                     .past_nullifiers
                     .check_unspent(&recent_nullifiers, &pf, n)?;
-                proofs.push((n, pf, root));
+                nullifiers_proofs.push((n, pf, root));
                 nulls.insert(n);
             }
 
@@ -1054,7 +1115,7 @@ impl ValidatorState {
             .chain(reward_txns.into_iter().map(EspressoTransaction::Reward))
             .collect();
 
-        Ok((Block(txns), proofs))
+        Ok((Block(txns), nullifiers_proofs))
     }
 
     /// Performs validation for a block, updating the ValidatorState.
@@ -1074,7 +1135,7 @@ impl ValidatorState {
         &mut self,
         now: u64,
         txns: Block,
-        null_pfs: Vec<Vec<SetMerkleProof>>,
+        null_pfs: Vec<EspressoTxnHelperProofs>,
     ) -> Result<(Vec<u64>, SetMerkleTree), ValidationError> {
         // If the block successfully validates, and the nullifier
         // proofs apply correctly, the remaining (mutating) operations

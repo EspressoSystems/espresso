@@ -20,7 +20,8 @@ use async_std::task::block_on;
 use commit::Committable;
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
 use espresso_core::state::{
-    BlockCommitment, ElaboratedTransaction, TransactionCommitment, ValidatorState,
+    BlockCommitment, ElaboratedTransaction, EspressoTransaction, EspressoTxnHelperProofs,
+    TransactionCommitment, ValidatorState,
 };
 use futures::task::SpawnError;
 use hotshot::types::EventType;
@@ -146,6 +147,17 @@ where
 
                         // Update the nullifier proofs in the block so that clients do not have
                         // to worry about out of date nullifier proofs.
+                        for (txn, proofs) in block.block.0.iter().zip(block.proofs.iter_mut()) {
+                            if let EspressoTransaction::CAP(txn) = txn {
+                                *proofs = EspressoTxnHelperProofs::CAP(
+                                    txn.input_nullifiers()
+                                        .into_iter()
+                                        .map(|n| nullifier_proofs.contains(n).unwrap().1)
+                                        .collect(),
+                                );
+                            }
+                        }
+                        /*
                         block.proofs = block
                             .block
                             .0
@@ -156,7 +168,7 @@ where
                                     .map(|n| nullifier_proofs.contains(n).unwrap().1)
                                     .collect()
                             })
-                            .collect();
+                            .collect();*/
 
                         {
                             let mut events = vec![LedgerEvent::Commit {

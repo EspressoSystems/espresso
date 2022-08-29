@@ -12,7 +12,7 @@
 
 use crate::state::{
     state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction, EspressoTransaction,
-    SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
+    EspressoTxnHelperProofs, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
 use crate::util::canonical;
 use commit::{Commitment, Committable};
@@ -174,7 +174,7 @@ impl traits::Transaction for ElaboratedTransaction {
     fn cap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
         Self {
             txn: EspressoTransaction::CAP(note),
-            proofs,
+            proofs: EspressoTxnHelperProofs::CAP(proofs),
             memos: Default::default(),
             signature: Default::default(),
         }
@@ -189,13 +189,15 @@ impl traits::Transaction for ElaboratedTransaction {
     }
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {
-        // reward transaction wont have nullifiers, so self.txn.input_nullifiers will return
-        // empty vector
-        self.txn
-            .input_nullifiers()
-            .into_iter()
-            .zip(self.proofs.clone())
-            .collect()
+        match &self.proofs {
+            EspressoTxnHelperProofs::CAP(proofs) => self
+                .txn
+                .input_nullifiers()
+                .into_iter()
+                .zip(proofs.clone())
+                .collect(),
+            EspressoTxnHelperProofs::Reward(_) => vec![], // no proven nullifiers
+        }
     }
 
     fn input_nullifiers(&self) -> Vec<Nullifier> {
@@ -229,7 +231,8 @@ impl traits::Transaction for ElaboratedTransaction {
     }
 
     fn set_proofs(&mut self, proofs: Vec<SetMerkleProof>) {
-        self.proofs = proofs;
+        // TODO fkrell what about setting proofs for reward transactions
+        self.proofs = EspressoTxnHelperProofs::CAP(proofs);
     }
 }
 
