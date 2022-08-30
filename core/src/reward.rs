@@ -12,8 +12,7 @@
 
 use crate::kv_merkle_tree::KVMerkleProof;
 use crate::stake_table::{
-    BlockToViewCommittableHash, CollectedRewardsHash, StakeKeyToStakeAmountCommittableHash,
-    StakeTableCommitmentsHash,
+    CollectedRewardsHash, StakeKeyToStakeAmountCommittableHash, StakeTableCommitmentsHash,
 };
 use crate::state::StakingKey;
 use crate::tree_hash::KVTreeHash;
@@ -38,8 +37,6 @@ use serde::{Deserialize, Serialize};
     Deserialize,
 )]
 pub struct CollectRewardNote {
-    /// block number of reward claim
-    block_number: u64,
     /// Blinding factor for reward record commitment on CAP native asset
     blind_factor: BlindFactor,
     /// Address that owns the reward
@@ -80,21 +77,20 @@ impl CollectRewardNote {
 struct VrfWitness {
     /// Staking public key
     staking_key: StakingKey,
-    /// View number for wich the key was elected
+    /// View number for which the key was elected
     view_number: u64,
-    /// amount of stake on reward to be claimed block
-    stake_amount: u64, /*
-                       /// VRF Proof
-                       proof:
-                       */
+    /// amount of stake on `view_number`
+    stake_amount: Amount, /*
+                          /// VRF Proof
+                          proof:
+                          */
 }
 
 /// Auxiliary info and proof for CollectRewardNote
-///  * Stake table commitment `comm` on `block_number`
-///  * `pub_key` is eligible for reward
-///  * * Proof that block was produced on view `view`
-///  * * Proof `comm` is valid commitment for `block_number`
-///  * * Proof for `stake_amount` for `pub_key` on `block_number`
+///  * Stake table commitment `comm` on `view_number`
+///  * Proof for `staking_pub_key` is eligible for reward:
+///  * * Proof `comm` is valid stake table commitment for `view_number`
+///  * * Proof for `staking_pub_key` mapped to `stake_amount` on `view_number`
 ///  *  Proof that reward hasn't been collected
 #[derive(
     Clone,
@@ -108,14 +104,12 @@ struct VrfWitness {
     Deserialize,
 )]
 pub struct RewardNoteProofs {
-    /// Stake table commitment for the block number reward
+    /// Stake table commitment for the view number reward
     stake_table_commitment: <StakeTableCommitmentsHash as KVTreeHash>::Digest,
-    /// Proof for view number matches block number
-    block_number_to_view_proof: KVMerkleProof<BlockToViewCommittableHash>,
+    /// Proof for stake_table_commitment
+    view_number_to_stake_table_commitment: KVMerkleProof<StakeTableCommitmentsHash>,
+    /// Proof for stake_amount for staking key on that view number
+    staking_key_to_stake_amount: KVMerkleProof<StakeKeyToStakeAmountCommittableHash>,
     /// Proof that reward hasn't been collected
     uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
-    /// Proof for stake_table_commitment
-    block_number_to_stake_table_commitment: KVMerkleProof<StakeTableCommitmentsHash>,
-    /// Proof for stake_amount for staking key on that block number
-    staking_key_to_stake_amount: KVMerkleProof<StakeKeyToStakeAmountCommittableHash>,
 }
