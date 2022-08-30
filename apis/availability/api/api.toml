@@ -1,0 +1,108 @@
+# Copyright (c) 2022 Espresso Systems (espressosys.com)
+# This file is part of the Espresso library.
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# General Public License as published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program. If not,
+# see <https://www.gnu.org/licenses/>.
+
+[meta]
+NAME = "espresso-availability"
+DESCRIPTION = "Historical Espresso blockchain state"
+FORMAT_VERSION = "0.1.0"
+
+[route.getblock]
+PATH = ["getblock/:block_id", "getblock/hash/:hash"]
+":block_id" = "Integer"
+":hash" = "TaggedBase64"
+DOC = """
+Get a block by its ID (block number) or hash.
+
+Returns
+```
+{
+    "raw_block": ElaboratedBlock,
+    "block_hash": TaggedBase64,
+    "block_id": integer,
+    "records_from": integer, // The UID of the first output of this block
+    "record_count": integer, // The total number of outputs in this block
+    "txn_hashes": [TaggedBase64],
+}
+```
+"""
+
+[route.gettransaction]
+PATH = ["gettransaction/:block_id/:txn_id", "gettransaction/hash/:hash"]
+":block_id" = "Integer"
+":txn_id" = "Integer"
+":hash" = "TaggedBase64"
+DOC = """
+Get a transaction by its ID or hash.
+
+If specified, `:block_id` and `:txn_id` represent the block containing the transaction and the index
+of the transaction within the block, respectively. Otherwise, `:hash` is the hash of the
+transaction.
+
+Returns
+```
+{
+    "raw_transaction": ElaboratedTransaction,
+    "block_id": integer,
+    "transaction_id": integer,
+    "transaction_hash": TaggedBase64,
+}
+```
+"""
+
+[route.getrecord]
+PATH = ["getrecord/:block_id/:txn_id/:output_index", "getrecord/uid/:uid"]
+":block_id" = "Integer"
+":txn_id" = "Integer"
+":output_index" = "Integer"
+":uid" = "Integer"
+DOC = """
+Get a UTXO.
+
+If specified, `:block_id` specifies a block, `:txn_id` the index of a transaction within that block,
+and `:output_index` the index of a UTXO within that transaction. Otherwise, `:uid` is the global UID
+of the desired record (that is, its index in the record Merkle tree).
+
+Returns
+```
+{
+    "commitment": TaggedBase64,
+    "uid": integer,
+    "block_id": integer,
+    "txn_id": integer,
+    "output_index": integer,
+}
+```
+"""
+
+[route.getstate]
+PATH = ["getstate/:block_id"]
+":block_id" = "Integer"
+DOC = """
+Get the state after applying block `block_id`.
+
+Returns
+```
+{
+    "state": ValidatorState,
+    "commitment": TaggedBase64,
+    "block_id": integer, // The ID of the block which created this state
+    "event_index": integer, // The index of the most recent event prior to this state
+}
+```
+"""
+
+[route.getstatecomm]
+PATH = ["getstatecomm/:block_id"]
+":block_id" = "Integer"
+DOC = """
+Get a binding commitment to the state after applying block `block_id`.
+"""

@@ -2226,10 +2226,17 @@ dependencies = [
 name = "espresso-availability-api"
 version = "0.1.0"
 dependencies = [
+ "clap 3.2.17",
  "commit",
+ "derive_more",
  "espresso-core",
+ "futures",
+ "hotshot-types",
  "jf-cap",
  "serde",
+ "snafu",
+ "tide-disco",
+ "toml",
 ]
 
 [[package]]

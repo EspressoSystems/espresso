@@ -11,9 +11,10 @@
 // see <https://www.gnu.org/licenses/>.
 
 use espresso_core::state::{
-    state_comm::LedgerStateCommitment, BlockCommitment, ElaboratedBlock, TransactionCommitment,
-    ValidatorState,
+    state_comm::LedgerStateCommitment, BlockCommitment, ElaboratedBlock, ElaboratedTransaction,
+    TransactionCommitment, ValidatorState,
 };
+use jf_cap::structs::RecordCommitment;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +25,50 @@ pub struct BlockQueryData {
     pub records_from: u64,
     pub record_count: u64,
     pub txn_hashes: Vec<TransactionCommitment>,
+}
+
+impl BlockQueryData {
+    pub fn len(&self) -> usize {
+        self.raw_block.block.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn transaction(&self, i: usize) -> Option<TransactionQueryData> {
+        if i >= self.len() {
+            return None;
+        }
+        Some(TransactionQueryData {
+            raw_transaction: ElaboratedTransaction {
+                txn: self.raw_block.block.0[i].clone(),
+                proofs: self.raw_block.proofs[i].clone(),
+                memos: self.raw_block.memos[i].clone(),
+                signature: self.raw_block.signatures[i].clone(),
+            },
+            block_id: self.block_id,
+            txn_id: i as u64,
+            transaction_hash: self.txn_hashes[i],
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionQueryData {
+    pub raw_transaction: ElaboratedTransaction,
+    pub block_id: u64,
+    pub txn_id: u64,
+    pub transaction_hash: TransactionCommitment,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordQueryData {
+    pub commitment: RecordCommitment,
+    pub uid: u64,
+    pub block_id: u64,
+    pub txn_id: u64,
+    pub output_index: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
