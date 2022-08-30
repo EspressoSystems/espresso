@@ -21,6 +21,7 @@ use async_std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use espresso_core::full_persistence::FullPersistence;
 pub use espresso_core::state::state_comm::LedgerStateCommitment;
+use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs};
 use espresso_core::{
     ledger::EspressoLedger,
     set_merkle_tree::*,
@@ -477,17 +478,16 @@ impl FullState {
 
                             // Update the nullifier proofs in the block so that clients do not have
                             // to worry about out of date nullifier proofs.
-                            block.proofs = block
-                                .block
-                                .0
-                                .iter()
-                                .map(|txn| {
-                                    txn.input_nullifiers()
-                                        .into_iter()
-                                        .map(|n| nullifier_proofs.contains(n).unwrap().1)
-                                        .collect()
-                                })
-                                .collect();
+                            for (txn, proofs) in block.block.0.iter().zip(block.proofs.iter_mut()) {
+                                if let EspressoTransaction::CAP(txn) = txn {
+                                    *proofs = EspressoTxnHelperProofs::CAP(
+                                        txn.input_nullifiers()
+                                            .into_iter()
+                                            .map(|n| nullifier_proofs.contains(n).unwrap().1)
+                                            .collect(),
+                                    );
+                                }
+                            }
 
                             // Notify subscribers of the new block.
                             self.send_event(LedgerEvent::Commit {

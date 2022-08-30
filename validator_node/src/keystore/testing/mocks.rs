@@ -153,6 +153,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
                     });
                 }
             }
+            EspressoTransaction::Reward(_) => {}
         }
 
         if memos.len() != txn.output_len() {

@@ -12,12 +12,13 @@
 
 use crate::state::{
     state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction, EspressoTransaction,
-    SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
+    EspressoTxnHelperProofs, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
 };
 use crate::util::canonical;
 use commit::{Commitment, Committable};
 use itertools::izip;
 use itertools::MultiUnzip;
+use jf_cap::structs::RecordOpening;
 use jf_cap::{
     keys::{ViewerKeyPair, ViewerPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
@@ -32,7 +33,7 @@ use std::fmt::Display;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum_macros::Display)]
 pub enum EspressoTransactionKind {
     CAP(reef::cap::TransactionKind),
-    // REWARD TODO (fernando)
+    REWARD,
 }
 
 impl traits::TransactionKind for EspressoTransactionKind {
@@ -107,6 +108,7 @@ impl EspressoTransaction {
             Self::CAP(txn) => {
                 reef::traits::Transaction::open_viewing_memo(txn, viewable_assets, viewing_keys)
             }
+            Self::Reward(_) => Err(ViewingError::NoViewingMemos),
         }
     }
 
@@ -114,6 +116,15 @@ impl EspressoTransaction {
     pub fn output_commitments(&self) -> Vec<RecordCommitment> {
         match self {
             Self::CAP(txn) => txn.output_commitments(),
+            Self::Reward(txn) => vec![txn.output_commitment()],
+        }
+    }
+
+    /// Retrieve transaction output openings
+    pub fn output_openings(&self) -> Option<Vec<RecordOpening>> {
+        match self {
+            Self::CAP(txn) => txn.output_openings(), // returns None
+            Self::Reward(txn) => Some(vec![txn.output_opening()]),
         }
     }
 
@@ -125,7 +136,8 @@ impl EspressoTransaction {
     /// Retrieve kind of transaction.
     pub fn kind(&self) -> EspressoTransactionKind {
         match self {
-            EspressoTransaction::CAP(txn) => EspressoTransactionKind::CAP(txn.kind()),
+            Self::CAP(txn) => EspressoTransactionKind::CAP(txn.kind()),
+            Self::Reward(_) => EspressoTransactionKind::REWARD,
         }
     }
 
@@ -133,6 +145,7 @@ impl EspressoTransaction {
     pub fn output_len(&self) -> usize {
         match self {
             Self::CAP(txn) => txn.output_len(),
+            Self::Reward(_) => 1,
         }
     }
 
@@ -140,6 +153,7 @@ impl EspressoTransaction {
     pub fn input_nullifiers(&self) -> Vec<Nullifier> {
         match self {
             Self::CAP(txn) => txn.input_nullifiers(),
+            Self::Reward(_) => vec![],
         }
     }
 }
@@ -160,7 +174,7 @@ impl traits::Transaction for ElaboratedTransaction {
     fn cap(note: TransactionNote, proofs: Vec<SetMerkleProof>) -> Self {
         Self {
             txn: EspressoTransaction::CAP(note),
-            proofs,
+            proofs: EspressoTxnHelperProofs::CAP(proofs),
             memos: Default::default(),
             signature: Default::default(),
         }
@@ -175,13 +189,15 @@ impl traits::Transaction for ElaboratedTransaction {
     }
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {
-        // reward transaction wont have nullifiers, so self.txn.input_nullifiers will return
-        // empty vector
-        self.txn
-            .input_nullifiers()
-            .into_iter()
-            .zip(self.proofs.clone())
-            .collect()
+        match &self.proofs {
+            EspressoTxnHelperProofs::CAP(proofs) => self
+                .txn
+                .input_nullifiers()
+                .into_iter()
+                .zip(proofs.clone())
+                .collect(),
+            EspressoTxnHelperProofs::Reward(_) => vec![], // no proven nullifiers
+        }
     }
 
     fn input_nullifiers(&self) -> Vec<Nullifier> {
@@ -194,6 +210,10 @@ impl traits::Transaction for ElaboratedTransaction {
 
     fn output_len(&self) -> usize {
         self.txn.output_len()
+    }
+
+    fn output_openings(&self) -> Option<Vec<RecordOpening>> {
+        self.txn.output_openings()
     }
 
     fn hash(&self) -> Self::Hash {
@@ -210,8 +230,8 @@ impl traits::Transaction for ElaboratedTransaction {
         self.txn.kind()
     }
 
-    fn set_proofs(&mut self, proofs: Vec<SetMerkleProof>) {
-        self.proofs = proofs;
+    fn set_proofs(&mut self, cap_nuls_proofs: Vec<SetMerkleProof>) {
+        self.proofs = EspressoTxnHelperProofs::CAP(cap_nuls_proofs);
     }
 }
 

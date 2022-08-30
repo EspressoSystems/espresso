@@ -24,7 +24,10 @@ use espresso_availability_api::{
     query_data::{BlockQueryData, StateQueryData},
 };
 use espresso_catchup_api::data_source::UpdateCatchUpData;
-use espresso_core::state::{BlockCommitment, TransactionCommitment, ValidatorState};
+use espresso_core::state::{
+    BlockCommitment, EspressoTransaction, EspressoTxnHelperProofs, TransactionCommitment,
+    ValidatorState,
+};
 use espresso_metastate_api::data_source::UpdateMetaStateData;
 use espresso_status_api::data_source::UpdateStatusData;
 use futures::{
@@ -36,6 +39,7 @@ use hotshot::data::{BlockHash, LeafHash, QuorumCertificate};
 use hotshot::types::EventType;
 use hotshot::H_256;
 use itertools::izip;
+use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 
 pub trait UpdateQueryDataSourceTypes {
@@ -126,17 +130,16 @@ where
 
                 // Update the nullifier proofs in the block so that clients do not have
                 // to worry about out of date nullifier proofs.
-                block.proofs = block
-                    .block
-                    .0
-                    .iter()
-                    .map(|txn| {
-                        txn.input_nullifiers()
-                            .into_iter()
-                            .map(|n| nullifier_proofs.contains(n).unwrap().1)
-                            .collect()
-                    })
-                    .collect();
+                for (txn, proofs) in block.block.0.iter().zip(block.proofs.iter_mut()) {
+                    if let EspressoTransaction::CAP(txn) = txn {
+                        *proofs = EspressoTxnHelperProofs::CAP(
+                            txn.input_nullifiers()
+                                .into_iter()
+                                .map(|n| nullifier_proofs.contains(n).unwrap().1)
+                                .collect(),
+                        );
+                    }
+                }
 
                 let record_count = {
                     let mut events = vec![Some(LedgerEvent::Commit {

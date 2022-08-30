@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use snafu::{ErrorCompat, IntoError, Snafu};
 use std::fmt;
 
-use espresso_core::state::EspressoTransaction;
+use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs};
 pub use net::*;
 
 #[derive(Debug, Serialize, Deserialize, Snafu)]
@@ -289,7 +289,7 @@ impl From<&CommittedBlock> for ElaboratedBlock {
 pub struct CommittedTransaction {
     pub id: TransactionId,
     pub data: EspressoTransaction,
-    pub proofs: Vec<SetMerkleProof>,
+    pub proofs: EspressoTxnHelperProofs,
     pub output_uids: Vec<u64>,
     pub output_memos: Vec<ReceiverMemo>,
     pub memos_signature: Signature,

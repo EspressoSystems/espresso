@@ -516,7 +516,7 @@ impl MultiXfrTestState {
                     &mut setup_block,
                     ElaboratedTransaction {
                         txn: EspressoTransaction::CAP(TransactionNote::Mint(Box::new(note))),
-                        proofs: vec![nul],
+                        proofs: EspressoTxnHelperProofs::CAP(vec![nul]),
                         memos: memos.clone(),
                         signature,
                     },
@@ -948,7 +948,7 @@ impl MultiXfrTestState {
                     signature: sig.clone(),
                     transaction: ElaboratedTransaction {
                         txn: EspressoTransaction::CAP(TransactionNote::Transfer(Box::new(txn))),
-                        proofs: nullifier_pfs,
+                        proofs: EspressoTxnHelperProofs::CAP(nullifier_pfs),
                         memos: owner_memos,
                         signature: sig,
                     },
@@ -1110,7 +1110,7 @@ impl MultiXfrTestState {
             signature: sig.clone(),
             transaction: ElaboratedTransaction {
                 txn: EspressoTransaction::CAP(TransactionNote::Transfer(Box::new(txn))),
-                proofs: nullifier_pfs,
+                proofs: EspressoTxnHelperProofs::CAP(nullifier_pfs),
                 memos: owner_memos,
                 signature: sig,
             },
@@ -1790,7 +1790,7 @@ mod tests {
                 Block(vec![EspressoTransaction::CAP(TransactionNote::Transfer(
                     Box::new(txn1),
                 ))]),
-                vec![nullifier_pfs],
+                vec![EspressoTxnHelperProofs::CAP(nullifier_pfs)],
             )
             .unwrap()
             .uids;
