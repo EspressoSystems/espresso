@@ -15,9 +15,9 @@ use crate::util::canonical;
 // use arbitrary_wrappers::*;
 use ark_serialize::*;
 use core::fmt::Debug;
+use core::hash::Hash;
 use generic_array::{arr::AddLength, ArrayLength, GenericArray};
 use typenum::U1;
-
 /// A hash function usable for sparse merkle tree implementations.
 ///
 /// Inherits several other traits for `#[derive]` ergonomics
@@ -29,12 +29,13 @@ pub trait KVTreeHash: Clone + PartialEq + Eq + Debug {
         + PartialEq
         + Clone
         + Copy
+        + Hash
         + CanonicalSerialize
         + CanonicalDeserialize;
     /// A data type for keys
     /// A data type for values
-    type Key: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize;
-    type Value: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize;
+    type Key: Debug + Clone + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize;
+    type Value: Debug + Clone + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize;
 
     /// The number of children each branch has minus one. This is due to the proof paths having sibling
     /// path lengths of n-1 and the generic implementation relying on type systems
@@ -297,7 +298,7 @@ pub mod committable_hash {
         fn commitment_diversifier() -> &'static str;
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
     pub struct CommitableHash<K, V, T>
     where
         K: Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
@@ -369,8 +370,8 @@ pub mod committable_hash {
 
     impl<K, V, T> KVTreeHash for CommitableHash<K, V, T>
     where
-        K: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
-        V: Debug + Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
+        K: Debug + Clone + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
+        V: Debug + Clone + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
         T: CommitableHashTag,
     {
         type Digest = Commitment<CommitableHashNode<K, V, T>>;

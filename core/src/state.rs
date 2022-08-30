@@ -19,12 +19,14 @@ use jf_cap::Signature;
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
 pub use crate::lw_persistence::LWPersistence;
+use crate::reward::{CollectRewardNote, RewardNoteProofs};
 pub use crate::set_merkle_tree::*;
 pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
 pub use crate::util::canonical;
 pub use crate::PrivKey;
 
+use crate::stake_table::{CollectedRewardsHash, StakeTableCommitmentsHash, StakeTableHash};
 pub use crate::PubKey;
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
@@ -55,26 +57,32 @@ use std::sync::Arc;
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-
 /// A transaction tht can be either a CAP transaction or a collect reward transaction
 pub enum EspressoTransaction {
     CAP(TransactionNote),
+    Reward(Box<CollectRewardNote>),
 }
 
 impl CanonicalSerialize for EspressoTransaction {
     fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
         match self {
-            EspressoTransaction::CAP(txn) => {
+            Self::CAP(txn) => {
                 let flag = 0;
                 writer.write_all(&[flag])?;
                 <TransactionNote as CanonicalSerialize>::serialize(txn, &mut writer)
+            }
+            Self::Reward(reward_note) => {
+                let flag = 1;
+                writer.write_all(&[flag])?;
+                <CollectRewardNote as CanonicalSerialize>::serialize(reward_note, &mut writer)
             }
         }
     }
 
     fn serialized_size(&self) -> usize {
         match self {
-            EspressoTransaction::CAP(txn) => txn.serialized_size() + 1,
+            Self::CAP(txn) => txn.serialized_size() + 1,
+            Self::Reward(reward) => reward.serialized_size() + 1,
         }
     }
 }
@@ -90,6 +98,59 @@ impl CanonicalDeserialize for EspressoTransaction {
             0 => Ok(Self::CAP(
                 <TransactionNote as CanonicalDeserialize>::deserialize(&mut r)?,
             )),
+            1 => Ok(Self::Reward(Box::new(
+                <CollectRewardNote as CanonicalDeserialize>::deserialize(&mut r)?,
+            ))),
+            _ => Err(SerializationError::InvalidData),
+        }
+    }
+}
+
+#[tagged_blob("EspressoTxnAuxProofs")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum EspressoTxnHelperProofs {
+    CAP(Vec<SetMerkleProof>),
+    Reward(Box<RewardNoteProofs>),
+}
+
+impl CanonicalSerialize for EspressoTxnHelperProofs {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        match self {
+            Self::CAP(nulls_pfs) => {
+                let flag = 0;
+                writer.write_all(&[flag])?;
+                <Vec<SetMerkleProof> as CanonicalSerialize>::serialize(nulls_pfs, &mut writer)
+            }
+            Self::Reward(reward_proofs) => {
+                let flag = 1;
+                writer.write_all(&[flag])?;
+                <RewardNoteProofs as CanonicalSerialize>::serialize(reward_proofs, &mut writer)
+            }
+        }
+    }
+
+    fn serialized_size(&self) -> usize {
+        1 + match &self {
+            Self::CAP(merkle_proofs) => merkle_proofs.serialized_size(),
+            Self::Reward(reward_proofs) => reward_proofs.serialized_size(),
+        }
+    }
+}
+
+impl CanonicalDeserialize for EspressoTxnHelperProofs {
+    fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
+    where
+        R: ark_serialize::Read,
+    {
+        let mut flag = [0u8; 1];
+        r.read_exact(&mut flag)?;
+        match flag[0] {
+            0 => Ok(Self::CAP(
+                <Vec<SetMerkleProof> as CanonicalDeserialize>::deserialize(&mut r)?,
+            )),
+            1 => Ok(Self::Reward(Box::new(
+                <RewardNoteProofs as CanonicalDeserialize>::deserialize(&mut r)?,
+            ))),
             _ => Err(SerializationError::InvalidData),
         }
     }
@@ -123,7 +184,7 @@ impl CanonicalDeserialize for EspressoTransaction {
 )]
 pub struct ElaboratedTransaction {
     pub txn: EspressoTransaction,
-    pub proofs: Vec<SetMerkleProof>,
+    pub proofs: EspressoTxnHelperProofs,
     pub memos: Vec<ReceiverMemo>,
     pub signature: Signature,
 }
@@ -175,7 +236,7 @@ pub struct Block(pub Vec<EspressoTransaction>);
 )]
 pub struct ElaboratedBlock {
     pub block: Block,
-    pub proofs: Vec<Vec<SetMerkleProof>>,
+    pub proofs: Vec<EspressoTxnHelperProofs>,
     pub memos: Vec<Vec<ReceiverMemo>>,
     pub signatures: Vec<Signature>,
 }
@@ -323,6 +384,9 @@ pub enum ValidationError {
     UnsupportedFreezeSize {
         num_inputs: usize,
     },
+
+    /// Block transaction order doesn't match helper proofs
+    InconsistentHelperProofs,
 }
 
 pub(crate) mod ser_display {
@@ -375,6 +439,7 @@ impl Clone for ValidationError {
             UnsupportedFreezeSize { num_inputs } => UnsupportedFreezeSize {
                 num_inputs: *num_inputs,
             },
+            InconsistentHelperProofs => InconsistentHelperProofs,
         }
     }
 }
@@ -819,7 +884,7 @@ pub mod state_comm {
 #[tagged_blob("STAKING_KEY")]
 #[ser_test(random(random_for_test))]
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
-pub struct StakingKey(PubKey);
+pub struct StakingKey(pub(crate) PubKey);
 
 impl StakingKey {
     #[cfg(test)]
@@ -852,69 +917,6 @@ impl CanonicalDeserialize for StakingKey {
         Ok(Self(PubKey::from_bytes(&pubkey).unwrap()))
     }
 }
-
-///The StakeTableKey is the key identifying a user who had stake in a given round
-#[tagged_blob("STAKEKEY")]
-#[derive(Debug, Clone, PartialEq, Hash, Eq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct StakeTableKey(StakingKey);
-
-///The values in the stake table are the amount staked by the holder of the associated StakingTableKey
-#[tagged_blob("STAKEVALUE")]
-#[derive(Clone, Debug, Copy, PartialEq, Hash, Eq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct StakeTableValue(u64);
-
-///Identifying tag for a StakeTable
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
-pub struct StakeTableTag();
-impl CommitableHashTag for StakeTableTag {
-    fn commitment_diversifier() -> &'static str {
-        "Stake Table Input"
-    }
-}
-
-/// Hash function for the Stake Table
-pub type StakeTableHash = CommitableHash<StakeTableKey, StakeTableValue, StakeTableTag>;
-
-///Block number for a given stake table commitment
-#[tagged_blob("STAKECOMMKEY")]
-#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Hash)]
-pub struct StakeTableCommitmentKey(u64);
-
-///Commitment hash for the associated block's stake table
-#[tagged_blob("STAKECOMMVALUE")]
-#[derive(Clone, Debug, Copy, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Hash)]
-
-pub struct StakeTableCommitmentValue(<StakeTableHash as KVTreeHash>::Digest);
-
-///Identifying tag for a StakeTableCommitment
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub struct StakeTableCommitmentTag();
-impl CommitableHashTag for StakeTableCommitmentTag {
-    fn commitment_diversifier() -> &'static str {
-        "Stake Table Commitment"
-    }
-}
-
-/// Hash for tree which stores commitment hash of previous rounds' stake tables in (block_num, stake table commitment) kv pairs
-pub type StakeTableCommitmentsHash =
-    CommitableHash<StakeTableCommitmentKey, StakeTableCommitmentValue, StakeTableCommitmentTag>;
-
-///Previously collected rewards are recorded in (StakingKey, amount) pairs
-#[tagged_blob("COLLECTED-REWARD")]
-#[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Hash)]
-pub struct CollectedRewards((StakingKey, u64));
-
-///Identifying tag for CollectedReward
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub struct CollectedRewardsTag();
-impl CommitableHashTag for CollectedRewardsTag {
-    fn commitment_diversifier() -> &'static str {
-        "Collected rewards"
-    }
-}
-
-/// Hash for set Merkle tree for all of the previously-collected rewards
-pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
 
 /// The working state of the ledger
 ///
@@ -1019,34 +1021,55 @@ impl ValidatorState {
         &self,
         now: u64,
         txns: Block,
-        null_pfs: Vec<Vec<SetMerkleProof>>,
+        txns_helper_proofs: Vec<EspressoTxnHelperProofs>,
     ) -> Result<(Block, NullifierProofs), ValidationError> {
-        let mut nulls = HashSet::new();
-        use ValidationError::*;
-        let mut proofs = NullifierProofs::new();
-
-        let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
-        for (pf, n) in null_pfs
-            .into_iter()
-            .zip(txns.0.iter())
-            .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.input_nullifiers().into_iter()))
-        {
-            if nulls.contains(&n) {
-                return Err(NullifierAlreadyExists { nullifier: n });
+        let mut cap_txns = vec![];
+        let mut reward_txns = vec![];
+        let mut cap_nulls_proofs = vec![];
+        let mut rewards_proofs = vec![];
+        for (txn, helper_proofs) in txns.0.into_iter().zip(txns_helper_proofs.into_iter()) {
+            match (txn, helper_proofs) {
+                (EspressoTransaction::CAP(cap_txn), EspressoTxnHelperProofs::CAP(cap_nuls_pfs)) => {
+                    cap_txns.push(cap_txn);
+                    cap_nulls_proofs.push(cap_nuls_pfs);
+                }
+                (
+                    EspressoTransaction::Reward(reward_txn),
+                    EspressoTxnHelperProofs::Reward(reward_pfs),
+                ) => {
+                    reward_txns.push(reward_txn);
+                    rewards_proofs.push(reward_pfs);
+                }
+                _ => return Err(ValidationError::InconsistentHelperProofs),
             }
-
-            let root = self
-                .past_nullifiers
-                .check_unspent(&recent_nullifiers, &pf, n)?;
-            proofs.push((n, pf, root));
-            nulls.insert(n);
         }
 
-        let verif_keys = txns
-            .0
-            .iter()
-            .map(|txn| match txn {
-                EspressoTransaction::CAP(cap_txn) => match cap_txn {
+        let mut nullifiers_proofs = NullifierProofs::new();
+        {
+            // verify cap_txns
+            let mut nulls = HashSet::new();
+            use ValidationError::*;
+
+            let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
+            for (pf, n) in cap_nulls_proofs
+                .into_iter()
+                .zip(cap_txns.iter())
+                .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.nullifiers().into_iter()))
+            {
+                if nulls.contains(&n) {
+                    return Err(NullifierAlreadyExists { nullifier: n });
+                }
+
+                let root = self
+                    .past_nullifiers
+                    .check_unspent(&recent_nullifiers, &pf, n)?;
+                nullifiers_proofs.push((n, pf, root));
+                nulls.insert(n);
+            }
+
+            let verif_keys = cap_txns
+                .iter()
+                .map(|txn| match txn {
                     TransactionNote::Mint(_) => Ok(&self.verif_crs.mint),
                     TransactionNote::Transfer(note) => {
                         let num_inputs = note.inputs_nullifiers.len();
@@ -1067,38 +1090,36 @@ impl ValidatorState {
                             .key_for_size(num_inputs, num_outputs)
                             .ok_or(UnsupportedFreezeSize { num_inputs })
                     }
-                },
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        // filter cap transactions to be validated first
-        let mut cap_txns = vec![];
-        let mut merkle_roots = vec![];
-        for espresso_txn in txns.0.iter() {
-            match espresso_txn {
-                EspressoTransaction::CAP(cap_note) => {
-                    let note_mt_root = cap_note.merkle_root();
-                    if self.record_merkle_commitment.root_value == note_mt_root
-                        || self.past_record_merkle_roots.0.contains(&note_mt_root)
-                    {
-                        merkle_roots.push(note_mt_root)
-                    } else {
-                        return Err(BadMerkleRoot {});
-                    }
-                    cap_txns.push(cap_note.clone());
-                } // _ => {}
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut merkle_roots = vec![];
+            for cap_note in cap_txns.iter() {
+                let note_mt_root = cap_note.merkle_root();
+                if self.record_merkle_commitment.root_value == note_mt_root
+                    || self.past_record_merkle_roots.0.contains(&note_mt_root)
+                {
+                    merkle_roots.push(note_mt_root)
+                } else {
+                    return Err(BadMerkleRoot {});
+                }
+            }
+            // cap transactions validates first
+            if !cap_txns.is_empty() {
+                txn_batch_verify(&cap_txns[..], &merkle_roots, now, &verif_keys)
+                    .map_err(|err| CryptoError { err: Ok(err) })?;
             }
         }
-        // cap transactions validates first
-        if !cap_txns.is_empty() {
-            txn_batch_verify(&cap_txns[..], &merkle_roots, now, &verif_keys)
-                .map_err(|err| CryptoError { err: Ok(err) })?;
+        {
+            //TODO (fernando) verify CollectRewards
         }
-        //TODO (fernando) verify CollectRewards
+        // assemble Block
+        let txns: Vec<_> = cap_txns
+            .into_iter()
+            .map(EspressoTransaction::CAP)
+            .chain(reward_txns.into_iter().map(EspressoTransaction::Reward))
+            .collect();
 
-        let txns: Vec<_> = cap_txns.into_iter().map(EspressoTransaction::CAP).collect();
-        // TODO(fernando) append CollectRewardsTransactions
-
-        Ok((Block(txns), proofs))
+        Ok((Block(txns), nullifiers_proofs))
     }
 
     /// Performs validation for a block, updating the ValidatorState.
@@ -1118,7 +1139,7 @@ impl ValidatorState {
         &mut self,
         now: u64,
         txns: Block,
-        null_pfs: Vec<Vec<SetMerkleProof>>,
+        null_pfs: Vec<EspressoTxnHelperProofs>,
     ) -> Result<(Vec<u64>, SetMerkleTree), ValidationError> {
         // If the block successfully validates, and the nullifier
         // proofs apply correctly, the remaining (mutating) operations

@@ -17,7 +17,9 @@ use crate::tree_hash::*;
 use ark_serialize::*;
 use core::fmt::Debug;
 use core::mem;
+use espresso_macros::*;
 use generic_array::{arr::AddLength, ArrayLength, GenericArray};
+use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use typenum::{Unsigned, U1};
 
@@ -126,7 +128,8 @@ where
 }
 
 /// Terminal nodes in a KVMT are either a leaf or an empty subtree
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[ser_test(random(random_for_test), serde(false), types(test_structs::TestKVHash))]
 pub enum KVMerkleTerminalNode<KVHash>
 where
     KVHash: KVTreeHash + Clone,
@@ -231,8 +234,45 @@ where
     }
 }
 
+#[cfg(test)]
+mod test_structs {
+    use crate::state::{CommitableHash, CommitableHashTag, KVMerkleProof, KVMerkleTerminalNode};
+    use crate::tree_hash::KVTreeHash;
+    use generic_array::arr;
+    use serde::{Deserialize, Serialize};
+    #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
+    pub(crate) struct TestTag();
+    impl CommitableHashTag for TestTag {
+        fn commitment_diversifier() -> &'static str {
+            "TestTag"
+        }
+    }
+    pub(crate) type TestKVHash = CommitableHash<u64, u64, TestTag>;
+
+    impl KVMerkleTerminalNode<TestKVHash> {
+        pub(crate) fn random_for_test(_: &mut rand_chacha::ChaChaRng) -> Self {
+            KVMerkleTerminalNode::Leaf {
+                height: 3,
+                key: 0,
+                value: 1,
+            }
+        }
+    }
+    impl KVMerkleProof<TestKVHash> {
+        pub(crate) fn random_for_test(rng: &mut rand_chacha::ChaChaRng) -> Self {
+            let array1 = arr![<TestKVHash as KVTreeHash>::Digest; <TestKVHash as KVTreeHash>::hash_leaf(10,20)];
+            let array2 = arr![<TestKVHash as KVTreeHash>::Digest; <TestKVHash as KVTreeHash>::hash_leaf(100,200)];
+            KVMerkleProof {
+                terminal_node: KVMerkleTerminalNode::random_for_test(rng),
+                path: vec![array1, array2],
+            }
+        }
+    }
+}
 /// Structure for proofs in the KVMT
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[tagged_blob("KVMerkleProof")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[ser_test(random(random_for_test), serde(false), types(test_structs::TestKVHash))]
 pub struct KVMerkleProof<KVHash>
 where
     KVHash: KVTreeHash,
@@ -243,6 +283,68 @@ where
     //each level of path in the tree includes all but 1 of the siblings,
     //hence BranchArityMinus1
     path: Vec<GenericArray<KVHash::Digest, KVHash::BranchArityMinus1>>,
+}
+
+impl<KVHash> CanonicalSerialize for KVMerkleProof<KVHash>
+where
+    KVHash: KVTreeHash,
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
+{
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        self.terminal_node.serialize(&mut writer)?;
+        writer.write_all(&[self.path.len() as u8])?; // as u8, paths are short
+        for node in self.path.iter() {
+            writer.write_all(&[node.len() as u8])?; // as u8, arity is short
+            for digest in node {
+                digest.serialize(&mut writer)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn serialized_size(&self) -> usize {
+        let mut size = self.terminal_node.serialized_size() + 1;
+        for node in self.path.iter() {
+            size += 1;
+            for e in node {
+                size += e.serialized_size();
+            }
+        }
+        size
+    }
+}
+
+impl<KVHash> CanonicalDeserialize for KVMerkleProof<KVHash>
+where
+    KVHash: KVTreeHash + Clone,
+    <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
+        ArrayLength<KVMerkleTree<KVHash>>,
+{
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let terminal_node: KVMerkleTerminalNode<KVHash> =
+            CanonicalDeserialize::deserialize(&mut reader)?;
+        let mut path = vec![];
+        let mut len = [0u8];
+        reader.read_exact(&mut len)?;
+        for _ in 0..len[0] {
+            let mut node_len = [0u8];
+            reader.read_exact(&mut node_len)?;
+            let mut vec_node = vec![];
+            for _ in 0..node_len[0] {
+                let digest: KVHash::Digest = CanonicalDeserialize::deserialize(&mut reader)?;
+                vec_node.push(digest);
+            }
+            let node = GenericArray::<KVHash::Digest, KVHash::BranchArityMinus1>::clone_from_slice(
+                &vec_node,
+            );
+            path.push(node)
+        }
+        Ok(KVMerkleProof {
+            terminal_node,
+            path,
+        })
+    }
 }
 
 impl<KVHash> KVMerkleProof<KVHash>
