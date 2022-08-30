@@ -24,9 +24,7 @@ use espresso_availability_api::{
     query_data::{BlockQueryData, StateQueryData},
 };
 use espresso_catchup_api::data_source::UpdateCatchUpData;
-use espresso_core::state::{
-    BlockCommitment, TransactionCommitment, ValidationOutputs, ValidatorState,
-};
+use espresso_core::state::{BlockCommitment, TransactionCommitment, ValidatorState};
 use espresso_metastate_api::data_source::UpdateMetaStateData;
 use espresso_status_api::data_source::UpdateStatusData;
 use futures::{
@@ -102,30 +100,16 @@ where
             for (mut block, state, qcert) in
                 izip!(block.iter().cloned(), state.iter(), qcs.iter().cloned()).rev()
             {
-                // A block has been committed. Update our mirror of the ValidatorState by applying
-                // the new block, and generate a Commit event. We are getting our event stream
-                // directly from a HotShot instance running in this process, so we can trust the
-                // events and use the much faster `trust_and_apply` instead of `validate_and_apply`.
+                // Grab metadata for the new block from the state it is applying to.
                 let block_index = self.validator_state.prev_commit_time;
-                let ValidationOutputs {
-                    uids,
-                    nullifier_proofs,
-                    record_proofs,
-                    ..
-                } = self
+                let nullifier_proofs = self
                     .validator_state
-                    .trust_and_apply(
-                        self.validator_state.prev_commit_time + 1,
-                        block.block.clone(),
-                        block.proofs.clone(),
-                    )
-                    .expect("state is out of sync with validator");
-                assert_eq!(self.validator_state.commit(), state.commit());
-                let records_from = if uids.is_empty() {
-                    self.validator_state.record_merkle_commitment.num_leaves
-                } else {
-                    uids[0]
-                };
+                    .update_nullifier_proofs(&block.block.0, block.proofs.clone())
+                    .expect("failed to update nullifier proofs from HotShot block");
+                let record_proofs = self.validator_state.update_records_frontier(&block.block.0);
+                let records_from = self.validator_state.record_merkle_commitment.num_leaves;
+                // Update the state.
+                self.validator_state = state.clone();
 
                 let mut txn_hashes = Vec::new();
                 let mut nullifiers_delta = Vec::new();
@@ -154,7 +138,7 @@ where
                     })
                     .collect();
 
-                {
+                let record_count = {
                     let mut events = vec![Some(LedgerEvent::Commit {
                         block: block.clone(),
                         block_id: block_index as u64,
@@ -162,12 +146,13 @@ where
                     })];
 
                     // Construct the Memos events for this block.
-                    let mut first_uid = 0;
+                    let mut first_uid = records_from;
                     for (txn_id, (txn, memos)) in
                         block.block.0.iter().zip(block.memos.iter()).enumerate()
                     {
-                        let txn_uids = &uids[first_uid..first_uid + txn.output_len()];
-                        first_uid += txn.output_len();
+                        let output_len = txn.output_len() as u64;
+                        let txn_uids = (first_uid..first_uid + output_len).collect::<Vec<_>>();
+                        first_uid += output_len;
                         let merkle_paths = txn_uids
                             .iter()
                             .map(|uid| record_proofs.get_leaf(*uid).expect_ok().unwrap().1.path)
@@ -176,7 +161,7 @@ where
                             outputs: izip!(
                                 memos.clone(),
                                 txn.output_commitments(),
-                                txn_uids.iter().cloned(),
+                                txn_uids,
                                 merkle_paths
                             )
                             .collect(),
@@ -189,7 +174,9 @@ where
                     if let Err(e) = catchup_store.append_events(events) {
                         tracing::warn!("append_events returned error {}", e);
                     }
-                }
+
+                    first_uid - records_from
+                };
                 {
                     let qcert_block_hash: [u8; H_256] =
                         qcert.block_hash.try_into().unwrap_or([0u8; H_256]);
@@ -201,7 +188,7 @@ where
                             block_hash: BlockCommitment(block.block.commit()),
                             block_id: block_index as u64,
                             records_from,
-                            record_count: uids.len() as u64,
+                            record_count,
                             txn_hashes,
                         }),
                         Some(StateQueryData {

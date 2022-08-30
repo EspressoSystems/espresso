@@ -615,6 +615,47 @@ impl NullifierHistory {
         &mut self,
         inserts: NullifierProofs,
     ) -> Result<SetMerkleTree, ValidationError> {
+        let (snapshot, new_hash, nulls) = self.apply_block(inserts)?;
+
+        // Update the state: append the new historical snapshot, prune an old snapshot if necessary,
+        // and update the current hash.
+        if self.history.len() >= ValidatorState::HISTORY_SIZE {
+            self.history.pop_back();
+        }
+        self.history.push_front((snapshot.clone(), nulls));
+        self.current = new_hash;
+
+        Ok(snapshot)
+    }
+
+    /// Update a set of historical nullifier non-membership proofs.
+    ///
+    /// `inserts` is a list of new nullifiers along with their proofs and the historical root hash
+    /// which their proof should be validated against. [update_proofs](Self::update_proofs) will
+    /// compute a sparse [SetMerkleTree] containing non-membership proofs for each nullifier in
+    /// `inserts`, updated so that the root hash of each new proof is the latest root hash in
+    /// `self`.
+    ///
+    /// Each nullifier and proof in `inserts` should be labeled with the [Hash](set_hash::Hash) that
+    /// was returned from [check_unspent](Self::check_unspent) when validating that proof. In
+    /// addition, [append_block](Self::append_block) must not have been called since any of the
+    /// relevant calls to [check_unspent](Self::check_unspent).
+    ///
+    /// # Errors
+    ///
+    /// This function fails if any of the proofs in `inserts` are invalid relative to the
+    /// corresponding [Hash](set_hash::Hash).
+    pub fn update_proofs(
+        &self,
+        inserts: NullifierProofs,
+    ) -> Result<SetMerkleTree, ValidationError> {
+        Ok(self.apply_block(inserts)?.0)
+    }
+
+    fn apply_block(
+        &self,
+        inserts: NullifierProofs,
+    ) -> Result<(SetMerkleTree, set_hash::Hash, Vec<Nullifier>), ValidationError> {
         let nulls = inserts.iter().map(|(n, _, _)| *n).collect::<Vec<_>>();
 
         // A map from a historical root hash to the proofs which are to be validated against that
@@ -684,15 +725,7 @@ impl NullifierHistory {
             accum.insert(*n).unwrap();
         }
 
-        // Update the state: append the new historical snapshot, prune an old snapshot if necessary,
-        // and update the current hash.
-        if self.history.len() >= ValidatorState::HISTORY_SIZE {
-            self.history.pop_back();
-        }
-        self.history.push_front((current.clone(), nulls));
-        self.current = accum.hash();
-
-        Ok(current)
+        Ok((current, accum.hash(), nulls))
     }
 }
 
@@ -1137,66 +1170,15 @@ impl ValidatorState {
         let (txns, null_pfs) = self.validate_block_check(now, txns, null_pfs)?;
         // If the block successfully validates, and the nullifier proofs apply correctly, the
         // remaining (mutating) operations cannot fail, as this would result in an inconsistent
-        // state. No operations in [apply] should fail if [validate_block_check] succeeded, hence
-        // the `unwrap`.
-        Ok(self.apply(now, txns, null_pfs).unwrap())
-    }
-
-    /// Updates the state based on the effects of a block.
-    ///
-    /// This method applies the same update that [validate_and_apply](Self::validate_and_apply)
-    /// would apply if the block is valid; however, this function does not perform validation of the
-    /// block. As such, it is much more efficient than
-    /// [validate_and_apply](Self::validate_and_apply), but it trusts the caller to provide a valid
-    /// block.
-    ///
-    /// If successful, returns
-    /// * the UIDs of the newly created records
-    /// * updated nullifier non-membership proofs for all of the nullifiers in `txns`, relative to
-    ///   the nullifier set at the time this function was invoked, in the form of a sparse
-    ///   reperesentation of a [SetMerkleTree]
-    ///
-    /// # Errors
-    /// This function may fail with any errors produced by
-    /// [validate_and_apply](Self::validate_and_apply). However, it is not guaranteed to catch any
-    /// such errors. It will only catch errors severe enough to make it impossible to compute the
-    /// udpate from `txns`. It skips many validity checks, and thus, given an invalid block,
-    /// [trust_and_apply](Self::trust_and_apply) may erroneously succeed where
-    /// [validate_and_apply](Self::validate_and_apply) would fail.
-    ///
-    /// # Panics
-    /// Panics if the record Merkle commitment is inconsistent with the record Merkle frontier.
-    pub fn trust_and_apply(
-        &mut self,
-        now: u64,
-        txns: Block,
-        null_pfs: Vec<Vec<SetMerkleProof>>,
-    ) -> Result<ValidationOutputs, ValidationError> {
-        let mut proofs = vec![];
-        let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
-        for (pf, n) in null_pfs
-            .into_iter()
-            .zip(txns.0.iter())
-            .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.input_nullifiers().into_iter()))
-        {
-            let root = self
-                .past_nullifiers
-                .check_unspent(&recent_nullifiers, &pf, n)?;
-            proofs.push((n, pf, root));
-        }
-        self.apply(now, txns, proofs)
-    }
-
-    fn apply(
-        &mut self,
-        now: u64,
-        txns: Block,
-        null_pfs: Vec<(Nullifier, SetMerkleProof, set_hash::Hash)>,
-    ) -> Result<ValidationOutputs, ValidationError> {
+        // state. No operations after the first assignement to a member of self have a possible
+        // error; this must remain true if code changes.
         let comm = self.commit();
         self.prev_commit_time = now;
         self.prev_block = BlockCommitment(txns.commit());
-        let null_pfs = self.past_nullifiers.append_block(null_pfs)?;
+        let null_pfs = self
+            .past_nullifiers
+            .append_block(null_pfs)
+            .expect("failed to append nullifiers after validation");
 
         let mut record_merkle_builder = FilledMTBuilder::from_frontier(
             &self.record_merkle_commitment,
@@ -1231,6 +1213,39 @@ impl ValidatorState {
             nullifier_proofs: null_pfs,
             record_proofs: record_merkle_frontier,
         })
+    }
+
+    pub fn update_nullifier_proofs(
+        &self,
+        txns: &[EspressoTransaction],
+        proofs: Vec<Vec<SetMerkleProof>>,
+    ) -> Result<SetMerkleTree, ValidationError> {
+        let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
+        let proofs = proofs
+            .into_iter()
+            .zip(txns)
+            .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.input_nullifiers()))
+            .map(|(pf, n)| {
+                let root = self
+                    .past_nullifiers
+                    .check_unspent(&recent_nullifiers, &pf, n)?;
+                Ok((n, pf, root))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.past_nullifiers.update_proofs(proofs)
+    }
+
+    pub fn update_records_frontier(&self, txns: &[EspressoTransaction]) -> MerkleTree {
+        let mut record_merkle_builder = FilledMTBuilder::from_frontier(
+            &self.record_merkle_commitment,
+            &self.record_merkle_frontier,
+        )
+        .expect("failed to restore MerkleTree from frontier");
+
+        for o in txns.iter().flat_map(|t| t.output_commitments()) {
+            record_merkle_builder.push(o.to_field_element());
+        }
+        record_merkle_builder.build()
     }
 }
 
