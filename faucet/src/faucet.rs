@@ -1122,7 +1122,7 @@ mod test {
             );
             let mut receiver = network.create_keystore(&mut receiver_loader).await;
             let receiver_key = receiver
-                .generate_user_key("receiver".into(), None)
+                .generate_sending_account("receiver".into(), None)
                 .await
                 .unwrap();
             println!("Receiver keystore {} created.", i);
@@ -1178,7 +1178,7 @@ mod test {
                     .await;
 
                     // We should have received at least `num_grants` records of `grant_size` each.
-                    let records = keystore.records().await.collect::<Vec<_>>();
+                    let records = keystore.records().await;
                     if restart {
                         assert!(
                             records.len() >= num_grants,
@@ -1190,8 +1190,8 @@ mod test {
                         assert_eq!(records.len(), num_grants);
                     }
                     for record in records {
-                        assert_eq!(record.ro.asset_def, AssetDefinition::native());
-                        assert_eq!(record.ro.pub_key, key);
+                        assert_eq!(*record.asset_definition(), AssetDefinition::native());
+                        assert_eq!(*record.pub_key(), key);
                         assert_eq!(record.amount(), grant_size);
                     }
                 })
