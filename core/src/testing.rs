@@ -1174,16 +1174,12 @@ impl MultiXfrTestState {
         )?;
         let new_state = self.validator.append(&blk).unwrap();
 
-<<<<<<< HEAD:zerok/zerok_lib/src/testing.rs
-        for n in blk.block.txns.iter().flat_map(|x| x.nullifiers().into_iter()) {
-=======
         for n in blk
             .block
             .0
             .iter()
             .flat_map(|x| x.input_nullifiers().into_iter())
         {
->>>>>>> origin/main:core/src/testing.rs
             assert!(!self.nullifiers.contains(n).unwrap().0);
             self.nullifiers.insert(n);
         }

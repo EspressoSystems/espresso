@@ -40,14 +40,7 @@ use jf_cap::{
     MerkleTree, Signature,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
-<<<<<<< HEAD:zerok/zerok_lib/src/node.rs
-use phaselock::{
-    types::{PhaseLockError, EventType, HandleError, PhaseLockHandle},
-    traits::BlockContents, H_256,
-};
-=======
 use reef::traits::Transaction;
->>>>>>> origin/main:validator_node/src/node.rs
 use seahorse::events::LedgerEvent;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -62,15 +55,8 @@ pub trait ConsensusEvent {
     fn into_event(self) -> HotShotEventType;
 }
 
-<<<<<<< HEAD:zerok/zerok_lib/src/node.rs
-pub type PhaseLockEvent = phaselock::types::Event<ElaboratedBlock, ValidatorState>;
-
-impl ConsensusEvent for PhaseLockEvent {
-    fn into_event(self) -> EventType<ElaboratedBlock, ValidatorState> {
-=======
 impl ConsensusEvent for HotShotEvent {
     fn into_event(self) -> HotShotEventType {
->>>>>>> origin/main:validator_node/src/node.rs
         self.event
     }
 }

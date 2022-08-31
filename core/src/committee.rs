@@ -1,7 +1,3 @@
-<<<<<<< HEAD:zerok/zerok_lib/src/committee.rs
-use phaselock::{committee::DynamicCommittee, traits::Election, data::BlockHash, PrivKey, PubKey, H_256};
-use std::collections::{hash_map::HashMap, HashSet};
-=======
 // Copyright (c) 2022 Espresso Systems (espressosys.com)
 // This file is part of the Espresso library.
 //
@@ -21,7 +17,6 @@ use hotshot_types::data::ViewNumber;
 use hotshot_types::traits::election::Election;
 use hotshot_types::traits::signature_key::EncodedSignature;
 use std::collections::{BTreeMap, HashSet};
->>>>>>> origin/main:core/src/committee.rs
 use std::marker::PhantomData;
 
 use crate::{PrivKey, PubKey};
