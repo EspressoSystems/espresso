@@ -47,7 +47,7 @@ use rand::{
     Rng, RngCore,
 };
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-use seahorse::txn_builder::RecordInfo;
+use seahorse::records::Record;
 use seahorse::{events::EventIndex, hd::KeyTree, loader::KeystoreLoader, KeystoreError};
 use std::cmp::min;
 use std::collections::{HashSet, VecDeque};
@@ -94,14 +94,20 @@ type Keystore = seahorse::Keystore<'static, NetworkBackend<'static>, EspressoLed
 
 /// Return records the freezer has access to freeze or unfreeze but does not own.
 /// Will only return records with freeze_flag the same as the frozen arg.
-pub async fn find_freezable_records<'a>(freezer: &Keystore, frozen: FreezeFlag) -> Vec<RecordInfo> {
-    let pks: HashSet<UserPubKey> = freezer.pub_keys().await.into_iter().collect();
+pub async fn find_freezable_records<'a>(freezer: &Keystore, frozen: FreezeFlag) -> Vec<Record> {
+    let pks: HashSet<UserPubKey> = freezer
+        .sending_keys()
+        .await
+        .into_iter()
+        .map(|pair| pair.pub_key())
+        .collect();
     let freeze_keys: HashSet<FreezerPubKey> =
-        freezer.freezer_pub_keys().await.into_iter().collect();
+        freezer.freezing_pub_keys().await.into_iter().collect();
     let records = freezer.records().await;
     records
+        .into_iter()
         .filter(|r| {
-            let ro = &r.ro;
+            let ro = &r.record_opening();
             // Ignore records we own
             if pks.contains(&ro.pub_key) {
                 return false;
@@ -298,7 +304,7 @@ async fn main() {
                 panic!("invalid private key file: {}", err);
             });
             keystore
-                .add_user_key(
+                .add_sending_account(
                     key_pair.clone(),
                     "Random keystore key".to_string(),
                     EventIndex::default(),
@@ -311,15 +317,15 @@ async fn main() {
         }
         None => {
             keystore
-                .generate_viewing_key("view key".to_string())
+                .generate_viewing_account("view key".to_string())
                 .await
                 .unwrap();
             keystore
-                .generate_freeze_key("freeze key".to_string())
+                .generate_viewing_account("freeze key".to_string())
                 .await
                 .unwrap();
             keystore
-                .generate_user_key("Random Key".to_string(), Some(EventIndex::default()))
+                .generate_sending_account("Random Key".to_string(), Some(EventIndex::default()))
                 .await
                 .unwrap()
         }
@@ -361,8 +367,8 @@ async fn main() {
                     "Random keystore asset".to_string(),
                     &[],
                     AssetPolicy::default()
-                        .set_viewer_pub_key(keystore.viewer_pub_keys().await[0].clone())
-                        .set_freezer_pub_key(keystore.freezer_pub_keys().await[0].clone())
+                        .set_viewer_pub_key(keystore.viewing_pub_keys().await[0].clone())
+                        .set_freezer_pub_key(keystore.freezing_pub_keys().await[0].clone())
                         .reveal_record_opening()
                         .unwrap(),
                 )
@@ -531,8 +537,8 @@ async fn main() {
                         "Random keystore asset".to_string(),
                         &[],
                         AssetPolicy::default()
-                            .set_viewer_pub_key(keystore.viewer_pub_keys().await[0].clone())
-                            .set_freezer_pub_key(keystore.freezer_pub_keys().await[0].clone())
+                            .set_viewer_pub_key(keystore.viewing_pub_keys().await[0].clone())
+                            .set_freezer_pub_key(keystore.freezing_pub_keys().await[0].clone())
                             .reveal_record_opening()
                             .unwrap(),
                     )
@@ -570,24 +576,24 @@ async fn main() {
                 pending.push_back(txn);
             }
             OperationType::Freeze => {
-                let freezable_records: Vec<RecordInfo> =
+                let freezable_records: Vec<Record> =
                     find_freezable_records(&keystore, FreezeFlag::Unfrozen).await;
                 if freezable_records.is_empty() {
                     event!(Level::INFO, "Seed {}, No freezable records", seed);
                     continue;
                 }
                 let record = freezable_records.choose(&mut rng).unwrap();
-                let owner_address = record.ro.pub_key.address().clone();
-                let asset_def = &record.ro.asset_def;
+                let owner_address = record.pub_key().address().clone();
+                let asset_def = &record.asset_definition();
                 event!(
                     Level::INFO,
                     "Seed {}, Freezing Asset: {}, Amount: {}, Owner: {}",
                     seed,
                     asset_def.code,
-                    record.ro.amount,
+                    record.amount(),
                     owner_address
                 );
-                let freeze_address = keystore.pub_keys().await[0].address();
+                let freeze_address = keystore.sending_keys().await[0].address();
 
                 let txn = match keystore
                     .freeze(
@@ -609,24 +615,24 @@ async fn main() {
             }
             OperationType::Unfreeze => {
                 event!(Level::INFO, "Seed {}, Unfreezing", seed);
-                let freezable_records: Vec<RecordInfo> =
+                let freezable_records: Vec<Record> =
                     find_freezable_records(&keystore, FreezeFlag::Frozen).await;
                 if freezable_records.is_empty() {
                     event!(Level::INFO, "Seed {}, No frozen records", seed);
                     continue;
                 }
                 let record = freezable_records.choose(&mut rng).unwrap();
-                let owner_address = record.ro.pub_key.address();
-                let asset_def = &record.ro.asset_def;
+                let owner_address = record.pub_key().address();
+                let asset_def = &record.asset_definition();
                 event!(
                     Level::INFO,
                     "Seed {}, Unfreezing Asset: {}, Amount: {}, Owner: {}",
                     seed,
                     asset_def.code,
-                    record.ro.amount,
+                    record.amount(),
                     owner_address
                 );
-                let freeze_address = keystore.pub_keys().await[0].address();
+                let freeze_address = keystore.sending_keys().await[0].address();
                 let txn = match keystore
                     .unfreeze(
                         Some(&freeze_address),

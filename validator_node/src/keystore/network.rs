@@ -225,12 +225,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
                 nullifiers,
                 record_mt: SparseMerkleTree::sparse(records.0),
                 now: EventIndex::from_source(EventSource::QueryService, num_events),
-                records: Default::default(),
             },
-            key_state: Default::default(),
-            viewing_accounts: Default::default(),
-            freezing_accounts: Default::default(),
-            sending_accounts: Default::default(),
         };
 
         Ok(state)

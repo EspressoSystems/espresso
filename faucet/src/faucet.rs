@@ -52,7 +52,8 @@ use validator_node::keystore::{
     hd::Mnemonic,
     loader::{MnemonicPasswordLogin, RecoveryLoader},
     network::NetworkBackend,
-    txn_builder::{RecordInfo, TransactionStatus, TransactionUID},
+    records::Record,
+    txn_builder::{TransactionStatus, TransactionUID},
     EspressoKeystore, RecordAmount,
 };
 
@@ -606,12 +607,12 @@ async fn worker(id: usize, mut state: FaucetState) {
 async fn spendable_records(
     keystore: &EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin>,
     grant_size: RecordAmount,
-) -> impl Iterator<Item = RecordInfo> {
+) -> impl Iterator<Item = Record> {
     let now = keystore.read().await.state().txn_state.validator.now();
-    keystore.records().await.filter(move |record| {
-        record.ro.asset_def.code == AssetCode::native()
+    keystore.records().await.into_iter().filter(move |record| {
+        record.asset_code() == AssetCode::native()
             && record.amount() >= grant_size
-            && record.ro.freeze_flag == FreezeFlag::Unfrozen
+            && record.freeze_flag() == FreezeFlag::Unfrozen
             && !record.on_hold(now)
     })
 }
@@ -695,7 +696,7 @@ async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionUID<Espr
             // Acquire the keystore lock inside the loop, so we release it after each transfer.
             // Holding the lock for too long can unneccessarily slow down faucet requests.
             let mut keystore = state.keystore.lock().await;
-            let pub_key = keystore.pub_keys().await[0].clone();
+            let pub_key = keystore.sending_keys().await[0].pub_key().clone();
             let records = spendable_records(&keystore, state.grant_size)
                 .await
                 .collect::<Vec<_>>();
@@ -826,16 +827,16 @@ pub async fn init_web_server(
     // first HD sending key is the faucet key.
     let new_key = if let Some(key) = faucet_key_pair {
         keystore
-            .add_user_key(key.clone(), "faucet".into(), EventIndex::default())
+            .add_sending_account(key.clone(), "faucet".into(), EventIndex::default())
             .await
             .unwrap();
         Some(key.pub_key())
-    } else if keystore.pub_keys().await.is_empty() {
+    } else if keystore.sending_keys().await.is_empty() {
         // We pass `EventIndex::default()` to start a scan of the ledger from the beginning, in
         // order to discover the faucet record.
         Some(
             keystore
-                .generate_user_key("faucet".into(), Some(EventIndex::default()))
+                .generate_sending_account("faucet".into(), Some(EventIndex::default()))
                 .await
                 .unwrap(),
         )

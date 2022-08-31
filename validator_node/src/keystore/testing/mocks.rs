@@ -226,16 +226,11 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                 txn_state: TransactionState {
                     validator: ledger.network().validator.clone(),
 
-                    records: Default::default(),
                     nullifiers: ledger.network().nullifiers.clone(),
                     record_mt: SparseMerkleTree::sparse(ledger.network().records.clone()),
 
                     now: ledger.now(),
                 },
-                key_state: Default::default(),
-                freezing_accounts: Default::default(),
-                sending_accounts: Default::default(),
-                viewing_accounts: Default::default(),
             }
         };
         Ok(state)
