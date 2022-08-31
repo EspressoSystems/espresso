@@ -12,7 +12,6 @@
 // see <https://www.gnu.org/licenses/>.
 
 use espresso_macros::*;
-use hotshot::types::SignatureKey;
 use jf_cap::structs::ReceiverMemo;
 use jf_cap::Signature;
 
@@ -26,7 +25,8 @@ pub use crate::tree_hash::*;
 pub use crate::util::canonical;
 pub use crate::PrivKey;
 
-use crate::stake_table::{CollectedRewardsHash, StakeTableCommitmentsHash, StakeTableHash};
+use crate::reward::CollectedRewardsHash;
+use crate::stake_table::{StakeTableCommitmentsHash, StakeTableHash};
 pub use crate::PubKey;
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
@@ -877,44 +877,6 @@ pub mod state_comm {
                 .field("prev_block", self.prev_block)
                 .finalize()
         }
-    }
-}
-
-/// PubKey used for stake table key
-#[tagged_blob("STAKING_KEY")]
-#[ser_test(random(random_for_test))]
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
-pub struct StakingKey(pub(crate) PubKey);
-
-impl StakingKey {
-    #[cfg(test)]
-    fn random_for_test(_rng: &mut rand_chacha::ChaChaRng) -> Self {
-        StakingKey(PubKey::from_private(&PrivKey::generate()))
-    }
-}
-
-// cannot derive CanonicalSerialize because PubKey does not implement it
-impl CanonicalSerialize for StakingKey {
-    fn serialized_size(&self) -> usize {
-        bincode::serialize(&self.0.to_bytes()).unwrap().len()
-    }
-    fn serialize<W: ark_serialize::Write>(
-        &self,
-        mut w: W,
-    ) -> Result<(), ark_serialize::SerializationError> {
-        let bytes = bincode::serialize(&self.0.to_bytes()).unwrap();
-        CanonicalSerialize::serialize(&bytes, &mut w)?;
-        Ok(())
-    }
-}
-impl CanonicalDeserialize for StakingKey {
-    fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
-    where
-        R: ark_serialize::Read,
-    {
-        let bytes: Vec<u8> = CanonicalDeserialize::deserialize(&mut r)?;
-        let pubkey = bincode::deserialize(&bytes).unwrap();
-        Ok(Self(PubKey::from_bytes(&pubkey).unwrap()))
     }
 }
 

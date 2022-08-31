@@ -10,24 +10,97 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::state::{CommitableHash, CommitableHashTag, StakingKey};
+use crate::state::{CommitableHash, CommitableHashTag};
 use crate::tree_hash::KVTreeHash;
+use crate::{PrivKey, PubKey};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
+use espresso_macros::*;
+use hotshot_types::traits::signature_key::{EncodedSignature, SignatureKey};
 use jf_cap::structs::Amount;
 use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 
-/*
-///The StakeTableKey is the key identifying a user who had stake in a given round
-#[tagged_blob("STAKEKEY")]
-#[derive(Debug, Clone, PartialEq, Hash, Eq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct StakeTableKey(pub(crate) StakingKey);
+/// PubKey used for stake table key
+#[tagged_blob("STAKING_KEY")]
+#[ser_test(random(random_for_test))]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+pub struct StakingKey(pub(crate) PubKey);
 
-///The values in the stake table are the amount staked by the holder of the associated StakingTableKey
-#[tagged_blob("STAKEVALUE")]
-#[derive(Clone, Debug, Copy, PartialEq, Hash, Eq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct StakeTableValue(pub(crate) Amount);
-*/
+impl StakingKey {
+    /// Derive Staking Public key from Staking Private Key
+    pub fn from_priv_key(priv_key: &StakingPrivKey) -> Self {
+        Self(PubKey::from_private(&priv_key.0))
+    }
+
+    /// Sign a message using StakingPrivate Key
+    pub fn sign(priv_key: &StakingPrivKey, msg: &[u8]) -> StakingKeySignature {
+        StakingKeySignature(PubKey::sign(&priv_key.0, msg))
+    }
+}
+
+/// Staking Private Key
+pub struct StakingPrivKey(pub(crate) PrivKey);
+
+/// PubKey used for stake table key
+#[tagged_blob("STAKING_KEY_SIGNATURE")]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+pub struct StakingKeySignature(pub(crate) EncodedSignature);
+
+impl StakingKey {
+    #[cfg(test)]
+    fn random_for_test(_rng: &mut rand_chacha::ChaChaRng) -> Self {
+        StakingKey(PubKey::from_private(&PrivKey::generate()))
+    }
+}
+
+// cannot derive CanonicalSerialize because PubKey does not implement it
+impl CanonicalSerialize for StakingKey {
+    fn serialize<W: ark_serialize::Write>(
+        &self,
+        mut w: W,
+    ) -> Result<(), ark_serialize::SerializationError> {
+        let bytes = bincode::serialize(&self.0.to_bytes()).unwrap();
+        CanonicalSerialize::serialize(&bytes, &mut w)?;
+        Ok(())
+    }
+
+    fn serialized_size(&self) -> usize {
+        bincode::serialize(&self.0.to_bytes()).unwrap().len()
+    }
+}
+impl CanonicalDeserialize for StakingKey {
+    fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
+    where
+        R: ark_serialize::Read,
+    {
+        let bytes: Vec<u8> = CanonicalDeserialize::deserialize(&mut r)?;
+        let pubkey = bincode::deserialize(&bytes).unwrap();
+        Ok(Self(PubKey::from_bytes(&pubkey).unwrap()))
+    }
+}
+
+// cannot derive CanonicalSerialize because PubKey does not implement it
+impl CanonicalSerialize for StakingKeySignature {
+    fn serialize<W: ark_serialize::Write>(
+        &self,
+        mut w: W,
+    ) -> Result<(), ark_serialize::SerializationError> {
+        CanonicalSerialize::serialize(&self.0 .0, &mut w)?;
+        Ok(())
+    }
+    fn serialized_size(&self) -> usize {
+        self.0 .0.len()
+    }
+}
+impl CanonicalDeserialize for StakingKeySignature {
+    fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
+    where
+        R: ark_serialize::Read,
+    {
+        let bytes: Vec<u8> = CanonicalDeserialize::deserialize(&mut r)?;
+        Ok(Self(EncodedSignature(bytes)))
+    }
+}
 
 /// HotShot View number
 #[derive(
@@ -71,20 +144,3 @@ pub type StakeTableCommitment = <StakeTableHash as KVTreeHash>::Digest;
 /// Hash for tree which stores commitment hash of previous rounds' stake tables in (view_number, stake table commitment) kv pairs
 pub type StakeTableCommitmentsHash =
     CommitableHash<ViewNumber, <StakeTableHash as KVTreeHash>::Digest, StakeTableCommitmentTag>;
-
-/// Previously collected rewards are recorded in (StakingKey, view_number) pairs
-#[tagged_blob("COLLECTED-REWARD")]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
-pub struct CollectedRewards((StakingKey, u64));
-
-/// Identifying tag for CollectedReward
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub struct CollectedRewardsTag();
-impl CommitableHashTag for CollectedRewardsTag {
-    fn commitment_diversifier() -> &'static str {
-        "Collected rewards"
-    }
-}
-
-/// Hash for set Merkle tree for all of the previously-collected rewards
-pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;

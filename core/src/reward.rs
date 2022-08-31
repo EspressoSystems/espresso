@@ -12,16 +12,35 @@
 
 use crate::kv_merkle_tree::KVMerkleProof;
 use crate::stake_table::{
-    CollectedRewardsHash, StakeTableCommitment, StakeTableCommitmentsHash, StakeTableHash,
+    StakeTableCommitment, StakeTableCommitmentsHash, StakeTableHash, StakingKey,
+    StakingKeySignature, ViewNumber,
 };
-use crate::state::StakingKey;
+use crate::state::{CommitableHash, CommitableHashTag};
 use ark_serialize::*;
 use core::hash::Hash;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::structs::{
     Amount, AssetDefinition, BlindFactor, FreezeFlag, RecordCommitment, RecordOpening,
 };
+use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
+
+/// Previously collected rewards are recorded in (StakingKey, view_number) pairs
+#[tagged_blob("COLLECTED-REWARD")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
+pub struct CollectedRewards((StakingKey, ViewNumber));
+
+/// Identifying tag for CollectedReward
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub struct CollectedRewardsTag();
+impl CommitableHashTag for CollectedRewardsTag {
+    fn commitment_diversifier() -> &'static str {
+        "Collected rewards"
+    }
+}
+
+/// Hash for set Merkle tree for all of the previously-collected rewards
+pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
 
 /// Reward Collection Transaction Note
 #[derive(
@@ -36,6 +55,23 @@ use serde::{Deserialize, Serialize};
     Deserialize,
 )]
 pub struct CollectRewardNote {
+    body: CollectRewardBody,
+    signature: StakingKeySignature,
+}
+
+/// Reward Collection Transaction Note
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+    Serialize,
+    Deserialize,
+)]
+pub struct CollectRewardBody {
     /// Blinding factor for reward record commitment on CAP native asset
     blind_factor: BlindFactor,
     /// Address that owns the reward
@@ -43,10 +79,10 @@ pub struct CollectRewardNote {
     /// Reward amount
     reward_amount: Amount,
     /// Staking `pub_key`, `view` number and a proof that staking key was selected for committee election on `view`
-    vrf_witness_info: VrfWitness,
+    vrf_witness: VrfWitness,
 }
 
-impl CollectRewardNote {
+impl CollectRewardBody {
     pub(crate) fn output_commitment(&self) -> RecordCommitment {
         RecordCommitment::from(&self.output_opening())
     }
@@ -59,6 +95,16 @@ impl CollectRewardNote {
             freeze_flag: FreezeFlag::Unfrozen,
             blind: self.blind_factor,
         }
+    }
+}
+
+impl CollectRewardNote {
+    pub(crate) fn output_commitment(&self) -> RecordCommitment {
+        self.body.output_commitment()
+    }
+
+    pub(crate) fn output_opening(&self) -> RecordOpening {
+        self.body.output_opening()
     }
 }
 
@@ -77,7 +123,7 @@ struct VrfWitness {
     /// Staking public key
     staking_key: StakingKey,
     /// View number for which the key was elected
-    view_number: u64,
+    view_number: ViewNumber,
     /// amount of stake on `view_number`
     stake_amount: Amount, /*
                           /// VRF Proof
