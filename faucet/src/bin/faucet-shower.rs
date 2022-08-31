@@ -103,7 +103,7 @@ async fn main() {
     // Generate the key which will be used to transfer to the children. Tell it to start a scan
     // from the default index (the first event) so it can find records created by the faucet event.
     let parent_key = parent
-        .generate_user_key("parent key".into(), Some(Default::default()))
+        .generate_sending_account("parent key".into(), Some(Default::default()))
         .await
         .unwrap();
 
@@ -122,7 +122,7 @@ async fn main() {
                     .await
                     .unwrap();
                 let key = keystore
-                    .generate_user_key(format!("child key {}", i), None)
+                    .generate_sending_account(format!("child key {}", i), None)
                     .await
                     .unwrap();
                 (keystore, mnemonic, key)

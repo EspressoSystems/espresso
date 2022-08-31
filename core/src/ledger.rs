@@ -19,6 +19,7 @@ use commit::{Commitment, Committable};
 use itertools::izip;
 use itertools::MultiUnzip;
 use jf_cap::structs::RecordOpening;
+use jf_cap::MerkleTree;
 use jf_cap::{
     keys::{ViewerKeyPair, ViewerPubKey},
     structs::{AssetCode, AssetDefinition, Nullifier, RecordCommitment},
@@ -292,10 +293,12 @@ impl traits::Validator for ValidatorState {
         self.commit()
     }
 
-    fn validate_and_apply(&mut self, block: Self::Block) -> Result<Vec<u64>, ValidationError> {
-        Ok(self
-            .validate_and_apply(self.now() + 1, block.block, block.proofs)?
-            .uids)
+    fn validate_and_apply(
+        &mut self,
+        block: Self::Block,
+    ) -> Result<(Vec<u64>, MerkleTree), ValidationError> {
+        let outputs = self.validate_and_apply(self.now() + 1, block.block, block.proofs)?;
+        Ok((outputs.uids, outputs.record_proofs))
     }
 }
 

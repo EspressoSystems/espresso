@@ -36,7 +36,7 @@ dependencies = [
  "signal-hook-async-std",
  "snafu",
  "strum 0.20.0",
- "strum_macros",
+ "strum_macros 0.20.1",
  "surf",
  "tagged-base64",
  "tempdir",
@@ -2271,7 +2271,7 @@ dependencies = [
  "jf-cap",
  "jf-plonk",
  "jf-primitives",
- "jf-utils",
+ "jf-utils 0.1.1",
  "lazy_static",
  "parse-size",
  "portpicker",
@@ -2326,7 +2326,7 @@ dependencies = [
  "jf-cap",
  "jf-plonk",
  "jf-primitives",
- "jf-utils",
+ "jf-utils 0.1.1",
  "key-set",
  "lazy_static",
  "mnemonic",
@@ -2353,7 +2353,7 @@ dependencies = [
  "sha3 0.9.1",
  "snafu",
  "strum 0.20.0",
- "strum_macros",
+ "strum_macros 0.20.1",
  "surf",
  "tagged-base64",
  "tempdir",
@@ -2455,7 +2455,7 @@ dependencies = [
  "jf-cap",
  "jf-plonk",
  "jf-primitives",
- "jf-utils",
+ "jf-utils 0.1.1",
  "key-set",
  "libp2p",
  "libp2p-networking",
@@ -2474,7 +2474,7 @@ dependencies = [
  "shellexpand",
  "snafu",
  "strum 0.24.1",
- "strum_macros",
+ "strum_macros 0.20.1",
  "surf",
  "tagged-base64",
  "tempdir",
@@ -3504,7 +3504,7 @@ dependencies = [
  "jf-plonk",
  "jf-primitives",
  "jf-rescue",
- "jf-utils",
+ "jf-utils 0.1.1",
  "num_cpus",
  "percentage",
  "rand 0.8.5",
@@ -3538,7 +3538,7 @@ dependencies = [
  "downcast-rs",
  "itertools 0.10.3",
  "jf-rescue",
- "jf-utils",
+ "jf-utils 0.1.1",
  "merlin",
  "num-bigint 0.4.3",
  "rand_chacha 0.3.1",
@@ -3568,7 +3568,7 @@ dependencies = [
  "itertools 0.10.3",
  "jf-plonk",
  "jf-rescue",
- "jf-utils",
+ "jf-utils 0.1.1",
  "rand_chacha 0.3.1",
  "rayon",
  "serde",
@@ -3595,7 +3595,7 @@ dependencies = [
  "derivative",
  "displaydoc",
  "generic-array 0.14.5",
- "jf-utils",
+ "jf-utils 0.1.1",
  "rayon",
  "serde",
  "zeroize",
@@ -3612,7 +3612,25 @@ dependencies = [
  "ark-serialize",
  "ark-std",
  "digest 0.10.3",
- "jf-utils-derive",
+ "jf-utils-derive 0.1.1",
+ "serde",
+ "sha2 0.10.2",
+ "snafu",
+ "tagged-base64",
+]
+
+[[package]]
+name = "jf-utils"
+version = "0.1.2"
+source = "git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.2#190213ac89c92118f1ed01421f427b83eed6d3d0"
+dependencies = [
+ "anyhow",
+ "ark-ec",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
+ "digest 0.10.3",
+ "jf-utils-derive 0.1.2",
  "serde",
  "sha2 0.10.2",
  "snafu",
@@ -3623,6 +3641,16 @@ dependencies = [
 name = "jf-utils-derive"
 version = "0.1.1"
 source = "git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.1#fbbe665698ae5d55c3c2f8ab66f8f3bd722f3a17"
+dependencies = [
+ "ark-std",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "jf-utils-derive"
+version = "0.1.2"
+source = "git+https://github.com/EspressoSystems/jellyfish.git?tag=0.1.2#190213ac89c92118f1ed01421f427b83eed6d3d0"
 dependencies = [
  "ark-std",
  "quote",
@@ -4612,7 +4640,7 @@ dependencies = [
  "hex",
  "itertools 0.10.3",
  "jf-cap",
- "jf-utils",
+ "jf-utils 0.1.1",
  "serde",
  "serde_json",
  "snafu",
@@ -5744,7 +5772,7 @@ dependencies = [
 [[package]]
 name = "reef"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/reef.git#7b45d90bcf1894a4a542e1680ccdf8cb7e6df247"
+source = "git+https://github.com/EspressoSystems/reef.git#2cab39fa229c98de8d72a795e0020e888b4af847"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -5753,11 +5781,12 @@ dependencies = [
  "funty 1.1.0",
  "itertools 0.10.3",
  "jf-cap",
+ "jf-primitives",
  "lazy_static",
  "rand_chacha 0.3.1",
  "serde",
  "snafu",
- "strum_macros",
+ "strum_macros 0.20.1",
 ]
 
 [[package]]
@@ -5994,6 +6023,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustversion"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97477e48b4cf8603ad5f7aaf897467cf42ab4218a38ef76fb14c2d6773a6d6a8"
+
+[[package]]
 name = "rusty-fork"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6100,7 +6135,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#ed29760a42788d907fbc3697a552e441423d6a0f"
+source = "git+https://github.com/EspressoSystems/seahorse.git#d368bffd3c933d599311b2d8e5af34f2f1d38de1"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -6126,7 +6161,7 @@ dependencies = [
  "itertools 0.10.3",
  "jf-cap",
  "jf-primitives",
- "jf-utils",
+ "jf-utils 0.1.2",
  "key-set",
  "lazy_static",
  "net",
@@ -6146,7 +6181,7 @@ dependencies = [
  "snafu",
  "structopt",
  "strum 0.24.1",
- "strum_macros",
+ "strum_macros 0.24.3",
  "surf",
  "tagged-base64",
  "tempdir",
@@ -6752,6 +6787,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum_macros"
+version = "0.24.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e385be0d24f186b4ce2f9982191e7101bb737312ad61c1f2f984f34bcf85d59"
+dependencies = [
+ "heck 0.4.0",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn",
+]
+
+[[package]]
 name = "subtle"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6982,7 +7030,7 @@ dependencies = [
  "futures-util",
  "http",
  "include_dir",
- "jf-utils",
+ "jf-utils 0.1.1",
  "lazy_static",
  "libc",
  "markdown",
@@ -6998,7 +7046,7 @@ dependencies = [
  "signal-hook-async-std",
  "snafu",
  "strum 0.20.0",
- "strum_macros",
+ "strum_macros 0.20.1",
  "surf",
  "tagged-base64",
  "tide",
@@ -7586,7 +7634,7 @@ dependencies = [
  "itertools 0.10.3",
  "jf-cap",
  "jf-primitives",
- "jf-utils",
+ "jf-utils 0.1.1",
  "key-set",
  "lazy_static",
  "net",
