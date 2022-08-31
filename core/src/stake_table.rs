@@ -17,15 +17,32 @@ use jf_cap::structs::Amount;
 use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 
+/*
 ///The StakeTableKey is the key identifying a user who had stake in a given round
 #[tagged_blob("STAKEKEY")]
 #[derive(Debug, Clone, PartialEq, Hash, Eq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct StakeTableKey(StakingKey);
+pub struct StakeTableKey(pub(crate) StakingKey);
 
 ///The values in the stake table are the amount staked by the holder of the associated StakingTableKey
 #[tagged_blob("STAKEVALUE")]
 #[derive(Clone, Debug, Copy, PartialEq, Hash, Eq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct StakeTableValue(Amount);
+pub struct StakeTableValue(pub(crate) Amount);
+*/
+
+/// HotShot View number
+#[derive(
+    Clone,
+    Debug,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+    Serialize,
+    Deserialize,
+)]
+pub struct ViewNumber(pub(crate) u64);
 
 ///Identifying tag for a StakeTable
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
@@ -37,17 +54,7 @@ impl CommitableHashTag for StakeTableTag {
 }
 
 /// Hash function for the Stake Table
-pub type StakeTableHash = CommitableHash<StakeTableKey, StakeTableValue, StakeTableTag>;
-
-/// View number for a given stake table commitment
-#[tagged_blob("STAKECOMMKEY")]
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
-pub struct StakeTableCommitmentKey(u64);
-
-/// Commitment hash for the associated successful view (block) stake table
-#[tagged_blob("STAKECOMMVALUE")]
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
-pub struct StakeTableCommitmentValue(<StakeTableHash as KVTreeHash>::Digest);
+pub type StakeTableHash = CommitableHash<StakingKey, Amount, StakeTableTag>;
 
 /// Identifying tag for a StakeTableCommitment
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -58,9 +65,12 @@ impl CommitableHashTag for StakeTableCommitmentTag {
     }
 }
 
+/// Stake table commitment type
+pub type StakeTableCommitment = <StakeTableHash as KVTreeHash>::Digest;
+
 /// Hash for tree which stores commitment hash of previous rounds' stake tables in (view_number, stake table commitment) kv pairs
 pub type StakeTableCommitmentsHash =
-    CommitableHash<StakeTableCommitmentKey, StakeTableCommitmentValue, StakeTableCommitmentTag>;
+    CommitableHash<ViewNumber, <StakeTableHash as KVTreeHash>::Digest, StakeTableCommitmentTag>;
 
 /// Previously collected rewards are recorded in (StakingKey, view_number) pairs
 #[tagged_blob("COLLECTED-REWARD")]
@@ -78,15 +88,3 @@ impl CommitableHashTag for CollectedRewardsTag {
 
 /// Hash for set Merkle tree for all of the previously-collected rewards
 pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
-
-//Identifying tag for StakeKeyToStakeAmount KVMT
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub(crate) struct StakeKeyToStakeAmountTag();
-impl CommitableHashTag for StakeKeyToStakeAmountTag {
-    fn commitment_diversifier() -> &'static str {
-        "Stake Public Key to Stake Number tag"
-    }
-}
-
-pub(crate) type StakeKeyToStakeAmountCommittableHash =
-    CommitableHash<StakingKey, Amount, StakeKeyToStakeAmountTag>;

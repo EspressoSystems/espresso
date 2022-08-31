@@ -12,10 +12,9 @@
 
 use crate::kv_merkle_tree::KVMerkleProof;
 use crate::stake_table::{
-    CollectedRewardsHash, StakeKeyToStakeAmountCommittableHash, StakeTableCommitmentsHash,
+    CollectedRewardsHash, StakeTableCommitment, StakeTableCommitmentsHash, StakeTableHash,
 };
 use crate::state::StakingKey;
-use crate::tree_hash::KVTreeHash;
 use ark_serialize::*;
 use core::hash::Hash;
 use jf_cap::keys::{UserAddress, UserPubKey};
@@ -105,11 +104,11 @@ struct VrfWitness {
 )]
 pub struct RewardNoteProofs {
     /// Stake table commitment for the view number reward
-    stake_table_commitment: <StakeTableCommitmentsHash as KVTreeHash>::Digest,
+    stake_table_commitment: StakeTableCommitment,
     /// Proof for stake_table_commitment
-    view_number_to_stake_table_commitment: KVMerkleProof<StakeTableCommitmentsHash>,
+    stake_table_commitment_proof: KVMerkleProof<StakeTableCommitmentsHash>,
     /// Proof for stake_amount for staking key on that view number
-    staking_key_to_stake_amount: KVMerkleProof<StakeKeyToStakeAmountCommittableHash>,
+    stake_amount_proof: KVMerkleProof<StakeTableHash>,
     /// Proof that reward hasn't been collected
     uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
 }
