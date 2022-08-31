@@ -27,6 +27,16 @@ use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 
+/// Compute the allowed stake amount given current state (e.g. circulating supply), view_number and stake amount
+/// Hard-coded to 0 for FST
+pub fn compute_reward_amount(
+    _validator_state: &ValidatorState,
+    _view_number: ViewNumber,
+    _stake: Amount,
+) -> Amount {
+    Amount::from(0u64)
+}
+
 /// Previously collected rewards are recorded in (StakingKey, view_number) pairs
 #[tagged_blob("COLLECTED-REWARD")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
@@ -62,20 +72,26 @@ pub struct CollectRewardNote {
 }
 
 impl CollectRewardNote {
+    /// Generate collect reward transaction note and helper proofs
+    /// Return RewardError in case of failure (invalid staking key/view_number, merkle proof not found in validator state, or serialization error signing the body).
     pub fn generate<R: CryptoRng + RngCore>(
         rng: &mut R,
         validator_state: &ValidatorState,
         view_number: ViewNumber,
         staking_priv_key: &StakingPrivKey,
         cap_address: UserAddress,
+        stake_amount: Amount,
+        stake_amount_proof: KVMerkleProof<StakeTableHash>,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
-        let staking_public_key = StakingKey::from_priv_key(staking_priv_key);
+        let staking_key = StakingKey::from_priv_key(staking_priv_key);
         let (body, proofs) = CollectRewardBody::generate(
             rng,
             validator_state,
             view_number,
-            staking_public_key,
+            staking_key,
             cap_address,
+            stake_amount,
+            stake_amount_proof,
         )?;
         let size = CanonicalSerialize::serialized_size(&body);
         let mut bytes = Vec::with_capacity(size);
@@ -123,22 +139,30 @@ pub struct CollectRewardBody {
 }
 
 impl CollectRewardBody {
+    /// Generate collect reward transaction body and helper proofs
+    /// Return RewardError in case of failure (invalid staking key/view_number, merkle proof not found in validator state).
     pub fn generate<R: RngCore + CryptoRng>(
         rng: &mut R,
         validator_state: &ValidatorState,
         view_number: ViewNumber,
         staking_key: StakingKey,
         cap_address: UserAddress,
+        stake_amount: Amount,
+        stake_amount_proof: KVMerkleProof<StakeTableHash>,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
+        let reward_amount = compute_reward_amount(validator_state, view_number, stake_amount);
         let blind_factor = BlindFactor::rand(rng);
-        let (rewards_proofs, stake_amount) =
-            RewardNoteProofs::generate(validator_state, view_number, &staking_key)?;
+        let rewards_proofs = RewardNoteProofs::generate(
+            validator_state,
+            view_number,
+            &staking_key,
+            stake_amount_proof,
+        )?;
         let vrf_witness = VrfWitness {
             staking_key,
             view_number,
             stake_amount,
         };
-        let reward_amount = Amount::from(0u128); // TODO how to compute reward amount?
         let body = CollectRewardBody {
             blind_factor,
             cap_address,
@@ -222,22 +246,18 @@ impl RewardNoteProofs {
         validator_state: &ValidatorState,
         view_number: ViewNumber,
         stake_key: &StakingKey,
-    ) -> Result<(Self, Amount), RewardError> {
+        stake_amount_proof: KVMerkleProof<StakeTableHash>,
+    ) -> Result<Self, RewardError> {
         let (stake_table_commitment, stake_table_commitment_proof) =
             Self::get_stake_commitment_and_proof(validator_state, view_number)?;
-        let (stake_amount, stake_amount_proof) =
-            Self::get_amount_and_proof(validator_state, stake_key)?;
         let uncollected_reward_proof =
             Self::proof_uncollected_rewards(validator_state, stake_key, view_number)?;
-        Ok((
-            Self {
-                stake_table_commitment,
-                stake_table_commitment_proof,
-                stake_amount_proof,
-                uncollected_reward_proof,
-            },
-            stake_amount,
-        ))
+        Ok(Self {
+            stake_table_commitment,
+            stake_table_commitment_proof,
+            stake_amount_proof,
+            uncollected_reward_proof,
+        })
     }
 
     /// Returns StakeTable commitment for view number, if view number is valid, otherwise return RewardError::InvalidViewNumber
@@ -257,14 +277,6 @@ impl RewardNoteProofs {
             .ok_or(RewardError::ProofNotInMemory {})?;
         let commitment = option_value.ok_or(RewardError::InvalidViewNumber { view_number })?;
         Ok((commitment, proof))
-    }
-
-    /// Returns amount and proof is staking key is found on stake table, otherwise returns RewardError::StakingKeyNotFound
-    fn get_amount_and_proof(
-        _validator_state: &ValidatorState,
-        _staking_key: &StakingKey,
-    ) -> Result<(Amount, KVMerkleProof<StakeTableHash>), RewardError> {
-        unimplemented!()
     }
 
     /// Returns proof if reward hasn't been collected, otherwise RewardError::RewardAlreadyCollected

@@ -1793,7 +1793,7 @@ mod tests {
                 vec![EspressoTxnHelperProofs::CAP(nullifier_pfs)],
             )
             .unwrap()
-            .0;
+            .uids;
 
         println!(
             "Transfer validated & applied: {}s",

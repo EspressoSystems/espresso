@@ -27,7 +27,7 @@ use espresso_core::{
     set_merkle_tree::*,
     state::{
         ElaboratedBlock, ElaboratedTransaction, TransactionCommitment, ValidationError,
-        ValidatorState,
+        ValidationOutputs, ValidatorState,
     },
 };
 pub use futures::prelude::*;
@@ -371,7 +371,11 @@ impl FullState {
                             panic!("state is out of sync with validator")
                         }
 
-                        Ok((mut uids, nullifier_proofs)) => {
+                        Ok(ValidationOutputs {
+                            mut uids,
+                            nullifier_proofs,
+                            ..
+                        }) => {
                             let hist_index = self.full_persisted.state_iter().len();
                             assert!(hist_index > 0);
                             let block_index = hist_index - 1;
