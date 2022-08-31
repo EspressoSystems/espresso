@@ -1,0 +1,28 @@
+@startuml
+
+component Validator {
+
+    component Conf as "Configuration"
+
+    component HotShot as "HotShot Instance" {
+        portin conf_pli
+        interface "get_events_since/:first" as if1
+        interface "get_events_since/:first/:count" as if2
+        interface "subscribe_for_events/:first/:count" as if3
+    }
+
+    component EsQS  #lightgray;line:black;line.dashed;text:red {
+        portin conf_esqs
+    }
+
+    Conf -down-> conf_esqs
+    Conf -down-> conf_pli
+
+    EsQS -down-> if1
+    EsQS --down-> if2
+    EsQS -down-> if3
+
+}
+
+@enduml
+

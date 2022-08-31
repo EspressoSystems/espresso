@@ -1,0 +1,342 @@
+# Copyright (c) 2022 Espresso Systems (espressosys.com)
+# This file is part of the Espresso library.
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# General Public License as published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program. If not,
+# see <https://www.gnu.org/licenses/>.
+
+# Many environment variables are shared between services. Such environment variables are set
+# globally in the .env file, and merely passed through here.
+
+version: '2'
+services:
+  # Configure the validators. Each validator exposes 2 ports: the validation port that other
+  # validators use to connect to it during consensus, and a port where it hosts a query service.
+  validator0:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - "40000:40000/tcp"
+      - "60000:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp"
+    environment:
+      - ESPRESSO_VALIDATOR_ID=0
+      - ESPRESSO_VALIDATOR_REPLICATION_FACTOR
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator0-store:/store
+  validator1:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - "40001:40000/tcp"
+      - "60001:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp"
+    environment:
+      - ESPRESSO_VALIDATOR_ID=1
+      - ESPRESSO_VALIDATOR_REPLICATION_FACTOR
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator1-store:/store
+  validator2:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - "40002:40000/tcp"
+      - "60002:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp"
+    environment:
+      - ESPRESSO_VALIDATOR_ID=2
+      - ESPRESSO_VALIDATOR_REPLICATION_FACTOR
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator2-store:/store
+  validator3:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - "40003:40000/tcp"
+      - "60003:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp"
+    environment:
+      - ESPRESSO_VALIDATOR_ID=3
+      - ESPRESSO_VALIDATOR_REPLICATION_FACTOR
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator3-store:/store
+  validator4:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - 40004:40000/tcp
+      - 60004:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp
+    environment:
+      - ESPRESSO_VALIDATOR_ID=4
+      - ESPRESSO_VALIDATOR_REPLICATION_FACTOR
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator4-store:/store
+  validator5:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - "40005:40000/tcp"
+      - "60005:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp"
+    environment:
+      - ESPRESSO_VALIDATOR_ID=5
+      - ESPRESSO_VALIDATOR_REPLICATION_FACTOR
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator5-store:/store
+  validator6:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - "40006:40000/tcp"
+      - "60006:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp"
+    environment:
+      - ESPRESSO_VALIDATOR_ID=6
+      - ESPRESSO_VALIDATOR_REPLICATION_FACTOR
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator6-store:/store
+  validator7:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - "40007:40000/tcp"
+      - "60007:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp"
+    environment:
+      - ESPRESSO_VALIDATOR_ID=7
+      - ESPRESSO_VALIDATOR_REPLICATION_FACTOR
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT=40000
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator7-store:/store
+  validator8:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - "40008:40000/tcp"
+      - "60008:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp"
+    environment:
+      - ESPRESSO_VALIDATOR_ID=8
+      - ESPRESSO_VALIDATOR_REPLICATION_FACTOR
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT=40000
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator8-store:/store
+  validator9:
+    image: ghcr.io/espressosystems/espresso/validator:main
+    ports:
+      - "40009:40000/tcp"
+      - "60009:$ESPRESSO_VALIDATOR_QUERY_PORT/tcp"
+    environment:
+      - ESPRESSO_VALIDATOR_ID=9
+      - ESPRESSO_VALIDATOR_REPLICATION_FACTOR
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N
+      - ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
+      - ESPRESSO_VALIDATOR_NUM_NODES
+      - ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT=40000
+      - ESPRESSO_FAUCET_PUB_KEYS
+      - RUST_LOG
+    volumes:
+      - validator9-store:/store
+
+  # Configure services. Services run at ports starting at 50000.
+  faucet:
+    image: ghcr.io/espressosystems/espresso/faucet:main
+    command: wait-for-it validator0:$ESPRESSO_VALIDATOR_QUERY_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- faucet
+    ports:
+      - $ESPRESSO_FAUCET_PORT:$ESPRESSO_FAUCET_PORT/tcp
+    environment:
+      - ESPRESSO_FAUCET_PORT
+      - ESPRESSO_FAUCET_WALLET_MNEMONIC
+      - ESPRESSO_SUBMIT_URL
+      - ESPRESSO_ESQS_URL
+      - ESPRESSO_ADDRESS_BOOK_URL
+      - RUST_LOG
+    volumes:
+      - faucet-store:/store
+  address-book:
+    image: ghcr.io/espressosystems/espresso/address-book:main
+    ports:
+      - $ESPRESSO_ADDRESS_BOOK_PORT:$ESPRESSO_ADDRESS_BOOK_PORT/tcp
+    environment:
+      - ESPRESSO_ADDRESS_BOOK_PORT
+      - ADDRESS_BOOK_BASE_URL=0.0.0.0:$ESPRESSO_ADDRESS_BOOK_PORT
+      - RUST_LOG
+    volumes:
+      - address-book-store:/store
+
+  # Configure random wallet
+  random-wallet0:
+    image: ghcr.io/espressosystems/espresso/random-wallet:main
+    command: wait-for-it validator0:$ESPRESSO_VALIDATOR_QUERY_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- wait-for-it faucet:$ESPRESSO_FAUCET_PORT -- random-wallet --seed 0
+    environment:
+      - ESPRESSO_FAUCET_URL
+      - ESPRESSO_ADDRESS_BOOK_URL
+      - ESPRESSO_SUBMIT_URL=http://validator0:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_ESQS_URL=http://validator0:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - RUST_LOG
+    volumes:
+      - random-wallet0-store:/store
+  random-wallet1:
+    image: ghcr.io/espressosystems/espresso/random-wallet:main
+    command: wait-for-it validator1:$ESPRESSO_VALIDATOR_QUERY_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- wait-for-it faucet:$ESPRESSO_FAUCET_PORT -- random-wallet --seed 1
+    environment:
+      - ESPRESSO_FAUCET_URL
+      - ESPRESSO_ADDRESS_BOOK_URL
+      - ESPRESSO_SUBMIT_URL=http://validator1:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_ESQS_URL=http://validator1:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - RUST_LOG
+    volumes:
+      - random-wallet1-store:/store
+  random-wallet2:
+    image: ghcr.io/espressosystems/espresso/random-wallet:main
+    command: wait-for-it validator2:$ESPRESSO_VALIDATOR_QUERY_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- wait-for-it faucet:$ESPRESSO_FAUCET_PORT -- random-wallet --seed 2
+    environment:
+      - ESPRESSO_FAUCET_URL
+      - ESPRESSO_ADDRESS_BOOK_URL
+      - ESPRESSO_SUBMIT_URL=http://validator2:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_ESQS_URL=http://validator2:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - RUST_LOG
+    volumes:
+      - random-wallet2-store:/store
+  random-wallet3:
+    image: ghcr.io/espressosystems/espresso/random-wallet:main
+    command: wait-for-it validator3:$ESPRESSO_VALIDATOR_QUERY_PORT -- wait-for-it address-book:$ESPRESSO_ADDRESS_BOOK_PORT -- wait-for-it faucet:$ESPRESSO_FAUCET_PORT -- random-wallet --seed 3
+    environment:
+      - ESPRESSO_FAUCET_URL
+      - ESPRESSO_ADDRESS_BOOK_URL
+      - ESPRESSO_SUBMIT_URL=http://validator3:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - ESPRESSO_ESQS_URL=http://validator3:$ESPRESSO_VALIDATOR_QUERY_PORT
+      - RUST_LOG
+    volumes:
+      - random-wallet3-store:/store
+
+volumes:
+  validator0-store:
+  validator1-store:
+  validator2-store:
+  validator3-store:
+  validator4-store:
+  validator5-store:
+  validator6-store:
+  validator7-store:
+  validator8-store:
+  validator9-store:
+  faucet-store:
+  address-book-store:
+  random-wallet0-store:
+  random-wallet1-store:
+  random-wallet2-store:
+  random-wallet3-store:

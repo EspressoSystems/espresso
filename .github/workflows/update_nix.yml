@@ -1,0 +1,38 @@
+# Copyright (c) 2022 Espresso Systems (espressosys.com)
+# This file is part of the Espresso library.
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# General Public License as published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program. If not,
+# see <https://www.gnu.org/licenses/>.
+
+name: update-flake-lock
+
+on:
+  workflow_dispatch: # allows manual triggering
+  schedule:
+    - cron: '0 0 * * 0' # runs weekly on Sunday at 00:00
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v17
+
+      - uses: cachix/cachix-action@v10
+        with:
+          name: espresso-systems-private
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      - name: Update flake.lock
+        uses: DeterminateSystems/update-flake-lock@v11
+        with:
+          pr-title: "Weekly PR to bump flake.nix" # Title of PR to be created

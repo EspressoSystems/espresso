@@ -1,0 +1,33 @@
+# Copyright (c) 2022 Espresso Systems (espressosys.com)
+# This file is part of the Espresso library.
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# General Public License as published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program. If not,
+# see <https://www.gnu.org/licenses/>.
+
+[meta]
+NAME = "espresso-catchup"
+DESCRIPTION = "Event streams allowing clients to replicate on-chain state changes"
+FORMAT_VERSION = "0.1.0"
+
+[route.get_events_since]
+PATH = ["/get_events_since/:first", "/get_events_since/:first/:count"]
+METHOD = "GET"
+":first" = "Integer"
+":count" = "Integer"
+DOC = """
+Get an ordered list of events starting at `:first`.
+"""
+
+[route.subscribe_for_events]
+PATH = ["/subscribe_for_events/:first"]
+METHOD = "SOCKET"
+":first" = "Integer"
+DOC = """
+Subscribe to an ordered stream of events starting at `:first`.
+"""

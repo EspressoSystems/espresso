@@ -35,11 +35,11 @@ In the implementation:
  - N == 512, since `Blake2B` has a 64-byte output
  - `EMPTY_HASH` is the all-zero string.
  - `H_elem(nul)`   is `h(canonical_serialize(nul))` where `h` is `Blake2B`
-   personalized with "AAPSet Elem"
+   personalized with "CAPSet Elem"
  - `H_leaf(nul)`   is `h(canonical_serialize(nul))` where `h` is `Blake2B`
-   personalized with "AAPSet Leaf"
+   personalized with "CAPSet Leaf"
  - `H_branch(nul)` is `h("l"||l||"r"||r)` where `h` is `Blake2B`
-   personalized with "AAPSet Branch"
+   personalized with "CAPSet Branch"
 
 We also assume that any sparse array `arr` of size `2^N` has less than
 `negl(N)` non-empty elements.
@@ -139,7 +139,7 @@ A proof of inclusion for `elem` in `S` is a sequence of `Digest`s
 
 Conceptually, if we walk down the ideal tree to where `elem` would get
 inserted, we will hit many `ITBranch(l,r)` nodes. If we write down the hashes
-of the oubtrees we don't go into (ie, if insertion goes into r, write down
+of the subtrees we don't go into (ie, if insertion goes into r, write down
 `hash(l)`, and vice versa), this will be `sib_{N-1},...,sib_0`.
 
 A proof of exclusion for `elem` is similar, except it is

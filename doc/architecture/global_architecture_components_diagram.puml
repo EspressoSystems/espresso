@@ -1,0 +1,148 @@
+@startuml
+
+component "Wallet" as Wallet
+left to right direction
+
+package "Wallet CLI" #lightgray {
+    address --> Wallet
+    pub_key --> Wallet
+    assets --> Wallet
+    asset --> Wallet
+    balance --> Wallet
+    transfer --> Wallet
+    transfer_from --> Wallet
+    create_asset --> Wallet
+    mint --> Wallet
+    freeze --> Wallet
+    unfreeze --> Wallet
+    transactions --> Wallet
+    transaction --> Wallet
+    gen_key --> Wallet
+    load_key --> Wallet
+    import_memo --> Wallet
+    info --> Wallet
+    view --> Wallet
+    import_asset --> Wallet
+}
+
+component "Espresso Query Service" as EsQS
+component BlockExplorer as BE
+note top of BE: <<not_for_V1>>
+
+component NetworkStats as NS
+note top of NS: <<not_for_V1>>
+
+
+[AddressBook] as AB
+package "Address Book API" #lightgray {
+    interface register_addr_and_enc_pub_key
+    interface get_enc_pub_key_from_addr
+    register_addr_and_enc_pub_key --> AB
+    get_enc_pub_key_from_addr --> AB
+}
+
+
+note top of F: The Faucet contains a Wallet instance.
+Component Faucet as F {
+    Component Wallet As W
+}
+
+package "Faucet API" #lightgray {
+    get_cap_fee_record --> F
+}
+
+package "Block queries" as BQ #lightgray {
+    interface "getblock/:block_id" as get_block_block_id
+    interface  "getblock/hash/:hash" as get_block_hash
+    interface "subscribe_for_blocks/:first" as sus_blocks_first
+    interface  "gettransaction/:block_id/:txn_id" as get_transaction_block_id_tx_id
+    interface "gettransaction/hash/:hash" as get_transaction_hash
+    interface "getrecord/:block_id/:tx_id/:output_index" as get_record_block_id_tx_id_output_index
+    interface "getrecord/uid/:uid" as get_record_uid
+    interface "check_nullifier/:block_id/:nullifier" as check_nullifier_block_id_nullifier
+    interface "get_cap_state/:block_id" as get_cap_state_block_id
+
+    get_block_block_id --> EsQS
+    get_block_hash --> EsQS
+    get_transaction_block_id_tx_id --> EsQS
+    get_transaction_hash --> EsQS
+    get_record_block_id_tx_id_output_index --> EsQS
+    get_record_uid --> EsQS
+    sus_blocks_first --> EsQS
+    check_nullifier_block_id_nullifier --> EsQS
+
+    get_cap_state_block_id --> EsQS
+    get_plonk_verif_keys --> EsQS
+    get_nullifiers --> EsQS
+    get_mt_proof_asset_record --> EsQS
+
+}
+
+component Validator #white {
+
+    package "Submit API" #lightgray {
+        interface submit_tx
+    }
+
+    package ValidatorStatusAPI #lightgray {
+        interface list_peers
+        interface "qc/:index" as qc_index
+        interface "pending_blocks"
+        interface latest_block_id
+        interface mempool_info
+        interface success_rate
+        interface throughput
+    }
+
+    package "Validation Event Stream" as VES #lightgray {
+        interface "subscribe_for_events/:first" as sus_events_first
+        interface  "get_events_since/:first" as get_events_since_first
+        interface  "get_events_since/:first/:count" as get_events_since_first_count
+    }
+
+    database "CAP Ledger" as CAPLedger{
+        submit_tx --> CAPLedger
+    }
+
+    sus_events_first --> CAPLedger
+    get_events_since_first --> CAPLedger
+    get_events_since_first_count --> CAPLedger
+}
+
+Wallet --> submit_tx
+Wallet --> get_mt_proof_asset_record
+Wallet --> register_addr_and_enc_pub_key
+Wallet --> get_enc_pub_key_from_addr
+Wallet --> get_cap_state_block_id
+Wallet --> get_plonk_verif_keys
+Wallet --> get_cap_fee_record
+Wallet --> get_nullifiers
+Wallet --> get_block_block_id
+Wallet --> sus_blocks_first
+Wallet --> check_nullifier_block_id_nullifier
+Wallet --> latest_block_id
+
+BE --> get_block_block_id
+BE --> sus_blocks_first
+BE --> get_block_hash
+BE --> get_transaction_block_id_tx_id
+BE --> get_transaction_hash
+BE --> get_record_block_id_tx_id_output_index
+BE --> get_record_uid
+BE --> check_nullifier_block_id_nullifier
+
+NS --> list_peers
+NS --> qc_index
+NS --> latest_block_id
+NS --> pending_blocks
+NS --> mempool_info
+NS --> success_rate
+NS --> throughput
+
+EsQS --> sus_events_first
+EsQS --> get_events_since_first
+EsQS --> get_events_since_first_count
+
+F --> submit_tx
+
+@enduml

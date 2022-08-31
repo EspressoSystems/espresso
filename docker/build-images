@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+nix develop .#staticShell -c cargo build --release
+
+docker build . -f docker/address-book.Dockerfile -t ghcr.io/espressosystems/espresso/address-book:main
+docker build . -f docker/faucet.Dockerfile -t ghcr.io/espressosystems/espresso/faucet:main
+docker build . -f docker/validator.Dockerfile -t ghcr.io/espressosystems/espresso/validator:main
+docker build . -f docker/random-wallet.Dockerfile -t ghcr.io/espressosystems/espresso/random-wallet:main

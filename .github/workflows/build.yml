@@ -1,31 +1,55 @@
+# Copyright (c) 2022 Espresso Systems (espressosys.com)
+# This file is part of the Espresso library.
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# General Public License as published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program. If not,
+# see <https://www.gnu.org/licenses/>.
+
 name: Build
 
 on:
   push:
+    branches:
+      - main
+      - release-*
+    tags:
+      # YYYYMMDD
+      - "20[0-9][0-9][0-1][0-9][0-3][0-9]*"
+  pull_request:
+    branches:
+      - main
+      - release-*
+  schedule:
+    - cron: "0 0 * * 1"
   workflow_dispatch:
+
+env:
+  RUST_LOG: info,libp2p=off
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: [self-hosted, X64]
     container:
-      image: registry.gitlab.com/asuran-rs/containers/rust-sccache-docker:1.56
+      image: ghcr.io/espressosystems/devops-rust:1.63
     steps:
-      - uses: styfle/cancel-workflow-action@0.9.1
+      - uses: styfle/cancel-workflow-action@0.10.0
         name: Cancel Outdated Builds
         with:
           all_but_latest: true
           access_token: ${{ github.token }}
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         name: Checkout Repository
 
       - name: Configure Git
         run: |
-          git config --global url."https://tl-ancients:${{ secrets.GITLAB_PAT }}@gitlab.com".insteadOf git://gitlab.com
-          git config --global url."https://tl-ancients:${{ secrets.GITLAB_PAT }}@gitlab.com".insteadOf ssh://git@gitlab.com
           git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com".insteadOf git://github.com
           git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com".insteadOf ssh://git@github.com
-          git config --global url."https://dl.cloudsmith.io/${{ secrets.CLOUDSMITH_ENTITLEMENT }}/".insteadOf https://dl.cloudsmith.io/basic/
 
       - uses: Swatinem/rust-cache@v1
         name: Enable Rust Caching
@@ -37,13 +61,31 @@ jobs:
         name: Clippy
         with:
           token: ${{ github.token }}
-          args: --workspace -- -D warnings
+          args: --workspace --examples --bins --tests -- -D warnings -A clippy::format_push_string
 
       - name: Audit
-        run: cargo audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071 --ignore RUSTSEC-2022-0006
+        run: cargo audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071 --ignore RUSTSEC-2022-0006 --ignore RUSTSEC-2022-0040
+
+      - name: Build
+        run: |
+          cargo build --workspace --release
+
+      - name: Build Slow Tests
+        # Make sure the slow tests build, but don't run them (we have another workflow for that).
+        run: cargo test --release --features=slow-tests --no-run
 
       - name: Test
         run: |
           cargo test --workspace --release --no-run
           cargo test --workspace --release --verbose -- -Zunstable-options --report-time --test-threads 2
         timeout-minutes: 30
+
+      - name: Upload address book artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: x86_64-unknown-linux-gnu-services
+          path: |
+            target/release/address-book
+            target/release/espresso-validator
+            target/release/faucet
+            target/release/random_wallet
