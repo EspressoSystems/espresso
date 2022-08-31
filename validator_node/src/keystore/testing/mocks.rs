@@ -15,11 +15,13 @@ pub use seahorse::testing::MockLedger;
 use crate::node;
 use async_std::sync::{Arc, Mutex};
 use async_trait::async_trait;
-use espresso_core::state::EspressoTransaction;
 use espresso_core::{
     ledger::EspressoLedger,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
-    state::{ElaboratedBlock, ElaboratedTransaction, ValidationOutputs, ValidatorState},
+    state::{
+        ChainVariables, ElaboratedBlock, ElaboratedTransaction, EspressoTransaction,
+        ValidationOutputs, ValidatorState,
+    },
 };
 use futures::stream::Stream;
 use itertools::izip;
@@ -146,6 +148,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
 
         // Validate the new memos.
         match txn {
+            EspressoTransaction::Genesis(_) => {}
             EspressoTransaction::CAP(txn) => {
                 if txn.verify_receiver_memos_signature(&memos, &sig).is_err() {
                     return Err(KeystoreError::Failed {
@@ -324,7 +327,10 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
     ) -> Self::MockNetwork {
         println!("[espresso] creating network");
         let mut ret = MockEspressoNetwork {
-            validator: ValidatorState::new(verif_crs, records.clone()),
+            validator: ValidatorState::new(
+                ChainVariables::new(42, Arc::new(verif_crs)),
+                records.clone(),
+            ),
             records,
             nullifiers: SetMerkleTree::default(),
             committed_blocks: Vec::new(),

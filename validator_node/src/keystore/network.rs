@@ -24,7 +24,8 @@ use async_tungstenite::tungstenite::Message;
 use espresso_core::{
     ledger::EspressoLedger,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
-    state::{ElaboratedTransaction, MERKLE_HEIGHT},
+    state::ElaboratedTransaction,
+    universal_params::MERKLE_HEIGHT,
 };
 use futures::future::ready;
 use futures::prelude::*;
@@ -183,6 +184,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
                 .context(CryptoSnafu)?
                 .0,
             freeze: validator
+                .chain
                 .verif_crs
                 .freeze
                 .iter()
@@ -199,6 +201,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
                 })
                 .collect::<Result<_, _>>()?,
             xfr: validator
+                .chain
                 .verif_crs
                 .xfr
                 .iter()

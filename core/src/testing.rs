@@ -12,7 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::state::*;
-use crate::universal_params::UNIVERSAL_PARAM;
+use crate::universal_params::{MERKLE_HEIGHT, PROVER_CRS, UNIVERSAL_PARAM, VERIF_CRS};
 use arbitrary::Arbitrary;
 use core::iter::once;
 use hotshot::traits::{BlockContents, State};
@@ -25,9 +25,9 @@ use jf_cap::{
         RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness, MerkleTree, Signature, TransactionNote, TransactionVerifyingKey,
+    AccMemberWitness, MerkleTree, Signature, TransactionNote,
 };
-use key_set::{KeySet, ProverKeySet, VerifierKeySet};
+use key_set::{ProverKeySet, VerifierKeySet};
 use num_bigint::BigInt;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
@@ -243,38 +243,6 @@ impl MultiXfrTestState {
         Self::update_timer(&mut timer, |t| {
             println!("Generated universal params: {}s", t)
         });
-
-        report_mem();
-
-        fence();
-        let (xfr_prove_key_22, xfr_verif_key_22, _) =
-            jf_cap::proof::transfer::preprocess(univ_setup, 2, 2, MERKLE_HEIGHT)?;
-        fence();
-        Self::update_timer(&mut timer, |t| println!("Generated xfr22: {}s", t));
-
-        report_mem();
-
-        fence();
-        let (xfr_prove_key_33, xfr_verif_key_33, _) =
-            jf_cap::proof::transfer::preprocess(univ_setup, 3, 3, MERKLE_HEIGHT)?;
-        fence();
-        Self::update_timer(&mut timer, |t| println!("Generated xfr33: {}s", t));
-
-        fence();
-        report_mem();
-        let (mint_prove_key, mint_verif_key, _) =
-            jf_cap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT)?;
-        fence();
-        Self::update_timer(&mut timer, |t| println!("Generated mint: {}s", t));
-
-        report_mem();
-
-        fence();
-        let (freeze_prove_key, freeze_verif_key, _) =
-            jf_cap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT)?;
-        fence();
-        Self::update_timer(&mut timer, |t| println!("Generated freeze: {}s", t));
-
         report_mem();
 
         let native_token = AssetDefinition::native();
@@ -329,34 +297,14 @@ impl MultiXfrTestState {
         }
 
         Self::update_timer(&mut timer, |t| println!("Native token records: {}s", t));
-
         let nullifiers: SetMerkleTree = Default::default();
-
-        let verif_keys = VerifierKeySet {
-            mint: TransactionVerifyingKey::Mint(mint_verif_key),
-            xfr: KeySet::new(
-                vec![
-                    TransactionVerifyingKey::Transfer(xfr_verif_key_22),
-                    TransactionVerifyingKey::Transfer(xfr_verif_key_33),
-                ]
-                .into_iter(),
-            )?,
-            freeze: KeySet::new(
-                vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
-            )?,
-        };
-
         Self::update_timer(&mut timer, |t| println!("Verify Keys: {}s", t));
 
         let mut ret = Self {
             univ_setup,
             prng,
-            prove_keys: ProverKeySet {
-                mint: mint_prove_key,
-                xfr: KeySet::new(vec![xfr_prove_key_22, xfr_prove_key_33].into_iter())?,
-                freeze: KeySet::new(vec![freeze_prove_key].into_iter())?,
-            },
-            verif_keys: verif_keys.clone(),
+            prove_keys: (**PROVER_CRS).clone(),
+            verif_keys: (**VERIF_CRS).clone(),
             native_token,
             keys,
             fee_records,
@@ -366,7 +314,7 @@ impl MultiXfrTestState {
             memos,
             nullifiers, /*asset_defs,*/
             record_merkle_tree: t.clone(),
-            validator: ValidatorState::new(verif_keys, t),
+            validator: ValidatorState::new(ChainVariables::new(42, VERIF_CRS.clone()), t),
             outer_timer: timer,
             inner_timer: Instant::now(),
         };
@@ -1267,11 +1215,15 @@ pub fn crypto_rng_from_seed(seed: [u8; 32]) -> ChaChaRng {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::canonical::CanonicalBytes;
+    use async_std::sync::Arc;
     use commit::Committable;
     use jf_cap::structs::{NoteType, Nullifier};
-    use jf_cap::{utils::compute_universal_param_size, BaseField, MerkleLeafProof, NodeValue};
+    use jf_cap::{
+        utils::compute_universal_param_size, BaseField, MerkleLeafProof, NodeValue,
+        TransactionVerifyingKey,
+    };
     use jf_primitives::merkle_tree::LookupResult;
+    use key_set::KeySet;
     use quickcheck::QuickCheck;
     use rand::{Rng, RngCore};
     use std::cmp::min;
@@ -1458,25 +1410,28 @@ mod tests {
         let validator = |xfrs: &[_], freezes: &[_]| {
             let record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
             ValidatorState::new(
-                VerifierKeySet {
-                    mint: TransactionVerifyingKey::Mint(mint.clone()),
-                    xfr: KeySet::new(xfrs.iter().map(|size| {
-                        TransactionVerifyingKey::Transfer(match size {
-                            (1, 1) => xfr11.clone(),
-                            (2, 2) => xfr22.clone(),
-                            _ => panic!("invalid xfr size"),
-                        })
-                    }))
-                    .unwrap(),
-                    freeze: KeySet::new(freezes.iter().map(|size| {
-                        TransactionVerifyingKey::Freeze(match size {
-                            2 => freeze2.clone(),
-                            3 => freeze3.clone(),
-                            _ => panic!("invalid freeze size"),
-                        })
-                    }))
-                    .unwrap(),
-                },
+                ChainVariables::new(
+                    42,
+                    Arc::new(VerifierKeySet {
+                        mint: TransactionVerifyingKey::Mint(mint.clone()),
+                        xfr: KeySet::new(xfrs.iter().map(|size| {
+                            TransactionVerifyingKey::Transfer(match size {
+                                (1, 1) => xfr11.clone(),
+                                (2, 2) => xfr22.clone(),
+                                _ => panic!("invalid xfr size"),
+                            })
+                        }))
+                        .unwrap(),
+                        freeze: KeySet::new(freezes.iter().map(|size| {
+                            TransactionVerifyingKey::Freeze(match size {
+                                2 => freeze2.clone(),
+                                3 => freeze3.clone(),
+                                _ => panic!("invalid freeze size"),
+                            })
+                        }))
+                        .unwrap(),
+                    }),
+                ),
                 record_merkle_tree,
             )
         };
@@ -1503,20 +1458,10 @@ mod tests {
     #[test]
     fn test_record_history_commit_hash() {
         // Check that ValidatorStates with different record histories have different commits.
-        println!("generating universal parameters");
-
-        let univ = &*UNIVERSAL_PARAM;
-        let (_, mint, _) = jf_cap::proof::mint::preprocess(univ, MERKLE_HEIGHT).unwrap();
-        let (_, xfr, _) = jf_cap::proof::transfer::preprocess(univ, 1, 1, MERKLE_HEIGHT).unwrap();
-        let (_, freeze, _) = jf_cap::proof::freeze::preprocess(univ, 2, MERKLE_HEIGHT).unwrap();
-        println!("CRS set up");
-
-        let verif_crs = VerifierKeySet {
-            mint: TransactionVerifyingKey::Mint(mint),
-            xfr: KeySet::new(vec![TransactionVerifyingKey::Transfer(xfr)].into_iter()).unwrap(),
-            freeze: KeySet::new(vec![TransactionVerifyingKey::Freeze(freeze)].into_iter()).unwrap(),
-        };
-        let mut v1 = ValidatorState::new(verif_crs, MerkleTree::new(MERKLE_HEIGHT).unwrap());
+        let mut v1 = ValidatorState::new(
+            ChainVariables::new(42, VERIF_CRS.clone()),
+            MerkleTree::new(MERKLE_HEIGHT).unwrap(),
+        );
         let mut v2 = v1.clone();
 
         // Test validators with different history lengths.
@@ -1624,37 +1569,6 @@ mod tests {
 
         let univ_setup = &*UNIVERSAL_PARAM;
 
-        let (xfr_prove_key, xfr_verif_key, _) =
-            jf_cap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
-        let (mint_prove_key, mint_verif_key, _) =
-            jf_cap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
-        let (freeze_prove_key, freeze_verif_key, _) =
-            jf_cap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
-
-        for (l, k) in vec![
-            ("xfr", CanonicalBytes::from(xfr_verif_key.clone())),
-            ("mint", CanonicalBytes::from(mint_verif_key.clone())),
-            ("freeze", CanonicalBytes::from(freeze_verif_key.clone())),
-        ] {
-            println!("{}: {} bytes", l, k.0.len());
-        }
-
-        let prove_keys = ProverKeySet::<key_set::OrderByInputs> {
-            mint: mint_prove_key,
-            xfr: KeySet::new(vec![xfr_prove_key].into_iter()).unwrap(),
-            freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
-        };
-
-        let verif_keys = VerifierKeySet {
-            mint: TransactionVerifyingKey::Mint(mint_verif_key),
-            xfr: KeySet::new(vec![TransactionVerifyingKey::Transfer(xfr_verif_key)].into_iter())
-                .unwrap(),
-            freeze: KeySet::new(
-                vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
-            )
-            .unwrap(),
-        };
-
         println!("CRS set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
 
@@ -1707,7 +1621,7 @@ mod tests {
         };
 
         let mut keystore_merkle_tree = t.clone();
-        let mut validator = ValidatorState::new(verif_keys, t);
+        let mut validator = ValidatorState::new(ChainVariables::new(42, VERIF_CRS.clone()), t);
 
         println!("Validator set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
@@ -1752,7 +1666,7 @@ mod tests {
                 /* outputs:        */ &[bob_rec.clone()],
                 /* fee:            */ Amount::from(1u64),
                 /* valid_until:    */ 2,
-                /* proving_key:    */ prove_keys.xfr.key_for_size(1, 2).unwrap(),
+                /* proving_key:    */ PROVER_CRS.xfr.key_for_size(1, 2).unwrap(),
             )
             .unwrap();
             (txn, bob_rec)

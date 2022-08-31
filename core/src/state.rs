@@ -23,11 +23,12 @@ pub use crate::set_merkle_tree::*;
 pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
 pub use crate::util::canonical;
-pub use crate::PrivKey;
+pub use crate::{PrivKey, PubKey};
 
+use crate::genesis::GenesisNote;
 use crate::reward::CollectedRewardsHash;
 use crate::stake_table::{StakeTableCommitmentsHash, StakeTableHash};
-pub use crate::PubKey;
+use crate::universal_params::{MERKLE_HEIGHT, VERIF_CRS};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
 use canonical::deserialize_canonical_bytes;
@@ -54,12 +55,10 @@ use std::io::Read;
 use std::iter::once;
 use std::sync::Arc;
 
-/// Height of the records Merkle tree
-pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 /// A transaction tht can be either a CAP transaction or a collect reward transaction
 pub enum EspressoTransaction {
+    Genesis(GenesisNote),
     CAP(TransactionNote),
     Reward(Box<CollectRewardNote>),
 }
@@ -77,6 +76,11 @@ impl CanonicalSerialize for EspressoTransaction {
                 writer.write_all(&[flag])?;
                 <CollectRewardNote as CanonicalSerialize>::serialize(reward_note, &mut writer)
             }
+            Self::Genesis(genesis_note) => {
+                let flag = 2;
+                writer.write_all(&[flag])?;
+                <GenesisNote as CanonicalSerialize>::serialize(genesis_note, &mut writer)
+            }
         }
     }
 
@@ -84,6 +88,7 @@ impl CanonicalSerialize for EspressoTransaction {
         match self {
             Self::CAP(txn) => txn.serialized_size() + 1,
             Self::Reward(reward) => reward.serialized_size() + 1,
+            Self::Genesis(genesis) => genesis.serialized_size() + 1,
         }
     }
 }
@@ -102,6 +107,9 @@ impl CanonicalDeserialize for EspressoTransaction {
             1 => Ok(Self::Reward(Box::new(
                 <CollectRewardNote as CanonicalDeserialize>::deserialize(&mut r)?,
             ))),
+            2 => Ok(Self::Genesis(
+                <GenesisNote as CanonicalDeserialize>::deserialize(&mut r)?,
+            )),
             _ => Err(SerializationError::InvalidData),
         }
     }
@@ -388,6 +396,9 @@ pub enum ValidationError {
 
     /// Block transaction order doesn't match helper proofs
     InconsistentHelperProofs,
+
+    /// A genesis transaction was included in a non-genesis block
+    UnexpectedGenesis,
 }
 
 pub(crate) mod ser_display {
@@ -441,6 +452,7 @@ impl Clone for ValidationError {
                 num_inputs: *num_inputs,
             },
             InconsistentHelperProofs => InconsistentHelperProofs,
+            UnexpectedGenesis => UnexpectedGenesis,
         }
     }
 }
@@ -859,9 +871,9 @@ pub mod state_comm {
     /// succinctly as cryptographic commitments.
     #[derive(Debug)]
     pub struct LedgerCommitmentOpening {
+        pub chain: Commitment<ChainVariables>,
         pub prev_commit_time: u64,
         pub prev_state: Option<state_comm::LedgerStateCommitment>,
-        pub verif_crs: Commitment<VerifierKeySet>,
         pub record_merkle_commitment: Commitment<RecordMerkleCommitment>,
         pub record_merkle_frontier: Commitment<RecordMerkleFrontier>,
         /// We need to include all the cached past record Merkle roots
@@ -893,7 +905,7 @@ pub mod state_comm {
     impl Committable for LedgerCommitmentOpening {
         fn commit(&self) -> Commitment<Self> {
             commit::RawCommitmentBuilder::new("Ledger Comm")
-                .u64_field("prev_commit_time", self.prev_commit_time)
+                .field("chain", self.chain)
                 .array_field(
                     "prev_state",
                     &self
@@ -903,7 +915,6 @@ pub mod state_comm {
                         .map(Commitment::<Self>::from)
                         .collect::<Vec<_>>(),
                 )
-                .field("verif_crs", self.verif_crs)
                 .field("record_merkle_commitment", self.record_merkle_commitment)
                 .field("record_merkle_frontier", self.record_merkle_frontier)
                 .field("past_record_merkle_roots", self.past_record_merkle_roots)
@@ -927,6 +938,104 @@ pub struct ValidationOutputs {
     pub record_proofs: MerkleTree,
 }
 
+/// Serializable [Arc]
+///
+/// Ark-serialize doesn't work out of the box for [Arc], even if the underlying type is
+/// serializable. This wrapper around [Arc] provides a simple implementation of [ark_serialize]
+/// traits that simply delegates to the implementations for [T].
+#[derive(
+    Clone,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    derive_more::Deref,
+    derive_more::From,
+    derive_more::Into,
+)]
+pub struct ArcSer<T>(Arc<T>);
+
+impl<T: CanonicalSerialize> CanonicalSerialize for ArcSer<T> {
+    fn serialize<W: Write>(&self, writer: W) -> Result<(), SerializationError> {
+        (**self).serialize(writer)
+    }
+
+    fn serialized_size(&self) -> usize {
+        (**self).serialized_size()
+    }
+}
+
+impl<T: CanonicalDeserialize> CanonicalDeserialize for ArcSer<T> {
+    fn deserialize<R: Read>(reader: R) -> Result<Self, SerializationError> {
+        Ok(Self(Arc::new(T::deserialize(reader)?)))
+    }
+}
+
+/// Global variables for an Espresso blockchain.
+#[ser_test(ark(false))]
+#[derive(Clone, Debug, Serialize, Deserialize, CanonicalDeserialize, CanonicalSerialize)]
+pub struct ChainVariables {
+    /// The version of the protocol this chain is currently using.
+    ///
+    /// The protocol version can be changed by committing an update transaction.
+    pub protocol_version: (u16, u16, u16),
+
+    /// A unique identifier for this chain, to prevent cross-chain replay attacks.
+    ///
+    /// The chain ID is set at genesis and never changes.
+    pub chain_id: u16,
+
+    /// Plonk verifier keys.
+    pub verif_crs: ArcSer<VerifierKeySet>,
+}
+
+impl Default for ChainVariables {
+    fn default() -> Self {
+        Self::new(0, VERIF_CRS.clone())
+    }
+}
+
+impl Committable for ChainVariables {
+    fn commit(&self) -> Commitment<Self> {
+        commit::RawCommitmentBuilder::new("ChainVariables")
+            .u64_field("protocol_version_major", self.protocol_version.0 as u64)
+            .u64_field("protocol_version_minor", self.protocol_version.1 as u64)
+            .u64_field("protocol_version_patch", self.protocol_version.2 as u64)
+            .var_size_bytes(&canonical::serialize(&self.verif_crs).unwrap())
+            .finalize()
+    }
+}
+
+impl PartialEq for ChainVariables {
+    fn eq(&self, other: &Self) -> bool {
+        self.commit() == other.commit()
+    }
+}
+
+impl Eq for ChainVariables {}
+
+impl Hash for ChainVariables {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Hash::hash(&self.commit(), state)
+    }
+}
+
+impl ChainVariables {
+    pub fn new(chain_id: u16, verif_crs: Arc<VerifierKeySet>) -> Self {
+        Self {
+            protocol_version: (
+                env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
+                env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
+                env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
+            ),
+            chain_id,
+            verif_crs: verif_crs.into(),
+        }
+    }
+}
+
 /// The working state of the ledger
 ///
 /// Only the previous state is represented as a commitment. Other
@@ -934,9 +1043,9 @@ pub struct ValidationOutputs {
 #[ser_test(arbitrary, ark(false))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidatorState {
+    pub chain: ChainVariables,
     pub prev_commit_time: u64,
     pub prev_state: Option<state_comm::LedgerStateCommitment>,
-    pub verif_crs: Arc<VerifierKeySet>,
     /// The current record Merkle commitment
     pub record_merkle_commitment: MerkleCommitment,
     /// The current frontier of the record Merkle tree
@@ -957,6 +1066,15 @@ pub struct ValidatorState {
 /// Nullifier proofs, organized by the root hash for which they are valid.
 pub type NullifierProofs = Vec<(Nullifier, SetMerkleProof, set_hash::Hash)>;
 
+impl Default for ValidatorState {
+    fn default() -> Self {
+        Self::new(
+            ChainVariables::default(),
+            MerkleTree::new(MERKLE_HEIGHT).unwrap(),
+        )
+    }
+}
+
 impl ValidatorState {
     /// The number of recent record Merkle tree root hashes the
     /// validator should remember
@@ -965,11 +1083,11 @@ impl ValidatorState {
     /// were generated using a validator state that is in the last HISTORY_SIZE states.
     pub const HISTORY_SIZE: usize = 10;
 
-    pub fn new(verif_crs: VerifierKeySet, record_merkle_frontier: MerkleTree) -> Self {
+    pub fn new(chain: ChainVariables, record_merkle_frontier: MerkleTree) -> Self {
         Self {
+            chain,
             prev_commit_time: 0u64,
             prev_state: None,
-            verif_crs: Arc::new(verif_crs),
             record_merkle_commitment: record_merkle_frontier.commitment(),
             record_merkle_frontier: record_merkle_frontier.frontier(),
             past_record_merkle_roots: RecordMerkleHistory(VecDeque::with_capacity(
@@ -987,9 +1105,9 @@ impl ValidatorState {
     /// Cryptographic commitment to the validator state
     pub fn commit(&self) -> state_comm::LedgerStateCommitment {
         let inputs = state_comm::LedgerCommitmentOpening {
+            chain: self.chain.commit(),
             prev_commit_time: self.prev_commit_time,
             prev_state: self.prev_state,
-            verif_crs: self.verif_crs.commit(),
             record_merkle_commitment: RecordMerkleCommitment(self.record_merkle_commitment)
                 .commit(),
             record_merkle_frontier: RecordMerkleFrontier(self.record_merkle_frontier.clone())
@@ -1032,6 +1150,20 @@ impl ValidatorState {
         txns: Block,
         txns_helper_proofs: Vec<EspressoTxnHelperProofs>,
     ) -> Result<(Block, NullifierProofs), ValidationError> {
+        // Check if this is a genesis block. If it is, validation is trivial and we can skip the
+        // rest of this. If it is not, then we will reject the block later if it contains any
+        // genesis transactions.
+        if let Some(EspressoTransaction::Genesis(_)) = txns.0.get(0) {
+            if now != 0 || txns.0.len() != 1 {
+                // A genesis transaction is only allowed in the genesis block, which is a block at
+                // height 0 containing only a single genesis transaction.
+                return Err(ValidationError::UnexpectedGenesis);
+            }
+            // An acceptable genesis block is always valid, regardless of the contents, and it has
+            // no nullifier proofs.
+            return Ok((txns, vec![]));
+        }
+
         let mut cap_txns = vec![];
         let mut reward_txns = vec![];
         let mut cap_nulls_proofs = vec![];
@@ -1048,6 +1180,9 @@ impl ValidatorState {
                 ) => {
                     reward_txns.push(reward_txn);
                     rewards_proofs.push(reward_pfs);
+                }
+                (EspressoTransaction::Genesis(_), _) => {
+                    return Err(ValidationError::UnexpectedGenesis)
                 }
                 _ => return Err(ValidationError::InconsistentHelperProofs),
             }
@@ -1079,11 +1214,12 @@ impl ValidatorState {
             let verif_keys = cap_txns
                 .iter()
                 .map(|txn| match txn {
-                    TransactionNote::Mint(_) => Ok(&self.verif_crs.mint),
+                    TransactionNote::Mint(_) => Ok(&self.chain.verif_crs.mint),
                     TransactionNote::Transfer(note) => {
                         let num_inputs = note.inputs_nullifiers.len();
                         let num_outputs = note.output_commitments.len();
-                        self.verif_crs
+                        self.chain
+                            .verif_crs
                             .xfr
                             .key_for_size(num_inputs, num_outputs)
                             .ok_or(UnsupportedTransferSize {
@@ -1094,7 +1230,8 @@ impl ValidatorState {
                     TransactionNote::Freeze(note) => {
                         let num_inputs = note.input_nullifiers.len();
                         let num_outputs = note.output_commitments.len();
-                        self.verif_crs
+                        self.chain
+                            .verif_crs
                             .freeze
                             .key_for_size(num_inputs, num_outputs)
                             .ok_or(UnsupportedFreezeSize { num_inputs })
@@ -1162,6 +1299,11 @@ impl ValidatorState {
             .past_nullifiers
             .append_block(null_pfs)
             .expect("failed to append nullifiers after validation");
+
+        // If this is a genesis block, apply system parameter updates.
+        if let Some(EspressoTransaction::Genesis(txn)) = txns.0.get(0) {
+            self.chain = txn.chain.clone()
+        }
 
         let mut record_merkle_builder = FilledMTBuilder::from_frontier(
             &self.record_merkle_commitment,

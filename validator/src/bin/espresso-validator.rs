@@ -77,6 +77,10 @@ struct Options {
     #[clap(long, env = "ESPRESSO_COLORED_LOGS")]
     pub colored_logs: bool,
 
+    /// Unique identifier for this instance of Espresso.
+    #[clap(long, env = "ESPRESSO_VALIDATOR_CHAIN_ID", default_value = "0")]
+    pub chain_id: u16,
+
     #[clap(subcommand)]
     pub esqs: Option<full_node_esqs::Command>,
 }
@@ -280,7 +284,10 @@ async fn main() -> Result<(), std::io::Error> {
         let (genesis, state) = GenesisState::new_for_test();
         (genesis, Some(state))
     } else {
-        (GenesisState::new(options.faucet_pub_key.clone()), None)
+        (
+            GenesisState::new(options.chain_id, options.faucet_pub_key.clone()),
+            None,
+        )
     };
     let keys = gen_keys(&options.consensus_opt, options.num_nodes);
     let priv_key = keys[own_id].private.clone();

@@ -27,11 +27,11 @@ use dirs::data_local_dir;
 use espresso_core::{
     committee::Committee,
     state::{
-        ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, SetMerkleTree,
-        ValidatorState, MERKLE_HEIGHT,
+        ChainVariables, ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence,
+        SetMerkleTree, ValidatorState,
     },
     testing::{MultiXfrRecordSpec, MultiXfrTestState},
-    universal_params::UNIVERSAL_PARAM,
+    universal_params::{MERKLE_HEIGHT, UNIVERSAL_PARAM, VERIF_CRS},
     PrivKey, PubKey,
 };
 use hotshot::traits::implementations::Libp2pNetwork;
@@ -44,11 +44,10 @@ use hotshot::{
 };
 use jf_cap::{
     structs::{Amount, AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
-    MerkleTree, TransactionVerifyingKey,
+    MerkleTree,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
-use key_set::{KeySet, VerifierKeySet};
 use libp2p::identity::ed25519::SecretKey;
 use libp2p::identity::Keypair;
 use libp2p::{multiaddr, Multiaddr, PeerId};
@@ -545,7 +544,7 @@ pub struct GenesisState {
 }
 
 impl GenesisState {
-    pub fn new(faucet_pub_keys: impl IntoIterator<Item = UserPubKey>) -> Self {
+    pub fn new(chain_id: u16, faucet_pub_keys: impl IntoIterator<Item = UserPubKey>) -> Self {
         let mut rng = ChaChaRng::from_seed(GENESIS_SEED);
         let mut records = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
         let mut memos = Vec::new();
@@ -571,33 +570,11 @@ impl GenesisState {
         let records = records.build();
 
         // Set up the validator.
-        let univ_setup = &*UNIVERSAL_PARAM;
-        let (_, xfr_verif_key_12, _) =
-            jf_cap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
-        let (_, xfr_verif_key_23, _) =
-            jf_cap::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
-        let (_, mint_verif_key, _) =
-            jf_cap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
-        let (_, freeze_verif_key, _) =
-            jf_cap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
-        let verif_keys = VerifierKeySet {
-            mint: TransactionVerifyingKey::Mint(mint_verif_key),
-            xfr: KeySet::new(
-                vec![
-                    TransactionVerifyingKey::Transfer(xfr_verif_key_12),
-                    TransactionVerifyingKey::Transfer(xfr_verif_key_23),
-                ]
-                .into_iter(),
-            )
-            .unwrap(),
-            freeze: KeySet::new(
-                vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
-            )
-            .unwrap(),
-        };
-
         let nullifiers = Default::default();
-        let validator = ValidatorState::new(verif_keys, records.clone());
+        let validator = ValidatorState::new(
+            ChainVariables::new(chain_id, VERIF_CRS.clone()),
+            records.clone(),
+        );
         Self {
             validator,
             records,

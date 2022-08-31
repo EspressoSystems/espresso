@@ -178,7 +178,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     println!("generated public keys in {:?}", start.elapsed());
 
     let store = TempDir::new("minimal_test_network_store").unwrap();
-    let genesis = GenesisState::new(iter::once(faucet_pub_key));
+    let genesis = GenesisState::new(0, iter::once(faucet_pub_key));
     let nodes = join_all((0..MINIMUM_NODES).into_iter().map(|i| {
         let consensus_opt = consensus_opt.clone();
         let genesis = genesis.clone();
