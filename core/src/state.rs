@@ -43,6 +43,7 @@ use jf_cap::{
     errors::TxnApiError, structs::Nullifier, txn_batch_verify, MerkleCommitment, MerkleFrontier,
     MerkleLeafProof, MerkleTree, NodeValue, TransactionNote,
 };
+use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
 use serde::{Deserialize, Serialize};
@@ -679,6 +680,47 @@ impl NullifierHistory {
         &mut self,
         inserts: NullifierProofs,
     ) -> Result<SetMerkleTree, ValidationError> {
+        let (snapshot, new_hash, nulls) = self.apply_block(inserts)?;
+
+        // Update the state: append the new historical snapshot, prune an old snapshot if necessary,
+        // and update the current hash.
+        if self.history.len() >= ValidatorState::HISTORY_SIZE {
+            self.history.pop_back();
+        }
+        self.history.push_front((snapshot.clone(), nulls));
+        self.current = new_hash;
+
+        Ok(snapshot)
+    }
+
+    /// Update a set of historical nullifier non-membership proofs.
+    ///
+    /// `inserts` is a list of new nullifiers along with their proofs and the historical root hash
+    /// which their proof should be validated against. [update_proofs](Self::update_proofs) will
+    /// compute a sparse [SetMerkleTree] containing non-membership proofs for each nullifier in
+    /// `inserts`, updated so that the root hash of each new proof is the latest root hash in
+    /// `self`.
+    ///
+    /// Each nullifier and proof in `inserts` should be labeled with the [Hash](set_hash::Hash) that
+    /// was returned from [check_unspent](Self::check_unspent) when validating that proof. In
+    /// addition, [append_block](Self::append_block) must not have been called since any of the
+    /// relevant calls to [check_unspent](Self::check_unspent).
+    ///
+    /// # Errors
+    ///
+    /// This function fails if any of the proofs in `inserts` are invalid relative to the
+    /// corresponding [Hash](set_hash::Hash).
+    pub fn update_proofs(
+        &self,
+        inserts: NullifierProofs,
+    ) -> Result<SetMerkleTree, ValidationError> {
+        Ok(self.apply_block(inserts)?.0)
+    }
+
+    fn apply_block(
+        &self,
+        inserts: NullifierProofs,
+    ) -> Result<(SetMerkleTree, set_hash::Hash, Vec<Nullifier>), ValidationError> {
         let nulls = inserts.iter().map(|(n, _, _)| *n).collect::<Vec<_>>();
 
         // A map from a historical root hash to the proofs which are to be validated against that
@@ -748,15 +790,7 @@ impl NullifierHistory {
             accum.insert(*n).unwrap();
         }
 
-        // Update the state: append the new historical snapshot, prune an old snapshot if necessary,
-        // and update the current hash.
-        if self.history.len() >= ValidatorState::HISTORY_SIZE {
-            self.history.pop_back();
-        }
-        self.history.push_front((current.clone(), nulls));
-        self.current = accum.hash();
-
-        Ok(current)
+        Ok((current, accum.hash(), nulls))
     }
 }
 
@@ -878,6 +912,19 @@ pub mod state_comm {
                 .finalize()
         }
     }
+}
+
+#[non_exhaustive]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ValidationOutputs {
+    /// UID for each new record created by this block.
+    pub uids: Vec<u64>,
+    /// Sparse [SetMerkleTree] containing up-to-date non-membership proofs for every nullifier in
+    /// this block, relative to the nullifier set root hash just before applying this block.
+    pub nullifier_proofs: SetMerkleTree,
+    /// Sparse [MerkleTree] containing membership profos for each new record created by this block,
+    /// relative to the record set root hash after applying this block.
+    pub record_proofs: MerkleTree,
 }
 
 /// The working state of the ledger
@@ -1101,25 +1148,26 @@ impl ValidatorState {
         &mut self,
         now: u64,
         txns: Block,
-        null_pfs: Vec<EspressoTxnHelperProofs>,
-    ) -> Result<(Vec<u64>, SetMerkleTree), ValidationError> {
-        // If the block successfully validates, and the nullifier
-        // proofs apply correctly, the remaining (mutating) operations
-        // cannot fail, as this would result in an inconsistent
-        // state. No operations after the first assignement to a
-        // member of self have a possible error; this must remain true
-        // if code changes.
-        let (txns, null_pfs) = self.validate_block_check(now, txns, null_pfs)?;
+        proofs: Vec<EspressoTxnHelperProofs>,
+    ) -> Result<ValidationOutputs, ValidationError> {
+        let (txns, null_pfs) = self.validate_block_check(now, txns, proofs)?;
+        // If the block successfully validates, and the nullifier proofs apply correctly, the
+        // remaining (mutating) operations cannot fail, as this would result in an inconsistent
+        // state. No operations after the first assignement to a member of self have a possible
+        // error; this must remain true if code changes.
         let comm = self.commit();
         self.prev_commit_time = now;
         self.prev_block = BlockCommitment(txns.commit());
-        let null_pfs = self.past_nullifiers.append_block(null_pfs)?;
+        let null_pfs = self
+            .past_nullifiers
+            .append_block(null_pfs)
+            .expect("failed to append nullifiers after validation");
 
-        let mut record_merkle_frontier = MerkleTree::restore_from_frontier(
-            self.record_merkle_commitment,
+        let mut record_merkle_builder = FilledMTBuilder::from_frontier(
+            &self.record_merkle_commitment,
             &self.record_merkle_frontier,
         )
-        .ok_or(ValidationError::BadMerklePath {})?;
+        .expect("failed to restore MerkleTree from frontier");
         let mut uids = vec![];
         let mut uid = self.record_merkle_commitment.num_leaves;
         for o in txns
@@ -1127,14 +1175,12 @@ impl ValidatorState {
             .iter()
             .flat_map(|x| x.output_commitments().into_iter())
         {
-            record_merkle_frontier.push(o.to_field_element());
-            if uid > 0 {
-                record_merkle_frontier.forget(uid - 1).expect_ok().unwrap();
-            }
+            record_merkle_builder.push(o.to_field_element());
             uids.push(uid);
             uid += 1;
-            assert_eq!(uid, record_merkle_frontier.num_leaves());
         }
+        let record_merkle_frontier = record_merkle_builder.build();
+        assert_eq!(uid, record_merkle_frontier.num_leaves());
 
         if self.past_record_merkle_roots.0.len() >= Self::HISTORY_SIZE {
             self.past_record_merkle_roots.0.pop_back();
@@ -1145,7 +1191,51 @@ impl ValidatorState {
         self.record_merkle_commitment = record_merkle_frontier.commitment();
         self.record_merkle_frontier = record_merkle_frontier.frontier();
         self.prev_state = Some(comm);
-        Ok((uids, null_pfs))
+        Ok(ValidationOutputs {
+            uids,
+            nullifier_proofs: null_pfs,
+            record_proofs: record_merkle_frontier,
+        })
+    }
+
+    pub fn update_nullifier_proofs(
+        &self,
+        txns: &[EspressoTransaction],
+        proofs: Vec<EspressoTxnHelperProofs>,
+    ) -> Result<SetMerkleTree, ValidationError> {
+        let recent_nullifiers = self.past_nullifiers.recent_nullifiers();
+        let proofs = proofs
+            .into_iter()
+            .zip(txns)
+            .filter_map(|(pf, txn)| {
+                if let EspressoTxnHelperProofs::CAP(pfs) = pf {
+                    Some((pfs, txn))
+                } else {
+                    None
+                }
+            })
+            .flat_map(|(pfs, txn)| pfs.into_iter().zip(txn.input_nullifiers()))
+            .map(|(pf, n)| {
+                let root = self
+                    .past_nullifiers
+                    .check_unspent(&recent_nullifiers, &pf, n)?;
+                Ok((n, pf, root))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.past_nullifiers.update_proofs(proofs)
+    }
+
+    pub fn update_records_frontier(&self, txns: &[EspressoTransaction]) -> MerkleTree {
+        let mut record_merkle_builder = FilledMTBuilder::from_frontier(
+            &self.record_merkle_commitment,
+            &self.record_merkle_frontier,
+        )
+        .expect("failed to restore MerkleTree from frontier");
+
+        for o in txns.iter().flat_map(|t| t.output_commitments()) {
+            record_merkle_builder.push(o.to_field_element());
+        }
+        record_merkle_builder.build()
     }
 }
 

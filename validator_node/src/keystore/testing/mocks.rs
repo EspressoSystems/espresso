@@ -19,7 +19,7 @@ use espresso_core::state::EspressoTransaction;
 use espresso_core::{
     ledger::EspressoLedger,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
-    state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState},
+    state::{ElaboratedBlock, ElaboratedTransaction, ValidationOutputs, ValidatorState},
 };
 use futures::stream::Stream;
 use itertools::izip;
@@ -76,7 +76,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
             block.block.clone(),
             block.proofs.clone(),
         ) {
-            Ok((mut uids, _)) => {
+            Ok(ValidationOutputs { mut uids, .. }) => {
                 // Add nullifiers
                 for txn in &block.block.0 {
                     for nullifier in txn.input_nullifiers() {
@@ -226,16 +226,11 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
                 txn_state: TransactionState {
                     validator: ledger.network().validator.clone(),
 
-                    records: Default::default(),
                     nullifiers: ledger.network().nullifiers.clone(),
                     record_mt: SparseMerkleTree::sparse(ledger.network().records.clone()),
 
                     now: ledger.now(),
                 },
-                key_state: Default::default(),
-                freezing_accounts: Default::default(),
-                sending_accounts: Default::default(),
-                viewing_accounts: Default::default(),
             }
         };
         Ok(state)
