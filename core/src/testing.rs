@@ -511,7 +511,7 @@ impl MultiXfrTestState {
             for (kix, note, memos, signature) in txns {
                 let nul = ret.nullifiers.contains(note.input_nullifier).unwrap().1;
 
-                let ix = setup_block.block.txns.len();
+                let ix = setup_block.block.0.len();
                 ret.try_add_transaction(
                     &mut setup_block,
                     ElaboratedTransaction {
@@ -1139,7 +1139,7 @@ impl MultiXfrTestState {
         let base_ix = self.record_merkle_tree.num_leaves()
             + blk
                 .block
-                .txns
+                .0
                 .iter()
                 .map(|x| x.output_commitments().len() as u64)
                 .sum::<u64>();
@@ -1185,7 +1185,7 @@ impl MultiXfrTestState {
         }
         for comm in blk
             .block
-            .txns
+            .0
             .iter()
             .flat_map(|x| x.output_commitments().into_iter())
         {
@@ -1204,7 +1204,7 @@ impl MultiXfrTestState {
                 "Block {}/{}: {} transactions, {}s ({}s generation, {}s checking)",
                 print_info.round + 1,
                 print_info.num_txs,
-                blk.block.txns.len(),
+                blk.block.0.len(),
                 t,
                 generation_time,
                 checking_time

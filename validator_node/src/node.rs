@@ -387,7 +387,7 @@ impl FullState {
                                 .insert(Vec::from(block.hash().as_ref()), block_index);
                             let block_uids = block
                                 .block
-                                .txns
+                                .0
                                 .iter()
                                 .map(|txn| {
                                     // Split the uids corresponding to this transaction off the front of
@@ -399,34 +399,18 @@ impl FullState {
                                 })
                                 .collect::<Vec<_>>();
                             self.full_persisted.store_block_uids(&block_uids);
-<<<<<<< HEAD:zerok/zerok_lib/src/node.rs
-                            self.full_persisted
-                                .store_memos(&vec![None; block.block.txns.len()]);
-=======
->>>>>>> origin/main:validator_node/src/node.rs
 
                             // Add the results of this block to our current state.
                             let mut nullifiers =
                                 self.full_persisted.get_latest_nullifier_set().unwrap();
-<<<<<<< HEAD:zerok/zerok_lib/src/node.rs
-                            for txn in block.block.txns.iter() {
-                                for n in txn.nullifiers() {
-                                    nullifiers.insert(n);
-                                }
-=======
                             let mut txn_hashes = Vec::new();
                             let mut nullifiers_delta = Vec::new();
                             let mut memo_events = Vec::new();
                             for txn in block.block.0.iter() {
->>>>>>> origin/main:validator_node/src/node.rs
                                 for o in txn.output_commitments() {
                                     self.records_pending_memos.push(o.to_field_element());
                                 }
                             }
-<<<<<<< HEAD:zerok/zerok_lib/src/node.rs
-                            self.num_txns += block.block.txns.len();
-                            assert_eq!(nullifiers.hash(), self.validator.nullifiers_root);
-=======
 
                             for (txn_id, (((txn, proofs), memos), signatures)) in block
                                 .block
@@ -485,7 +469,6 @@ impl FullState {
                             self.num_txns += block.block.0.len();
                             self.cumulative_size += block.serialized_size();
                             assert_eq!(nullifiers.hash(), self.validator.nullifiers_root());
->>>>>>> origin/main:validator_node/src/node.rs
                             assert_eq!(
                                 self.records_pending_memos.commitment(),
                                 self.validator.record_merkle_commitment
@@ -661,106 +644,6 @@ impl FullState {
                 })?,
         })
     }
-<<<<<<< HEAD:zerok/zerok_lib/src/node.rs
-
-    fn post_memos(
-        &mut self,
-        block_id: u64,
-        txn_id: u64,
-        new_memos: Vec<ReceiverMemo>,
-        sig: Signature,
-    ) -> Result<(), QueryServiceError> {
-        let block_id = block_id as usize;
-        let txn_id = txn_id as usize;
-
-        // Get the information about the committed block containing the relevant transaction.
-        let LedgerTransition {
-            block, uids, memos, ..
-        } = self.get_block(block_id)?;
-        let num_txns = block.block.txns.len();
-        assert_eq!(uids.len(), num_txns);
-        assert_eq!(block.proofs.len(), num_txns);
-
-        // Validate `txn_id` and get the relevant information for the transaction within `block`.
-        if txn_id >= num_txns {
-            return Err(QueryServiceError::InvalidTxnId {});
-        }
-        let txn = &block.block.txns[txn_id];
-        let uids = &uids[txn_id];
-
-        // Validate the new memos.
-        if memos[txn_id].is_some() {
-            return Err(QueryServiceError::MemosAlreadyPosted {});
-        }
-        if txn
-            .verify_receiver_memos_signature(&new_memos, &sig)
-            .is_err()
-        {
-            return Err(QueryServiceError::InvalidSignature {});
-        }
-        if new_memos.len() != txn.output_len() {
-            return Err(QueryServiceError::WrongNumberOfMemos {
-                expected: txn.output_len(),
-            });
-        }
-
-        // Authenticate the validity of the records corresponding to the memos.
-        let merkle_tree = &mut self.records_pending_memos;
-        let merkle_paths = uids
-            .iter()
-            .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path)
-            .collect::<Vec<_>>();
-        // Once we have generated proofs for the memos, we will not need to generate proofs for
-        // these records again (unless specifically requested) so there is no need to keep them in
-        // memory.
-        for uid in uids {
-            merkle_tree.forget(*uid);
-        }
-
-        // Store and broadcast the new memos.
-        //todo !jeb.bearer update memos in storage
-        let event = LedgerEvent::Memos {
-            outputs: izip!(
-                new_memos,
-                txn.output_commitments(),
-                uids.iter().cloned(),
-                merkle_paths
-            )
-            .collect(),
-            transaction: Some((block_id as u64, txn_id as u64)),
-        };
-        self.send_event(event);
-
-        Ok(())
-    }
-
-    fn introduce(&mut self, pub_key: &UserPubKey) -> Result<(), QueryServiceError> {
-        let mut known_nodes = self
-            .full_persisted
-            .get_latest_known_nodes()
-            .map_err(|err| QueryServiceError::PersistenceError {
-                msg: err.to_string(),
-            })?;
-        known_nodes.insert(pub_key.address(), pub_key.clone());
-        self.full_persisted.update_known_nodes(&known_nodes);
-        self.full_persisted.commit_known_nodes();
-        Ok(())
-    }
-
-    fn get_user(&self, address: &UserAddress) -> Result<UserPubKey, QueryServiceError> {
-        let known_nodes = self
-            .full_persisted
-            .get_latest_known_nodes()
-            .map_err(|err| QueryServiceError::PersistenceError {
-                msg: err.to_string(),
-            })?;
-        known_nodes
-            .get(address)
-            .cloned()
-            .ok_or(QueryServiceError::InvalidAddress {})
-    }
-=======
->>>>>>> origin/main:validator_node/src/node.rs
 }
 
 /// A QueryService that aggregates the full ledger state by observing consensus.
