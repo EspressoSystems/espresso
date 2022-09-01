@@ -20,7 +20,7 @@ use reef::Ledger;
 /// Height of the records Merkle tree
 pub const MERKLE_HEIGHT: u8 = 20 /*H*/;
 
-pub const SUPPORTED_TRANSFER_SIZES: [(usize, usize); 2] = [(1, 2), (2, 3)];
+pub const SUPPORTED_TRANSFER_SIZES: [(usize, usize); 3] = [(1, 2), (2, 2), (3, 3)];
 pub const SUPPORTED_FREEZE_SIZES: [usize; 1] = [2];
 
 lazy_static! {

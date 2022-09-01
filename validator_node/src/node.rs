@@ -36,7 +36,7 @@ use futures::{channel::mpsc, future::RemoteHandle, select, task::SpawnExt};
 use hotshot::{traits::BlockContents, types::HotShotHandle, HotShotError, H_256};
 use itertools::izip;
 use jf_cap::{
-    structs::{Nullifier, ReceiverMemo, RecordCommitment},
+    structs::{Nullifier, ReceiverMemo},
     MerkleTree, Signature,
 };
 use jf_primitives::merkle_tree::FilledMTBuilder;
@@ -234,17 +234,14 @@ pub trait QueryService {
         txn_id: u64,
     ) -> Result<(Vec<ReceiverMemo>, Signature), QueryServiceError> {
         let LedgerTransition { block, .. } = self.get_block(block_id as usize).await?;
-        let memos = block
+        match block
             .memos
             .get(txn_id as usize)
-            .cloned()
-            .ok_or(QueryServiceError::InvalidTxnId {})?;
-        let sig = block
-            .signatures
-            .get(txn_id as usize)
-            .cloned()
-            .ok_or(QueryServiceError::InvalidTxnId {})?;
-        Ok((memos, sig))
+            .ok_or(QueryServiceError::InvalidTxnId {})?
+        {
+            Some(memos) => Ok(memos.clone()),
+            None => Err(QueryServiceError::NoMemosForTxn {}),
+        }
     }
 }
 
@@ -355,155 +352,148 @@ impl FullState {
                 state,
                 qcs: _,
             } => {
-                for (mut block, state) in block.iter().cloned().zip(state.iter()).rev() {
-                    // A block has been committed. Update our mirror of the ValidatorState by applying
-                    // the new block, and generate a Commit event.
-
-                    match self.validator.validate_and_apply(
-                        self.validator.prev_commit_time + 1,
-                        block.block.clone(),
-                        block.proofs.clone(),
-                    ) {
-                        // We update our ValidatorState for each block committed by the HotShot event
-                        // source, so we shouldn't ever get out of sync.
-                        Err(_) => panic!("state is out of sync with validator"),
-                        Ok(_) if self.validator.commit() != state.commit() => {
-                            panic!("state is out of sync with validator")
-                        }
-
-                        Ok(ValidationOutputs {
-                            mut uids,
-                            nullifier_proofs,
-                            ..
-                        }) => {
-                            let hist_index = self.full_persisted.state_iter().len();
-                            assert!(hist_index > 0);
-                            let block_index = hist_index - 1;
-
-                            self.full_persisted.store_for_commit(&block, state);
-                            self.past_nullifiers
-                                .insert(self.validator.nullifiers_root(), hist_index);
-                            self.block_hashes
-                                .insert(Vec::from(block.hash().as_ref()), block_index);
-                            let block_uids = block
-                                .block
-                                .0
-                                .iter()
-                                .map(|txn| {
-                                    // Split the uids corresponding to this transaction off the front of
-                                    // the list of uids for the whole block.
-                                    let mut this_txn_uids = uids.split_off(txn.output_len());
-                                    std::mem::swap(&mut this_txn_uids, &mut uids);
-                                    assert_eq!(this_txn_uids.len(), txn.output_len());
-                                    this_txn_uids
-                                })
-                                .collect::<Vec<_>>();
-                            self.full_persisted.store_block_uids(&block_uids);
-
-                            // Add the results of this block to our current state.
-                            let mut nullifiers =
-                                self.full_persisted.get_latest_nullifier_set().unwrap();
-                            let mut txn_hashes = Vec::new();
-                            let mut nullifiers_delta = Vec::new();
-                            let mut memo_events = Vec::new();
-                            for txn in block.block.0.iter() {
-                                for o in txn.output_commitments() {
-                                    self.records_pending_memos.push(o.to_field_element());
-                                }
-                            }
-
-                            for (txn_id, (((txn, proofs), memos), signatures)) in block
-                                .block
-                                .0
-                                .iter()
-                                .zip(block.proofs.iter())
-                                .zip(block.memos.iter())
-                                .zip(block.signatures.iter())
-                                .enumerate()
-                            {
-                                for n in txn.input_nullifiers() {
-                                    nullifiers.insert(n);
-                                    nullifiers_delta.push(n);
-                                }
-                                let txn_uids = &block_uids[txn_id];
-
-                                let merkle_tree = &mut self.records_pending_memos;
-                                let merkle_paths = txn_uids
-                                    .iter()
-                                    .map(|uid| {
-                                        merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path
-                                    })
-                                    .collect::<Vec<_>>();
-                                // Once we have generated proofs for the memos, we will not need to generate proofs for
-                                // these records again (unless specifically requested) so there is no need to keep them in
-                                // memory.
-                                for uid in txn_uids.iter() {
-                                    merkle_tree.forget(*uid);
-                                }
-
-                                let hash = ElaboratedTransaction {
-                                    txn: txn.clone(),
-                                    proofs: proofs.clone(),
-                                    memos: memos.clone(),
-                                    signature: signatures.clone(),
-                                }
-                                .hash();
-                                txn_hashes.push(TransactionCommitment(hash));
-                                let memo_event = LedgerEvent::Memos {
-                                    outputs: izip!(
-                                        memos.clone(),
-                                        txn.output_commitments(),
-                                        txn_uids.iter().cloned(),
-                                        merkle_paths
-                                    )
-                                    .collect(),
-                                    transaction: Some((
-                                        block_index as u64,
-                                        txn_id as u64,
-                                        hash,
-                                        txn.kind(),
-                                    )),
-                                };
-                                memo_events.push(memo_event);
-                            }
-                            self.num_txns += block.block.0.len();
-                            self.cumulative_size += block.serialized_size();
-                            assert_eq!(nullifiers.hash(), self.validator.nullifiers_root());
-                            assert_eq!(
-                                self.records_pending_memos.commitment(),
-                                self.validator.record_merkle_commitment
-                            );
-                            self.full_persisted.store_nullifier_set(&nullifiers);
-                            self.full_persisted.commit_accepted();
-
-                            // Update the nullifier proofs in the block so that clients do not have
-                            // to worry about out of date nullifier proofs.
-                            for (txn, proofs) in block.block.0.iter().zip(block.proofs.iter_mut()) {
-                                if let EspressoTransaction::CAP(txn) = txn {
-                                    *proofs = EspressoTxnHelperProofs::CAP(
-                                        txn.input_nullifiers()
-                                            .into_iter()
-                                            .map(|n| nullifier_proofs.contains(n).unwrap().1)
-                                            .collect(),
-                                    );
-                                }
-                            }
-
-                            // Notify subscribers of the new block.
-                            self.send_event(LedgerEvent::Commit {
-                                block,
-                                block_id: block_index as u64,
-                                state_comm: self.validator.commit(),
-                            });
-                            for memo_event in memo_events.into_iter() {
-                                self.send_event(memo_event);
-                            }
-                        }
-                    }
+                for (block, state) in block.iter().cloned().zip(state.iter()).rev() {
+                    self.append_block(block, state)
                 }
             }
 
             _ => {}
+        }
+    }
+
+    fn append_block(&mut self, mut block: ElaboratedBlock, state: &ValidatorState) {
+        // A block has been committed. Update our mirror of the ValidatorState by applying the new
+        // block, and generate a Commit event.
+        match self.validator.validate_and_apply(
+            self.validator.prev_commit_time + 1,
+            block.block.clone(),
+            block.proofs.clone(),
+        ) {
+            // We update our ValidatorState for each block committed by the HotShot event source, so
+            // we shouldn't ever get out of sync.
+            Err(_) => panic!("state is out of sync with validator"),
+            Ok(_) if self.validator.commit() != state.commit() => {
+                panic!("state is out of sync with validator")
+            }
+
+            Ok(ValidationOutputs {
+                mut uids,
+                nullifier_proofs,
+                ..
+            }) => {
+                let hist_index = self.full_persisted.state_iter().len();
+                assert!(hist_index > 0);
+                let block_index = hist_index - 1;
+
+                self.full_persisted.store_for_commit(&block, state);
+                self.past_nullifiers
+                    .insert(self.validator.nullifiers_root(), hist_index);
+                self.block_hashes
+                    .insert(Vec::from(block.hash().as_ref()), block_index);
+                let block_uids = block
+                    .block
+                    .0
+                    .iter()
+                    .map(|txn| {
+                        // Split the uids corresponding to this transaction off the front of the
+                        // list of uids for the whole block.
+                        let mut this_txn_uids = uids.split_off(txn.output_len());
+                        std::mem::swap(&mut this_txn_uids, &mut uids);
+                        assert_eq!(this_txn_uids.len(), txn.output_len());
+                        this_txn_uids
+                    })
+                    .collect::<Vec<_>>();
+                self.full_persisted.store_block_uids(&block_uids);
+
+                // Add the results of this block to our current state.
+                let mut nullifiers = self.full_persisted.get_latest_nullifier_set().unwrap();
+                let mut txn_hashes = Vec::new();
+                let mut nullifiers_delta = Vec::new();
+                let mut memo_events = Vec::new();
+                for txn in block.block.0.iter() {
+                    for o in txn.output_commitments() {
+                        self.records_pending_memos.push(o.to_field_element());
+                    }
+                }
+
+                for (txn_id, ((txn, proofs), memos)) in block
+                    .block
+                    .0
+                    .iter()
+                    .zip(block.proofs.iter())
+                    .zip(block.memos.iter())
+                    .enumerate()
+                {
+                    for n in txn.input_nullifiers() {
+                        nullifiers.insert(n);
+                        nullifiers_delta.push(n);
+                    }
+                    let txn_uids = &block_uids[txn_id];
+
+                    let merkle_tree = &mut self.records_pending_memos;
+                    let merkle_paths = txn_uids
+                        .iter()
+                        .map(|uid| merkle_tree.get_leaf(*uid).expect_ok().unwrap().1.path)
+                        .collect::<Vec<_>>();
+                    // Once we have generated proofs for the memos, we will not need to generate
+                    // proofs for these records again (unless specifically requested) so there is no
+                    // need to keep them in memory.
+                    for uid in txn_uids.iter() {
+                        merkle_tree.forget(*uid);
+                    }
+
+                    let hash = ElaboratedTransaction {
+                        txn: txn.clone(),
+                        proofs: proofs.clone(),
+                        memos: memos.clone(),
+                    }
+                    .hash();
+                    txn_hashes.push(TransactionCommitment(hash));
+                    let memo_event = LedgerEvent::Memos {
+                        outputs: izip!(
+                            memos.clone().map(|(memos, _)| memos).unwrap_or_default(),
+                            txn.output_commitments(),
+                            txn_uids.iter().cloned(),
+                            merkle_paths
+                        )
+                        .collect(),
+                        transaction: Some((block_index as u64, txn_id as u64, hash, txn.kind())),
+                    };
+                    memo_events.push(memo_event);
+                }
+                self.num_txns += block.block.0.len();
+                self.cumulative_size += block.serialized_size();
+                assert_eq!(nullifiers.hash(), self.validator.nullifiers_root());
+                assert_eq!(
+                    self.records_pending_memos.commitment(),
+                    self.validator.record_merkle_commitment
+                );
+                self.full_persisted.store_nullifier_set(&nullifiers);
+                self.full_persisted.commit_accepted();
+
+                // Update the nullifier proofs in the block so that clients do not have to worry
+                // about out of date nullifier proofs.
+                for (txn, proofs) in block.block.0.iter().zip(block.proofs.iter_mut()) {
+                    if let EspressoTransaction::CAP(txn) = txn {
+                        *proofs = EspressoTxnHelperProofs::CAP(
+                            txn.input_nullifiers()
+                                .into_iter()
+                                .map(|n| nullifier_proofs.contains(n).unwrap().1)
+                                .collect(),
+                        );
+                    }
+                }
+
+                // Notify subscribers of the new block.
+                self.send_event(LedgerEvent::Commit {
+                    block,
+                    block_id: block_index as u64,
+                    state_comm: self.validator.commit(),
+                });
+                for memo_event in memo_events.into_iter() {
+                    self.send_event(memo_event);
+                }
+            }
         }
     }
 
@@ -662,48 +652,28 @@ impl<'a> HotShotQueryService<'a> {
 
         // The current state of the network.
         univ_param: &'a jf_cap::proof::UniversalParam,
-        mut validator: ValidatorState,
-        record_merkle_tree: MerkleTree,
-        nullifiers: SetMerkleTree,
-        unspent_memos: Vec<(ReceiverMemo, u64)>,
+        genesis: ElaboratedBlock,
         mut full_persisted: FullPersistence,
     ) -> Self {
-        //todo !jeb.bearer If we are not starting from the genesis of the ledger, query the full
-        // state at this point from another full node, like
-        //  let state = other_node.full_state(validator.commit());
-        // https://github.com/EspressoSystems/espresso/issues/415
-        //
-        // For now, just assume we are starting at the beginning:
-        let block_hashes = HashMap::new();
-        // Use the unpruned record Merkle tree.
-        assert_eq!(
-            record_merkle_tree.commitment(),
-            validator.record_merkle_commitment
-        );
-
-        let record_merkle_commitment = record_merkle_tree.commitment();
-        let record_merkle_frontier = record_merkle_tree.frontier();
-        // There have not yet been any transactions, so we are not expecting to receive any memos.
-        // Therefore, the set of record commitments that are pending the receipt of corresponding
-        // memos is the completely sparse merkle tree.
-        let records_pending_memos =
-            MerkleTree::restore_from_frontier(record_merkle_commitment, &record_merkle_frontier)
-                .unwrap();
-
-        validator.record_merkle_commitment = record_merkle_commitment;
-        validator.record_merkle_frontier = record_merkle_frontier;
+        let validator = ValidatorState::default();
+        let records = MerkleTree::restore_from_frontier(
+            validator.record_merkle_commitment,
+            &validator.record_merkle_frontier,
+        )
+        .unwrap();
+        let nullifiers = SetMerkleTree::default();
 
         // Commit the initial state.
-        full_persisted.store_initial(&validator, &record_merkle_tree, &nullifiers);
+        full_persisted.store_initial(&validator, &records, &nullifiers);
 
-        let state = Arc::new(RwLock::new(FullState {
+        let full_state = Arc::new(RwLock::new(FullState {
             validator,
-            records_pending_memos,
+            records_pending_memos: records,
             full_persisted,
             past_nullifiers: vec![(nullifiers.hash(), 0)].into_iter().collect(),
             num_txns: 0,
             cumulative_size: 0,
-            block_hashes,
+            block_hashes: Default::default(),
             proposed: ElaboratedBlock::default(),
             subscribers: Default::default(),
             pending_subscribers: Default::default(),
@@ -711,45 +681,31 @@ impl<'a> HotShotQueryService<'a> {
 
         // Spawn event handling task.
         let task = {
-            let state = state.clone();
+            let full_state = full_state.clone();
             let mut event_source = Box::pin(event_source);
             AsyncStd::new()
                 .spawn_with_handle(async move {
+                    // HotShot does not currently support genesis nicely. It should automatically
+                    // commit and broadcast a `Decide` event for the genesis block, but it doesn't.
+                    // For now, we broadcast a `Commit` event for the genesis block ourselves.
                     {
-                        // Broadcast the initial receiver memos so that clients can access the
-                        // records they have been granted at ledger setup time.
-                        let mut state = state.write().await;
-                        let (memos, uids): (Vec<_>, Vec<_>) = unspent_memos.into_iter().unzip();
-                        let (comms, merkle_paths): (Vec<_>, Vec<_>) = uids
-                            .iter()
-                            .map(|uid| {
-                                record_merkle_tree
-                                    .get_leaf(*uid)
-                                    .expect_ok()
-                                    .map(|(_, proof)| (proof.leaf.0, proof.path))
-                                    .unwrap()
-                            })
-                            .unzip();
-                        let comms = comms
-                            .into_iter()
-                            .map(RecordCommitment::from_field_element)
-                            .collect::<Vec<_>>();
-                        state.send_event(LedgerEvent::Memos {
-                            outputs: izip!(memos, comms, uids, merkle_paths).collect(),
-                            transaction: None,
-                        });
+                        let mut state = ValidatorState::default();
+                        state
+                            .validate_and_apply(1, genesis.block.clone(), genesis.proofs.clone())
+                            .unwrap();
+                        full_state.write().await.append_block(genesis, &state);
                     }
 
                     // Handle events as they come in from the network.
                     while let Some(event) = event_source.next().await {
-                        state.write().await.update(event);
+                        full_state.write().await.update(event);
                     }
                 })
                 .unwrap()
         };
         Self {
             _univ_param: univ_param,
-            state,
+            state: full_state,
             _event_task: Arc::new(task),
         }
     }
@@ -853,10 +809,7 @@ where
 
         // The current state of the network.
         univ_param: &'a jf_cap::proof::UniversalParam,
-        state: ValidatorState,
-        record_merkle_tree: MerkleTree,
-        nullifiers: SetMerkleTree,
-        unspent_memos: Vec<(ReceiverMemo, u64)>,
+        genesis: ElaboratedBlock,
         full_persisted: FullPersistence,
         catchup_store: Arc<RwLock<TYPES::CU>>,
         availability_store: Arc<RwLock<TYPES::AV>>,
@@ -864,15 +817,8 @@ where
         status_store: Arc<RwLock<TYPES::ST>>,
         event_handler: Arc<RwLock<TYPES::EH>>,
     ) -> Self {
-        let query_service = HotShotQueryService::new(
-            validator.subscribe(),
-            univ_param,
-            state.clone(),
-            record_merkle_tree,
-            nullifiers,
-            unspent_memos,
-            full_persisted,
-        );
+        let query_service =
+            HotShotQueryService::new(validator.subscribe(), univ_param, genesis, full_persisted);
         let data_source_updater = UpdateQueryDataSource::new(
             validator.subscribe(),
             catchup_store,
@@ -880,7 +826,7 @@ where
             meta_state_store,
             status_store,
             event_handler,
-            state,
+            ValidatorState::default(),
         );
         Self {
             validator,

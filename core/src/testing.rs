@@ -465,11 +465,9 @@ impl MultiXfrTestState {
                     ElaboratedTransaction {
                         txn: EspressoTransaction::CAP(TransactionNote::Mint(Box::new(note))),
                         proofs: EspressoTxnHelperProofs::CAP(vec![nul]),
-                        memos: memos.clone(),
-                        signature,
+                        memos: Some((memos, signature)),
                     },
                     ix,
-                    memos,
                     vec![kix, kix],
                     TxnPrintInfo::new_no_time(0, 0),
                 )
@@ -495,6 +493,23 @@ impl MultiXfrTestState {
         .unwrap();
 
         Ok(ret)
+    }
+
+    pub fn records(&self) -> impl '_ + Iterator<Item = RecordOpening> {
+        self.owners.iter().enumerate().map(|(rec_ix, &key_ix)| {
+            let comm = RecordCommitment::from_field_element(
+                self.record_merkle_tree
+                    .get_leaf(rec_ix as u64)
+                    .expect_ok()
+                    .unwrap()
+                    .1
+                    .leaf
+                    .0,
+            );
+            self.memos[rec_ix]
+                .decrypt(&self.keys[key_ix], &comm, &[])
+                .unwrap()
+        })
     }
 
     /// Generates transactions with the specified block information.
@@ -897,8 +912,7 @@ impl MultiXfrTestState {
                     transaction: ElaboratedTransaction {
                         txn: EspressoTransaction::CAP(TransactionNote::Transfer(Box::new(txn))),
                         proofs: EspressoTxnHelperProofs::CAP(nullifier_pfs),
-                        memos: owner_memos,
-                        signature: sig,
+                        memos: Some((owner_memos, sig)),
                     },
                 })
             })
@@ -1059,8 +1073,7 @@ impl MultiXfrTestState {
             transaction: ElaboratedTransaction {
                 txn: EspressoTransaction::CAP(TransactionNote::Transfer(Box::new(txn))),
                 proofs: EspressoTxnHelperProofs::CAP(nullifier_pfs),
-                memos: owner_memos,
-                signature: sig,
+                memos: Some((owner_memos, sig)),
             },
         })
     }
@@ -1070,9 +1083,8 @@ impl MultiXfrTestState {
     pub fn try_add_transaction(
         &mut self,
         blk: &mut ElaboratedBlock,
-        mut txn: ElaboratedTransaction,
+        txn: ElaboratedTransaction,
         ix: usize,
-        owner_memos: Vec<ReceiverMemo>,
         kixs: Vec<usize>,
         print_info: TxnPrintInfo,
     ) -> Result<(), ValidationError> {
@@ -1082,7 +1094,6 @@ impl MultiXfrTestState {
             print_info.num_txs,
             ix
         );
-        txn.memos = owner_memos.clone();
 
         let base_ix = self.record_merkle_tree.num_leaves()
             + blk
@@ -1098,7 +1109,7 @@ impl MultiXfrTestState {
             print_info.num_txs,
             ix
         );
-        self.memos.extend(owner_memos);
+        self.memos.extend(txn.memos.unwrap().0);
         self.fee_records[kixs[0]] = base_ix;
         self.owners.extend(kixs);
 
@@ -1349,7 +1360,6 @@ mod tests {
                     &mut blk,
                     tx.transaction,
                     tx.index,
-                    owner_memos,
                     kixs,
                     TxnPrintInfo::new_no_time(i, num_txs),
                 );
@@ -1535,7 +1545,6 @@ mod tests {
                 &mut blk,
                 tx.transaction,
                 tx.index,
-                owner_memos,
                 kixs,
                 TxnPrintInfo::new_no_time(i, 2),
             );

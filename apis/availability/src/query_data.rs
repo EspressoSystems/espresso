@@ -45,7 +45,6 @@ impl BlockQueryData {
                 txn: self.raw_block.block.0[i].clone(),
                 proofs: self.raw_block.proofs[i].clone(),
                 memos: self.raw_block.memos[i].clone(),
-                signature: self.raw_block.signatures[i].clone(),
             },
             block_id: self.block_id,
             txn_id: i as u64,

@@ -12,12 +12,16 @@
 
 use crate::{
     state::{ArcSer, ChainVariables},
+    universal_params::MERKLE_HEIGHT,
     util::canonical,
 };
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use async_std::sync::Arc;
 use commit::{Commitment, Committable, RawCommitmentBuilder};
-use jf_cap::structs::{RecordCommitment, RecordOpening};
+use jf_cap::{
+    structs::{RecordCommitment, RecordOpening},
+    MerkleTree,
+};
 use serde::{Deserialize, Serialize};
 
 /// Genesis transaction
@@ -73,5 +77,13 @@ impl GenesisNote {
 
     pub fn output_openings(&self) -> Vec<RecordOpening> {
         (**self.faucet_records).clone()
+    }
+
+    pub fn record_merkle_tree(&self) -> MerkleTree {
+        let mut records = MerkleTree::new(MERKLE_HEIGHT).unwrap();
+        for comm in self.output_commitments() {
+            records.push(comm.to_field_element());
+        }
+        records
     }
 }

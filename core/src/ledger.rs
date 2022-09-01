@@ -183,8 +183,7 @@ impl traits::Transaction for ElaboratedTransaction {
         Self {
             txn: EspressoTransaction::CAP(note),
             proofs: EspressoTxnHelperProofs::CAP(proofs),
-            memos: Default::default(),
-            signature: Default::default(),
+            memos: None,
         }
     }
 
@@ -198,6 +197,7 @@ impl traits::Transaction for ElaboratedTransaction {
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {
         match &self.proofs {
+            EspressoTxnHelperProofs::Genesis => vec![],
             EspressoTxnHelperProofs::CAP(proofs) => self
                 .txn
                 .input_nullifiers()
@@ -258,25 +258,23 @@ impl traits::Block for ElaboratedBlock {
     type Error = ValidationError;
 
     fn new(txns: Vec<Self::Transaction>) -> Self {
-        let (txns, proofs, memos, signatures): (Vec<EspressoTransaction>, Vec<_>, Vec<_>, Vec<_>) =
-            txns.into_iter()
-                .map(|txn| (txn.txn, txn.proofs, txn.memos, txn.signature))
-                .multiunzip();
+        let (txns, proofs, memos): (Vec<EspressoTransaction>, Vec<_>, Vec<_>) = txns
+            .into_iter()
+            .map(|txn| (txn.txn, txn.proofs, txn.memos))
+            .multiunzip();
         Self {
             block: crate::state::Block(txns),
             proofs,
             memos,
-            signatures,
         }
     }
 
     fn txns(&self) -> Vec<Self::Transaction> {
-        izip!(&self.block.0, &self.proofs, &self.memos, &self.signatures)
-            .map(|(txn, proofs, memos, signature)| ElaboratedTransaction {
+        izip!(&self.block.0, &self.proofs, &self.memos)
+            .map(|(txn, proofs, memos)| ElaboratedTransaction {
                 txn: txn.clone(),
                 proofs: proofs.clone(),
                 memos: memos.clone(),
-                signature: signature.clone(),
             })
             .collect()
     }

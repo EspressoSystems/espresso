@@ -341,10 +341,10 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
         txn_info: Transaction<EspressoLedger>,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
         if let Some(signed_memos) = txn_info.memos() {
-            for memo in signed_memos.memos.iter().flatten().cloned() {
-                txn.memos.push(memo);
-            }
-            txn.signature = signed_memos.sig.clone();
+            txn.memos = Some((
+                signed_memos.memos.iter().flatten().cloned().collect(),
+                signed_memos.sig.clone(),
+            ));
         }
 
         Self::post(&self.validator_client, "/submit", &txn).await

@@ -118,6 +118,7 @@ impl CanonicalDeserialize for EspressoTransaction {
 #[tagged_blob("EspressoTxnAuxProofs")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum EspressoTxnHelperProofs {
+    Genesis,
     CAP(Vec<SetMerkleProof>),
     Reward(Box<RewardNoteProofs>),
 }
@@ -135,6 +136,10 @@ impl CanonicalSerialize for EspressoTxnHelperProofs {
                 writer.write_all(&[flag])?;
                 <RewardNoteProofs as CanonicalSerialize>::serialize(reward_proofs, &mut writer)
             }
+            Self::Genesis => {
+                writer.write_all(&[2])?;
+                Ok(())
+            }
         }
     }
 
@@ -142,6 +147,7 @@ impl CanonicalSerialize for EspressoTxnHelperProofs {
         1 + match &self {
             Self::CAP(merkle_proofs) => merkle_proofs.serialized_size(),
             Self::Reward(reward_proofs) => reward_proofs.serialized_size(),
+            Self::Genesis => 0,
         }
     }
 }
@@ -160,6 +166,7 @@ impl CanonicalDeserialize for EspressoTxnHelperProofs {
             1 => Ok(Self::Reward(Box::new(
                 <RewardNoteProofs as CanonicalDeserialize>::deserialize(&mut r)?,
             ))),
+            2 => Ok(Self::Genesis),
             _ => Err(SerializationError::InvalidData),
         }
     }
@@ -194,8 +201,7 @@ impl CanonicalDeserialize for EspressoTxnHelperProofs {
 pub struct ElaboratedTransaction {
     pub txn: EspressoTransaction,
     pub proofs: EspressoTxnHelperProofs,
-    pub memos: Vec<ReceiverMemo>,
-    pub signature: Signature,
+    pub memos: Option<(Vec<ReceiverMemo>, Signature)>,
 }
 
 impl TransactionTrait<H_256> for ElaboratedTransaction {}
@@ -246,8 +252,17 @@ pub struct Block(pub Vec<EspressoTransaction>);
 pub struct ElaboratedBlock {
     pub block: Block,
     pub proofs: Vec<EspressoTxnHelperProofs>,
-    pub memos: Vec<Vec<ReceiverMemo>>,
-    pub signatures: Vec<Signature>,
+    pub memos: Vec<Option<(Vec<ReceiverMemo>, Signature)>>,
+}
+
+impl ElaboratedBlock {
+    pub fn genesis(txn: GenesisNote) -> Self {
+        Self {
+            block: Block(vec![EspressoTransaction::Genesis(txn)]),
+            proofs: vec![EspressoTxnHelperProofs::Genesis],
+            memos: vec![None],
+        }
+    }
 }
 
 impl Committable for ElaboratedBlock {
@@ -308,7 +323,6 @@ impl BlockContents<H_256> for ElaboratedBlock {
         ret.block.0.push(txn.txn.clone());
         ret.proofs.push(txn.proofs.clone());
         ret.memos.push(txn.memos.clone());
-        ret.signatures.push(txn.signature.clone());
 
         Ok(ret)
     }
@@ -1154,7 +1168,7 @@ impl ValidatorState {
         // rest of this. If it is not, then we will reject the block later if it contains any
         // genesis transactions.
         if let Some(EspressoTransaction::Genesis(_)) = txns.0.get(0) {
-            if now != 0 || txns.0.len() != 1 {
+            if self.prev_commit_time != 0 || txns.0.len() != 1 {
                 // A genesis transaction is only allowed in the genesis block, which is a block at
                 // height 0 containing only a single genesis transaction.
                 return Err(ValidationError::UnexpectedGenesis);
