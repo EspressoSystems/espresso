@@ -1345,17 +1345,7 @@ mod tests {
 
             let mut blk = ElaboratedBlock::default();
             for tx in txns {
-                let (owner_memos, kixs) = {
-                    let mut owner_memos = vec![];
-                    let mut kixs = vec![];
-
-                    for (kix, memo) in tx.keys_and_memos {
-                        kixs.push(kix);
-                        owner_memos.push(memo);
-                    }
-                    (owner_memos, kixs)
-                };
-
+                let kixs = tx.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
                 let _ = state.try_add_transaction(
                     &mut blk,
                     tx.transaction,
@@ -1529,17 +1519,7 @@ mod tests {
         // Submit the transactions in two separate blocks, so that the second one is validated
         // against an updated nullifier set.
         for (i, tx) in txns.into_iter().enumerate() {
-            let (owner_memos, kixs) = {
-                let mut owner_memos = vec![];
-                let mut kixs = vec![];
-
-                for (kix, memo) in tx.keys_and_memos {
-                    kixs.push(kix);
-                    owner_memos.push(memo);
-                }
-                (owner_memos, kixs)
-            };
-
+            let kixs = tx.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
             let mut blk = ElaboratedBlock::default();
             let _ = state.try_add_transaction(
                 &mut blk,
