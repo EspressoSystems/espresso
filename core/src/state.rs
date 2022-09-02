@@ -956,7 +956,7 @@ pub struct ValidationOutputs {
 ///
 /// Ark-serialize doesn't work out of the box for [Arc], even if the underlying type is
 /// serializable. This wrapper around [Arc] provides a simple implementation of [ark_serialize]
-/// traits that simply delegates to the implementations for [T].
+/// traits that simply delegates to the implementations for `T`.
 #[derive(
     Clone,
     Debug,
