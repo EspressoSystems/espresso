@@ -973,11 +973,11 @@ pub struct ArcSer<T>(Arc<T>);
 
 impl<T: CanonicalSerialize> CanonicalSerialize for ArcSer<T> {
     fn serialize<W: Write>(&self, writer: W) -> Result<(), SerializationError> {
-        (**self).serialize(writer)
+        (*self.0).serialize(writer)
     }
 
     fn serialized_size(&self) -> usize {
-        (**self).serialized_size()
+        (*self.0).serialized_size()
     }
 }
 
@@ -1017,6 +1017,7 @@ impl Committable for ChainVariables {
             .u64_field("protocol_version_major", self.protocol_version.0 as u64)
             .u64_field("protocol_version_minor", self.protocol_version.1 as u64)
             .u64_field("protocol_version_patch", self.protocol_version.2 as u64)
+            .u64_field("chain_id", self.chain_id as u64)
             .var_size_bytes(&canonical::serialize(&self.verif_crs).unwrap())
             .finalize()
     }
