@@ -126,7 +126,7 @@ where
                 }
                 num_txns += block.block.0.len();
                 cumulative_size += block.serialized_size();
-                let event_index;
+                let continuation_event_index;
 
                 // Update the nullifier proofs in the block so that clients do not have
                 // to worry about out of date nullifier proofs.
@@ -173,10 +173,10 @@ where
                     }
 
                     let mut catchup_store = block_on(self.catchup_store.write());
-                    event_index = catchup_store.event_count() as u64;
                     if let Err(e) = catchup_store.append_events(events) {
                         tracing::warn!("append_events returned error {}", e);
                     }
+                    continuation_event_index = catchup_store.event_count() as u64;
 
                     first_uid - records_from
                 };
@@ -198,7 +198,7 @@ where
                             state: state.clone(),
                             commitment: state.commit(),
                             block_id: block_index as u64,
-                            event_index,
+                            continuation_event_index,
                         }),
                         Some(QuorumCertificate {
                             block_hash,
