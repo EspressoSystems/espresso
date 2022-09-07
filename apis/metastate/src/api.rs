@@ -24,7 +24,7 @@ use tide_disco::{
     RequestError, StatusCode,
 };
 
-#[derive(Args)]
+#[derive(Args, Default)]
 pub struct Options {
     #[clap(long = "metastate-api-path", env = "ESPRESSO_METASTATE_API_PATH")]
     pub api_path: Option<PathBuf>,
@@ -47,8 +47,8 @@ impl Error {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NullifierCheck {
-    spent: bool,
-    proof: SetMerkleProof,
+    pub spent: bool,
+    pub proof: SetMerkleProof,
 }
 
 pub fn define_api<State>(options: &Options) -> Result<Api<State, Error>, ApiError>

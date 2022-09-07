@@ -11,8 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    gen_keys, genesis, init_validator, init_web_server, open_data_source, ConsensusOpt, Node,
-    NodeOpt, MINIMUM_NODES,
+    full_node_esqs, gen_keys, genesis, init_validator, open_data_source, ConsensusOpt, NodeOpt,
+    MINIMUM_NODES,
 };
 use address_book::store::FileStore;
 use async_std::task::{block_on, spawn, JoinHandle};
@@ -196,7 +196,6 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             };
             if i == 0 {
                 node_opt.full = true;
-                node_opt.web_server_port = pick_unused_port().unwrap();
             }
             let data_source = open_data_source(&mut node_opt, i);
             let node = init_validator(
@@ -211,16 +210,20 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             .await;
 
             // If applicable, run a query service.
-            let url = if let Node::Full(node) = &node {
+            let url = if node_opt.full {
+                let port = pick_unused_port().unwrap();
+                tracing::info!("spawning EsQS at http://localhost:{}", port);
                 // This returns a JoinHandle for the server, but there's no way to kill a Tide
                 // server (this is a known bug/limitation of Tide) so all we can really do is drop
                 // the handle, detaching the task.
-                init_web_server(&node_opt, node.clone()).unwrap();
-                Some(
-                    format!("http://0.0.0.0:{}", node_opt.web_server_port)
-                        .parse()
-                        .unwrap(),
-                )
+                spawn(
+                    full_node_esqs::init_server(
+                        &full_node_esqs::Command::with_port(port),
+                        data_source,
+                    )
+                    .unwrap(),
+                );
+                Some(format!("http://localhost:{}", port).parse().unwrap())
             } else {
                 None
             };

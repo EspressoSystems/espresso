@@ -24,7 +24,7 @@ use tide_disco::{
     RequestError, StatusCode,
 };
 
-#[derive(Args)]
+#[derive(Args, Default)]
 pub struct Options {
     #[clap(long = "status-api-path", env = "ESPRESSO_STATUS_API_PATH")]
     pub api_path: Option<PathBuf>,

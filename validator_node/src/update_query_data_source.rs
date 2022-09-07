@@ -25,8 +25,8 @@ use espresso_availability_api::{
 };
 use espresso_catchup_api::data_source::UpdateCatchUpData;
 use espresso_core::state::{
-    BlockCommitment, EspressoTransaction, EspressoTxnHelperProofs, TransactionCommitment,
-    ValidatorState,
+    BlockCommitment, ElaboratedBlock, EspressoTransaction, EspressoTxnHelperProofs,
+    TransactionCommitment, ValidatorState,
 };
 use espresso_metastate_api::data_source::UpdateMetaStateData;
 use espresso_status_api::data_source::UpdateStatusData;
@@ -35,9 +35,10 @@ use futures::{
     task::{SpawnError, SpawnExt},
     StreamExt,
 };
-use hotshot::data::{BlockHash, LeafHash, QuorumCertificate};
+use hotshot::data::{BlockHash, LeafHash, QuorumCertificate, Stage, VecQuorumCertificate};
 use hotshot::types::EventType;
 use hotshot::H_256;
+use hotshot_types::data::ViewNumber;
 use itertools::izip;
 use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
@@ -77,17 +78,38 @@ where
         meta_state_store: Arc<RwLock<TYPES::MS>>,
         status_store: Arc<RwLock<TYPES::ST>>,
         event_handler: Arc<RwLock<TYPES::EH>>,
-        validator_state: ValidatorState,
+        genesis: ElaboratedBlock,
     ) -> Arc<RwLock<Self>> {
-        let instance = Arc::new(RwLock::new(Self {
+        let mut instance = Self {
             catchup_store,
             availability_store,
             meta_state_store,
             status_store,
             event_handler,
-            validator_state,
+            validator_state: Default::default(),
             _event_task: None,
-        }));
+        };
+
+        // HotShot does not currently support genesis nicely. It should automatically commit and
+        // broadcast a `Decide` event for the genesis block, but it doesn't. For now, we broadcast a
+        // `Commit` event for the genesis block ourselves.
+        let mut genesis_state = ValidatorState::default();
+        genesis_state
+            .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
+            .unwrap();
+        instance.update(EventType::Decide {
+            block: Arc::new(vec![genesis]),
+            state: Arc::new(vec![genesis_state]),
+            qcs: Arc::new(vec![VecQuorumCertificate {
+                block_hash: Default::default(),
+                view_number: ViewNumber::genesis(),
+                stage: Stage::Decide,
+                signatures: Default::default(),
+                genesis: Default::default(),
+            }]),
+        });
+
+        let instance = Arc::new(RwLock::new(instance));
         if let Ok(task_handle) = launch_updates(event_source, instance.clone()) {
             let mut edit_handle = block_on(instance.write());
             edit_handle._event_task = Some(task_handle);

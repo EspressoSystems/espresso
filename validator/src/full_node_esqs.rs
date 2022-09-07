@@ -43,9 +43,27 @@ pub struct Options {
     pub status: status::Options,
 }
 
+impl Options {
+    pub fn with_port(port: u16) -> Self {
+        Self {
+            port,
+            availability: Default::default(),
+            catchup: Default::default(),
+            metastate: Default::default(),
+            status: Default::default(),
+        }
+    }
+}
+
 #[derive(Subcommand)]
 pub enum Command {
     Esqs(Options),
+}
+
+impl Command {
+    pub fn with_port(port: u16) -> Self {
+        Self::Esqs(Options::with_port(port))
+    }
 }
 
 #[derive(Clone, Debug, From, Snafu, Deserialize, Serialize)]
