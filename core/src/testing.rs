@@ -12,7 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::state::*;
-use crate::universal_params::UNIVERSAL_PARAM;
+use crate::universal_params::{MERKLE_HEIGHT, PROVER_CRS, UNIVERSAL_PARAM, VERIF_CRS};
 use arbitrary::Arbitrary;
 use core::iter::once;
 use hotshot::traits::{BlockContents, State};
@@ -25,9 +25,9 @@ use jf_cap::{
         RecordCommitment, RecordOpening, TxnFeeInfo,
     },
     transfer::{TransferNote, TransferNoteInput},
-    AccMemberWitness, MerkleTree, Signature, TransactionNote, TransactionVerifyingKey,
+    AccMemberWitness, MerkleTree, Signature, TransactionNote,
 };
-use key_set::{KeySet, ProverKeySet, VerifierKeySet};
+use key_set::{ProverKeySet, VerifierKeySet};
 use num_bigint::BigInt;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
@@ -243,38 +243,6 @@ impl MultiXfrTestState {
         Self::update_timer(&mut timer, |t| {
             println!("Generated universal params: {}s", t)
         });
-
-        report_mem();
-
-        fence();
-        let (xfr_prove_key_22, xfr_verif_key_22, _) =
-            jf_cap::proof::transfer::preprocess(univ_setup, 2, 2, MERKLE_HEIGHT)?;
-        fence();
-        Self::update_timer(&mut timer, |t| println!("Generated xfr22: {}s", t));
-
-        report_mem();
-
-        fence();
-        let (xfr_prove_key_33, xfr_verif_key_33, _) =
-            jf_cap::proof::transfer::preprocess(univ_setup, 3, 3, MERKLE_HEIGHT)?;
-        fence();
-        Self::update_timer(&mut timer, |t| println!("Generated xfr33: {}s", t));
-
-        fence();
-        report_mem();
-        let (mint_prove_key, mint_verif_key, _) =
-            jf_cap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT)?;
-        fence();
-        Self::update_timer(&mut timer, |t| println!("Generated mint: {}s", t));
-
-        report_mem();
-
-        fence();
-        let (freeze_prove_key, freeze_verif_key, _) =
-            jf_cap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT)?;
-        fence();
-        Self::update_timer(&mut timer, |t| println!("Generated freeze: {}s", t));
-
         report_mem();
 
         let native_token = AssetDefinition::native();
@@ -329,34 +297,14 @@ impl MultiXfrTestState {
         }
 
         Self::update_timer(&mut timer, |t| println!("Native token records: {}s", t));
-
         let nullifiers: SetMerkleTree = Default::default();
-
-        let verif_keys = VerifierKeySet {
-            mint: TransactionVerifyingKey::Mint(mint_verif_key),
-            xfr: KeySet::new(
-                vec![
-                    TransactionVerifyingKey::Transfer(xfr_verif_key_22),
-                    TransactionVerifyingKey::Transfer(xfr_verif_key_33),
-                ]
-                .into_iter(),
-            )?,
-            freeze: KeySet::new(
-                vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
-            )?,
-        };
-
         Self::update_timer(&mut timer, |t| println!("Verify Keys: {}s", t));
 
         let mut ret = Self {
             univ_setup,
             prng,
-            prove_keys: ProverKeySet {
-                mint: mint_prove_key,
-                xfr: KeySet::new(vec![xfr_prove_key_22, xfr_prove_key_33].into_iter())?,
-                freeze: KeySet::new(vec![freeze_prove_key].into_iter())?,
-            },
-            verif_keys: verif_keys.clone(),
+            prove_keys: (**PROVER_CRS).clone(),
+            verif_keys: (**VERIF_CRS).clone(),
             native_token,
             keys,
             fee_records,
@@ -366,7 +314,7 @@ impl MultiXfrTestState {
             memos,
             nullifiers, /*asset_defs,*/
             record_merkle_tree: t.clone(),
-            validator: ValidatorState::new(verif_keys, t),
+            validator: ValidatorState::new(ChainVariables::new(42, VERIF_CRS.clone()), t),
             outer_timer: timer,
             inner_timer: Instant::now(),
         };
@@ -517,11 +465,9 @@ impl MultiXfrTestState {
                     ElaboratedTransaction {
                         txn: EspressoTransaction::CAP(TransactionNote::Mint(Box::new(note))),
                         proofs: EspressoTxnHelperProofs::CAP(vec![nul]),
-                        memos: memos.clone(),
-                        signature,
+                        memos: Some((memos, signature)),
                     },
                     ix,
-                    memos,
                     vec![kix, kix],
                     TxnPrintInfo::new_no_time(0, 0),
                 )
@@ -547,6 +493,23 @@ impl MultiXfrTestState {
         .unwrap();
 
         Ok(ret)
+    }
+
+    pub fn records(&self) -> impl '_ + Iterator<Item = RecordOpening> {
+        self.owners.iter().enumerate().map(|(rec_ix, &key_ix)| {
+            let comm = RecordCommitment::from_field_element(
+                self.record_merkle_tree
+                    .get_leaf(rec_ix as u64)
+                    .expect_ok()
+                    .unwrap()
+                    .1
+                    .leaf
+                    .0,
+            );
+            self.memos[rec_ix]
+                .decrypt(&self.keys[key_ix], &comm, &[])
+                .unwrap()
+        })
     }
 
     /// Generates transactions with the specified block information.
@@ -949,8 +912,7 @@ impl MultiXfrTestState {
                     transaction: ElaboratedTransaction {
                         txn: EspressoTransaction::CAP(TransactionNote::Transfer(Box::new(txn))),
                         proofs: EspressoTxnHelperProofs::CAP(nullifier_pfs),
-                        memos: owner_memos,
-                        signature: sig,
+                        memos: Some((owner_memos, sig)),
                     },
                 })
             })
@@ -1111,8 +1073,7 @@ impl MultiXfrTestState {
             transaction: ElaboratedTransaction {
                 txn: EspressoTransaction::CAP(TransactionNote::Transfer(Box::new(txn))),
                 proofs: EspressoTxnHelperProofs::CAP(nullifier_pfs),
-                memos: owner_memos,
-                signature: sig,
+                memos: Some((owner_memos, sig)),
             },
         })
     }
@@ -1122,9 +1083,8 @@ impl MultiXfrTestState {
     pub fn try_add_transaction(
         &mut self,
         blk: &mut ElaboratedBlock,
-        mut txn: ElaboratedTransaction,
+        txn: ElaboratedTransaction,
         ix: usize,
-        owner_memos: Vec<ReceiverMemo>,
         kixs: Vec<usize>,
         print_info: TxnPrintInfo,
     ) -> Result<(), ValidationError> {
@@ -1134,7 +1094,6 @@ impl MultiXfrTestState {
             print_info.num_txs,
             ix
         );
-        txn.memos = owner_memos.clone();
 
         let base_ix = self.record_merkle_tree.num_leaves()
             + blk
@@ -1150,7 +1109,7 @@ impl MultiXfrTestState {
             print_info.num_txs,
             ix
         );
-        self.memos.extend(owner_memos);
+        self.memos.extend(txn.memos.unwrap().0);
         self.fee_records[kixs[0]] = base_ix;
         self.owners.extend(kixs);
 
@@ -1267,11 +1226,15 @@ pub fn crypto_rng_from_seed(seed: [u8; 32]) -> ChaChaRng {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::canonical::CanonicalBytes;
+    use async_std::sync::Arc;
     use commit::Committable;
     use jf_cap::structs::{NoteType, Nullifier};
-    use jf_cap::{utils::compute_universal_param_size, BaseField, MerkleLeafProof, NodeValue};
+    use jf_cap::{
+        utils::compute_universal_param_size, BaseField, MerkleLeafProof, NodeValue,
+        TransactionVerifyingKey,
+    };
     use jf_primitives::merkle_tree::LookupResult;
+    use key_set::KeySet;
     use quickcheck::QuickCheck;
     use rand::{Rng, RngCore};
     use std::cmp::min;
@@ -1382,22 +1345,11 @@ mod tests {
 
             let mut blk = ElaboratedBlock::default();
             for tx in txns {
-                let (owner_memos, kixs) = {
-                    let mut owner_memos = vec![];
-                    let mut kixs = vec![];
-
-                    for (kix, memo) in tx.keys_and_memos {
-                        kixs.push(kix);
-                        owner_memos.push(memo);
-                    }
-                    (owner_memos, kixs)
-                };
-
+                let kixs = tx.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
                 let _ = state.try_add_transaction(
                     &mut blk,
                     tx.transaction,
                     tx.index,
-                    owner_memos,
                     kixs,
                     TxnPrintInfo::new_no_time(i, num_txs),
                 );
@@ -1458,25 +1410,28 @@ mod tests {
         let validator = |xfrs: &[_], freezes: &[_]| {
             let record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
             ValidatorState::new(
-                VerifierKeySet {
-                    mint: TransactionVerifyingKey::Mint(mint.clone()),
-                    xfr: KeySet::new(xfrs.iter().map(|size| {
-                        TransactionVerifyingKey::Transfer(match size {
-                            (1, 1) => xfr11.clone(),
-                            (2, 2) => xfr22.clone(),
-                            _ => panic!("invalid xfr size"),
-                        })
-                    }))
-                    .unwrap(),
-                    freeze: KeySet::new(freezes.iter().map(|size| {
-                        TransactionVerifyingKey::Freeze(match size {
-                            2 => freeze2.clone(),
-                            3 => freeze3.clone(),
-                            _ => panic!("invalid freeze size"),
-                        })
-                    }))
-                    .unwrap(),
-                },
+                ChainVariables::new(
+                    42,
+                    Arc::new(VerifierKeySet {
+                        mint: TransactionVerifyingKey::Mint(mint.clone()),
+                        xfr: KeySet::new(xfrs.iter().map(|size| {
+                            TransactionVerifyingKey::Transfer(match size {
+                                (1, 1) => xfr11.clone(),
+                                (2, 2) => xfr22.clone(),
+                                _ => panic!("invalid xfr size"),
+                            })
+                        }))
+                        .unwrap(),
+                        freeze: KeySet::new(freezes.iter().map(|size| {
+                            TransactionVerifyingKey::Freeze(match size {
+                                2 => freeze2.clone(),
+                                3 => freeze3.clone(),
+                                _ => panic!("invalid freeze size"),
+                            })
+                        }))
+                        .unwrap(),
+                    }),
+                ),
                 record_merkle_tree,
             )
         };
@@ -1503,20 +1458,10 @@ mod tests {
     #[test]
     fn test_record_history_commit_hash() {
         // Check that ValidatorStates with different record histories have different commits.
-        println!("generating universal parameters");
-
-        let univ = &*UNIVERSAL_PARAM;
-        let (_, mint, _) = jf_cap::proof::mint::preprocess(univ, MERKLE_HEIGHT).unwrap();
-        let (_, xfr, _) = jf_cap::proof::transfer::preprocess(univ, 1, 1, MERKLE_HEIGHT).unwrap();
-        let (_, freeze, _) = jf_cap::proof::freeze::preprocess(univ, 2, MERKLE_HEIGHT).unwrap();
-        println!("CRS set up");
-
-        let verif_crs = VerifierKeySet {
-            mint: TransactionVerifyingKey::Mint(mint),
-            xfr: KeySet::new(vec![TransactionVerifyingKey::Transfer(xfr)].into_iter()).unwrap(),
-            freeze: KeySet::new(vec![TransactionVerifyingKey::Freeze(freeze)].into_iter()).unwrap(),
-        };
-        let mut v1 = ValidatorState::new(verif_crs, MerkleTree::new(MERKLE_HEIGHT).unwrap());
+        let mut v1 = ValidatorState::new(
+            ChainVariables::new(42, VERIF_CRS.clone()),
+            MerkleTree::new(MERKLE_HEIGHT).unwrap(),
+        );
         let mut v2 = v1.clone();
 
         // Test validators with different history lengths.
@@ -1574,23 +1519,12 @@ mod tests {
         // Submit the transactions in two separate blocks, so that the second one is validated
         // against an updated nullifier set.
         for (i, tx) in txns.into_iter().enumerate() {
-            let (owner_memos, kixs) = {
-                let mut owner_memos = vec![];
-                let mut kixs = vec![];
-
-                for (kix, memo) in tx.keys_and_memos {
-                    kixs.push(kix);
-                    owner_memos.push(memo);
-                }
-                (owner_memos, kixs)
-            };
-
+            let kixs = tx.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
             let mut blk = ElaboratedBlock::default();
             let _ = state.try_add_transaction(
                 &mut blk,
                 tx.transaction,
                 tx.index,
-                owner_memos,
                 kixs,
                 TxnPrintInfo::new_no_time(i, 2),
             );
@@ -1623,37 +1557,6 @@ mod tests {
         let mut prng = ChaChaRng::from_seed([0x8au8; 32]);
 
         let univ_setup = &*UNIVERSAL_PARAM;
-
-        let (xfr_prove_key, xfr_verif_key, _) =
-            jf_cap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
-        let (mint_prove_key, mint_verif_key, _) =
-            jf_cap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
-        let (freeze_prove_key, freeze_verif_key, _) =
-            jf_cap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
-
-        for (l, k) in vec![
-            ("xfr", CanonicalBytes::from(xfr_verif_key.clone())),
-            ("mint", CanonicalBytes::from(mint_verif_key.clone())),
-            ("freeze", CanonicalBytes::from(freeze_verif_key.clone())),
-        ] {
-            println!("{}: {} bytes", l, k.0.len());
-        }
-
-        let prove_keys = ProverKeySet::<key_set::OrderByInputs> {
-            mint: mint_prove_key,
-            xfr: KeySet::new(vec![xfr_prove_key].into_iter()).unwrap(),
-            freeze: KeySet::new(vec![freeze_prove_key].into_iter()).unwrap(),
-        };
-
-        let verif_keys = VerifierKeySet {
-            mint: TransactionVerifyingKey::Mint(mint_verif_key),
-            xfr: KeySet::new(vec![TransactionVerifyingKey::Transfer(xfr_verif_key)].into_iter())
-                .unwrap(),
-            freeze: KeySet::new(
-                vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
-            )
-            .unwrap(),
-        };
 
         println!("CRS set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
@@ -1707,7 +1610,7 @@ mod tests {
         };
 
         let mut keystore_merkle_tree = t.clone();
-        let mut validator = ValidatorState::new(verif_keys, t);
+        let mut validator = ValidatorState::new(ChainVariables::new(42, VERIF_CRS.clone()), t);
 
         println!("Validator set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
@@ -1752,7 +1655,7 @@ mod tests {
                 /* outputs:        */ &[bob_rec.clone()],
                 /* fee:            */ Amount::from(1u64),
                 /* valid_until:    */ 2,
-                /* proving_key:    */ prove_keys.xfr.key_for_size(1, 2).unwrap(),
+                /* proving_key:    */ PROVER_CRS.xfr.key_for_size(1, 2).unwrap(),
             )
             .unwrap();
             (txn, bob_rec)

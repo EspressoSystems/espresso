@@ -15,20 +15,24 @@ pub use seahorse::testing::MockLedger;
 use crate::node;
 use async_std::sync::{Arc, Mutex};
 use async_trait::async_trait;
-use espresso_core::state::EspressoTransaction;
 use espresso_core::{
+    genesis::GenesisNote,
     ledger::EspressoLedger,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
-    state::{ElaboratedBlock, ElaboratedTransaction, ValidationOutputs, ValidatorState},
+    state::{
+        ChainVariables, ElaboratedBlock, ElaboratedTransaction, EspressoTransaction,
+        ValidationOutputs, ValidatorState,
+    },
 };
 use futures::stream::Stream;
 use itertools::izip;
 use jf_cap::{
     keys::{UserAddress, UserKeyPair, UserPubKey},
-    structs::{Nullifier, ReceiverMemo, RecordCommitment, RecordOpening},
+    structs::{Nullifier, ReceiverMemo, RecordOpening},
     MerkleTree, Signature,
 };
 use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
+use reef::Ledger;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
     sparse_merkle_tree::SparseMerkleTree,
@@ -70,7 +74,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
         }
     }
 
-    fn submit(&mut self, block: ElaboratedBlock) -> Result<(), KeystoreError<EspressoLedger>> {
+    fn submit(&mut self, block: ElaboratedBlock) -> Result<usize, KeystoreError<EspressoLedger>> {
         match self.validator.validate_and_apply(
             self.validator.prev_commit_time + 1,
             block.block.clone(),
@@ -106,17 +110,21 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
                 self.committed_blocks.push((block.clone(), block_uids));
 
                 // Broadcast the memos.
-                for (txn_id, (memos, sig)) in
-                    block.memos.into_iter().zip(block.signatures).enumerate()
-                {
-                    self.post_memos(block_id, txn_id as u64, memos, sig)
-                        .unwrap();
+                let mut num_memos = 0;
+                for (txn_id, memos) in block.memos.into_iter().enumerate() {
+                    if let Some((memos, sig)) = memos {
+                        self.post_memos(block_id, txn_id as u64, memos, sig)
+                            .unwrap();
+                        num_memos += 1;
+                    }
                 }
+                Ok(num_memos)
             }
-            Err(error) => self.generate_event(LedgerEvent::Reject { block, error }),
+            Err(error) => {
+                self.generate_event(LedgerEvent::Reject { block, error });
+                Ok(0)
+            }
         }
-
-        Ok(())
     }
 
     fn post_memos(
@@ -146,6 +154,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
 
         // Validate the new memos.
         match txn {
+            EspressoTransaction::Genesis(_) => {}
             EspressoTransaction::CAP(txn) => {
                 if txn.verify_receiver_memos_signature(&memos, &sig).is_err() {
                     return Err(KeystoreError::Failed {
@@ -286,10 +295,10 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         txn_info: Transaction<EspressoLedger>,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
         if let Some(signed_memos) = txn_info.memos() {
-            for memo in signed_memos.memos.iter().flatten().cloned() {
-                txn.memos.push(memo);
-            }
-            txn.signature = signed_memos.sig.clone();
+            txn.memos = Some((
+                signed_memos.memos.iter().flatten().cloned().collect(),
+                signed_memos.sig.clone(),
+            ));
         }
         self.ledger.lock().await.submit(txn)
     }
@@ -302,7 +311,10 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         &self,
         _from: EventIndex,
     ) -> Result<(MerkleTree, EventIndex), KeystoreError<EspressoLedger>> {
-        self.ledger.lock().await.get_initial_scan_state()
+        Ok((
+            MerkleTree::new(EspressoLedger::merkle_height()).unwrap(),
+            EventIndex::default(),
+        ))
     }
 }
 
@@ -323,9 +335,10 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
         initial_grants: Vec<(RecordOpening, u64)>,
     ) -> Self::MockNetwork {
         println!("[espresso] creating network");
+        let verif_crs = Arc::new(verif_crs);
         let mut ret = MockEspressoNetwork {
-            validator: ValidatorState::new(verif_crs, records.clone()),
-            records,
+            validator: ValidatorState::default(),
+            records: MerkleTree::new(records.height()).unwrap(),
             nullifiers: SetMerkleTree::default(),
             committed_blocks: Vec::new(),
             proving_keys: Arc::new(proof_crs),
@@ -333,33 +346,14 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
             events: MockEventSource::new(EventSource::QueryService),
         };
 
-        let mut rng = espresso_core::testing::crypto_rng_from_seed([0x42u8; 32]);
-
-        // Broadcast receiver memos for the records which are included in the tree from the start,
-        // so that clients can access records they have been granted at ledger setup time in a
-        // uniform way.
-        let memo_outputs = initial_grants
-            .into_iter()
-            .map(|(ro, uid)| {
-                let memo = ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap();
-                let (comm, merkle_path) = ret
-                    .records
-                    .get_leaf(uid)
-                    .expect_ok()
-                    .map(|(_, proof)| {
-                        (
-                            RecordCommitment::from_field_element(proof.leaf.0),
-                            proof.path,
-                        )
-                    })
-                    .unwrap();
-                (memo, comm, uid, merkle_path)
-            })
-            .collect();
-        ret.generate_event(LedgerEvent::Memos {
-            outputs: memo_outputs,
-            transaction: None,
-        });
+        // Commit a [Genesis] block to initialize the ledger.
+        let genesis = ElaboratedBlock::genesis(GenesisNote::new(
+            ChainVariables::new(42, verif_crs),
+            Arc::new(initial_grants.into_iter().map(|(ro, _)| ro).collect()),
+        ));
+        ret.submit(genesis).unwrap();
+        assert_eq!(ret.validator.record_merkle_commitment, records.commitment());
+        assert_eq!(ret.records.commitment(), records.commitment());
 
         println!("[espresso] created network");
         ret

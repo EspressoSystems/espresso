@@ -160,19 +160,15 @@ async fn validate_committed_block(
         }
 
         // Check memos.
-        assert_eq!(tx.output_memos.len(), tx.data.output_len());
+        let (memos, sig) = tx.output_memos.clone().unwrap();
+        assert_eq!(memos.len(), tx.data.output_len());
         if let EspressoTransaction::CAP(txn) = &tx.data {
-            txn.verify_receiver_memos_signature(&tx.output_memos, &tx.memos_signature)
-                .unwrap()
+            txn.verify_receiver_memos_signature(&memos, &sig).unwrap()
         }
 
         // Check outputs.
-        for (i, (output, uid, memo)) in izip!(
-            tx.data.output_commitments(),
-            &tx.output_uids,
-            &tx.output_memos
-        )
-        .enumerate()
+        for (i, (output, uid, memo)) in
+            izip!(tx.data.output_commitments(), &tx.output_uids, &memos,).enumerate()
         {
             // Check that we get the same record if we query for the output directly.
             let utxo: UnspentRecord =
