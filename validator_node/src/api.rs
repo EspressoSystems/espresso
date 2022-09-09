@@ -248,39 +248,30 @@ impl Display for CommittedBlock {
 
 impl From<CommittedBlock> for ElaboratedBlock {
     fn from(b: CommittedBlock) -> Self {
-        let (txs, proofs, memos, signatures) = b
+        let (txs, proofs, memos) = b
             .transactions
             .into_iter()
-            .map(|tx| (tx.data, tx.proofs, tx.output_memos, tx.memos_signature))
+            .map(|tx| (tx.data, tx.proofs, tx.output_memos))
             .multiunzip();
         Self {
             block: Block(txs),
             proofs,
             memos,
-            signatures,
         }
     }
 }
 
 impl From<&CommittedBlock> for ElaboratedBlock {
     fn from(b: &CommittedBlock) -> Self {
-        let (txs, proofs, memos, signatures) = b
+        let (txs, proofs, memos) = b
             .transactions
             .iter()
-            .map(|tx| {
-                (
-                    tx.data.clone(),
-                    tx.proofs.clone(),
-                    tx.output_memos.clone(),
-                    tx.memos_signature.clone(),
-                )
-            })
+            .map(|tx| (tx.data.clone(), tx.proofs.clone(), tx.output_memos.clone()))
             .multiunzip();
         Self {
             block: Block(txs),
             proofs,
             memos,
-            signatures,
         }
     }
 }
@@ -291,8 +282,7 @@ pub struct CommittedTransaction {
     pub data: EspressoTransaction,
     pub proofs: EspressoTxnHelperProofs,
     pub output_uids: Vec<u64>,
-    pub output_memos: Vec<ReceiverMemo>,
-    pub memos_signature: Signature,
+    pub output_memos: Option<(Vec<ReceiverMemo>, Signature)>,
 }
 
 impl From<CommittedTransaction> for ElaboratedTransaction {
@@ -301,7 +291,6 @@ impl From<CommittedTransaction> for ElaboratedTransaction {
             txn: tx.data,
             proofs: tx.proofs,
             memos: tx.output_memos,
-            signature: tx.memos_signature,
         }
     }
 }
@@ -312,7 +301,6 @@ impl From<&CommittedTransaction> for ElaboratedTransaction {
             txn: tx.data.clone(),
             proofs: tx.proofs.clone(),
             memos: tx.output_memos.clone(),
-            signature: tx.memos_signature.clone(),
         }
     }
 }

@@ -33,6 +33,7 @@ use std::fmt::Display;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum_macros::Display)]
 pub enum EspressoTransactionKind {
+    GENESIS,
     CAP(reef::cap::TransactionKind),
     REWARD,
 }
@@ -109,6 +110,7 @@ impl EspressoTransaction {
             Self::CAP(txn) => {
                 reef::traits::Transaction::open_viewing_memo(txn, viewable_assets, viewing_keys)
             }
+            Self::Genesis(_) => Err(ViewingError::NoViewingMemos),
             Self::Reward(_) => Err(ViewingError::NoViewingMemos),
         }
     }
@@ -116,6 +118,7 @@ impl EspressoTransaction {
     /// Retrieve transaction output record commitments.
     pub fn output_commitments(&self) -> Vec<RecordCommitment> {
         match self {
+            Self::Genesis(txn) => txn.output_commitments(),
             Self::CAP(txn) => txn.output_commitments(),
             Self::Reward(txn) => vec![txn.output_commitment()],
         }
@@ -124,6 +127,7 @@ impl EspressoTransaction {
     /// Retrieve transaction output openings
     pub fn output_openings(&self) -> Option<Vec<RecordOpening>> {
         match self {
+            Self::Genesis(txn) => Some(txn.output_openings()),
             Self::CAP(txn) => txn.output_openings(), // returns None
             Self::Reward(txn) => Some(vec![txn.output_opening()]),
         }
@@ -137,6 +141,7 @@ impl EspressoTransaction {
     /// Retrieve kind of transaction.
     pub fn kind(&self) -> EspressoTransactionKind {
         match self {
+            Self::Genesis(_) => EspressoTransactionKind::GENESIS,
             Self::CAP(txn) => EspressoTransactionKind::CAP(txn.kind()),
             Self::Reward(_) => EspressoTransactionKind::REWARD,
         }
@@ -145,6 +150,7 @@ impl EspressoTransaction {
     /// Retrieve number of transaction outputs.
     pub fn output_len(&self) -> usize {
         match self {
+            Self::Genesis(txn) => txn.output_len(),
             Self::CAP(txn) => txn.output_len(),
             Self::Reward(_) => 1,
         }
@@ -153,6 +159,7 @@ impl EspressoTransaction {
     /// Retrieve transaction input nullifiers.
     pub fn input_nullifiers(&self) -> Vec<Nullifier> {
         match self {
+            Self::Genesis(_) => vec![],
             Self::CAP(txn) => txn.input_nullifiers(),
             Self::Reward(_) => vec![],
         }
@@ -176,8 +183,7 @@ impl traits::Transaction for ElaboratedTransaction {
         Self {
             txn: EspressoTransaction::CAP(note),
             proofs: EspressoTxnHelperProofs::CAP(proofs),
-            memos: Default::default(),
-            signature: Default::default(),
+            memos: None,
         }
     }
 
@@ -191,6 +197,7 @@ impl traits::Transaction for ElaboratedTransaction {
 
     fn proven_nullifiers(&self) -> Vec<(Nullifier, SetMerkleProof)> {
         match &self.proofs {
+            EspressoTxnHelperProofs::Genesis => vec![],
             EspressoTxnHelperProofs::CAP(proofs) => self
                 .txn
                 .input_nullifiers()
@@ -251,25 +258,23 @@ impl traits::Block for ElaboratedBlock {
     type Error = ValidationError;
 
     fn new(txns: Vec<Self::Transaction>) -> Self {
-        let (txns, proofs, memos, signatures): (Vec<EspressoTransaction>, Vec<_>, Vec<_>, Vec<_>) =
-            txns.into_iter()
-                .map(|txn| (txn.txn, txn.proofs, txn.memos, txn.signature))
-                .multiunzip();
+        let (txns, proofs, memos): (Vec<EspressoTransaction>, Vec<_>, Vec<_>) = txns
+            .into_iter()
+            .map(|txn| (txn.txn, txn.proofs, txn.memos))
+            .multiunzip();
         Self {
             block: crate::state::Block(txns),
             proofs,
             memos,
-            signatures,
         }
     }
 
     fn txns(&self) -> Vec<Self::Transaction> {
-        izip!(&self.block.0, &self.proofs, &self.memos, &self.signatures)
-            .map(|(txn, proofs, memos, signature)| ElaboratedTransaction {
+        izip!(&self.block.0, &self.proofs, &self.memos)
+            .map(|(txn, proofs, memos)| ElaboratedTransaction {
                 txn: txn.clone(),
                 proofs: proofs.clone(),
                 memos: memos.clone(),
-                signature: signature.clone(),
             })
             .collect()
     }
@@ -317,7 +322,7 @@ impl Ledger for EspressoLedger {
     }
 
     fn merkle_height() -> u8 {
-        crate::state::MERKLE_HEIGHT
+        crate::universal_params::MERKLE_HEIGHT
     }
 
     fn srs() -> &'static jf_cap::proof::UniversalParam {

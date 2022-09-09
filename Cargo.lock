@@ -2315,6 +2315,7 @@ dependencies = [
  "chacha20",
  "chrono",
  "commit",
+ "derive_more",
  "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git)",
  "futures",
  "generic-array 0.14.5",
@@ -6135,7 +6136,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#d368bffd3c933d599311b2d8e5af34f2f1d38de1"
+source = "git+https://github.com/EspressoSystems/seahorse.git#87bb3860124362f0624beae2cbb32dee1dcc4f8b"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
