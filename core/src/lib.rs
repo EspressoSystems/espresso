@@ -19,7 +19,7 @@ pub mod ledger;
 pub mod lw_persistence;
 pub mod reward;
 pub mod set_merkle_tree;
-mod stake_table;
+pub mod stake_table;
 pub mod state;
 pub mod testing;
 pub mod tree_hash;

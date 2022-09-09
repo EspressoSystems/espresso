@@ -19,6 +19,7 @@ use hotshot_types::traits::signature_key::{EncodedSignature, SignatureKey};
 use jf_cap::structs::Amount;
 use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
+use std::ops::Deref;
 
 /// PubKey used for stake table key
 #[tagged_blob("STAKING_KEY")]
@@ -117,6 +118,12 @@ impl CanonicalDeserialize for StakingKeySignature {
 )]
 pub struct ViewNumber(pub(crate) u64);
 
+impl From<hotshot_types::data::ViewNumber> for ViewNumber {
+    fn from(number: hotshot_types::data::ViewNumber) -> Self {
+        ViewNumber(*number.deref())
+    }
+}
+
 ///Identifying tag for a StakeTable
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub struct StakeTableTag();
@@ -141,6 +148,9 @@ impl CommitableHashTag for StakeTableCommitmentTag {
 /// Stake table commitment type
 pub type StakeTableCommitment = <StakeTableHash as KVTreeHash>::Digest;
 
-/// Hash for tree which stores commitment hash of previous rounds' stake tables in (view_number, stake table commitment) kv pairs
-pub type StakeTableCommitmentsHash =
-    CommitableHash<ViewNumber, <StakeTableHash as KVTreeHash>::Digest, StakeTableCommitmentTag>;
+/// Hash for tree which stores commitment hash and total stake of previous rounds' stake tables in (view_number->(stake table commitment, total stake)) kv map
+pub type StakeTableCommitmentsHash = CommitableHash<
+    ViewNumber,
+    (<StakeTableHash as KVTreeHash>::Digest, Amount),
+    StakeTableCommitmentTag,
+>;
