@@ -88,7 +88,7 @@ struct Options {
 async fn generate_transactions(
     num_txn: u64,
     own_id: usize,
-    hotshot: Node,
+    hotshot: Consensus,
     mut state: MultiXfrTestState,
 ) {
     #[cfg(target_os = "linux")]
@@ -253,7 +253,7 @@ async fn generate_transactions(
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
-    let mut options = Options::from_args();
+    let options = Options::from_args();
     if let Err(msg) = options.node_opt.check() {
         eprintln!("{}", msg);
         exit(1);
@@ -265,7 +265,6 @@ async fn main() -> Result<(), std::io::Error> {
         .init();
 
     let own_id = options.id;
-    let data_source = open_data_source(&mut options.node_opt, own_id);
     // Initialize the state and hotshot
     let (genesis, state) = if options.num_txn.is_some() {
         // If we are going to generate transactions, we need to initialize the ledger with a
@@ -289,37 +288,19 @@ async fn main() -> Result<(), std::io::Error> {
         known_nodes,
         genesis,
         own_id,
-        data_source.clone(),
     )
     .await;
+    let data_source = open_data_source(&options.node_opt, own_id, hotshot.clone());
 
     // Start an EsQS server if requested.
     if let Some(esqs) = &options.esqs {
         async_std::task::spawn(full_node_esqs::init_server(esqs, data_source)?);
     }
 
-    // If we are running a full node, also host a query API to inspect the accumulated state.
-    let web_server = if let Node::Full(node) = &hotshot {
-        Some(
-            init_web_server(&options.node_opt, node.clone())
-                .expect("Failed to initialize web server"),
-        )
-    } else {
-        None
-    };
-
     if let Some(num_txn) = options.num_txn {
         generate_transactions(num_txn, own_id, hotshot, state.unwrap()).await;
     } else {
         hotshot.run(pending::<()>()).await;
-    }
-
-    if options.wait {
-        if let Some(join_handle) = web_server {
-            join_handle.await.unwrap_or_else(|err| {
-                panic!("web server exited with an error: {}", err);
-            });
-        }
     }
 
     Ok(())

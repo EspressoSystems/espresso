@@ -10,28 +10,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use espresso_core::ledger::EspressoLedger;
-use postage::broadcast::Receiver;
-use seahorse::events::LedgerEvent;
-use std::error::Error;
-use std::fmt::Debug;
+pub mod api;
+pub mod data_source;
 
-pub trait CatchUpDataSource {
-    type EventIterType: Iterator<Item = Option<LedgerEvent<EspressoLedger>>>;
-
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool;
-    fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType;
-    fn subscribe(&self) -> Receiver<(usize, LedgerEvent<EspressoLedger>)>;
-}
-
-pub trait UpdateCatchUpData {
-    type Error: Error + Debug;
-
-    fn event_count(&self) -> usize;
-
-    fn append_events(
-        &mut self,
-        events: Vec<Option<LedgerEvent<EspressoLedger>>>,
-    ) -> Result<(), Self::Error>;
-}
+pub use api::*;

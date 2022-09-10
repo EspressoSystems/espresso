@@ -18,6 +18,7 @@ use espresso_availability_api::api as availability;
 use espresso_catchup_api::api as catchup;
 use espresso_metastate_api::api as metastate;
 use espresso_status_api::api as status;
+use espresso_validator_api::api as validator;
 use futures::Future;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -41,6 +42,9 @@ pub struct Options {
 
     #[clap(flatten)]
     pub status: status::Options,
+
+    #[clap(flatten)]
+    pub validator: validator::Options,
 }
 
 impl Options {
@@ -51,6 +55,7 @@ impl Options {
             catchup: Default::default(),
             metastate: Default::default(),
             status: Default::default(),
+            validator: Default::default(),
         }
     }
 }
@@ -80,6 +85,9 @@ pub enum ApiError {
     Status {
         source: status::Error,
     },
+    Validator {
+        source: validator::Error,
+    },
     #[from(ignore)]
     Internal {
         status: StatusCode,
@@ -98,6 +106,7 @@ impl tide_disco::Error for ApiError {
             Self::CatchUp { source } => source.status(),
             Self::Metastate { source } => source.status(),
             Self::Status { source } => source.status(),
+            Self::Validator { source } => source.status(),
             Self::Internal { status, .. } => *status,
         }
     }
@@ -112,6 +121,7 @@ pub fn init_server(
     let catchup_api = catchup::define_api(&opt.catchup).map_err(io_error)?;
     let metastate_api = metastate::define_api(&opt.metastate).map_err(io_error)?;
     let status_api = status::define_api(&opt.status).map_err(io_error)?;
+    let validator_api = validator::define_api(&opt.validator).map_err(io_error)?;
 
     let mut app = App::<_, ApiError>::with_state(data_source);
     app.with_version(env!("CARGO_PKG_VERSION").parse().unwrap())
@@ -122,6 +132,8 @@ pub fn init_server(
         .register_module("metastate", metastate_api)
         .map_err(io_error)?
         .register_module("status", status_api)
+        .map_err(io_error)?
+        .register_module("validator", validator_api)
         .map_err(io_error)?;
 
     let port = opt.port;

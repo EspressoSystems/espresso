@@ -12,11 +12,16 @@
 
 use crate::{
     full_node_esqs, gen_keys, genesis, init_validator, open_data_source, ConsensusOpt, NodeOpt,
-    MINIMUM_NODES,
+    UpdateQueryDataSourceTypesBinder, MINIMUM_NODES,
 };
 use address_book::store::FileStore;
-use async_std::task::{block_on, spawn, JoinHandle};
-use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
+use async_std::{
+    sync::{Arc, RwLock},
+    task::{block_on, spawn, JoinHandle},
+};
+use espresso_core::{
+    ledger::EspressoLedger, state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM,
+};
 use futures::{channel::oneshot, future::join_all};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
@@ -35,11 +40,14 @@ use validator_node::{
         EspressoKeystore,
     },
     node::Validator,
+    update_query_data_source::UpdateQueryDataSource,
 };
 
 pub struct TestNode {
     pub query_api: Option<Url>,
     pub submit_api: Option<Url>,
+    _update_data_source:
+        Option<Arc<RwLock<UpdateQueryDataSource<UpdateQueryDataSourceTypesBinder>>>>,
     kill: oneshot::Sender<()>,
     wait: JoinHandle<()>,
 }
@@ -197,20 +205,19 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             if i == 0 {
                 node_opt.full = true;
             }
-            let data_source = open_data_source(&mut node_opt, i);
-            let node = init_validator(
+            let consensus = init_validator(
                 &node_opt,
                 &consensus_opt,
                 priv_key,
                 pub_keys,
-                genesis,
+                genesis.clone(),
                 i,
-                data_source.clone(),
             )
             .await;
+            let data_source = open_data_source(&node_opt, i, consensus.clone());
 
             // If applicable, run a query service.
-            let url = if node_opt.full {
+            let (url, update_data_source) = if node_opt.full {
                 let port = pick_unused_port().unwrap();
                 tracing::info!("spawning EsQS at http://localhost:{}", port);
                 // This returns a JoinHandle for the server, but there's no way to kill a Tide
@@ -219,20 +226,32 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 spawn(
                     full_node_esqs::init_server(
                         &full_node_esqs::Command::with_port(port),
-                        data_source,
+                        data_source.clone(),
                     )
                     .unwrap(),
                 );
-                Some(format!("http://localhost:{}", port).parse().unwrap())
+                (
+                    Some(format!("http://localhost:{}", port).parse().unwrap()),
+                    Some(UpdateQueryDataSource::new(
+                        consensus.subscribe(),
+                        data_source.clone(),
+                        data_source.clone(),
+                        data_source.clone(),
+                        data_source.clone(),
+                        data_source,
+                        ElaboratedBlock::genesis(genesis),
+                    )),
+                )
             } else {
-                None
+                (None, None)
             };
 
             let (kill, recv_kill) = oneshot::channel();
-            let wait = spawn(node.run(recv_kill));
+            let wait = spawn(consensus.run(recv_kill));
             TestNode {
                 query_api: url.clone(),
                 submit_api: url,
+                _update_data_source: update_data_source,
                 kill,
                 wait,
             }

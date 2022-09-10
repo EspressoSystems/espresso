@@ -10,10 +10,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::{
-    api,
-    api::{ClientError, EspressoError},
-};
+use crate::{api, api::ClientError};
 use address_book::InsertPubKey;
 use api::client::*;
 use async_std::{sync::Arc, task::sleep};
@@ -83,7 +80,7 @@ impl<'a> NetworkBackend<'a> {
             .set_base_url(base_url)
             .try_into()
             .context(ClientConfigSnafu)?;
-        Ok(client.with(parse_error_body::<EspressoError>))
+        Ok(client)
     }
 
     async fn get<T: for<'de> Deserialize<'de>>(
@@ -92,12 +89,22 @@ impl<'a> NetworkBackend<'a> {
     ) -> Result<T, KeystoreError<EspressoLedger>> {
         let mut res = self
             .query_client
-            .get(uri)
+            .get(uri.as_ref())
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, KeystoreError<EspressoLedger>>(ClientError)?;
-        response_body(&mut res).await.context(ClientError)
+            .map_err(|source| KeystoreError::Failed {
+                msg: format!("EsQS request GET {} failed: {}", uri.as_ref(), source),
+            })?;
+        response_body(&mut res)
+            .await
+            .map_err(|source| KeystoreError::Failed {
+                msg: format!(
+                    "Failed to parse response from GET {}: {}",
+                    uri.as_ref(),
+                    source
+                ),
+            })
     }
 
     async fn post<T: Serialize>(
@@ -106,12 +113,14 @@ impl<'a> NetworkBackend<'a> {
         body: &T,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
         client
-            .post(uri)
+            .post(uri.as_ref())
             .body_bytes(bincode::serialize(body).context(BincodeSnafu)?)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, KeystoreError<EspressoLedger>>(ClientError)?;
+            .map_err(|source| KeystoreError::Failed {
+                msg: format!("EsQS request POST {} failed: {}", uri.as_ref(), source),
+            })?;
         Ok(())
     }
 
@@ -371,7 +380,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
             ));
         }
 
-        Self::post(&self.validator_client, "/submit", &txn).await
+        Self::post(&self.validator_client, "/validator/submit", &txn).await
     }
 
     async fn finalize(&mut self, _txn: Transaction<EspressoLedger>, _txid: Option<(u64, u64)>) {

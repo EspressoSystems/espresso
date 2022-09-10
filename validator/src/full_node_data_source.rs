@@ -14,6 +14,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::From;
 use std::path::Path;
 
+use crate::Consensus;
+use async_trait::async_trait;
 use atomic_store::{
     append_log::Iter as ALIter, load_store::BincodeLoadStore, AppendLog, AtomicStore,
     AtomicStoreLoader, PersistenceError, RollingLog,
@@ -24,14 +26,18 @@ use espresso_availability_api::data_source::{
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
 use espresso_catchup_api::data_source::{CatchUpDataSource, UpdateCatchUpData};
 use espresso_core::ledger::EspressoLedger;
-use espresso_core::state::{BlockCommitment, SetMerkleProof, SetMerkleTree, TransactionCommitment};
+use espresso_core::state::{
+    BlockCommitment, ElaboratedTransaction, SetMerkleProof, SetMerkleTree, TransactionCommitment,
+};
 use espresso_metastate_api::data_source::{MetaStateDataSource, UpdateMetaStateData};
 use espresso_status_api::data_source::{StatusDataSource, UpdateStatusData};
 use espresso_status_api::query_data::ValidatorStatus;
-use hotshot::{data::QuorumCertificate, H_256};
+use espresso_validator_api::data_source::ValidatorDataSource;
+use hotshot::{data::QuorumCertificate, HotShotError, H_256};
 use itertools::izip;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
+use postage::{broadcast, sink::Sink};
 use seahorse::events::LedgerEvent;
 use tracing::warn;
 use validator_node::api::EspressoError;
@@ -40,6 +46,7 @@ use validator_node::node::QueryServiceError;
 // This should probably be taken from a passed-in configuration, and stored locally.
 const CACHED_BLOCKS_COUNT: usize = 50;
 const CACHED_EVENTS_COUNT: usize = 500;
+const EVENT_CHANNEL_CAPACITY: usize = 500;
 
 pub struct QueryData {
     cached_blocks_start: usize,
@@ -49,8 +56,8 @@ pub struct QueryData {
     index_by_last_record_id: BTreeMap<u64, u64>,
     cached_events_start: usize,
     events: Vec<Option<LedgerEvent<EspressoLedger>>>,
-    event_sender: async_channel::Sender<(usize, LedgerEvent<EspressoLedger>)>,
-    event_receiver: async_channel::Receiver<(usize, LedgerEvent<EspressoLedger>)>,
+    event_sender: broadcast::Sender<(usize, LedgerEvent<EspressoLedger>)>,
+    event_receiver: broadcast::Receiver<(usize, LedgerEvent<EspressoLedger>)>,
     cached_nullifier_sets: BTreeMap<u64, SetMerkleTree>,
     node_status: ValidatorStatus,
     query_storage: AtomicStore,
@@ -59,6 +66,7 @@ pub struct QueryData {
     qcert_storage: AppendLog<BincodeLoadStore<QuorumCertificate<H_256>>>,
     event_storage: AppendLog<BincodeLoadStore<LedgerEvent<EspressoLedger>>>,
     status_storage: RollingLog<BincodeLoadStore<ValidatorStatus>>,
+    consensus: Consensus,
 }
 
 pub trait Extract<T> {
@@ -384,7 +392,7 @@ impl<'a> CatchUpDataSource for &'a QueryData {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn subscribe(&self) -> async_channel::Receiver<(usize, LedgerEvent<EspressoLedger>)> {
+    fn subscribe(&self) -> broadcast::Receiver<(usize, LedgerEvent<EspressoLedger>)> {
         self.event_receiver.clone()
     }
 }
@@ -404,7 +412,7 @@ impl UpdateCatchUpData for QueryData {
                 // `try_send` fails if the channel is full or closed. The channel cannot be full because
                 // it is unbounded, and cannot be closed because `self` owns copies of both ends.
                 self.event_sender
-                    .try_send((self.events.len(), e.clone()))
+                    .blocking_send((self.event_count(), e.clone()))
                     .expect("unexpected failure when broadcasting event");
             }
             self.events.push(e);
@@ -443,12 +451,13 @@ impl QueryData {
         } else {
             (&0, &default_nullifier_set)
         };
+        assert!(*index <= block_id);
         if *index == block_id {
             Ok(op(nullifier_set))
         } else {
             let mut adjusted_nullifier_set = nullifier_set.clone();
             let index = *index as usize;
-            let iter = self.get_nth_block_iter(index);
+            let iter = self.get_nth_block_iter(index + 1);
             iter.take(block_id as usize - index).for_each(|block| {
                 if let Some(block) = block {
                     for transaction in block.raw_block.block.0.iter() {
@@ -532,10 +541,19 @@ impl UpdateStatusData for QueryData {
     }
 }
 
+#[async_trait]
+impl ValidatorDataSource for QueryData {
+    type Error = HotShotError;
+
+    async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), Self::Error> {
+        self.consensus.submit_transaction(txn).await
+    }
+}
+
 const STATUS_STORAGE_COUNT: u32 = 10u32;
 
 impl QueryData {
-    pub fn new(store_path: &Path) -> Result<QueryData, PersistenceError> {
+    pub fn new(store_path: &Path, consensus: Consensus) -> Result<QueryData, PersistenceError> {
         let key_tag = "query_data_store";
         let blocks_tag = format!("{}_blocks", key_tag);
         let states_tag = format!("{}_states", key_tag);
@@ -554,7 +572,7 @@ impl QueryData {
 
         let query_storage = AtomicStore::open(loader)?;
 
-        let (event_sender, event_receiver) = async_channel::unbounded();
+        let (event_sender, event_receiver) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Ok(QueryData {
             cached_blocks_start: 0usize,
             cached_blocks: Vec::new(),
@@ -573,10 +591,11 @@ impl QueryData {
             qcert_storage,
             event_storage,
             status_storage,
+            consensus,
         })
     }
 
-    pub fn load(store_path: &Path) -> Result<QueryData, PersistenceError> {
+    pub fn load(store_path: &Path, consensus: Consensus) -> Result<QueryData, PersistenceError> {
         let key_tag = "query_data_store";
         let blocks_tag = format!("{}_blocks", key_tag);
         let states_tag = format!("{}_states", key_tag);
@@ -660,7 +679,7 @@ impl QueryData {
             })
             .collect();
 
-        let (event_sender, event_receiver) = async_channel::unbounded();
+        let (event_sender, event_receiver) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         let events_loader = event_storage.iter();
         let events_count = events_loader.len();
         let cached_events_start = if events_count > CACHED_EVENTS_COUNT {
@@ -677,7 +696,10 @@ impl QueryData {
                 ev.ok()
             })
             .collect();
-        let node_status = status_storage.load_latest()?;
+        // Load the last persisted validator status. If there is no existing status (e.g. the user
+        // gave us an empty directory, but did not set the reset flag, so we ended up here and not
+        // in `new`) we should behave as we do when creating a new store: use the default status.
+        let node_status = status_storage.load_latest().unwrap_or_default();
 
         Ok(QueryData {
             cached_blocks_start,
@@ -697,6 +719,7 @@ impl QueryData {
             qcert_storage,
             event_storage,
             status_storage,
+            consensus,
         })
     }
 

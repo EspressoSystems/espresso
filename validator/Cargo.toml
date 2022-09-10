@@ -38,6 +38,7 @@ espresso-catchup-api = { path = "../apis/catchup" }
 espresso-core = { path = "../core/" }
 espresso-metastate-api = { path = "../apis/metastate" }
 espresso-status-api = { path = "../apis/status" }
+espresso-validator-api = { path = "../apis/validator" }
 futures = "0.3.0"
 futures-util = "0.3.8"
 #hex = "0.4.3"
@@ -54,6 +55,7 @@ libp2p-networking = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", 
 markdown = "0.3"
 net = { git = "https://github.com/EspressoSystems/net.git" }
 portpicker = { version = "0.1", optional = true }
+postage = { version = "0.5", features = ["futures-traits"] }
 rand = "0.8.5"
 rand_chacha = { package = "rand_chacha", version = "0.3.1" }
 rand_chacha_02 = { package = "rand_chacha", version = "0.2.2" }
