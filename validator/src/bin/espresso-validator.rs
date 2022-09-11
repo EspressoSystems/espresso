@@ -20,6 +20,7 @@ use espresso_core::{
     testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo},
 };
 use espresso_validator::*;
+use full_node_esqs::EsQS;
 use futures::{future::pending, StreamExt};
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
@@ -286,16 +287,23 @@ async fn main() -> Result<(), std::io::Error> {
         &options.consensus_opt,
         priv_key,
         known_nodes,
-        genesis,
+        genesis.clone(),
         own_id,
     )
     .await;
     let data_source = open_data_source(&options.node_opt, own_id, hotshot.clone());
 
     // Start an EsQS server if requested.
-    if let Some(esqs) = &options.esqs {
-        async_std::task::spawn(full_node_esqs::init_server(esqs, data_source)?);
-    }
+    let _esqs = if let Some(esqs) = &options.esqs {
+        Some(EsQS::new(
+            esqs,
+            data_source,
+            hotshot.subscribe(),
+            ElaboratedBlock::genesis(genesis),
+        )?)
+    } else {
+        None
+    };
 
     if let Some(num_txn) = options.num_txn {
         generate_transactions(num_txn, own_id, hotshot, state.unwrap()).await;

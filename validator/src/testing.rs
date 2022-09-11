@@ -11,14 +11,11 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    full_node_esqs, gen_keys, genesis, init_validator, open_data_source, ConsensusOpt, NodeOpt,
-    UpdateQueryDataSourceTypesBinder, MINIMUM_NODES,
+    full_node_esqs::{self, EsQS},
+    gen_keys, genesis, init_validator, open_data_source, ConsensusOpt, NodeOpt, MINIMUM_NODES,
 };
 use address_book::store::FileStore;
-use async_std::{
-    sync::{Arc, RwLock},
-    task::{block_on, spawn, JoinHandle},
-};
+use async_std::task::{block_on, spawn, JoinHandle};
 use espresso_core::{
     ledger::EspressoLedger, state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM,
 };
@@ -40,14 +37,10 @@ use validator_node::{
         EspressoKeystore,
     },
     node::Validator,
-    update_query_data_source::UpdateQueryDataSource,
 };
 
 pub struct TestNode {
-    pub query_api: Option<Url>,
-    pub submit_api: Option<Url>,
-    _update_data_source:
-        Option<Arc<RwLock<UpdateQueryDataSource<UpdateQueryDataSourceTypesBinder>>>>,
+    esqs: Option<EsQS>,
     kill: oneshot::Sender<()>,
     wait: JoinHandle<()>,
 }
@@ -217,44 +210,25 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             let data_source = open_data_source(&node_opt, i, consensus.clone());
 
             // If applicable, run a query service.
-            let (url, update_data_source) = if node_opt.full {
+            let esqs = if node_opt.full {
                 let port = pick_unused_port().unwrap();
                 tracing::info!("spawning EsQS at http://localhost:{}", port);
-                // This returns a JoinHandle for the server, but there's no way to kill a Tide
-                // server (this is a known bug/limitation of Tide) so all we can really do is drop
-                // the handle, detaching the task.
-                spawn(
-                    full_node_esqs::init_server(
+                Some(
+                    EsQS::new(
                         &full_node_esqs::Command::with_port(port),
-                        data_source.clone(),
+                        data_source,
+                        consensus.subscribe(),
+                        ElaboratedBlock::genesis(genesis),
                     )
                     .unwrap(),
-                );
-                (
-                    Some(format!("http://localhost:{}", port).parse().unwrap()),
-                    Some(UpdateQueryDataSource::new(
-                        consensus.subscribe(),
-                        data_source.clone(),
-                        data_source.clone(),
-                        data_source.clone(),
-                        data_source.clone(),
-                        data_source,
-                        ElaboratedBlock::genesis(genesis),
-                    )),
                 )
             } else {
-                (None, None)
+                None
             };
 
             let (kill, recv_kill) = oneshot::channel();
             let wait = spawn(consensus.run(recv_kill));
-            TestNode {
-                query_api: url.clone(),
-                submit_api: url,
-                _update_data_source: update_data_source,
-                kill,
-                wait,
-            }
+            TestNode { esqs, kill, wait }
         }
     }))
     .await;
@@ -263,8 +237,8 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     let address_book_api = address_book.url();
 
     TestNetwork {
-        query_api: nodes[0].query_api.clone().unwrap(),
-        submit_api: nodes[0].submit_api.clone().unwrap(),
+        query_api: nodes[0].esqs.as_ref().unwrap().url(),
+        submit_api: nodes[0].esqs.as_ref().unwrap().url(),
         address_book_api,
         nodes,
         address_book: Some(address_book),
