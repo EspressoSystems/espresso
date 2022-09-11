@@ -127,7 +127,7 @@ where
                 izip!(block.iter().cloned(), state.iter(), qcs.iter().cloned()).rev()
             {
                 // Grab metadata for the new block from the state it is applying to.
-                let block_index = state.prev_commit_time;
+                let block_index = self.validator_state.block_height;
                 let nullifier_proofs = self
                     .validator_state
                     .update_nullifier_proofs(&block.block.0, block.proofs.clone())
