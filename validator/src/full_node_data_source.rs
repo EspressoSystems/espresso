@@ -445,20 +445,27 @@ impl QueryData {
             return Err(QueryServiceError::InvalidHistoricalIndex {}.into());
         }
         let default_nullifier_set = SetMerkleTree::default();
+
+        // Get a cached nullifier set and the index of the block _after_ that set (so that we can
+        // use index 0 to represent the pre-genesis "-1" state, with empty nullifiers).
         let prev_cached_set = self.cached_nullifier_sets.range(..block_id + 1).next_back();
         let (index, nullifier_set) = if let Some((index, tree)) = prev_cached_set {
-            (index, tree)
+            (index + 1, tree)
         } else {
-            (&0, &default_nullifier_set)
+            (0, &default_nullifier_set)
         };
-        assert!(*index <= block_id);
-        if *index == block_id {
+        assert!(index <= block_id + 1);
+        if index == block_id + 1 {
+            // If the block after `nullifier_set` is the block after the one of interest, then
+            // `nullifier_set` corresponds to the block of interest.
             Ok(op(nullifier_set))
         } else {
+            // Otherwise, we need to build the nullifier set for `block_id` by adding the nullifiers
+            // from each block from `index` to `block_id`.
             let mut adjusted_nullifier_set = nullifier_set.clone();
-            let index = *index as usize;
-            let iter = self.get_nth_block_iter(index + 1);
-            iter.take(block_id as usize - index).for_each(|block| {
+            let index = index as usize;
+            let iter = self.get_nth_block_iter(index);
+            iter.take(block_id as usize + 1 - index).for_each(|block| {
                 if let Some(block) = block {
                     for transaction in block.raw_block.block.0.iter() {
                         for nullifier_in in transaction.input_nullifiers() {
@@ -478,7 +485,10 @@ impl MetaStateDataSource for QueryData {
         block_id: u64,
         nullifier: Nullifier,
     ) -> Option<(bool, SetMerkleProof)> {
-        if let Ok(proof) = self.with_nullifier_set_at_block(block_id, |ns| ns.contains(nullifier)) {
+        if let Ok(proof) = self.with_nullifier_set_at_block(block_id, |ns| {
+            tracing::info!("getting nullifier proof for {} in {}", nullifier, ns.hash());
+            ns.contains(nullifier)
+        }) {
             proof
         } else {
             None
