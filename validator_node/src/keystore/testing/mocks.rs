@@ -265,6 +265,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
 
     async fn get_nullifier_proof(
         &self,
+        _block_id: u64,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
     ) -> Result<(bool, SetMerkleProof), KeystoreError<EspressoLedger>> {
