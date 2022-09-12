@@ -18,15 +18,18 @@ use jf_cap::Signature;
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
 pub use crate::lw_persistence::LWPersistence;
-use crate::reward::{CollectRewardNote, RewardNoteProofs};
+use crate::reward::{CollectRewardNote, CollectedRewards, RewardNoteProofs};
 pub use crate::set_merkle_tree::*;
 pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
 pub use crate::util::canonical;
 pub use crate::PrivKey;
 
-use crate::reward::CollectedRewardsHash;
-use crate::stake_table::{StakeTableCommitmentsHash, StakeTableHash};
+use crate::reward::{CollectedRewardsCommitment, CollectedRewardsHash};
+use crate::stake_table::{
+    StakeTableCommitment, StakeTableCommitmentsCommitment, StakeTableCommitmentsHash,
+    StakeTableHash, ViewNumber,
+};
 pub use crate::PubKey;
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
@@ -818,6 +821,8 @@ impl Committable for NullifierHistory {
 /// the validators, so that all agree. Any discrepency in the history
 /// would produce a disagreement.
 pub mod state_comm {
+    use crate::stake_table::{StakeTableCommitment, StakeTableCommitmentsCommitment};
+
     use super::*;
     use jf_utils::tagged_blob;
     use net::Hash;
@@ -888,6 +893,9 @@ pub mod state_comm {
         pub past_record_merkle_roots: Commitment<RecordMerkleHistory>,
         pub past_nullifiers: Commitment<NullifierHistory>,
         pub prev_block: Commitment<Block>,
+        pub stake_table: Commitment<StakeTableCommitment>,
+        pub stake_table_commitments: Commitment<StakeTableCommitmentsCommitment>,
+        pub collected_rewards: Commitment<CollectedRewardsCommitment>,
     }
 
     impl Committable for LedgerCommitmentOpening {
@@ -998,6 +1006,12 @@ impl ValidatorState {
 
             past_nullifiers: self.past_nullifiers.commit(),
             prev_block: self.prev_block.0,
+            stake_table: StakeTableCommitment(self.stake_table.hash()).commit(),
+            stake_table_commitments: StakeTableCommitmentsCommitment(
+                self.stake_table_commitments.hash(),
+            )
+            .commit(),
+            collected_rewards: CollectedRewardsCommitment(self.collected_rewards.hash()).commit(),
         };
         inputs.commit().into()
     }
@@ -1120,6 +1134,68 @@ impl ValidatorState {
         }
         {
             //TODO (fernando) verify CollectRewards
+            for (pfs, txn) in rewards_proofs
+                .into_iter()
+                .zip(reward_txns.clone().into_iter())
+            {
+                //check collected reward non-inclusion proof
+                let collected_reward_check = pfs
+                    .uncollected_reward_proof
+                    .check(
+                        CollectedRewards((
+                            txn.body.vrf_witness.staking_key.clone(),
+                            txn.body.vrf_witness.view_number,
+                        )),
+                        self.collected_rewards.hash(),
+                    )
+                    .unwrap();
+                //reward exists in the table; reward has been collected
+                if collected_reward_check.0.is_some() {
+                    //return "already collected reward" error
+                    return Err(ValidationError::Failed {});
+                }
+
+                //make sure stake_table_commitment matches stored stake table commitment for that view
+                //KALEY: might not need this...
+                if pfs.stake_table_commitment
+                    != self
+                        .stake_table_commitments
+                        .lookup(txn.body.vrf_witness.view_number)
+                        .unwrap()
+                        .0
+                        .unwrap()
+                {
+                    //return "incorrect stake table commitment" error
+                    return Err(ValidationError::Failed {});
+                }
+
+                //check stake_table_commitment_proof
+                let stake_table_comm_check = pfs
+                    .stake_table_commitment_proof
+                    .check(
+                        txn.body.vrf_witness.view_number,
+                        self.stake_table_commitments.hash(),
+                    )
+                    .unwrap();
+                if stake_table_comm_check.0.unwrap() != pfs.stake_table_commitment {
+                    return Err(ValidationError::Failed {});
+                }
+
+                //check stake amount proof
+                let stake_amount_check = pfs
+                    .stake_amount_proof
+                    .check(
+                        txn.body.vrf_witness.staking_key,
+                        pfs.stake_table_commitment.0,
+                    )
+                    .unwrap();
+                //check amount matches stake_amount
+                if stake_amount_check.0.is_none()
+                    || stake_amount_check.0.unwrap() != txn.body.reward_amount
+                {
+                    return Err(ValidationError::Failed {});
+                }
+            }
         }
         // assemble Block
         let txns: Vec<_> = cap_txns
@@ -1190,6 +1266,10 @@ impl ValidatorState {
             .push_front(self.record_merkle_commitment.root_value);
         self.record_merkle_commitment = record_merkle_frontier.commitment();
         self.record_merkle_frontier = record_merkle_frontier.frontier();
+        self.stake_table_commitments.insert(
+            ViewNumber(now),
+            StakeTableCommitment(self.stake_table.hash()),
+        );
         self.prev_state = Some(comm);
         Ok(ValidationOutputs {
             uids,

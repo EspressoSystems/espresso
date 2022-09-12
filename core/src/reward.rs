@@ -15,7 +15,9 @@ use crate::stake_table::{
     StakeTableCommitment, StakeTableCommitmentsHash, StakeTableHash, StakingKey,
     StakingKeySignature, ViewNumber,
 };
-use crate::state::{CommitableHash, CommitableHashTag};
+use crate::state::{CommitableHash, CommitableHashTag, KVTreeHash};
+use crate::util::canonical;
+
 use ark_serialize::*;
 use core::hash::Hash;
 use jf_cap::keys::{UserAddress, UserPubKey};
@@ -28,7 +30,7 @@ use serde::{Deserialize, Serialize};
 /// Previously collected rewards are recorded in (StakingKey, view_number) pairs
 #[tagged_blob("COLLECTED-REWARD")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
-pub struct CollectedRewards((StakingKey, ViewNumber));
+pub struct CollectedRewards(pub (StakingKey, ViewNumber));
 
 /// Identifying tag for CollectedReward
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -41,6 +43,16 @@ impl CommitableHashTag for CollectedRewardsTag {
 
 /// Hash for set Merkle tree for all of the previously-collected rewards
 pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
+
+pub struct CollectedRewardsCommitment(pub <CollectedRewardsHash as KVTreeHash>::Digest);
+
+impl commit::Committable for CollectedRewardsCommitment {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Collected Reward")
+            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
+            .finalize()
+    }
+}
 
 /// Reward Collection Transaction Note
 #[derive(
@@ -55,8 +67,8 @@ pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRe
     Deserialize,
 )]
 pub struct CollectRewardNote {
-    body: CollectRewardBody,
-    signature: StakingKeySignature,
+    pub body: CollectRewardBody,
+    pub signature: StakingKeySignature,
 }
 
 /// Reward Collection Transaction Note
@@ -73,13 +85,13 @@ pub struct CollectRewardNote {
 )]
 pub struct CollectRewardBody {
     /// Blinding factor for reward record commitment on CAP native asset
-    blind_factor: BlindFactor,
+    pub blind_factor: BlindFactor,
     /// Address that owns the reward
-    cap_address: UserAddress,
+    pub cap_address: UserAddress,
     /// Reward amount
-    reward_amount: Amount,
+    pub reward_amount: Amount,
     /// Staking `pub_key`, `view` number and a proof that staking key was selected for committee election on `view`
-    vrf_witness: VrfWitness,
+    pub vrf_witness: VrfWitness,
 }
 
 impl CollectRewardBody {
@@ -119,16 +131,16 @@ impl CollectRewardNote {
     Serialize,
     Deserialize,
 )]
-struct VrfWitness {
+pub struct VrfWitness {
     /// Staking public key
-    staking_key: StakingKey,
+    pub staking_key: StakingKey,
     /// View number for which the key was elected
-    view_number: ViewNumber,
+    pub view_number: ViewNumber,
     /// amount of stake on `view_number`
-    stake_amount: Amount, /*
-                          /// VRF Proof
-                          proof:
-                          */
+    pub stake_amount: Amount, /*
+                              /// VRF Proof
+                              proof:
+                              */
 }
 
 /// Auxiliary info and proof for CollectRewardNote
@@ -150,11 +162,11 @@ struct VrfWitness {
 )]
 pub struct RewardNoteProofs {
     /// Stake table commitment for the view number reward
-    stake_table_commitment: StakeTableCommitment,
+    pub stake_table_commitment: StakeTableCommitment,
     /// Proof for stake_table_commitment
-    stake_table_commitment_proof: KVMerkleProof<StakeTableCommitmentsHash>,
+    pub stake_table_commitment_proof: KVMerkleProof<StakeTableCommitmentsHash>,
     /// Proof for stake_amount for staking key on that view number
-    stake_amount_proof: KVMerkleProof<StakeTableHash>,
+    pub stake_amount_proof: KVMerkleProof<StakeTableHash>,
     /// Proof that reward hasn't been collected
-    uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+    pub uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
 }

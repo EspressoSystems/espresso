@@ -423,8 +423,10 @@ where
         }
     }
 
-    /// Returns the value and proof for a queried key. If the key exists in a forgotten subtree,
-    /// returns None.
+    /// Returns the value and proof for a queried key.
+    /// If the key is in a ForgottenSubtree (not loaded in memory), returns None.
+    /// If the key is not present, returns Some(None, pf) where pf is the non-inclusion proof.
+    /// If the key is present, returns Some(Some(value), pf) where `value` is the corresponding value and pf is the inclusion proof.
     pub fn lookup(
         &self,
         key: KVHash::Key,

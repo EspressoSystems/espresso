@@ -12,7 +12,9 @@
 
 use crate::state::{CommitableHash, CommitableHashTag};
 use crate::tree_hash::KVTreeHash;
+use crate::util::canonical;
 use crate::{PrivKey, PubKey};
+
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use espresso_macros::*;
 use hotshot_types::traits::signature_key::{EncodedSignature, SignatureKey};
@@ -79,6 +81,14 @@ impl CanonicalDeserialize for StakingKey {
     }
 }
 
+impl commit::Committable for StakingKey {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Staking Key")
+            .var_size_bytes(&canonical::serialize(self).unwrap())
+            .finalize()
+    }
+}
+
 // cannot derive CanonicalSerialize because PubKey does not implement it
 impl CanonicalSerialize for StakingKeySignature {
     fn serialize<W: ark_serialize::Write>(
@@ -117,6 +127,14 @@ impl CanonicalDeserialize for StakingKeySignature {
 )]
 pub struct ViewNumber(pub(crate) u64);
 
+impl commit::Committable for ViewNumber {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("View Number")
+            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
+            .finalize()
+    }
+}
+
 ///Identifying tag for a StakeTable
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub struct StakeTableTag();
@@ -139,8 +157,38 @@ impl CommitableHashTag for StakeTableCommitmentTag {
 }
 
 /// Stake table commitment type
-pub type StakeTableCommitment = <StakeTableHash as KVTreeHash>::Digest;
+#[derive(
+    Clone,
+    Debug,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Hash,
+    CanonicalDeserialize,
+    CanonicalSerialize,
+)]
+
+pub struct StakeTableCommitment(pub <StakeTableHash as KVTreeHash>::Digest);
+
+impl commit::Committable for StakeTableCommitment {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Stake Table Commitment")
+            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
+            .finalize()
+    }
+}
 
 /// Hash for tree which stores commitment hash of previous rounds' stake tables in (view_number, stake table commitment) kv pairs
 pub type StakeTableCommitmentsHash =
-    CommitableHash<ViewNumber, <StakeTableHash as KVTreeHash>::Digest, StakeTableCommitmentTag>;
+    CommitableHash<ViewNumber, StakeTableCommitment, StakeTableCommitmentTag>;
+
+pub struct StakeTableCommitmentsCommitment(pub <StakeTableCommitmentsHash as KVTreeHash>::Digest);
+impl commit::Committable for StakeTableCommitmentsCommitment {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Stake Table Commitments Commitment")
+            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
+            .finalize()
+    }
+}
