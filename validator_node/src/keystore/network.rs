@@ -10,9 +10,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::{api, api::ClientError};
 use address_book::InsertPubKey;
-use api::client::*;
 use async_std::{sync::Arc, task::sleep};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
@@ -34,6 +32,7 @@ use jf_cap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, Univ
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use key_set::{ProverKeySet, SizedKey};
+use net::client::*;
 use reef::Ledger;
 use seahorse::transactions::Transaction;
 use seahorse::{
@@ -322,8 +321,20 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
             .unwrap()
             .send()
             .await
-            .context::<_, KeystoreError<EspressoLedger>>(ClientError)?;
-        response_body(&mut res).await.context(ClientError)
+            .map_err(|source| KeystoreError::Failed {
+                msg: format!(
+                    "Address book request POST /request_pubkey failed: {}",
+                    source
+                ),
+            })?;
+        response_body(&mut res)
+            .await
+            .map_err(|source| KeystoreError::Failed {
+                msg: format!(
+                    "Failed to parse response from GET /request_pubkey: {}",
+                    source
+                ),
+            })
     }
 
     async fn get_nullifier_proof(

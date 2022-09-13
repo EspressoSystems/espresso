@@ -21,14 +21,13 @@ use espresso_core::{
 };
 use espresso_validator::*;
 use full_node_esqs::EsQS;
-use futures::{future::pending, StreamExt};
+use futures::future::pending;
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
 use std::process::exit;
 use std::time::Duration;
 use tagged_base64::TaggedBase64;
 use tracing::info;
-use validator_node::node::Validator;
 
 #[derive(Parser)]
 #[clap(
@@ -70,10 +69,6 @@ struct Options {
     #[clap(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txn: Option<u64>,
 
-    /// Wait for web server to exit after transactions complete.
-    #[clap(long)]
-    pub wait: bool,
-
     /// Whether to color log output with ANSI color codes.
     #[clap(long, env = "ESPRESSO_COLORED_LOGS")]
     pub colored_logs: bool,
@@ -89,7 +84,7 @@ struct Options {
 async fn generate_transactions(
     num_txn: u64,
     own_id: usize,
-    hotshot: Consensus,
+    mut hotshot: Consensus,
     mut state: MultiXfrTestState,
 ) {
     #[cfg(target_os = "linux")]
@@ -113,8 +108,6 @@ async fn generate_transactions(
         fence();
     };
 
-    let mut events = hotshot.subscribe();
-
     // Start consensus for each transaction
     let mut round = 0;
     let mut succeeded_round = 0;
@@ -126,7 +119,7 @@ async fn generate_transactions(
         report_mem();
         info!(
             "Commitment: {}",
-            hotshot.current_state().await.unwrap().unwrap().commit()
+            hotshot.get_state().await.unwrap().unwrap().commit()
         );
 
         // Generate a transaction if the node ID is 0 and if there isn't a keystore to generate it.
@@ -172,10 +165,13 @@ async fn generate_transactions(
             }
         }
 
-        hotshot.start_consensus().await;
+        hotshot.start().await;
         let success = loop {
             info!("Waiting for HotShot event");
-            let event = events.next().await.expect("HotShot unexpectedly closed");
+            let event = hotshot
+                .next_event()
+                .await
+                .expect("HotShot unexpectedly closed");
 
             match event.event {
                 EventType::Decide {
@@ -298,7 +294,7 @@ async fn main() -> Result<(), std::io::Error> {
         Some(EsQS::new(
             esqs,
             data_source,
-            hotshot.subscribe(),
+            hotshot.clone(),
             ElaboratedBlock::genesis(genesis),
         )?)
     } else {
@@ -308,7 +304,7 @@ async fn main() -> Result<(), std::io::Error> {
     if let Some(num_txn) = options.num_txn {
         generate_transactions(num_txn, own_id, hotshot, state.unwrap()).await;
     } else {
-        hotshot.run(pending::<()>()).await;
+        run_consensus(hotshot, pending::<()>()).await;
     }
 
     Ok(())

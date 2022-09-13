@@ -12,7 +12,8 @@
 
 use crate::{
     full_node_esqs::{self, EsQS},
-    gen_keys, genesis, init_validator, open_data_source, ConsensusOpt, NodeOpt, MINIMUM_NODES,
+    gen_keys, genesis, init_validator, open_data_source, run_consensus, ConsensusOpt, NodeOpt,
+    MINIMUM_NODES,
 };
 use address_book::store::FileStore;
 use async_std::task::{block_on, spawn, JoinHandle};
@@ -30,13 +31,10 @@ use std::time::{Duration, Instant};
 use surf::Url;
 use tempdir::TempDir;
 use tide_disco::{wait_for_server, SERVER_STARTUP_RETRIES, SERVER_STARTUP_SLEEP_MS};
-use validator_node::{
-    keystore::{
-        loader::{KeystoreLoader, MnemonicPasswordLogin},
-        network::NetworkBackend,
-        EspressoKeystore,
-    },
-    node::Validator,
+use validator_node::keystore::{
+    loader::{KeystoreLoader, MnemonicPasswordLogin},
+    network::NetworkBackend,
+    EspressoKeystore,
 };
 
 pub struct TestNode {
@@ -189,15 +187,12 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
 
         store_path.push(i.to_string());
         async move {
-            let mut node_opt = NodeOpt {
+            let node_opt = NodeOpt {
                 store_path: Some(store_path),
                 nonbootstrap_base_port: base_port as usize,
                 next_view_timeout: Duration::from_secs(10 * 60),
                 ..NodeOpt::default()
             };
-            if i == 0 {
-                node_opt.full = true;
-            }
             let consensus = init_validator(
                 &node_opt,
                 &consensus_opt,
@@ -210,14 +205,14 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             let data_source = open_data_source(&node_opt, i, consensus.clone());
 
             // If applicable, run a query service.
-            let esqs = if node_opt.full {
+            let esqs = if i == 0 {
                 let port = pick_unused_port().unwrap();
                 tracing::info!("spawning EsQS at http://localhost:{}", port);
                 Some(
                     EsQS::new(
                         &full_node_esqs::Command::with_port(port),
                         data_source,
-                        consensus.subscribe(),
+                        consensus.clone(),
                         ElaboratedBlock::genesis(genesis),
                     )
                     .unwrap(),
@@ -227,7 +222,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             };
 
             let (kill, recv_kill) = oneshot::channel();
-            let wait = spawn(consensus.run(recv_kill));
+            let wait = spawn(run_consensus(consensus, recv_kill));
             TestNode { esqs, kill, wait }
         }
     }))

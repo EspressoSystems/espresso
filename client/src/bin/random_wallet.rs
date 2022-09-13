@@ -40,6 +40,7 @@ use jf_cap::{
     structs::{AssetCode, AssetPolicy, FreezeFlag},
     TransactionNote,
 };
+use net::client::response_body;
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand::{
@@ -61,13 +62,10 @@ use structopt::StructOpt;
 use surf::StatusCode;
 use tempdir::TempDir;
 use tracing::{event, Level};
-use validator_node::{
-    api::client::response_body,
-    keystore::{
-        network::{NetworkBackend, Url},
-        txn_builder::TransactionUID,
-        RecordAmount,
-    },
+use validator_node::keystore::{
+    network::{NetworkBackend, Url},
+    txn_builder::TransactionUID,
+    RecordAmount,
 };
 
 #[derive(Debug)]

@@ -13,7 +13,6 @@
 // There are design arguments for partitioning this into independent modules for each api,
 // but doing so results in duplicated work and (temporary) allocation
 
-use crate::node::{ConsensusEvent, EventStream};
 use ark_serialize::CanonicalSerialize;
 use async_executors::AsyncStd;
 use async_std::sync::{Arc, RwLock};
@@ -33,15 +32,16 @@ use espresso_status_api::data_source::UpdateStatusData;
 use futures::{
     future::RemoteHandle,
     task::{SpawnError, SpawnExt},
-    StreamExt,
+    Stream, StreamExt,
 };
 use hotshot::data::{BlockHash, LeafHash, QuorumCertificate, Stage, VecQuorumCertificate};
-use hotshot::types::EventType;
 use hotshot::H_256;
 use hotshot_types::data::ViewNumber;
 use itertools::izip;
 use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
+
+pub type HotShotEvent = hotshot::types::EventType<ElaboratedBlock, ValidatorState, H_256>;
 
 pub trait UpdateQueryDataSourceTypes {
     type CU: UpdateCatchUpData + Sized + Send + Sync;
@@ -72,7 +72,7 @@ where
     TYPES: UpdateQueryDataSourceTypes + 'static,
 {
     pub fn new(
-        event_source: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
+        event_source: impl 'static + Send + Unpin + Stream<Item = HotShotEvent>,
         catchup_store: Arc<RwLock<TYPES::CU>>,
         availability_store: Arc<RwLock<TYPES::AV>>,
         meta_state_store: Arc<RwLock<TYPES::MS>>,
@@ -117,9 +117,8 @@ where
         instance
     }
 
-    async fn update(&mut self, event: impl ConsensusEvent) {
-        use EventType::*;
-        if let Decide { block, state, qcs } = event.into_event() {
+    async fn update(&mut self, event: HotShotEvent) {
+        if let HotShotEvent::Decide { block, state, qcs } = event {
             let mut num_txns = 0usize;
             let mut cumulative_size = 0usize;
 
@@ -246,6 +245,8 @@ where
             let mut status_store = self.status_store.write().await;
             status_store
                 .edit_status(|vs| {
+                    vs.latest_block_id = self.validator_state.block_height as u64 - 1;
+                    vs.decided_block_count += block.len() as u64;
                     vs.cumulative_txn_count += num_txns as u64;
                     vs.cumulative_size += cumulative_size as u64;
                     Ok(())
@@ -260,7 +261,7 @@ where
 }
 
 fn launch_updates<TYPES>(
-    mut event_source: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
+    mut event_source: impl 'static + Send + Unpin + Stream<Item = HotShotEvent>,
     update_handle: Arc<RwLock<UpdateQueryDataSource<TYPES>>>,
 ) -> Result<RemoteHandle<()>, SpawnError>
 where

@@ -2295,6 +2295,7 @@ dependencies = [
  "jf-primitives",
  "jf-utils 0.1.1",
  "lazy_static",
+ "net",
  "parse-size",
  "portpicker",
  "primitive-types",
@@ -2462,6 +2463,7 @@ dependencies = [
  "bincode",
  "clap 3.2.17",
  "cld",
+ "commit",
  "derive_more",
  "dirs",
  "escargot",
@@ -2511,6 +2513,7 @@ dependencies = [
  "tracing-distributed 0.3.1",
  "tracing-futures",
  "tracing-subscriber 0.3.15",
+ "tracing-test",
  "validator_node",
 ]
 

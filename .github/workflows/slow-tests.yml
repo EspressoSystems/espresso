@@ -42,4 +42,4 @@ jobs:
       - name: Run Tests
         run: |
           ulimit -n 4096
-          cargo test --release --features=slow-tests
+          cargo test --release --features=testing,slow-tests

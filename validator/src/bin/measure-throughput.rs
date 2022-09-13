@@ -12,6 +12,7 @@
 
 use async_std::task::sleep;
 use clap::Parser;
+use espresso_status_api::Throughput;
 use human_bytes::human_bytes;
 use net::client::response_body;
 use std::fmt::{self, Display, Formatter};
@@ -19,7 +20,6 @@ use std::ops::Sub;
 use std::time::{Duration, Instant};
 use surf::Url;
 use tracing::{error, info};
-use validator_node::node::LedgerSummary;
 
 /// Measure system throughput over time by polling a query service.
 #[derive(Parser)]
@@ -42,9 +42,9 @@ struct Options {
 #[derive(Clone, Debug)]
 struct Measurement {
     duration: Duration,
-    transactions: usize,
-    bytes: usize,
-    blocks: usize,
+    transactions: u64,
+    bytes: u64,
+    blocks: u64,
 }
 
 impl Display for Measurement {
@@ -64,16 +64,22 @@ impl Display for Measurement {
 #[derive(Clone, Debug)]
 struct Snapshot {
     t: Instant,
-    state: LedgerSummary,
+    num_txns: u64,
+    num_blocks: u64,
+    total_size: u64,
 }
 
 impl Snapshot {
     async fn new(esqs_url: &Url) -> Result<Self, surf::Error> {
-        let mut res = surf::get(esqs_url.join("/getinfo").unwrap()).send().await?;
-        let state = response_body(&mut res).await?;
+        let mut res = surf::get(esqs_url.join("/status/throughput").unwrap())
+            .send()
+            .await?;
+        let m: Throughput = response_body(&mut res).await?;
         Ok(Self {
             t: Instant::now(),
-            state,
+            num_txns: m.transactions_finalized,
+            num_blocks: m.blocks_finalized,
+            total_size: m.bytes_finalized,
         })
     }
 }
@@ -84,9 +90,9 @@ impl Sub for &Snapshot {
     fn sub(self, other: &Snapshot) -> Measurement {
         Measurement {
             duration: self.t - other.t,
-            transactions: self.state.num_txns - other.state.num_txns,
-            bytes: self.state.total_size - other.state.total_size,
-            blocks: self.state.num_blocks - other.state.num_blocks,
+            transactions: self.num_txns - other.num_txns,
+            bytes: self.total_size - other.total_size,
+            blocks: self.num_blocks - other.num_blocks,
         }
     }
 }

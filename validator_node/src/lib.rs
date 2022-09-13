@@ -11,15 +11,9 @@
 // see <https://www.gnu.org/licenses/>.
 #![deny(warnings)]
 
-pub mod api;
 pub mod keystore;
-pub mod node;
-mod serializers;
 pub mod update_query_data_source;
 pub mod validator_node;
 
 #[cfg(test)]
 mod macro_tests;
-
-extern crate espresso_macros;
-use espresso_macros::*;

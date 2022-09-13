@@ -40,6 +40,7 @@ jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jelly
 jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
 jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
 lazy_static = "1.4.0"
+net = { git = "https://github.com/EspressoSystems/net.git" }
 parse-size = "1.0"
 portpicker = "0.1"
 primitive-types = "0.11"

@@ -119,33 +119,12 @@ async fn main() {
     if options.node_opt.reset_store_state {
         args.push("--reset-store-state");
     }
-    if options.node_opt.full {
-        args.push("--full");
-    }
-    if options.wait {
-        args.push("--wait");
-    }
     let store_path;
     if let Some(path) = &options.node_opt.store_path {
         store_path = path.display().to_string();
         args.push("--store-path");
         args.push(&store_path);
     }
-    let web_path;
-    if let Some(path) = &options.node_opt.web_path {
-        web_path = path.display().to_string();
-        args.push("--assets");
-        args.push(&web_path);
-    }
-    let api_path;
-    if let Some(path) = &options.node_opt.api_path {
-        api_path = path.display().to_string();
-        args.push("--api");
-        args.push(&api_path);
-    }
-    let web_server_port = options.node_opt.web_server_port.to_string();
-    args.push("--web-server-port");
-    args.push(&web_server_port);
     let min_propose_time = format!("{}ms", options.node_opt.min_propose_time.as_millis());
     args.push("--min-propose-time");
     args.push(&min_propose_time);

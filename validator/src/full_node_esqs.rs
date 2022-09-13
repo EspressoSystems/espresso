@@ -10,7 +10,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::{node::ConsensusEvent, EventStream, QueryData, UpdateQueryDataSourceTypesBinder};
+use crate::{Consensus, QueryData, UpdateQueryDataSourceTypesBinder};
 use async_std::{
     sync::{Arc, RwLock},
     task::{spawn, JoinHandle},
@@ -23,6 +23,7 @@ use espresso_core::state::ElaboratedBlock;
 use espresso_metastate_api::api as metastate;
 use espresso_status_api::api as status;
 use espresso_validator_api::api as validator;
+use futures::stream::{unfold, StreamExt};
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::fmt::Display;
@@ -126,7 +127,7 @@ impl EsQS {
     pub fn new(
         command: &Command,
         data_source: Arc<RwLock<QueryData>>,
-        events: EventStream<impl ConsensusEvent + Send + std::fmt::Debug + 'static>,
+        consensus: Consensus,
         genesis: ElaboratedBlock,
     ) -> io::Result<Self> {
         let Command::Esqs(opt) = command;
@@ -158,6 +159,13 @@ impl EsQS {
                 Ok(())
             }
         });
+        let events = unfold(consensus, |mut consensus| async move {
+            match consensus.next_event().await {
+                Ok(event) => Some((event.event, consensus)),
+                Err(err) => panic!("unexpected error from HotShotHandle::next_event: {:?}", err),
+            }
+        })
+        .boxed();
         let updater = UpdateQueryDataSource::new(
             events,
             data_source.clone(),
