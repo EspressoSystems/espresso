@@ -97,7 +97,7 @@ where
         genesis_state
             .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
             .unwrap();
-        instance.update(EventType::Decide {
+        block_on(instance.update(EventType::Decide {
             block: Arc::new(vec![genesis]),
             state: Arc::new(vec![genesis_state]),
             qcs: Arc::new(vec![VecQuorumCertificate {
@@ -107,7 +107,7 @@ where
                 signatures: Default::default(),
                 genesis: Default::default(),
             }]),
-        });
+        }));
 
         let instance = Arc::new(RwLock::new(instance));
         if let Ok(task_handle) = launch_updates(event_source, instance.clone()) {
@@ -117,7 +117,7 @@ where
         instance
     }
 
-    fn update(&mut self, event: impl ConsensusEvent) {
+    async fn update(&mut self, event: impl ConsensusEvent) {
         use EventType::*;
         if let Decide { block, state, qcs } = event.into_event() {
             let mut num_txns = 0usize;
@@ -194,8 +194,8 @@ where
                         }))
                     }
 
-                    let mut catchup_store = block_on(self.catchup_store.write());
-                    if let Err(e) = catchup_store.append_events(events) {
+                    let mut catchup_store = self.catchup_store.write().await;
+                    if let Err(e) = catchup_store.append_events(events).await {
                         tracing::warn!("append_events returned error {}", e);
                     }
                     continuation_event_index = catchup_store.event_count() as u64;
@@ -206,7 +206,7 @@ where
                     let qcert_block_hash: [u8; H_256] =
                         qcert.block_hash.try_into().unwrap_or([0u8; H_256]);
                     let block_hash = BlockHash::<H_256>::from_array(qcert_block_hash);
-                    let mut availability_store = block_on(self.availability_store.write());
+                    let mut availability_store = self.availability_store.write().await;
                     if let Err(e) = availability_store.append_blocks(vec![(
                         Some(BlockQueryData {
                             raw_block: block.clone(),
@@ -235,7 +235,7 @@ where
                     }
                 }
                 {
-                    let mut meta_state_store = block_on(self.meta_state_store.write());
+                    let mut meta_state_store = self.meta_state_store.write().await;
                     if let Err(e) = meta_state_store
                         .append_block_nullifiers(block_index as u64, nullifiers_delta)
                     {
@@ -243,7 +243,7 @@ where
                     }
                 }
             }
-            let mut status_store = block_on(self.status_store.write());
+            let mut status_store = self.status_store.write().await;
             status_store
                 .edit_status(|vs| {
                     vs.cumulative_txn_count += num_txns as u64;
@@ -253,7 +253,7 @@ where
                 .unwrap();
             drop(status_store);
 
-            let mut on_handled = block_on(self.event_handler.write());
+            let mut on_handled = self.event_handler.write().await;
             on_handled.on_event_processing_complete();
         }
     }
@@ -269,7 +269,7 @@ where
     AsyncStd::new().spawn_with_handle(async move {
         // Handle events as they come in from the network.
         while let Some(event) = event_source.next().await {
-            update_handle.write().await.update(event);
+            update_handle.write().await.update(event).await;
         }
     })
 }

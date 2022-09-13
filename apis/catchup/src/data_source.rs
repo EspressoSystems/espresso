@@ -10,6 +10,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+use async_trait::async_trait;
 use espresso_core::ledger::EspressoLedger;
 use postage::broadcast::Receiver;
 use seahorse::events::LedgerEvent;
@@ -25,12 +26,13 @@ pub trait CatchUpDataSource {
     fn subscribe(&self) -> Receiver<(usize, LedgerEvent<EspressoLedger>)>;
 }
 
+#[async_trait]
 pub trait UpdateCatchUpData {
     type Error: Error + Debug;
 
     fn event_count(&self) -> usize;
 
-    fn append_events(
+    async fn append_events(
         &mut self,
         events: Vec<Option<LedgerEvent<EspressoLedger>>>,
     ) -> Result<(), Self::Error>;

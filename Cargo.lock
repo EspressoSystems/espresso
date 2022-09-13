@@ -2263,6 +2263,7 @@ dependencies = [
 name = "espresso-catchup-api"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "clap 3.2.17",
  "derive_more",
  "espresso-core",

@@ -397,9 +397,10 @@ impl<'a> CatchUpDataSource for &'a QueryData {
     }
 }
 
+#[async_trait]
 impl UpdateCatchUpData for QueryData {
     type Error = EspressoError;
-    fn append_events(
+    async fn append_events(
         &mut self,
         events: Vec<Option<LedgerEvent<EspressoLedger>>>,
     ) -> Result<(), Self::Error> {
@@ -409,10 +410,11 @@ impl UpdateCatchUpData for QueryData {
                     warn!("Failed to store event {:?}, Error: {}", e, err);
                 }
 
-                // `try_send` fails if the channel is full or closed. The channel cannot be full because
+                // `send` fails if the channel is full or closed. The channel cannot be full because
                 // it is unbounded, and cannot be closed because `self` owns copies of both ends.
                 self.event_sender
-                    .blocking_send((self.event_count(), e.clone()))
+                    .send((self.event_count(), e.clone()))
+                    .await
                     .expect("unexpected failure when broadcasting event");
             }
             self.events.push(e);
