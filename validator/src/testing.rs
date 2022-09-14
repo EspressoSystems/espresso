@@ -11,13 +11,13 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    full_node_esqs::{self, EsQS},
     gen_keys, genesis, init_validator, open_data_source, run_consensus, ConsensusOpt, NodeOpt,
     MINIMUM_NODES,
 };
 use address_book::store::FileStore;
 use async_std::task::{block_on, spawn, JoinHandle};
 use espresso_core::state::ElaboratedBlock;
+use espresso_esqs::full_node::{self, EsQS};
 use futures::{channel::oneshot, future::join_all};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
@@ -188,7 +188,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 tracing::info!("spawning EsQS at http://localhost:{}", port);
                 Some(
                     EsQS::new(
-                        &full_node_esqs::Command::with_port(port),
+                        &full_node::Command::with_port(port),
                         data_source,
                         consensus.clone(),
                         ElaboratedBlock::genesis(genesis),

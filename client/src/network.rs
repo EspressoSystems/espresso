@@ -24,15 +24,15 @@ use espresso_core::{
     state::ElaboratedTransaction,
     universal_params::MERKLE_HEIGHT,
 };
+use espresso_esqs::ApiError;
 use espresso_metastate_api::api::NullifierCheck;
-use futures::future::ready;
+use futures::future::{ready, BoxFuture};
 use futures::prelude::*;
 use jf_cap::keys::{UserAddress, UserKeyPair, UserPubKey};
 use jf_cap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, UniversalParam};
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use key_set::{ProverKeySet, SizedKey};
-use net::client::*;
 use reef::Ledger;
 use seahorse::transactions::Transaction;
 use seahorse::{
@@ -47,8 +47,8 @@ use std::convert::TryInto;
 use std::pin::Pin;
 use std::time::Duration;
 use surf::http::content::{Accept, MediaTypeProposal};
-use surf::http::{headers, mime};
-pub use surf::Url;
+use surf::http::{headers, mime, StatusCode};
+pub use surf::{Request, Response, Url};
 
 pub struct NetworkBackend<'a> {
     univ_param: &'a UniversalParam,
@@ -79,7 +79,7 @@ impl<'a> NetworkBackend<'a> {
             .set_base_url(base_url)
             .try_into()
             .context(ClientConfigSnafu)?;
-        Ok(client)
+        Ok(client.with(parse_error_body::<ApiError>))
     }
 
     async fn get<T: for<'de> Deserialize<'de>>(
@@ -407,4 +407,127 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
             Default::default(),
         ))
     }
+}
+
+/// Deserialize the body of a response.
+///
+/// The Content-Type header is used to determine the serialization format.
+///
+/// This function combined with the [parse_error_body] middleware defines the client-side
+/// protocol for decoding espresso types from Tide Disco responses.
+async fn response_body<T: for<'de> Deserialize<'de>>(res: &mut Response) -> Result<T, surf::Error> {
+    if let Some(content_type) = res.header("Content-Type") {
+        match content_type.as_str() {
+            "application/json" => res.body_json().await,
+            "application/octet-stream" => {
+                bincode::deserialize(&res.body_bytes().await?).map_err(|err| {
+                    surf::Error::from_str(
+                        StatusCode::InternalServerError,
+                        format!("response body fails to deserialize: {}", err),
+                    )
+                })
+            }
+            content_type => Err(surf::Error::from_str(
+                StatusCode::UnsupportedMediaType,
+                format!("unsupported content type {}", content_type),
+            )),
+        }
+    } else {
+        Err(surf::Error::from_str(
+            StatusCode::UnsupportedMediaType,
+            "unspecified content type in response",
+        ))
+    }
+}
+
+async fn response_error<E: tide_disco::Error>(res: &mut Response) -> E {
+    // To add context to the error, try to interpret the response body as a serialized error. Since
+    // `body_json`, `body_string`, etc. consume the response body, we will extract the body as raw
+    // bytes and then try various potential decodings based on the response headers and the contents
+    // of the body.
+    let bytes = match res.body_bytes().await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            // If we are unable to even read the body, just return a generic error message based on
+            // the status code.
+            return E::catch_all(
+                res.status(),
+                format!(
+                    "Request terminated with error {}. Failed to read request body due to {}",
+                    res.status(),
+                    err
+                ),
+            );
+        }
+    };
+    if let Some(content_type) = res.header("Content-Type") {
+        // If the response specifies a content type, check if it is one of the types we know how to
+        // deserialize, and if it is, we can then see if it deserializes to an `E`.
+        match content_type.as_str() {
+            "application/json" => {
+                if let Ok(err) = serde_json::from_slice(&bytes) {
+                    return err;
+                }
+            }
+            "application/octet-stream" => {
+                if let Ok(err) = bincode::deserialize(&bytes) {
+                    return err;
+                }
+            }
+            _ => {}
+        }
+    }
+    // If we get here, then we were not able to interpret the response body as an `E` directly. This
+    // can be because:
+    //  * the content type is not supported for deserialization
+    //  * the content type was unspecified
+    //  * the body did not deserialize to an `E`
+    // We have one thing left we can try: if the body is a string, we can use the `catch_all`
+    // variant of `E` to include the contents of the string in the error message.
+    if let Ok(msg) = std::str::from_utf8(&bytes) {
+        return E::catch_all(res.status(), msg.to_string());
+    }
+
+    // The response body was not an `E` or a string. Return the most helpful error message we can,
+    // including the status code, content type, and raw body.
+    E::catch_all(
+        res.status(),
+        format!(
+            "Request terminated with error {}. Content-Type: {}. Body: 0x{}",
+            res.status(),
+            match res.header("Content-Type") {
+                Some(content_type) => content_type.as_str(),
+                None => "unspecified",
+            },
+            hex::encode(&bytes)
+        ),
+    )
+}
+
+async fn response_to_result<E: tide_disco::Error>(mut res: Response) -> surf::Result<Response> {
+    if res.status() == StatusCode::Ok {
+        Ok(res)
+    } else {
+        let err = response_error::<E>(&mut res).await;
+        Err(surf::Error::new(res.status(), err))
+    }
+}
+
+/// Client middleware which turns responses with non-success statuses into errors.
+///
+/// If the status code of the response is Ok (200), the response is passed through unchanged.
+/// Otherwise, the body of the response is treated as a [tide_disco::Error] which is lifted into a
+/// [surf::Error].
+///
+/// If the request fails without producing a response at all, the [surf::Error] from the failed
+/// request is passed through.
+fn parse_error_body<E: tide_disco::Error>(
+    req: Request,
+    client: surf::Client,
+    next: surf::middleware::Next<'_>,
+) -> BoxFuture<surf::Result<Response>> {
+    Box::pin(
+        next.run(req, client)
+            .and_then(|res| async { response_to_result::<E>(res).await }),
+    )
 }

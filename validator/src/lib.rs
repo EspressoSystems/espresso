@@ -13,7 +13,6 @@
 #![deny(warnings)]
 #![allow(clippy::format_push_string)]
 
-use crate::full_node_data_source::QueryData;
 use ark_serialize::*;
 use async_std::sync::{Arc, RwLock};
 use clap::{Args, Parser};
@@ -30,6 +29,7 @@ use espresso_core::{
     universal_params::VERIF_CRS,
     PrivKey, PubKey,
 };
+use espresso_esqs::full_node_data_source::QueryData;
 use futures::{select, Future, FutureExt};
 use hotshot::traits::implementations::Libp2pNetwork;
 use hotshot::traits::NetworkError;
@@ -64,12 +64,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use surf::Url;
 use tracing::{debug, event, Level};
-use validator_node::{
-    update_query_data_source::UpdateQueryDataSourceTypes, validator_node::ValidatorNodeImpl,
-};
-
-pub mod full_node_data_source;
-pub mod full_node_esqs;
+use validator_node::validator_node::ValidatorNodeImpl;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
@@ -434,16 +429,6 @@ fn get_secret_key_seed(consensus_opt: &ConsensusOpt) -> [u8; 32] {
         .secret_key_seed
         .unwrap_or(SecretKeySeed(DEFAULT_SECRET_KEY_SEED))
         .into()
-}
-
-pub struct UpdateQueryDataSourceTypesBinder;
-
-impl UpdateQueryDataSourceTypes for UpdateQueryDataSourceTypesBinder {
-    type CU = QueryData;
-    type AV = QueryData;
-    type MS = QueryData;
-    type ST = QueryData;
-    type EH = QueryData;
 }
 
 type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
@@ -830,8 +815,8 @@ pub fn open_data_source(
 ) -> Arc<RwLock<QueryData>> {
     let storage = get_store_dir(options, id);
     Arc::new(RwLock::new(if options.reset_store_state {
-        QueryData::new(&storage, consensus).unwrap()
+        QueryData::new(&storage, Box::new(consensus)).unwrap()
     } else {
-        QueryData::load(&storage, consensus).unwrap()
+        QueryData::load(&storage, Box::new(consensus)).unwrap()
     }))
 }

@@ -36,9 +36,11 @@ derive_more = "0.99"
 escargot = "0.5.2"
 espresso-availability-api = { path = "../apis/availability" }
 espresso-core = { path = "../core/" }
+espresso-esqs = { path = "../apis/esqs" }
 espresso-metastate-api = { path = "../apis/metastate" }
 espresso-validator = { path = "../validator", features = ["testing"] }
 futures = "0.3.16"
+hex = "0.4"
 human_bytes = "0.3"
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
@@ -65,6 +67,7 @@ structopt = { version = "0.3", features = ["paw"] }
 surf = "2.3.1"
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.2.0" }
 tempdir = "0.3.7"
+tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main" }
 toml = "0.5"
 tracing = "0.1.35"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

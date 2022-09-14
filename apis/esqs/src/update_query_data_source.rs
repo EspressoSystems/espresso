@@ -97,7 +97,7 @@ where
         genesis_state
             .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
             .unwrap();
-        block_on(instance.update(EventType::Decide {
+        block_on(instance.update(HotShotEvent::Decide {
             block: Arc::new(vec![genesis]),
             state: Arc::new(vec![genesis_state]),
             qcs: Arc::new(vec![VecQuorumCertificate {

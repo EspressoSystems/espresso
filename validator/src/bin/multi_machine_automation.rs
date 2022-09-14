@@ -13,7 +13,8 @@
 use async_std::task::{sleep, spawn_blocking};
 use clap::Parser;
 use escargot::CargoBuild;
-use espresso_validator::{full_node_esqs, NodeOpt};
+use espresso_esqs::full_node;
+use espresso_validator::NodeOpt;
 use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
@@ -56,7 +57,7 @@ struct Options {
 
     /// Options for the new EsQS.
     #[clap(subcommand)]
-    pub esqs: Option<full_node_esqs::Command>,
+    pub esqs: Option<full_node::Command>,
 
     #[clap(long, short)]
     verbose: bool,
@@ -196,7 +197,7 @@ async fn main() {
                 this_args.push(&num_txn_str);
             }
             let mut esqs_args = vec![];
-            if let Some(full_node_esqs::Command::Esqs(opt)) = &options.esqs {
+            if let Some(full_node::Command::Esqs(opt)) = &options.esqs {
                 esqs_args = vec!["esqs".to_string(), "-p".to_string(), opt.port.to_string()];
                 if let Some(path) = &opt.metastate.api_path {
                     esqs_args.push("--metastate-api-path".to_string());

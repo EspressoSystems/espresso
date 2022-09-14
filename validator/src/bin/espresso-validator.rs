@@ -19,8 +19,8 @@ use espresso_core::{
     state::ElaboratedBlock,
     testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo},
 };
+use espresso_esqs::full_node::{self, EsQS};
 use espresso_validator::*;
-use full_node_esqs::EsQS;
 use futures::future::pending;
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
@@ -78,7 +78,7 @@ struct Options {
     pub chain_id: u16,
 
     #[clap(subcommand)]
-    pub esqs: Option<full_node_esqs::Command>,
+    pub esqs: Option<full_node::Command>,
 }
 
 async fn generate_transactions(

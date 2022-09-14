@@ -11,7 +11,6 @@
 // see <https://www.gnu.org/licenses/>.
 #![deny(warnings)]
 
-pub mod update_query_data_source;
 pub mod validator_node;
 
 #[cfg(test)]

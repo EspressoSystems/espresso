@@ -10,26 +10,36 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::{Consensus, QueryData, UpdateQueryDataSourceTypesBinder};
+//! Full node query service
+//!
+//! An instantiation of a Tide Disco service containing all possible query service modules, assuming
+//! all the relevant data is available locally. This service assumes it is running in the same
+//! process as an Espresso/HotShot instance. It provides the following API modules:
+//! * [availability]
+//! * [catchup]
+//! * [metastate]
+//! * [status]
+//! * [validator]
+
+use crate::{
+    full_node_data_source::QueryData,
+    update_query_data_source::{UpdateQueryDataSource, UpdateQueryDataSourceTypes},
+    ApiError,
+};
 use async_std::{
     sync::{Arc, RwLock},
     task::{spawn, JoinHandle},
 };
 use clap::{Args, Subcommand};
-use derive_more::From;
 use espresso_availability_api::api as availability;
 use espresso_catchup_api::api as catchup;
 use espresso_core::state::ElaboratedBlock;
 use espresso_metastate_api::api as metastate;
 use espresso_status_api::api as status;
-use espresso_validator_api::api as validator;
-use futures::stream::{unfold, StreamExt};
-use serde::{Deserialize, Serialize};
-use snafu::Snafu;
+use espresso_validator_api::{api as validator, data_source::ValidatorDataSource};
 use std::fmt::Display;
 use std::io;
-use tide_disco::{http::Url, App, StatusCode};
-use validator_node::update_query_data_source::UpdateQueryDataSource;
+use tide_disco::{http::Url, App};
 
 #[derive(Args)]
 pub struct Options {
@@ -76,45 +86,14 @@ impl Command {
     }
 }
 
-#[derive(Clone, Debug, From, Snafu, Deserialize, Serialize)]
-pub enum ApiError {
-    Availability {
-        source: availability::Error,
-    },
-    CatchUp {
-        source: catchup::Error,
-    },
-    Metastate {
-        source: metastate::Error,
-    },
-    Status {
-        source: status::Error,
-    },
-    Validator {
-        source: validator::Error,
-    },
-    #[from(ignore)]
-    Internal {
-        status: StatusCode,
-        reason: String,
-    },
-}
+struct UpdateQueryDataSourceTypesBinder;
 
-impl tide_disco::Error for ApiError {
-    fn catch_all(status: StatusCode, reason: String) -> Self {
-        Self::Internal { status, reason }
-    }
-
-    fn status(&self) -> StatusCode {
-        match self {
-            Self::Availability { source } => source.status(),
-            Self::CatchUp { source } => source.status(),
-            Self::Metastate { source } => source.status(),
-            Self::Status { source } => source.status(),
-            Self::Validator { source } => source.status(),
-            Self::Internal { status, .. } => *status,
-        }
-    }
+impl UpdateQueryDataSourceTypes for UpdateQueryDataSourceTypesBinder {
+    type CU = QueryData;
+    type AV = QueryData;
+    type MS = QueryData;
+    type ST = QueryData;
+    type EH = QueryData;
 }
 
 pub struct EsQS {
@@ -127,7 +106,7 @@ impl EsQS {
     pub fn new(
         command: &Command,
         data_source: Arc<RwLock<QueryData>>,
-        consensus: Consensus,
+        consensus: impl ValidatorDataSource + Send + Sync + 'static,
         genesis: ElaboratedBlock,
     ) -> io::Result<Self> {
         let Command::Esqs(opt) = command;
@@ -159,13 +138,7 @@ impl EsQS {
                 Ok(())
             }
         });
-        let events = unfold(consensus, |mut consensus| async move {
-            match consensus.next_event().await {
-                Ok(event) => Some((event.event, consensus)),
-                Err(err) => panic!("unexpected error from HotShotHandle::next_event: {:?}", err),
-            }
-        })
-        .boxed();
+        let events = consensus.into_stream();
         let updater = UpdateQueryDataSource::new(
             events,
             data_source.clone(),
@@ -175,7 +148,6 @@ impl EsQS {
             data_source,
             genesis,
         );
-
         Ok(Self {
             port,
             _updater: updater,
