@@ -17,9 +17,7 @@ use crate::{
 };
 use address_book::store::FileStore;
 use async_std::task::{block_on, spawn, JoinHandle};
-use espresso_core::{
-    ledger::EspressoLedger, state::ElaboratedBlock, universal_params::UNIVERSAL_PARAM,
-};
+use espresso_core::state::ElaboratedBlock;
 use futures::{channel::oneshot, future::join_all};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
@@ -31,11 +29,6 @@ use std::time::{Duration, Instant};
 use surf::Url;
 use tempdir::TempDir;
 use tide_disco::{wait_for_server, SERVER_STARTUP_RETRIES, SERVER_STARTUP_SLEEP_MS};
-use validator_node::keystore::{
-    loader::{KeystoreLoader, MnemonicPasswordLogin},
-    network::NetworkBackend,
-    EspressoKeystore,
-};
 
 pub struct TestNode {
     esqs: Option<EsQS>,
@@ -108,21 +101,6 @@ pub struct TestNetwork {
 }
 
 impl TestNetwork {
-    pub async fn create_keystore(
-        &self,
-        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = MnemonicPasswordLogin>,
-    ) -> EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin> {
-        let backend = NetworkBackend::new(
-            &UNIVERSAL_PARAM,
-            self.query_api.clone(),
-            self.address_book_api.clone(),
-            self.submit_api.clone(),
-        )
-        .await
-        .unwrap();
-        EspressoKeystore::new(backend, loader).await.unwrap()
-    }
-
     pub async fn kill(mut self) {
         Self::kill_impl(take(&mut self.nodes), take(&mut self.address_book)).await
     }

@@ -2281,19 +2281,25 @@ dependencies = [
 name = "espresso-client"
 version = "0.1.0"
 dependencies = [
+ "address-book",
  "async-std",
  "async-trait",
+ "async-tungstenite 0.15.0",
  "bincode",
  "derive_more",
  "escargot",
+ "espresso-availability-api",
  "espresso-core",
+ "espresso-metastate-api",
  "espresso-validator",
  "futures",
  "human_bytes",
+ "itertools 0.10.3",
  "jf-cap",
  "jf-plonk",
  "jf-primitives",
  "jf-utils 0.1.1",
+ "key-set",
  "lazy_static",
  "net",
  "parse-size",
@@ -2301,6 +2307,7 @@ dependencies = [
  "primitive-types",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "reef",
  "regex",
  "rustyline",
  "seahorse",
@@ -2469,6 +2476,7 @@ dependencies = [
  "escargot",
  "espresso-availability-api",
  "espresso-catchup-api",
+ "espresso-client",
  "espresso-core",
  "espresso-metastate-api",
  "espresso-status-api",
@@ -2634,6 +2642,7 @@ dependencies = [
  "bincode",
  "dirs",
  "escargot",
+ "espresso-client",
  "espresso-core",
  "espresso-validator",
  "futures",
@@ -2659,7 +2668,6 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber 0.3.15",
  "tracing-test",
- "validator_node",
 ]
 
 [[package]]
@@ -7676,14 +7684,12 @@ checksum = "936e4b492acfd135421d8dca4b1aa80a7bfc26e702ef3af710e0752684df5372"
 name = "validator_node"
 version = "0.1.0"
 dependencies = [
- "address-book",
  "arbitrary",
  "arbitrary-wrappers",
  "ark-serialize",
  "ark-std",
  "async-std",
  "async-trait",
- "async-tungstenite 0.15.0",
  "async_executors",
  "bincode",
  "bitvec 0.20.1",
@@ -7701,7 +7707,6 @@ dependencies = [
  "jf-cap",
  "jf-primitives",
  "jf-utils 0.1.1",
- "key-set",
  "lazy_static",
  "net",
  "proptest",

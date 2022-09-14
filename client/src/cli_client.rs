@@ -512,7 +512,6 @@ impl Validator {
                 .args([
                     "--store-path",
                     store_path.as_os_str().to_str().unwrap(),
-                    "--full",
                     "--id",
                     &id.to_string(),
                     "--num-nodes",

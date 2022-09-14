@@ -33,6 +33,11 @@
 
 use async_std::task::sleep;
 use derive_more::Deref;
+use espresso_client::{
+    network::{NetworkBackend, Url},
+    txn_builder::TransactionUID,
+    RecordAmount,
+};
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use human_bytes::human_bytes;
 use jf_cap::{
@@ -62,11 +67,6 @@ use structopt::StructOpt;
 use surf::StatusCode;
 use tempdir::TempDir;
 use tracing::{event, Level};
-use validator_node::keystore::{
-    network::{NetworkBackend, Url},
-    txn_builder::TransactionUID,
-    RecordAmount,
-};
 
 #[derive(Debug)]
 pub enum OperationType {

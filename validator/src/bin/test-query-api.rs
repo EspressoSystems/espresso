@@ -30,25 +30,21 @@ use async_tungstenite::async_std::connect_async;
 use clap::Parser;
 use commit::Committable;
 use espresso_availability_api::query_data::*;
-use espresso_core::{
-    ledger::EspressoLedger, state::BlockCommitment, universal_params::UNIVERSAL_PARAM,
-};
+use espresso_core::{ledger::EspressoLedger, state::BlockCommitment};
 use espresso_metastate_api::api::NullifierCheck;
 use futures::prelude::*;
 use itertools::izip;
 use net::client::*;
 use reef::traits::Transaction;
-use seahorse::{
-    events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnafu, Keystore, KeystoreError,
-};
+use seahorse::{events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnafu, KeystoreError};
 use serde::Deserialize;
 use snafu::ResultExt;
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::time::Duration;
+use surf::Url;
 use tempdir::TempDir;
 use tracing::{event, Level};
-use validator_node::keystore::network::{NetworkBackend, Url};
 
 #[derive(Parser)]
 struct Args {
@@ -222,20 +218,6 @@ async fn test(opt: &Args) {
     for event in events1.into_iter() {
         serde_json::from_str::<LedgerEvent<EspressoLedger>>(event.to_text().unwrap()).unwrap();
     }
-
-    // Check that we can create a keystore using this server as a backend.
-    let url = url(opt, "/");
-    let mut loader = UnencryptedKeystoreLoader {
-        dir: TempDir::new("test_query_api").unwrap(),
-    };
-    let _keystore = Keystore::new(
-        NetworkBackend::new(&UNIVERSAL_PARAM, url.clone(), url.clone(), url)
-            .await
-            .unwrap(),
-        &mut loader,
-    )
-    .await
-    .unwrap();
 }
 
 #[async_std::main]
@@ -249,6 +231,8 @@ async fn main() {
 #[cfg(test)]
 mod test {
     use super::*;
+    use espresso_client::{network::NetworkBackend, Keystore};
+    use espresso_core::universal_params::UNIVERSAL_PARAM;
     use espresso_validator::testing::minimal_test_network;
     use jf_cap::{keys::UserKeyPair, structs::AssetCode};
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};

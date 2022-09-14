@@ -21,6 +21,15 @@ use async_std::{
 use atomic_store::{
     load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
 };
+use espresso_client::{
+    events::EventIndex,
+    hd::Mnemonic,
+    loader::{MnemonicPasswordLogin, RecoveryLoader},
+    network::NetworkBackend,
+    records::Record,
+    txn_builder::{TransactionStatus, TransactionUID},
+    EspressoKeystore, RecordAmount,
+};
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use futures::{channel::mpsc, future::join_all, stream::StreamExt};
 use jf_cap::{
@@ -47,15 +56,6 @@ use tide::{
     StatusCode,
 };
 use tracing::{error, info, warn};
-use validator_node::keystore::{
-    events::EventIndex,
-    hd::Mnemonic,
-    loader::{MnemonicPasswordLogin, RecoveryLoader},
-    network::NetworkBackend,
-    records::Record,
-    txn_builder::{TransactionStatus, TransactionUID},
-    EspressoKeystore, RecordAmount,
-};
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -942,6 +942,7 @@ mod test {
     use super::*;
     use async_std::task::{sleep, spawn_blocking};
     use escargot::CargoBuild;
+    use espresso_client::{hd::KeyTree, loader::CreateLoader};
     use espresso_validator::testing::minimal_test_network;
     use futures::{future::join_all, Future};
     use jf_cap::structs::AssetDefinition;
@@ -955,7 +956,6 @@ mod test {
     use std::time::Duration;
     use tempdir::TempDir;
     use tracing_test::traced_test;
-    use validator_node::keystore::{hd::KeyTree, loader::CreateLoader};
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
         let mut backoff = Duration::from_millis(100);
@@ -1120,7 +1120,17 @@ mod test {
                 receiver_mnemonic,
                 Alphanumeric.sample_string(&mut rand::thread_rng(), 16),
             );
-            let mut receiver = network.create_keystore(&mut receiver_loader).await;
+            let backend = NetworkBackend::new(
+                &UNIVERSAL_PARAM,
+                network.query_api.clone(),
+                network.address_book_api.clone(),
+                network.submit_api.clone(),
+            )
+            .await
+            .unwrap();
+            let mut receiver = EspressoKeystore::new(backend, &mut receiver_loader)
+                .await
+                .unwrap();
             let receiver_key = receiver
                 .generate_sending_account("receiver".into(), None)
                 .await

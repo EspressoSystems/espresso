@@ -21,14 +21,12 @@ edition = "2021"
 slow-tests = ["seahorse/testing"]
 
 [dependencies]
-address-book = { path = "../address-book" }
 arbitrary = { version = "1.0", features = ["derive"] }
 arbitrary-wrappers = { git = "https://github.com/EspressoSystems/arbitrary-wrappers.git" }
 ark-serialize = { version = "0.3.0", features = ["derive"] }
 ark-std = { version = "0.3.0", default-features = false }
 async-std = { version = "1.10.0", features = ["unstable", "attributes"] }
 async-trait = "0.1.51"
-async-tungstenite = { version = "0.15.0", features = ["async-std-runtime"] }
 async_executors = { version = "0.4.2", features = ["async_std"] }
 bincode = "1.3.3"
 bitvec = "0.20.1"
@@ -43,7 +41,6 @@ itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
 jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
-key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 lazy_static = "1.4.0"
 net = { git = "https://github.com/EspressoSystems/net.git" }
 hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.3" }

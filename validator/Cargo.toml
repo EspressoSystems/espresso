@@ -87,6 +87,7 @@ slow-tests = []
 testing = ["portpicker"]
 
 [dev-dependencies]
+espresso-client = { path = "../client" }
 portpicker = "0.1"
 tracing-test = "0.2"
 
