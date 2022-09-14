@@ -50,10 +50,10 @@ use tracing::{error, info, warn};
 use validator_node::keystore::{
     events::EventIndex,
     hd::Mnemonic,
+    ledger_state::{TransactionStatus, TransactionUID},
     loader::{MnemonicPasswordLogin, RecoveryLoader},
     network::NetworkBackend,
     records::Record,
-    txn_builder::{TransactionStatus, TransactionUID},
     EspressoKeystore, RecordAmount,
 };
 
@@ -608,7 +608,7 @@ async fn spendable_records(
     keystore: &EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin>,
     grant_size: RecordAmount,
 ) -> impl Iterator<Item = Record> {
-    let now = keystore.read().await.state().txn_state.validator.now();
+    let now = keystore.read().await.state().validator.now();
     keystore.records().await.into_iter().filter(move |record| {
         record.asset_code() == AssetCode::native()
             && record.amount() >= grant_size

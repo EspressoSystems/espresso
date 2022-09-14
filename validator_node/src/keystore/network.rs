@@ -38,9 +38,9 @@ use node::{LedgerSnapshot, LedgerSummary};
 use seahorse::transactions::Transaction;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
-    sparse_merkle_tree::SparseMerkleTree,
-    txn_builder::TransactionState,
-    BincodeSnafu, ClientConfigSnafu, CryptoSnafu, KeystoreBackend, KeystoreError, KeystoreState,
+    ledger_state::LedgerState,
+    lw_merkle_tree::LWMerkleTree,
+    BincodeSnafu, ClientConfigSnafu, CryptoSnafu, KeystoreBackend, KeystoreError,
 };
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
@@ -161,7 +161,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
 
     async fn create(
         &mut self,
-    ) -> Result<KeystoreState<'a, EspressoLedger>, KeystoreError<EspressoLedger>> {
+    ) -> Result<LedgerState<'a, EspressoLedger>, KeystoreError<EspressoLedger>> {
         let LedgerSummary {
             num_blocks,
             num_events,
@@ -220,16 +220,13 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
                 .collect::<Result<_, _>>()?,
         });
 
-        let state = KeystoreState {
+        let state = LedgerState::new(
             proving_keys,
-            txn_state: TransactionState {
-                validator,
-
-                nullifiers,
-                record_mt: SparseMerkleTree::sparse(records.0),
-                now: EventIndex::from_source(EventSource::QueryService, num_events),
-            },
-        };
+            EventIndex::from_source(EventSource::QueryService, num_events),
+            validator,
+            LWMerkleTree::sparse(records.0),
+            nullifiers,
+        );
 
         Ok(state)
     }
@@ -299,6 +296,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
 
     async fn get_nullifier_proof(
         &self,
+        _block_height: u64,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
     ) -> Result<(bool, SetMerkleProof), KeystoreError<EspressoLedger>> {
