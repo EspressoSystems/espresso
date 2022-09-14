@@ -27,7 +27,8 @@ use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 
-type VrfProof = StakingKeySignature;
+/// Proof for Vrf output
+pub type VrfProof = StakingKeySignature;
 
 /// Compute the allowed stake amount given current state (e.g. circulating supply), view_number and stake amount
 /// Hard-coded to 0 for FST

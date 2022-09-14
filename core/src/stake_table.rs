@@ -42,6 +42,12 @@ impl StakingKey {
 /// Staking Private Key
 pub struct StakingPrivKey(pub(crate) PrivKey);
 
+impl StakingPrivKey {
+    pub fn generate() -> Self {
+        Self(PrivKey::generate())
+    }
+}
+
 /// PubKey used for stake table key
 #[tagged_blob("STAKING_KEY_SIGNATURE")]
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
@@ -51,6 +57,11 @@ impl StakingKey {
     #[cfg(test)]
     fn random_for_test(_rng: &mut rand_chacha::ChaChaRng) -> Self {
         StakingKey(PubKey::from_private(&PrivKey::generate()))
+    }
+
+    /// validate a signature
+    pub fn validate(&self, signature: &StakingKeySignature, data: &[u8]) -> bool {
+        self.0.validate(&signature.0, data)
     }
 }
 
