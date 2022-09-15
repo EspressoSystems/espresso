@@ -31,13 +31,10 @@
 // a key pair using `wallet-cli -g KEY_FILE`, and then pass the public key to the validators with
 // `-w KEY_FILE.pub` and pass the key pair to `random_keystore` with `-k KEY_FILE`.
 
+use address_book::error::AddressBookError;
 use async_std::task::sleep;
 use derive_more::Deref;
-use espresso_client::{
-    network::{NetworkBackend, Url},
-    txn_builder::TransactionUID,
-    RecordAmount,
-};
+use espresso_client::{network::NetworkBackend, txn_builder::TransactionUID, RecordAmount};
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use human_bytes::human_bytes;
 use jf_cap::{
@@ -45,7 +42,6 @@ use jf_cap::{
     structs::{AssetCode, AssetPolicy, FreezeFlag},
     TransactionNote,
 };
-use net::client::response_body;
 use rand::distributions::weighted::WeightedError;
 use rand::seq::SliceRandom;
 use rand::{
@@ -64,7 +60,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use structopt::StructOpt;
-use surf::StatusCode;
+use surf_disco::{Error, StatusCode, Url};
 use tempdir::TempDir;
 use tracing::{event, Level};
 
@@ -202,36 +198,30 @@ async fn retry_delay() {
     sleep(Duration::from_secs(1)).await
 }
 
-async fn get_peers(url: &Url) -> Result<Vec<UserPubKey>, surf::Error> {
-    let mut response = surf::get(format!("{}request_peers", url))
-        .content_type(surf::http::mime::JSON)
-        .await?;
-    let pub_keys: Vec<UserPubKey> = response_body(&mut response).await?;
+async fn get_peers(url: &Url) -> Result<Vec<UserPubKey>, AddressBookError> {
+    let pub_keys: Vec<UserPubKey> =
+        surf_disco::get::<_, AddressBookError>(url.join("request_peers").unwrap())
+            .send()
+            .await?;
     event!(Level::INFO, "peers {} ", pub_keys.len());
     Ok(pub_keys)
 }
 
 async fn get_native_from_faucet(keystore: &mut Keystore, pub_key: &UserPubKey, url: &Url) {
     // Request native asset for the keystore.
-    let receiver_key_bytes = bincode::serialize(&pub_key).unwrap();
     loop {
-        match surf::post(format!("{}request_fee_assets", url))
-            .content_type(surf::http::mime::BYTE_STREAM)
-            .body_bytes(&receiver_key_bytes)
+        match surf_disco::post::<(), AddressBookError>(url.join("request_fee_assets").unwrap())
+            .body_binary(pub_key)
+            .unwrap()
+            .send()
             .await
         {
-            Ok(res) if res.status() == StatusCode::Ok => {
-                break;
-            }
-            Ok(res) if res.status() == StatusCode::TooManyRequests => {
+            Ok(_) => break,
+            Err(err) if err.status() == StatusCode::TooManyRequests => {
                 tracing::warn!(
                     "Faucet request failed due because another is in flight.  Won't retry."
                 );
                 break;
-            }
-            Ok(res) => {
-                tracing::error!("retrying faucet because of {} response", res.status());
-                retry_delay().await;
             }
             Err(err) => {
                 tracing::error!("Retrying faucet because of {:?}", err);

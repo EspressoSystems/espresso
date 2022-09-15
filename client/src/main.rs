@@ -20,7 +20,7 @@
 mod cli_client;
 
 use async_trait::async_trait;
-use espresso_client::network::{NetworkBackend, Url};
+use espresso_client::network::NetworkBackend;
 use espresso_core::ledger::EspressoLedger;
 use jf_cap::proof::UniversalParam;
 use seahorse::{
@@ -33,6 +33,7 @@ use seahorse::{
 use std::path::PathBuf;
 use std::process::exit;
 use structopt::StructOpt;
+use surf_disco::Url;
 
 #[derive(StructOpt)]
 pub struct Args {

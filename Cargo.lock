@@ -2284,7 +2284,6 @@ dependencies = [
  "address-book",
  "async-std",
  "async-trait",
- "async-tungstenite 0.15.0",
  "bincode",
  "derive_more",
  "escargot",
@@ -2303,7 +2302,6 @@ dependencies = [
  "jf-utils 0.1.1",
  "key-set",
  "lazy_static",
- "net",
  "parse-size",
  "portpicker",
  "primitive-types",
@@ -2318,10 +2316,9 @@ dependencies = [
  "serde_json",
  "snafu",
  "structopt",
- "surf",
+ "surf-disco",
  "tagged-base64",
  "tempdir",
- "tide-disco",
  "toml",
  "tracing",
  "tracing-subscriber 0.3.15",
@@ -6932,6 +6929,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "surf-disco"
+version = "0.1.0"
+source = "git+https://github.com/EspressoSystems/surf-disco.git?branch=main#2bd39463c93bdf62ea75ff2836f9c8244dfc0366"
+dependencies = [
+ "async-std",
+ "async-tungstenite 0.15.0",
+ "bincode",
+ "futures",
+ "hex",
+ "serde",
+ "serde_json",
+ "surf",
+ "tide-disco",
+]
+
+[[package]]
 name = "sval"
 version = "1.0.0-alpha.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7118,7 +7131,7 @@ dependencies = [
 [[package]]
 name = "tide-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#e081b97fae210bf478788b9bde443dd3afeb5f2e"
+source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#482f59a9314765ecd8928a7b051b3a9555190bbc"
 dependencies = [
  "ark-serialize",
  "async-std",
