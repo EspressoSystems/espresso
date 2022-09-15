@@ -294,7 +294,7 @@ async fn main() -> Result<(), std::io::Error> {
     let data_source = open_data_source(&options.node_opt, own_id, hotshot.clone());
 
     // Start an EsQS server if requested.
-    let _esqs = if let Some(esqs) = &options.esqs {
+    if let Some(esqs) = &options.esqs {
         Some(EsQS::new(
             esqs,
             data_source,

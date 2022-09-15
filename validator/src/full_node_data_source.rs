@@ -448,26 +448,40 @@ impl QueryData {
         }
         let default_nullifier_set = SetMerkleTree::default();
 
-        // Get a cached nullifier set and the index of the block _after_ that set (so that we can
-        // use index 0 to represent the pre-genesis "-1" state, with empty nullifiers).
-        let prev_cached_set = self.cached_nullifier_sets.range(..block_id + 1).next_back();
-        let (index, nullifier_set) = if let Some((index, tree)) = prev_cached_set {
-            (index + 1, tree)
+        // `cached_nullifier_sets` is indexed by `block_id`, the (0-based) index of the block which
+        // created each nullifier set. This gives us no way to represent the initial, empty
+        // nullifier set (since it's hypothetical block ID would be -1) in the case where we do not
+        // have a cached nullifier set earlier than `block_id`. Things will become slightly simpler
+        // if we work in terms of block _height_. Then the initial nullifier set (the one we have
+        // before applying any blocks) has block height 0, and the nullifier set after the block
+        // with ID `n` has block height `n + 1`.
+        let block_height = block_id + 1;
+
+        // Get the latest cached nullifier set whose block height is at most the block height of
+        // interest.
+        let prev_cached_set = self.cached_nullifier_sets.range(..block_height).next_back();
+        let (cached_block_height, cached_nullifier_set) =
+            if let Some((index, tree)) = prev_cached_set {
+                // Remember that `cached_nullifier_sets` is indexed by block _index_, so the block
+                // _height_ of the cached nullifier set is `index + 1`.
+                (index + 1, tree)
+            } else {
+                // If we don't have a cached set lower than `block_height`, we use the initial,
+                // empty set, which has a block height of 0.
+                (0, &default_nullifier_set)
+            };
+        assert!(cached_block_height <= block_height);
+        if cached_block_height == block_height {
+            Ok(op(cached_nullifier_set))
         } else {
-            (0, &default_nullifier_set)
-        };
-        assert!(index <= block_id + 1);
-        if index == block_id + 1 {
-            // If the block after `nullifier_set` is the block after the one of interest, then
-            // `nullifier_set` corresponds to the block of interest.
-            Ok(op(nullifier_set))
-        } else {
-            // Otherwise, we need to build the nullifier set for `block_id` by adding the nullifiers
-            // from each block from `index` to `block_id`.
-            let mut adjusted_nullifier_set = nullifier_set.clone();
-            let index = index as usize;
-            let iter = self.get_nth_block_iter(index);
-            iter.take(block_id as usize + 1 - index).for_each(|block| {
+            // If the cached nullifier set is not the exact one we are interested in, we need to
+            // build the nullifier set for `block_height` by adding the nullifiers from each block
+            // from `cached_block_height` to `block_height`.
+            let mut adjusted_nullifier_set = cached_nullifier_set.clone();
+            let iter = self
+                .get_nth_block_iter(cached_block_height as usize)
+                .take((block_height - cached_block_height) as usize);
+            iter.for_each(|block| {
                 if let Some(block) = block {
                     for transaction in block.raw_block.block.0.iter() {
                         for nullifier_in in transaction.input_nullifiers() {
