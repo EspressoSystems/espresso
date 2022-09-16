@@ -540,8 +540,9 @@ impl Validator {
                     "12",
                     "--bootstrap-nodes",
                     &format!("localhost:{}", bootstrap_port),
+                    "esqs",
                 ])
-                .env("ESPRESSO_VALIDATOR_QUERY_PORT", server_port.to_string())
+                .env("ESPRESSO_ESQS_PORT", server_port.to_string())
                 .env(
                     "ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT",
                     pick_unused_port().unwrap().to_string(),

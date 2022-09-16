@@ -10,23 +10,23 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::{
-    api,
-    api::{ClientError, EspressoError},
-    node,
-};
+use crate::{api, api::ClientError};
 use address_book::InsertPubKey;
 use api::client::*;
 use async_std::{sync::Arc, task::sleep};
 use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
-use async_tungstenite::tungstenite::Message;
+use async_tungstenite::tungstenite::{
+    client::IntoClientRequest, http::header as ws_headers, Message,
+};
+use espresso_availability_api::query_data::StateQueryData;
 use espresso_core::{
     ledger::EspressoLedger,
     set_merkle_tree::{SetMerkleProof, SetMerkleTree},
     state::ElaboratedTransaction,
     universal_params::MERKLE_HEIGHT,
 };
+use espresso_metastate_api::api::NullifierCheck;
 use futures::future::ready;
 use futures::prelude::*;
 use jf_cap::keys::{UserAddress, UserKeyPair, UserPubKey};
@@ -34,7 +34,7 @@ use jf_cap::proof::{freeze::FreezeProvingKey, transfer::TransferProvingKey, Univ
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
 use key_set::{ProverKeySet, SizedKey};
-use node::{LedgerSnapshot, LedgerSummary};
+use reef::Ledger;
 use seahorse::transactions::Transaction;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
@@ -80,7 +80,7 @@ impl<'a> NetworkBackend<'a> {
             .set_base_url(base_url)
             .try_into()
             .context(ClientConfigSnafu)?;
-        Ok(client.with(parse_error_body::<EspressoError>))
+        Ok(client)
     }
 
     async fn get<T: for<'de> Deserialize<'de>>(
@@ -89,12 +89,22 @@ impl<'a> NetworkBackend<'a> {
     ) -> Result<T, KeystoreError<EspressoLedger>> {
         let mut res = self
             .query_client
-            .get(uri)
+            .get(uri.as_ref())
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, KeystoreError<EspressoLedger>>(ClientError)?;
-        response_body(&mut res).await.context(ClientError)
+            .map_err(|source| KeystoreError::Failed {
+                msg: format!("EsQS request GET {} failed: {}", uri.as_ref(), source),
+            })?;
+        response_body(&mut res)
+            .await
+            .map_err(|source| KeystoreError::Failed {
+                msg: format!(
+                    "Failed to parse response from GET {}: {}",
+                    uri.as_ref(),
+                    source
+                ),
+            })
     }
 
     async fn post<T: Serialize>(
@@ -103,12 +113,14 @@ impl<'a> NetworkBackend<'a> {
         body: &T,
     ) -> Result<(), KeystoreError<EspressoLedger>> {
         client
-            .post(uri)
+            .post(uri.as_ref())
             .body_bytes(bincode::serialize(body).context(BincodeSnafu)?)
             .header(headers::ACCEPT, Self::accept_header())
             .send()
             .await
-            .context::<_, KeystoreError<EspressoLedger>>(ClientError)?;
+            .map_err(|source| KeystoreError::Failed {
+                msg: format!("EsQS request POST {} failed: {}", uri.as_ref(), source),
+            })?;
         Ok(())
     }
 
@@ -126,25 +138,24 @@ impl<'a> NetworkBackend<'a> {
 
     async fn wait_for_esqs(&self) -> Result<(), KeystoreError<EspressoLedger>> {
         let mut backoff = Duration::from_millis(500);
+        let url = &self
+            .query_client
+            .config()
+            .base_url
+            .as_ref()
+            .expect("esqs config has no base url");
         for _ in 0..8 {
             // We use a direct `surf::connect` instead of
             // `self.query_client.connect` because the client middleware isn't
             // set up to handle connect requests, only API requests.
-            if surf::connect(
-                &self
-                    .query_client
-                    .config()
-                    .base_url
-                    .as_ref()
-                    .expect("esqs config has no base url"),
-            )
-            .send()
-            .await
-            .is_ok()
-            {
+            if surf::connect(&url).send().await.is_ok() {
                 return Ok(());
             }
-            tracing::warn!("unable to connect to EsQS; sleeping for {:?}", backoff);
+            tracing::warn!(
+                "unable to connect to EsQS at {}; sleeping for {:?}",
+                url,
+                backoff
+            );
             sleep(backoff).await;
             backoff *= 2;
         }
@@ -157,24 +168,15 @@ impl<'a> NetworkBackend<'a> {
 
 #[async_trait]
 impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
-    type EventStream = node::EventStream<(LedgerEvent<EspressoLedger>, EventSource)>;
+    type EventStream =
+        Pin<Box<dyn Send + Unpin + Stream<Item = (LedgerEvent<EspressoLedger>, EventSource)>>>;
 
     async fn create(
         &mut self,
     ) -> Result<KeystoreState<'a, EspressoLedger>, KeystoreError<EspressoLedger>> {
-        let LedgerSummary {
-            num_blocks,
-            num_events,
-            ..
-        } = self.get("getinfo").await?;
-
-        let LedgerSnapshot {
-            state: validator,
-            nullifiers,
-            records,
-            ..
-        } = self
-            .get(&format!("getsnapshot/{}/true", num_blocks))
+        let block_id: u64 = self.get("status/latest_block_id").await?;
+        let snapshot: StateQueryData = self
+            .get(format!("availability/getstate/{}", block_id))
             .await?;
 
         // Construct proving keys of the same arities as the verifier keys from the validator.
@@ -183,7 +185,8 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
             mint: jf_cap::proof::mint::preprocess(univ_param, MERKLE_HEIGHT)
                 .context(CryptoSnafu)?
                 .0,
-            freeze: validator
+            freeze: snapshot
+                .state
                 .chain
                 .verif_crs
                 .freeze
@@ -200,7 +203,8 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
                     )
                 })
                 .collect::<Result<_, _>>()?,
-            xfr: validator
+            xfr: snapshot
+                .state
                 .chain
                 .verif_crs
                 .xfr
@@ -223,11 +227,19 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
         let state = KeystoreState {
             proving_keys,
             txn_state: TransactionState {
-                validator,
-
-                nullifiers,
-                record_mt: SparseMerkleTree::sparse(records.0),
-                now: EventIndex::from_source(EventSource::QueryService, num_events),
+                nullifiers: SetMerkleTree::sparse(snapshot.state.nullifiers_root()),
+                record_mt: SparseMerkleTree::restore_from_frontier(
+                    snapshot.state.record_merkle_commitment,
+                    &snapshot.state.record_merkle_frontier,
+                )
+                .ok_or_else(|| KeystoreError::Failed {
+                    msg: "failed to restore sparse Merkle tree from frontier".to_string(),
+                })?,
+                validator: snapshot.state,
+                now: EventIndex::from_source(
+                    EventSource::QueryService,
+                    snapshot.continuation_event_index as usize,
+                ),
             },
         };
 
@@ -245,15 +257,20 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
             .base_url
             .as_ref()
             .unwrap()
-            .join(&format!("subscribe/{}", from))
+            .join(&format!("catchup/subscribe_for_events/{}", from))
             .unwrap();
         url.set_scheme("ws").unwrap();
+        let mut socket_req = url.into_client_request().unwrap();
+        socket_req.headers_mut().insert(
+            ws_headers::ACCEPT,
+            "application/octet-stream".parse().unwrap(),
+        );
 
         //todo !jeb.bearer handle connection failures.
         //      https://github.com/EspressoSystems/seahorse/issues/117
         // This should only fail if the server is incorrect or down, so we should handle by retrying
         // or failing over to a different server.
-        let all_events = connect_async(url)
+        let all_events = connect_async(socket_req)
             .await
             .expect("failed to connect to server")
             .0;
@@ -271,9 +288,21 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
                 // should retry or fail over to a different server.
                 .filter_map(|msg| {
                     let item = match msg {
-                        Ok(Message::Binary(bytes)) => bincode::deserialize(&bytes).ok(),
-                        Ok(Message::Text(json)) => serde_json::from_str(&json).ok(),
-                        _ => None,
+                        Ok(Message::Binary(bytes)) => match bincode::deserialize(&bytes) {
+                            Ok(Some(e)) => Some(e),
+                            Ok(None) => {
+                                tracing::error!("missing event from catchup service");
+                                None
+                            }
+                            Err(err) => {
+                                tracing::error!("malformed event from catchup service: {}", err);
+                                None
+                            }
+                        },
+                        msg => {
+                            tracing::warn!("unexpected message from catchup service: {:?}", msg);
+                            None
+                        }
                     }
                     .map(|event| (event, EventSource::QueryService));
                     ready(item)
@@ -299,14 +328,18 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
 
     async fn get_nullifier_proof(
         &self,
+        block_id: u64,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
     ) -> Result<(bool, SetMerkleProof), KeystoreError<EspressoLedger>> {
         if let Some(ret) = set.contains(nullifier) {
             Ok(ret)
         } else {
-            let api::NullifierProof { proof, spent, .. } = self
-                .get(format!("/getnullifier/{}/{}", set.hash(), nullifier))
+            let NullifierCheck { proof, spent } = self
+                .get(format!(
+                    "/metastate/check_nullifier/{}/{}",
+                    block_id, nullifier
+                ))
                 .await?;
             set.remember(nullifier, proof.clone()).unwrap();
             Ok((spent, proof))
@@ -347,7 +380,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
             ));
         }
 
-        Self::post(&self.validator_client, "/submit", &txn).await
+        Self::post(&self.validator_client, "/validator/submit", &txn).await
     }
 
     async fn finalize(&mut self, _txn: Transaction<EspressoLedger>, _txid: Option<(u64, u64)>) {
@@ -358,7 +391,9 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
         &self,
         _from: EventIndex,
     ) -> Result<(MerkleTree, EventIndex), KeystoreError<EspressoLedger>> {
-        let LedgerSnapshot { records, .. } = self.get("getsnapshot/0/true").await?;
-        Ok((records.0, Default::default()))
+        Ok((
+            MerkleTree::new(EspressoLedger::merkle_height()).unwrap(),
+            Default::default(),
+        ))
     }
 }

@@ -743,6 +743,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b88d82667eca772c4aa12f0f1348b3ae643424c8876448f3f7bd5787032e234c"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1537,6 +1546,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-queue"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cd42583b04998a5363558e5f9291ee5a5ff6b49944332103f251e7479a82aa7"
+dependencies = [
+ "cfg-if 1.0.0",
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2237,22 +2256,25 @@ dependencies = [
  "snafu",
  "tide-disco",
  "toml",
+ "tracing",
 ]
 
 [[package]]
 name = "espresso-catchup-api"
 version = "0.1.0"
 dependencies = [
- "async-channel",
+ "async-trait",
  "clap 3.2.17",
  "derive_more",
  "espresso-core",
  "futures",
+ "postage",
  "seahorse",
  "serde",
  "snafu",
  "tide-disco",
  "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -2448,6 +2470,7 @@ dependencies = [
  "espresso-core",
  "espresso-metastate-api",
  "espresso-status-api",
+ "espresso-validator-api",
  "futures",
  "futures-util",
  "hotshot",
@@ -2463,6 +2486,7 @@ dependencies = [
  "markdown",
  "net",
  "portpicker",
+ "postage",
  "procfs",
  "rand 0.8.5",
  "rand_chacha 0.2.2",
@@ -2488,6 +2512,21 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber 0.3.15",
  "validator_node",
+]
+
+[[package]]
+name = "espresso-validator-api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "clap 3.2.17",
+ "derive_more",
+ "espresso-core",
+ "futures",
+ "serde",
+ "snafu",
+ "tide-disco",
+ "toml",
 ]
 
 [[package]]
@@ -5291,6 +5330,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pollster"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5da3b0203fd7ee5720aa0b5e790b591aa5d3f41c3ed2c34a3a393382198af2f7"
+
+[[package]]
 name = "poly1305"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5331,6 +5376,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be97d76faf1bfab666e1375477b23fde79eccf0276e9b63b92a39d676a889ba9"
 dependencies = [
  "rand 0.8.5",
+]
+
+[[package]]
+name = "postage"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af3fb618632874fb76937c2361a7f22afd393c982a2165595407edc75b06d3c1"
+dependencies = [
+ "atomic",
+ "crossbeam-queue",
+ "futures",
+ "log",
+ "parking_lot 0.12.1",
+ "pin-project",
+ "pollster",
+ "static_assertions",
+ "thiserror",
 ]
 
 [[package]]
@@ -6136,7 +6198,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#87bb3860124362f0624beae2cbb32dee1dcc4f8b"
+source = "git+https://github.com/EspressoSystems/seahorse.git#b40236a09128bad59464653b62483291db8466de"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",

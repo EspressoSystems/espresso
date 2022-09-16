@@ -10,23 +10,14 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <https://www.gnu.org/licenses/>.
 
-[workspace]
-resolver = "2"
+[meta]
+NAME = "espresso-validator"
+DESCRIPTION = "HTTP interface to an Espresso validator"
+FORMAT_VERSION = "0.1.0"
 
-members = [
-    "address-book",
-    "apis/availability",
-    "apis/catchup",
-    "apis/metastate",
-    "apis/status",
-    "apis/validator",
-    "client",
-    "core",
-    "faucet",
-    "validator",
-  ]
-[profile.dev]
-opt-level = 1
-[profile.release]
-debug = true
-lto = "thin"
+[route.submit]
+PATH = ["/submit"]
+METHOD = "POST"
+DOC = """
+Submit a transaction.
+"""

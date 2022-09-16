@@ -25,8 +25,8 @@ use espresso_availability_api::{
 };
 use espresso_catchup_api::data_source::UpdateCatchUpData;
 use espresso_core::state::{
-    BlockCommitment, EspressoTransaction, EspressoTxnHelperProofs, TransactionCommitment,
-    ValidatorState,
+    BlockCommitment, ElaboratedBlock, EspressoTransaction, EspressoTxnHelperProofs,
+    TransactionCommitment, ValidatorState,
 };
 use espresso_metastate_api::data_source::UpdateMetaStateData;
 use espresso_status_api::data_source::UpdateStatusData;
@@ -35,9 +35,10 @@ use futures::{
     task::{SpawnError, SpawnExt},
     StreamExt,
 };
-use hotshot::data::{BlockHash, LeafHash, QuorumCertificate};
+use hotshot::data::{BlockHash, LeafHash, QuorumCertificate, Stage, VecQuorumCertificate};
 use hotshot::types::EventType;
 use hotshot::H_256;
+use hotshot_types::data::ViewNumber;
 use itertools::izip;
 use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
@@ -77,17 +78,38 @@ where
         meta_state_store: Arc<RwLock<TYPES::MS>>,
         status_store: Arc<RwLock<TYPES::ST>>,
         event_handler: Arc<RwLock<TYPES::EH>>,
-        validator_state: ValidatorState,
+        genesis: ElaboratedBlock,
     ) -> Arc<RwLock<Self>> {
-        let instance = Arc::new(RwLock::new(Self {
+        let mut instance = Self {
             catchup_store,
             availability_store,
             meta_state_store,
             status_store,
             event_handler,
-            validator_state,
+            validator_state: Default::default(),
             _event_task: None,
+        };
+
+        // HotShot does not currently support genesis nicely. It should automatically commit and
+        // broadcast a `Decide` event for the genesis block, but it doesn't. For now, we broadcast a
+        // `Commit` event for the genesis block ourselves.
+        let mut genesis_state = ValidatorState::default();
+        genesis_state
+            .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
+            .unwrap();
+        block_on(instance.update(EventType::Decide {
+            block: Arc::new(vec![genesis]),
+            state: Arc::new(vec![genesis_state]),
+            qcs: Arc::new(vec![VecQuorumCertificate {
+                block_hash: Default::default(),
+                view_number: ViewNumber::genesis(),
+                stage: Stage::Decide,
+                signatures: Default::default(),
+                genesis: Default::default(),
+            }]),
         }));
+
+        let instance = Arc::new(RwLock::new(instance));
         if let Ok(task_handle) = launch_updates(event_source, instance.clone()) {
             let mut edit_handle = block_on(instance.write());
             edit_handle._event_task = Some(task_handle);
@@ -95,7 +117,7 @@ where
         instance
     }
 
-    fn update(&mut self, event: impl ConsensusEvent) {
+    async fn update(&mut self, event: impl ConsensusEvent) {
         use EventType::*;
         if let Decide { block, state, qcs } = event.into_event() {
             let mut num_txns = 0usize;
@@ -105,7 +127,7 @@ where
                 izip!(block.iter().cloned(), state.iter(), qcs.iter().cloned()).rev()
             {
                 // Grab metadata for the new block from the state it is applying to.
-                let block_index = self.validator_state.prev_commit_time;
+                let block_index = self.validator_state.block_height;
                 let nullifier_proofs = self
                     .validator_state
                     .update_nullifier_proofs(&block.block.0, block.proofs.clone())
@@ -126,7 +148,7 @@ where
                 }
                 num_txns += block.block.0.len();
                 cumulative_size += block.serialized_size();
-                let event_index;
+                let continuation_event_index;
 
                 // Update the nullifier proofs in the block so that clients do not have
                 // to worry about out of date nullifier proofs.
@@ -172,11 +194,11 @@ where
                         }))
                     }
 
-                    let mut catchup_store = block_on(self.catchup_store.write());
-                    event_index = catchup_store.event_count() as u64;
-                    if let Err(e) = catchup_store.append_events(events) {
+                    let mut catchup_store = self.catchup_store.write().await;
+                    if let Err(e) = catchup_store.append_events(events).await {
                         tracing::warn!("append_events returned error {}", e);
                     }
+                    continuation_event_index = catchup_store.event_count() as u64;
 
                     first_uid - records_from
                 };
@@ -184,7 +206,7 @@ where
                     let qcert_block_hash: [u8; H_256] =
                         qcert.block_hash.try_into().unwrap_or([0u8; H_256]);
                     let block_hash = BlockHash::<H_256>::from_array(qcert_block_hash);
-                    let mut availability_store = block_on(self.availability_store.write());
+                    let mut availability_store = self.availability_store.write().await;
                     if let Err(e) = availability_store.append_blocks(vec![(
                         Some(BlockQueryData {
                             raw_block: block.clone(),
@@ -198,7 +220,7 @@ where
                             state: state.clone(),
                             commitment: state.commit(),
                             block_id: block_index as u64,
-                            event_index,
+                            continuation_event_index,
                         }),
                         Some(QuorumCertificate {
                             block_hash,
@@ -213,7 +235,7 @@ where
                     }
                 }
                 {
-                    let mut meta_state_store = block_on(self.meta_state_store.write());
+                    let mut meta_state_store = self.meta_state_store.write().await;
                     if let Err(e) = meta_state_store
                         .append_block_nullifiers(block_index as u64, nullifiers_delta)
                     {
@@ -221,7 +243,7 @@ where
                     }
                 }
             }
-            let mut status_store = block_on(self.status_store.write());
+            let mut status_store = self.status_store.write().await;
             status_store
                 .edit_status(|vs| {
                     vs.cumulative_txn_count += num_txns as u64;
@@ -231,7 +253,7 @@ where
                 .unwrap();
             drop(status_store);
 
-            let mut on_handled = block_on(self.event_handler.write());
+            let mut on_handled = self.event_handler.write().await;
             on_handled.on_event_processing_complete();
         }
     }
@@ -247,7 +269,7 @@ where
     AsyncStd::new().spawn_with_handle(async move {
         // Handle events as they come in from the network.
         while let Some(event) = event_source.next().await {
-            update_handle.write().await.update(event);
+            update_handle.write().await.update(event).await;
         }
     })
 }

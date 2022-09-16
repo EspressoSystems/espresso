@@ -28,11 +28,11 @@ use espresso_core::{
     committee::Committee,
     genesis::GenesisNote,
     state::{
-        ChainVariables, ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence,
-        NullifierHistory, SetMerkleTree, ValidatorState,
+        ChainVariables, ElaboratedBlock, ElaboratedTransaction, LWPersistence, NullifierHistory,
+        SetMerkleTree, ValidatorState,
     },
     testing::{MultiXfrRecordSpec, MultiXfrTestState},
-    universal_params::{UNIVERSAL_PARAM, VERIF_CRS},
+    universal_params::VERIF_CRS,
     PrivKey, PubKey,
 };
 use hotshot::traits::implementations::Libp2pNetwork;
@@ -40,7 +40,7 @@ use hotshot::traits::NetworkError;
 use hotshot::types::ed25519::{Ed25519Priv, Ed25519Pub};
 use hotshot::{
     traits::implementations::AtomicStorage,
-    types::{Message, SignatureKey},
+    types::{HotShotHandle, Message, SignatureKey},
     HotShot, HotShotConfig, HotShotError, H_256,
 };
 use jf_cap::structs::{Amount, AssetDefinition, FreezeFlag, RecordOpening};
@@ -56,7 +56,6 @@ use std::collections::hash_map::HashMap;
 use std::collections::HashSet;
 use std::env;
 use std::fmt::{self, Display, Formatter};
-use std::fs;
 use std::io::Read;
 use std::num::{NonZeroUsize, ParseIntError};
 use std::path::{Path, PathBuf};
@@ -73,6 +72,7 @@ use validator_node::{
     api::{server, UserPubKey},
     node,
     node::{EventStream, HotShotEvent, Validator},
+    validator_node::ValidatorNodeImpl,
 };
 
 mod disco;
@@ -487,6 +487,7 @@ impl UpdateQueryDataSourceTypes for UpdateQueryDataSourceTypesBinder {
 }
 
 type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
+pub type Consensus = HotShotHandle<ValidatorNodeImpl<PLNetwork, PLStorage>, H_256>;
 type LWNode = node::LightWeightNode<PLNetwork, PLStorage>;
 type FullNode<'a> = node::FullNode<'a, PLNetwork, PLStorage, UpdateQueryDataSourceTypesBinder>;
 
@@ -612,11 +613,9 @@ async fn init_hotshot(
     threshold: u64,
     node_id: usize,
     networking: PLNetwork,
-    full_node: bool,
     genesis: GenesisNote,
-    data_source: Arc<RwLock<QueryData>>,
     num_bootstrap: usize,
-) -> Node {
+) -> Consensus {
     // Create the initial hotshot
     let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
     let pub_key = known_nodes[node_id].clone();
@@ -637,14 +636,15 @@ async fn init_hotshot(
 
     let storage = get_store_dir(options, node_id);
     let storage_path = Path::new(&storage);
-    if options.reset_store_state {
+    let lw_persistence = if options.reset_store_state {
         debug!("Initializing new session");
+        LWPersistence::new(storage_path, "validator").unwrap()
     } else {
         debug!("Restoring from persisted session");
-    }
-    let lw_persistence = LWPersistence::new(storage_path, "validator").unwrap();
+        LWPersistence::load(storage_path, "validator").unwrap()
+    };
     let genesis = ElaboratedBlock::genesis(genesis);
-    let state = if options.reset_store_state {
+    let state = lw_persistence.load_latest_state().unwrap_or_else(|_| {
         // HotShot does not currently support genesis nicely. It should take a genesis block and
         // apply it to the default state. However, it currently takes the genesis block _and_ the
         // resulting state. This means we must apply the genesis block to the default state
@@ -654,24 +654,16 @@ async fn init_hotshot(
             .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
             .unwrap();
         state
-    } else {
-        lw_persistence
-            .load_latest_state()
-            .expect("failed to load saved state")
-    };
+    });
 
-    let univ_param = if full_node {
-        Some(&*UNIVERSAL_PARAM)
-    } else {
-        None
-    };
-
-    let hotshot_persistence = [storage_path, Path::new("hotshot")]
+    let hotshot_storage_path = [storage_path, Path::new("hotshot")]
         .iter()
         .collect::<PathBuf>();
-    let node_persistence = [storage_path, Path::new("node")]
-        .iter()
-        .collect::<PathBuf>();
+    let hotshot_storage = if options.reset_store_state {
+        AtomicStorage::create(&hotshot_storage_path).unwrap()
+    } else {
+        AtomicStorage::open(&hotshot_storage_path).unwrap()
+    };
 
     let hotshot = HotShot::init(
         genesis.clone(),
@@ -682,7 +674,7 @@ async fn init_hotshot(
         config,
         state,
         networking,
-        AtomicStorage::open(&hotshot_persistence).unwrap(),
+        hotshot_storage,
         lw_persistence,
         Committee::new(stake_table),
     )
@@ -690,26 +682,7 @@ async fn init_hotshot(
     .unwrap();
 
     debug!("Hotshot online!");
-
-    let validator = if full_node {
-        let full_persisted = FullPersistence::new(&node_persistence, "full_node").unwrap();
-        let node = FullNode::new(
-            hotshot,
-            univ_param.unwrap(),
-            genesis,
-            full_persisted,
-            data_source.clone(),
-            data_source.clone(),
-            data_source.clone(),
-            data_source.clone(),
-            data_source.clone(),
-        );
-        Node::Full(Arc::new(RwLock::new(node)))
-    } else {
-        Node::Light(hotshot)
-    };
-
-    validator
+    hotshot
 }
 
 #[derive(Clone)]
@@ -1070,8 +1043,7 @@ pub async fn init_validator(
     pub_keys: Vec<PubKey>,
     genesis: GenesisNote,
     own_id: usize,
-    data_source: Arc<RwLock<QueryData>>,
-) -> Node {
+) -> Consensus {
     debug!("Current node: {}", own_id);
 
     let num_bootstrap = consensus_opt.bootstrap_nodes.len();
@@ -1150,31 +1122,21 @@ pub async fn init_validator(
         threshold,
         own_id,
         own_network,
-        node_opt.full,
         genesis,
-        data_source,
         num_bootstrap,
     )
     .await
 }
 
-pub fn open_data_source(options: &mut NodeOpt, id: usize) -> Arc<RwLock<QueryData>> {
+pub fn open_data_source(
+    options: &NodeOpt,
+    id: usize,
+    consensus: Consensus,
+) -> Arc<RwLock<QueryData>> {
     let storage = get_store_dir(options, id);
-    options.reset_store_state = if storage.exists() {
-        if options.reset_store_state {
-            reset_store_dir(&storage);
-            true
-        } else {
-            false
-        }
+    Arc::new(RwLock::new(if options.reset_store_state {
+        QueryData::new(&storage, consensus).unwrap()
     } else {
-        true
-    };
-
-    Arc::new(RwLock::new(QueryData::new(&storage).unwrap()))
-}
-
-/// Removes the contents in the persistence files.
-fn reset_store_dir(store_dir: &Path) {
-    fs::remove_dir_all(store_dir).expect("Failed to remove persistence files");
+        QueryData::load(&storage, consensus).unwrap()
+    }))
 }

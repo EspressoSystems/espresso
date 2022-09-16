@@ -75,5 +75,6 @@ pub struct StateQueryData {
     pub state: ValidatorState,
     pub commitment: LedgerStateCommitment,
     pub block_id: u64,
-    pub event_index: u64,
+    /// Event index to subscribe to to follow chain events built on top of this state.
+    pub continuation_event_index: u64,
 }

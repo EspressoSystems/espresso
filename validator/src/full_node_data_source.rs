@@ -14,6 +14,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::From;
 use std::path::Path;
 
+use crate::Consensus;
+use async_trait::async_trait;
 use atomic_store::{
     append_log::Iter as ALIter, load_store::BincodeLoadStore, AppendLog, AtomicStore,
     AtomicStoreLoader, PersistenceError, RollingLog,
@@ -24,14 +26,18 @@ use espresso_availability_api::data_source::{
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
 use espresso_catchup_api::data_source::{CatchUpDataSource, UpdateCatchUpData};
 use espresso_core::ledger::EspressoLedger;
-use espresso_core::state::{BlockCommitment, SetMerkleProof, SetMerkleTree, TransactionCommitment};
+use espresso_core::state::{
+    BlockCommitment, ElaboratedTransaction, SetMerkleProof, SetMerkleTree, TransactionCommitment,
+};
 use espresso_metastate_api::data_source::{MetaStateDataSource, UpdateMetaStateData};
 use espresso_status_api::data_source::{StatusDataSource, UpdateStatusData};
 use espresso_status_api::query_data::ValidatorStatus;
-use hotshot::{data::QuorumCertificate, H_256};
+use espresso_validator_api::data_source::ValidatorDataSource;
+use hotshot::{data::QuorumCertificate, HotShotError, H_256};
 use itertools::izip;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
+use postage::{broadcast, sink::Sink};
 use seahorse::events::LedgerEvent;
 use tracing::warn;
 use validator_node::api::EspressoError;
@@ -40,6 +46,7 @@ use validator_node::node::QueryServiceError;
 // This should probably be taken from a passed-in configuration, and stored locally.
 const CACHED_BLOCKS_COUNT: usize = 50;
 const CACHED_EVENTS_COUNT: usize = 500;
+const EVENT_CHANNEL_CAPACITY: usize = 500;
 
 pub struct QueryData {
     cached_blocks_start: usize,
@@ -49,8 +56,8 @@ pub struct QueryData {
     index_by_last_record_id: BTreeMap<u64, u64>,
     cached_events_start: usize,
     events: Vec<Option<LedgerEvent<EspressoLedger>>>,
-    event_sender: async_channel::Sender<(usize, LedgerEvent<EspressoLedger>)>,
-    event_receiver: async_channel::Receiver<(usize, LedgerEvent<EspressoLedger>)>,
+    event_sender: broadcast::Sender<(usize, LedgerEvent<EspressoLedger>)>,
+    event_receiver: broadcast::Receiver<(usize, LedgerEvent<EspressoLedger>)>,
     cached_nullifier_sets: BTreeMap<u64, SetMerkleTree>,
     node_status: ValidatorStatus,
     query_storage: AtomicStore,
@@ -59,6 +66,7 @@ pub struct QueryData {
     qcert_storage: AppendLog<BincodeLoadStore<QuorumCertificate<H_256>>>,
     event_storage: AppendLog<BincodeLoadStore<LedgerEvent<EspressoLedger>>>,
     status_storage: RollingLog<BincodeLoadStore<ValidatorStatus>>,
+    consensus: Consensus,
 }
 
 pub trait Extract<T> {
@@ -384,14 +392,15 @@ impl<'a> CatchUpDataSource for &'a QueryData {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn subscribe(&self) -> async_channel::Receiver<(usize, LedgerEvent<EspressoLedger>)> {
+    fn subscribe(&self) -> broadcast::Receiver<(usize, LedgerEvent<EspressoLedger>)> {
         self.event_receiver.clone()
     }
 }
 
+#[async_trait]
 impl UpdateCatchUpData for QueryData {
     type Error = EspressoError;
-    fn append_events(
+    async fn append_events(
         &mut self,
         events: Vec<Option<LedgerEvent<EspressoLedger>>>,
     ) -> Result<(), Self::Error> {
@@ -401,10 +410,11 @@ impl UpdateCatchUpData for QueryData {
                     warn!("Failed to store event {:?}, Error: {}", e, err);
                 }
 
-                // `try_send` fails if the channel is full or closed. The channel cannot be full because
+                // `send` fails if the channel is full or closed. The channel cannot be full because
                 // it is unbounded, and cannot be closed because `self` owns copies of both ends.
                 self.event_sender
-                    .try_send((self.events.len(), e.clone()))
+                    .send((self.event_count(), e.clone()))
+                    .await
                     .expect("unexpected failure when broadcasting event");
             }
             self.events.push(e);
@@ -437,19 +447,41 @@ impl QueryData {
             return Err(QueryServiceError::InvalidHistoricalIndex {}.into());
         }
         let default_nullifier_set = SetMerkleTree::default();
-        let prev_cached_set = self.cached_nullifier_sets.range(..block_id + 1).next_back();
-        let (index, nullifier_set) = if let Some((index, tree)) = prev_cached_set {
-            (index, tree)
+
+        // `cached_nullifier_sets` is indexed by `block_id`, the (0-based) index of the block which
+        // created each nullifier set. This gives us no way to represent the initial, empty
+        // nullifier set (since it's hypothetical block ID would be -1) in the case where we do not
+        // have a cached nullifier set earlier than `block_id`. Things will become slightly simpler
+        // if we work in terms of block _height_. Then the initial nullifier set (the one we have
+        // before applying any blocks) has block height 0, and the nullifier set after the block
+        // with ID `n` has block height `n + 1`.
+        let block_height = block_id + 1;
+
+        // Get the latest cached nullifier set whose block height is at most the block height of
+        // interest.
+        let prev_cached_set = self.cached_nullifier_sets.range(..block_height).next_back();
+        let (cached_block_height, cached_nullifier_set) =
+            if let Some((index, tree)) = prev_cached_set {
+                // Remember that `cached_nullifier_sets` is indexed by block _index_, so the block
+                // _height_ of the cached nullifier set is `index + 1`.
+                (index + 1, tree)
+            } else {
+                // If we don't have a cached set lower than `block_height`, we use the initial,
+                // empty set, which has a block height of 0.
+                (0, &default_nullifier_set)
+            };
+        assert!(cached_block_height <= block_height);
+        if cached_block_height == block_height {
+            Ok(op(cached_nullifier_set))
         } else {
-            (&0, &default_nullifier_set)
-        };
-        if *index == block_id {
-            Ok(op(nullifier_set))
-        } else {
-            let mut adjusted_nullifier_set = nullifier_set.clone();
-            let index = *index as usize;
-            let iter = self.get_nth_block_iter(index);
-            iter.take(block_id as usize - index).for_each(|block| {
+            // If the cached nullifier set is not the exact one we are interested in, we need to
+            // build the nullifier set for `block_height` by adding the nullifiers from each block
+            // from `cached_block_height` to `block_height`.
+            let mut adjusted_nullifier_set = cached_nullifier_set.clone();
+            let iter = self
+                .get_nth_block_iter(cached_block_height as usize)
+                .take((block_height - cached_block_height) as usize);
+            iter.for_each(|block| {
                 if let Some(block) = block {
                     for transaction in block.raw_block.block.0.iter() {
                         for nullifier_in in transaction.input_nullifiers() {
@@ -469,7 +501,10 @@ impl MetaStateDataSource for QueryData {
         block_id: u64,
         nullifier: Nullifier,
     ) -> Option<(bool, SetMerkleProof)> {
-        if let Ok(proof) = self.with_nullifier_set_at_block(block_id, |ns| ns.contains(nullifier)) {
+        if let Ok(proof) = self.with_nullifier_set_at_block(block_id, |ns| {
+            tracing::info!("getting nullifier proof for {} in {}", nullifier, ns.hash());
+            ns.contains(nullifier)
+        }) {
             proof
         } else {
             None
@@ -532,10 +567,19 @@ impl UpdateStatusData for QueryData {
     }
 }
 
+#[async_trait]
+impl ValidatorDataSource for QueryData {
+    type Error = HotShotError;
+
+    async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), Self::Error> {
+        self.consensus.submit_transaction(txn).await
+    }
+}
+
 const STATUS_STORAGE_COUNT: u32 = 10u32;
 
 impl QueryData {
-    pub fn new(store_path: &Path) -> Result<QueryData, PersistenceError> {
+    pub fn new(store_path: &Path, consensus: Consensus) -> Result<QueryData, PersistenceError> {
         let key_tag = "query_data_store";
         let blocks_tag = format!("{}_blocks", key_tag);
         let states_tag = format!("{}_states", key_tag);
@@ -554,7 +598,7 @@ impl QueryData {
 
         let query_storage = AtomicStore::open(loader)?;
 
-        let (event_sender, event_receiver) = async_channel::unbounded();
+        let (event_sender, event_receiver) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Ok(QueryData {
             cached_blocks_start: 0usize,
             cached_blocks: Vec::new(),
@@ -573,10 +617,11 @@ impl QueryData {
             qcert_storage,
             event_storage,
             status_storage,
+            consensus,
         })
     }
 
-    pub fn load(store_path: &Path) -> Result<QueryData, PersistenceError> {
+    pub fn load(store_path: &Path, consensus: Consensus) -> Result<QueryData, PersistenceError> {
         let key_tag = "query_data_store";
         let blocks_tag = format!("{}_blocks", key_tag);
         let states_tag = format!("{}_states", key_tag);
@@ -660,7 +705,7 @@ impl QueryData {
             })
             .collect();
 
-        let (event_sender, event_receiver) = async_channel::unbounded();
+        let (event_sender, event_receiver) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         let events_loader = event_storage.iter();
         let events_count = events_loader.len();
         let cached_events_start = if events_count > CACHED_EVENTS_COUNT {
@@ -677,7 +722,10 @@ impl QueryData {
                 ev.ok()
             })
             .collect();
-        let node_status = status_storage.load_latest()?;
+        // Load the last persisted validator status. If there is no existing status (e.g. the user
+        // gave us an empty directory, but did not set the reset flag, so we ended up here and not
+        // in `new`) we should behave as we do when creating a new store: use the default status.
+        let node_status = status_storage.load_latest().unwrap_or_default();
 
         Ok(QueryData {
             cached_blocks_start,
@@ -697,6 +745,7 @@ impl QueryData {
             qcert_storage,
             event_storage,
             status_storage,
+            consensus,
         })
     }
 
