@@ -35,11 +35,7 @@ use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
-use hotshot::{
-    data::{BlockHash, LeafHash, TransactionHash},
-    traits::{BlockContents, State, Transaction as TransactionTrait},
-    H_256,
-};
+use hotshot::traits::{BlockContents, StateContents};
 use jf_cap::{
     errors::TxnApiError, structs::Nullifier, txn_batch_verify, MerkleCommitment, MerkleFrontier,
     MerkleLeafProof, MerkleTree, NodeValue, TransactionNote,
@@ -204,7 +200,19 @@ pub struct ElaboratedTransaction {
     pub memos: Option<(Vec<ReceiverMemo>, Signature)>,
 }
 
-impl TransactionTrait<H_256> for ElaboratedTransaction {}
+impl ElaboratedTransaction {
+    fn build_commitment(
+        txn: &EspressoTransaction,
+        proofs: &EspressoTxnHelperProofs,
+        memos: &Option<(Vec<ReceiverMemo>, Signature)>,
+    ) -> Commitment<Self> {
+        commit::RawCommitmentBuilder::new("ElaboratedTransaction")
+            .field("Txn contents", txn.commit())
+            .var_size_field("Txn proofs", &canonical::serialize(proofs).unwrap())
+            .var_size_field("Txn memos", &canonical::serialize(memos).unwrap())
+            .finalize()
+    }
+}
 
 /// A collection of transactions
 ///
@@ -282,16 +290,12 @@ impl Committable for ElaboratedBlock {
 impl Committable for ElaboratedTransaction {
     /// Get a commitment to an elaborated transaction.
     fn commit(&self) -> Commitment<Self> {
-        commit::RawCommitmentBuilder::new("ElaboratedTransaction")
-            .field("Txn contents", self.txn.commit())
-            .var_size_field("Txn proofs", &canonical::serialize(&self.proofs).unwrap())
-            .var_size_field("Txn memos", &canonical::serialize(&self.memos).unwrap())
-            .finalize()
+        Self::build_commitment(&self.txn, &self.proofs, &self.memos)
     }
 }
 
 /// Allow an elaborated block to be used by the [HotShot](https://hotshot.docs.espressosys.com/hotshot/) consensus protocol.
-impl BlockContents<H_256> for ElaboratedBlock {
+impl BlockContents for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
 
@@ -327,24 +331,24 @@ impl BlockContents<H_256> for ElaboratedBlock {
         Ok(ret)
     }
 
-    /// A cryptographic hash of an elaborated block
-    fn hash(&self) -> BlockHash<H_256> {
-        BlockHash::<H_256>::from_array(self.commit().try_into().unwrap())
-    }
-
-    /// A cryptographic hash of the given bytes
-    fn hash_leaf(bytes: &[u8]) -> LeafHash<H_256> {
-        // TODO: fix this hack, it is specifically working around the
-        // misuse-preventing `T: Committable` on `RawCommitmentBuilder`
-        let ret = commit::RawCommitmentBuilder::<Block>::new("HotShot bytes")
-            .var_size_bytes(bytes)
-            .finalize();
-        LeafHash::<H_256>::from_array(ret.try_into().unwrap())
-    }
-
-    /// A cryptographic hash of an elaborated transaction
-    fn hash_transaction(txn: &ElaboratedTransaction) -> TransactionHash<H_256> {
-        TransactionHash::<H_256>::from_array(txn.commit().try_into().unwrap())
+    fn contained_transactions(&self) -> HashSet<Commitment<Self::Transaction>> {
+        self.block
+            .0
+            .iter()
+            .zip(&self.proofs)
+            .zip(&self.memos)
+            .map(|((txn, proofs), memos)| {
+                // TODO @jeb.bearer this version of committing to transactions in a block does not
+                // match the behavior of `ElaboratedTransaction::hash`, which excludes the proofs
+                // and memos. To fix this, we should consider refining the HotShot interface to use
+                // two associated types: `TransactionEffects`, which captures the essence of a CAP
+                // transaction, and `TransactionValidity`, which includes auxiliary data like
+                // nullifier proofs. This would remove the need for `ElaboratedTransaction`
+                // entirely, and would allow us to use `Commitment<TransactionEffects>` both here
+                // and in the `reef` implementation.
+                ElaboratedTransaction::build_commitment(txn, proofs, memos)
+            })
+            .collect()
     }
 }
 
@@ -853,15 +857,15 @@ pub mod state_comm {
     #[derive(
         Arbitrary, Debug, Clone, Copy, CanonicalSerialize, CanonicalDeserialize, PartialEq, Eq, Hash,
     )]
-    pub struct LedgerStateCommitment(pub Commitment<LedgerCommitmentOpening>);
+    pub struct LedgerStateCommitment(pub Commitment<ValidatorState>);
 
-    impl From<Commitment<LedgerCommitmentOpening>> for LedgerStateCommitment {
-        fn from(x: Commitment<LedgerCommitmentOpening>) -> Self {
+    impl From<Commitment<ValidatorState>> for LedgerStateCommitment {
+        fn from(x: Commitment<ValidatorState>) -> Self {
             Self(x)
         }
     }
 
-    impl From<LedgerStateCommitment> for Commitment<LedgerCommitmentOpening> {
+    impl From<LedgerStateCommitment> for Commitment<ValidatorState> {
         fn from(x: LedgerStateCommitment) -> Self {
             x.0
         }
@@ -917,8 +921,8 @@ pub mod state_comm {
         pub prev_block: Commitment<Block>,
     }
 
-    impl Committable for LedgerCommitmentOpening {
-        fn commit(&self) -> Commitment<Self> {
+    impl LedgerCommitmentOpening {
+        pub fn commit(&self) -> LedgerStateCommitment {
             commit::RawCommitmentBuilder::new("Ledger Comm")
                 .field("chain", self.chain)
                 .u64_field("prev_commit_time", self.prev_commit_time)
@@ -929,7 +933,7 @@ pub mod state_comm {
                         .prev_state
                         .iter()
                         .cloned()
-                        .map(Commitment::<Self>::from)
+                        .map(Commitment::<ValidatorState>::from)
                         .collect::<Vec<_>>(),
                 )
                 .field("record_merkle_commitment", self.record_merkle_commitment)
@@ -938,6 +942,7 @@ pub mod state_comm {
                 .field("past_nullifiers", self.past_nullifiers)
                 .field("prev_block", self.prev_block)
                 .finalize()
+                .into()
         }
     }
 }
@@ -1123,6 +1128,26 @@ impl Default for ValidatorState {
     }
 }
 
+impl Committable for ValidatorState {
+    fn commit(&self) -> Commitment<Self> {
+        let inputs = state_comm::LedgerCommitmentOpening {
+            chain: self.chain.commit(),
+            prev_commit_time: self.prev_commit_time,
+            block_height: self.block_height,
+            prev_state: self.prev_state,
+            record_merkle_commitment: RecordMerkleCommitment(self.record_merkle_commitment)
+                .commit(),
+            record_merkle_frontier: RecordMerkleFrontier(self.record_merkle_frontier.clone())
+                .commit(),
+            past_record_merkle_roots: self.past_record_merkle_roots.commit(),
+
+            past_nullifiers: self.past_nullifiers.commit(),
+            prev_block: self.prev_block.0,
+        };
+        inputs.commit().into()
+    }
+}
+
 impl ValidatorState {
     /// The number of recent record Merkle tree root hashes the
     /// validator should remember
@@ -1159,21 +1184,7 @@ impl ValidatorState {
 
     /// Cryptographic commitment to the validator state
     pub fn commit(&self) -> state_comm::LedgerStateCommitment {
-        let inputs = state_comm::LedgerCommitmentOpening {
-            chain: self.chain.commit(),
-            prev_commit_time: self.prev_commit_time,
-            block_height: self.block_height,
-            prev_state: self.prev_state,
-            record_merkle_commitment: RecordMerkleCommitment(self.record_merkle_commitment)
-                .commit(),
-            record_merkle_frontier: RecordMerkleFrontier(self.record_merkle_frontier.clone())
-                .commit(),
-            past_record_merkle_roots: self.past_record_merkle_roots.commit(),
-
-            past_nullifiers: self.past_nullifiers.commit(),
-            prev_block: self.prev_block.0,
-        };
-        inputs.commit().into()
+        Committable::commit(self).into()
     }
 
     pub fn nullifiers_root(&self) -> set_hash::Hash {
@@ -1210,7 +1221,7 @@ impl ValidatorState {
         // rest of this. If it is not, then we will reject the block later if it contains any
         // genesis transactions.
         if let Some(EspressoTransaction::Genesis(_)) = txns.0.get(0) {
-            if self.prev_commit_time != 0 || txns.0.len() != 1 {
+            if self.block_height != 0 || txns.0.len() != 1 {
                 // A genesis transaction is only allowed in the genesis block, which is a block at
                 // height 0 containing only a single genesis transaction.
                 return Err(ValidationError::UnexpectedGenesis);
@@ -1467,7 +1478,7 @@ impl Hash for ValidatorState {
     }
 }
 
-impl State<H_256> for ValidatorState {
+impl StateContents for ValidatorState {
     type Error = ValidationError;
 
     type Block = ElaboratedBlock;

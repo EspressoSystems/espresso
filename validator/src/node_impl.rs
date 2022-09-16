@@ -14,46 +14,29 @@ use core::fmt::Debug;
 use core::marker::PhantomData;
 use espresso_core::{
     committee::Committee,
-    state::{ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState},
+    state::{LWPersistence, ValidatorState},
     PubKey,
 };
 use hotshot::{
     traits::{NetworkingImplementation, NodeImplementation, Storage},
     types::Message,
-    H_256,
 };
 
 /// A lightweight node that handles validation for consensus, and nothing more.
 pub trait PLNet:
-    NetworkingImplementation<
-        Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
-        PubKey,
-    > + Clone
-    + Debug
-    + 'static
+    NetworkingImplementation<Message<ValidatorState, PubKey>, PubKey> + Clone + Debug + 'static
 {
 }
 
 impl<
-        T: NetworkingImplementation<
-                Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, PubKey, H_256>,
-                PubKey,
-            > + Clone
-            + Debug
-            + 'static,
+        T: NetworkingImplementation<Message<ValidatorState, PubKey>, PubKey> + Clone + Debug + 'static,
     > PLNet for T
 {
 }
 
-pub trait PLStore:
-    Storage<ElaboratedBlock, ValidatorState, H_256> + Clone + Send + Sync + 'static
-{
-}
+pub trait PLStore: Storage<ValidatorState> + Clone + Send + Sync + 'static {}
 
-impl<T: Storage<ElaboratedBlock, ValidatorState, H_256> + Clone + Send + Sync + 'static> PLStore
-    for T
-{
-}
+impl<T: Storage<ValidatorState> + Clone + Send + Sync + 'static> PLStore for T {}
 
 #[derive(Clone)]
 pub struct ValidatorNodeImpl<NET: PLNet, STORE: PLStore> {
@@ -67,9 +50,7 @@ impl<NET: PLNet, STORE: PLStore> Debug for ValidatorNodeImpl<NET, STORE> {
     }
 }
 
-impl<NET: PLNet, STORE: PLStore> NodeImplementation<H_256> for ValidatorNodeImpl<NET, STORE> {
-    type Block = ElaboratedBlock;
-
+impl<NET: PLNet, STORE: PLStore> NodeImplementation for ValidatorNodeImpl<NET, STORE> {
     type State = ValidatorState;
 
     type Storage = STORE;
@@ -78,7 +59,7 @@ impl<NET: PLNet, STORE: PLStore> NodeImplementation<H_256> for ValidatorNodeImpl
 
     type StatefulHandler = LWPersistence;
 
-    type Election = Committee<(), H_256>;
+    type Election = Committee<ValidatorState>;
 
     type SignatureKey = PubKey;
 }

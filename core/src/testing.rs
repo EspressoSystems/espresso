@@ -15,7 +15,7 @@ use crate::state::*;
 use crate::universal_params::{MERKLE_HEIGHT, PROVER_CRS, UNIVERSAL_PARAM, VERIF_CRS};
 use arbitrary::Arbitrary;
 use core::iter::once;
-use hotshot::traits::{BlockContents, State};
+use hotshot::traits::{BlockContents, StateContents};
 use jf_cap::{
     keys::UserKeyPair,
     mint::MintNote,

@@ -14,7 +14,7 @@ use crate::state::{ElaboratedBlock, ValidatorState};
 use atomic_store::{
     load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
 };
-use hotshot::{traits::StatefulHandler, H_256};
+use hotshot::traits::StatefulHandler;
 
 use core::fmt::Debug;
 use std::path::{Path, PathBuf};
@@ -69,7 +69,7 @@ impl Debug for LWPersistence {
     }
 }
 
-impl StatefulHandler<H_256> for LWPersistence {
+impl StatefulHandler for LWPersistence {
     type Block = ElaboratedBlock;
     type State = ValidatorState;
 

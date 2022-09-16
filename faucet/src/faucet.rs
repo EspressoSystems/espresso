@@ -789,7 +789,10 @@ async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionUID<Espr
         .await
         {
             if !matches!(result, Ok(TransactionStatus::Retired)) {
-                error!("record breakup transfer did not complete successfully");
+                error!(
+                    "record breakup transfer did not complete successfully ({:?})",
+                    result
+                );
             }
         }
     }
@@ -1208,8 +1211,12 @@ mod test {
     }
 
     #[async_std::test]
-    #[traced_test]
+    // #[traced_test]
     async fn test_faucet_transfer() {
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .init();
         parallel_request(1, false).await;
     }
 

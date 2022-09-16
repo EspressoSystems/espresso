@@ -26,7 +26,6 @@ use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
 use std::process::exit;
 use std::time::Duration;
-use tagged_base64::TaggedBase64;
 use tracing::info;
 
 #[derive(Parser)]
@@ -117,10 +116,7 @@ async fn generate_transactions(
     while succeeded_round < num_txn {
         info!("Starting round {}", round + 1);
         report_mem();
-        info!(
-            "Commitment: {}",
-            hotshot.get_state().await.unwrap().unwrap().commit()
-        );
+        info!("Commitment: {}", hotshot.get_state().await.commit());
 
         // Generate a transaction if the node ID is 0 and if there isn't a keystore to generate it.
         if own_id == 0 {
@@ -174,25 +170,19 @@ async fn generate_transactions(
                 .expect("HotShot unexpectedly closed");
 
             match event.event {
-                EventType::Decide {
-                    block: _,
-                    state,
-                    qcs: _,
-                } => {
-                    if !state.is_empty() {
+                EventType::Decide { leaf_chain } => {
+                    if let Some(leaf) = leaf_chain.last() {
                         succeeded_round += 1;
-                        let commitment = TaggedBase64::new("COMM", state[0].commit().as_ref())
-                            .unwrap()
-                            .to_string();
                         println!(
                             "  - Round {} completed. Commitment: {}",
-                            succeeded_round, commitment
+                            succeeded_round,
+                            leaf.state.commit()
                         );
-                        final_commitment = Some(commitment);
+                        final_commitment = Some(leaf.state.commit());
                         break true;
                     }
                 }
-                EventType::ViewTimeout { view_number: _ } => {
+                EventType::ReplicaViewTimeout { .. } | EventType::NextLeaderViewTimeout { .. } => {
                     info!("  - Round {} timed out.", round + 1);
                     break false;
                 }

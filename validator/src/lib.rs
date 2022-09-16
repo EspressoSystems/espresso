@@ -40,13 +40,13 @@ use hotshot::traits::NetworkError;
 use hotshot::types::ed25519::{Ed25519Priv, Ed25519Pub};
 use hotshot::types::EventType;
 use hotshot::{
-    traits::implementations::AtomicStorage,
+    traits::implementations::MemoryStorage,
     types::{HotShotHandle, Message, SignatureKey},
-    HotShot, HotShotConfig, H_256,
+    HotShot,
 };
-use jf_cap::keys::UserAddress;
+use hotshot_types::{ExecutionType, HotShotConfig};
 use jf_cap::{
-    keys::UserPubKey,
+    keys::{UserAddress, UserPubKey},
     structs::{Amount, AssetDefinition, FreezeFlag, RecordOpening},
 };
 use jf_utils::tagged_blob;
@@ -74,6 +74,7 @@ mod node_impl;
 pub mod testing;
 
 pub const MINIMUM_NODES: usize = 6;
+pub const MINIMUM_BOOTSTRAP_NODES: usize = 5;
 
 const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 const DEFAULT_SECRET_KEY_SEED: [u8; 32] = [
@@ -99,10 +100,7 @@ pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
     }
 }
 
-type PLNetwork = Libp2pNetwork<
-    Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
-    Ed25519Pub,
->;
+type PLNetwork = Libp2pNetwork<Message<ValidatorState, Ed25519Pub>, Ed25519Pub>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ratio {
@@ -435,8 +433,8 @@ fn get_secret_key_seed(consensus_opt: &ConsensusOpt) -> [u8; 32] {
         .into()
 }
 
-type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
-pub type Consensus = HotShotHandle<ValidatorNodeImpl<PLNetwork, PLStorage>, H_256>;
+type PLStorage = MemoryStorage<ValidatorState>;
+pub type Consensus = HotShotHandle<ValidatorNodeImpl<PLNetwork, PLStorage>>;
 
 pub fn genesis(
     chain_id: u16,
@@ -522,8 +520,8 @@ async fn init_hotshot(
     num_bootstrap: usize,
 ) -> Consensus {
     // Create the initial hotshot
-    let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
-    let pub_key = known_nodes[node_id].clone();
+    let stake_table = known_nodes.iter().map(|key| (*key, 1)).collect();
+    let pub_key = known_nodes[node_id];
     let config = HotShotConfig {
         total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
         threshold: NonZeroUsize::new(threshold as usize).unwrap(),
@@ -536,6 +534,7 @@ async fn init_hotshot(
         propose_min_round_time: options.min_propose_time,
         propose_max_round_time: options.max_propose_time,
         num_bootstrap,
+        execution_type: ExecutionType::Continuous,
     };
     debug!(?config);
 
@@ -556,30 +555,19 @@ async fn init_hotshot(
         // ourselves.
         let mut state = ValidatorState::default();
         state
-            .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
+            .validate_and_apply(1, genesis.block.clone(), genesis.proofs.clone())
             .unwrap();
         state
     });
 
-    let hotshot_storage_path = [storage_path, Path::new("hotshot")]
-        .iter()
-        .collect::<PathBuf>();
-    let hotshot_storage = if options.reset_store_state {
-        AtomicStorage::create(&hotshot_storage_path).unwrap()
-    } else {
-        AtomicStorage::open(&hotshot_storage_path).unwrap()
-    };
-
     let hotshot = HotShot::init(
-        genesis.clone(),
         config.known_nodes.clone(),
         pub_key,
         priv_key,
         node_id as u64,
         config,
-        state,
         networking,
-        hotshot_storage,
+        MemoryStorage::new(genesis, state),
         lw_persistence,
         Committee::new(stake_table),
     )
@@ -603,12 +591,12 @@ pub async fn run_consensus<F: Send + Future>(mut consensus: Consensus, kill: F) 
             event = event_future => {
                 match event {
                     Ok(event) => match event.event {
-                        EventType::Decide { state, block: _, qcs: _ } => {
-                            if let Some(state) = state.last() {
-                                tracing::debug!(". - Committed state {}", state.commit());
+                        EventType::Decide { leaf_chain } => {
+                            if let Some(leaf) = leaf_chain.last() {
+                                tracing::debug!(". - Committed state {}", leaf.state.commit());
                             }
                         }
-                        EventType::ViewTimeout { view_number } => {
+                        EventType::NextLeaderViewTimeout { view_number } => {
                             tracing::debug!("  - Round {:?} timed out.", view_number);
                         }
                         EventType::Error { error } => {
@@ -783,7 +771,7 @@ pub async fn init_validator(
     let threshold = ((pub_keys.len() as u64 * 2) / 3) + 1;
 
     let own_network = new_libp2p_network(
-        pub_keys[own_id].clone(),
+        pub_keys[own_id],
         to_connect_addrs,
         own_id,
         node_type,
@@ -839,14 +827,10 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
             .next_event()
             .await
             .expect("HotShot unexpectedly closed");
-        if let EventType::Decide {
-            block: _,
-            state,
-            qcs,
-        } = event.event
-        {
-            for (validator_state, qc) in state.iter().rev().zip(qcs.iter().rev()) {
-                let view_number = qc.view_number;
+        if let EventType::Decide { leaf_chain } = event.event {
+            for leaf in leaf_chain.iter().rev() {
+                let validator_state = &leaf.state;
+                let view_number = leaf.justify_qc.view_number;
                 // 0. check if I'm elected
                 if let Some(vrf_proof) =
                     mock_eligibility::prove_eligibility(view_number.into(), staking_priv_key)

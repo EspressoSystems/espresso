@@ -196,6 +196,7 @@
               fenix.packages.${system}.rust-analyzer
               nixWithFlakes
               nixpkgs-fmt
+              protobuf
               git
               mdbook # make-doc, documentation generation
               stableToolchain

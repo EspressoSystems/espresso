@@ -12,7 +12,7 @@
 
 use crate::{
     gen_keys, genesis, init_validator, open_data_source, run_consensus, ConsensusOpt, NodeOpt,
-    MINIMUM_NODES,
+    MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES,
 };
 use address_book::store::FileStore;
 use async_std::task::{block_on, spawn, JoinHandle};
@@ -133,7 +133,9 @@ impl Drop for TestNetwork {
 pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKey) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
-    let base_port = pick_unused_port().unwrap();
+    let bootstrap_ports = (0..MINIMUM_BOOTSTRAP_NODES)
+        .into_iter()
+        .map(|_| pick_unused_port().unwrap());
     let consensus_opt = ConsensusOpt {
         secret_key_seed: Some(seed.into()),
         replication_factor: 4,
@@ -145,16 +147,15 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         nonbootstrap_mesh_n_low: 8,
         nonbootstrap_mesh_outbound_min: 4,
         nonbootstrap_mesh_n: 12,
-        bootstrap_nodes: vec![Url::parse(&format!("localhost:{}", base_port)).unwrap()],
+        bootstrap_nodes: bootstrap_ports
+            .map(|p| format!("localhost:{}", p).parse().unwrap())
+            .collect(),
     };
 
     println!("generating public keys");
     let start = Instant::now();
     let keys = gen_keys(&consensus_opt, MINIMUM_NODES);
-    let pub_keys = keys
-        .iter()
-        .map(|key| key.public.clone())
-        .collect::<Vec<_>>();
+    let pub_keys = keys.iter().map(|key| key.public).collect::<Vec<_>>();
     println!("generated public keys in {:?}", start.elapsed());
 
     let store = TempDir::new("minimal_test_network_store").unwrap();
@@ -170,8 +171,10 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         async move {
             let node_opt = NodeOpt {
                 store_path: Some(store_path),
-                nonbootstrap_base_port: base_port as usize,
-                next_view_timeout: Duration::from_secs(10 * 60),
+                nonbootstrap_base_port: pick_unused_port().unwrap() as usize,
+                next_view_timeout: Duration::from_secs(10),
+                min_propose_time: Duration::from_secs(1),
+                max_propose_time: Duration::from_secs(10),
                 ..NodeOpt::default()
             };
             let consensus = init_validator(

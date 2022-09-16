@@ -55,6 +55,11 @@ struct Args {
     /// Port number of the query service.
     #[clap(short = 'P', long = "--port", default_value = "50000")]
     port: u16,
+
+    /// Test all blocks in the history.
+    ///
+    /// Without this flag, only a sample will be tested.
+    all: bool,
 }
 
 fn url_with_scheme(opt: &Args, scheme: impl Display, route: impl Display) -> Url {
@@ -83,14 +88,18 @@ async fn validate_committed_block(opt: &Args, block: &BlockQueryData, ix: u64, n
     );
 
     // Check that we get the same block if we query by other methods.
-    assert_eq!(
-        *block,
-        get(
-            opt,
-            format!("/availability/getblock/hash/{}", block.block_hash)
-        )
-        .await
-    );
+    if !block.txn_hashes.is_empty() {
+        // Only lookup by hash if the block is not empty. Querying by hash for empty blocks is not
+        // guaranteed to return the same block, since all empty blocks have the same hash.
+        assert_eq!(
+            *block,
+            get(
+                opt,
+                format!("/availability/getblock/hash/{}", block.block_hash)
+            )
+            .await
+        );
+    }
 
     // Check the output state of this block.
     let state: StateQueryData =
@@ -171,10 +180,15 @@ impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
 async fn test(opt: &Args) {
     let num_blocks = get::<u64, _>(opt, "/status/latest_block_id").await + 1;
 
-    // Check that we can query the 0th block and the last block.
-    for ix in [0, num_blocks - 1].iter() {
-        let block = get(opt, format!("/availability/getblock/{}", *ix)).await;
-        validate_committed_block(opt, &block, *ix, num_blocks).await;
+    let test_indices = if opt.all {
+        (0..num_blocks).into_iter().collect()
+    } else {
+        // Check that we can query the 0th block and the last block.
+        vec![0, num_blocks - 1]
+    };
+    for ix in test_indices {
+        let block = get(opt, format!("/availability/getblock/{}", ix)).await;
+        validate_committed_block(opt, &block, ix, num_blocks).await;
     }
 
     // Check the event stream. The event stream is technically never-ending; once we have received
@@ -304,6 +318,7 @@ mod test {
         test(&Args {
             host: "localhost".into(),
             port: network.query_api.port().unwrap(),
+            all: true,
         })
         .await
     }

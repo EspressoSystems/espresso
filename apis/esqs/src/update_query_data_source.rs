@@ -34,14 +34,12 @@ use futures::{
     task::{SpawnError, SpawnExt},
     Stream, StreamExt,
 };
-use hotshot::data::{BlockHash, LeafHash, QuorumCertificate, Stage, VecQuorumCertificate};
-use hotshot::H_256;
-use hotshot_types::data::ViewNumber;
+use hotshot::data::Leaf;
 use itertools::izip;
 use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 
-pub type HotShotEvent = hotshot::types::EventType<ElaboratedBlock, ValidatorState, H_256>;
+pub type HotShotEvent = hotshot::types::EventType<ValidatorState>;
 
 pub trait UpdateQueryDataSourceTypes {
     type CU: UpdateCatchUpData + Sized + Send + Sync;
@@ -93,20 +91,8 @@ where
         // HotShot does not currently support genesis nicely. It should automatically commit and
         // broadcast a `Decide` event for the genesis block, but it doesn't. For now, we broadcast a
         // `Commit` event for the genesis block ourselves.
-        let mut genesis_state = ValidatorState::default();
-        genesis_state
-            .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
-            .unwrap();
         block_on(instance.update(HotShotEvent::Decide {
-            block: Arc::new(vec![genesis]),
-            state: Arc::new(vec![genesis_state]),
-            qcs: Arc::new(vec![VecQuorumCertificate {
-                block_hash: Default::default(),
-                view_number: ViewNumber::genesis(),
-                stage: Stage::Decide,
-                signatures: Default::default(),
-                genesis: Default::default(),
-            }]),
+            leaf_chain: Arc::new(vec![Leaf::genesis(genesis)]),
         }));
 
         let instance = Arc::new(RwLock::new(instance));
@@ -118,13 +104,14 @@ where
     }
 
     async fn update(&mut self, event: HotShotEvent) {
-        if let HotShotEvent::Decide { block, state, qcs } = event {
+        if let HotShotEvent::Decide { leaf_chain } = event {
             let mut num_txns = 0usize;
             let mut cumulative_size = 0usize;
+            for leaf in leaf_chain.iter().rev() {
+                let mut block = leaf.deltas.clone();
+                let state = &leaf.state;
+                let qcert = leaf.justify_qc.clone();
 
-            for (mut block, state, qcert) in
-                izip!(block.iter().cloned(), state.iter(), qcs.iter().cloned()).rev()
-            {
                 // Grab metadata for the new block from the state it is applying to.
                 let block_index = self.validator_state.block_height;
                 let nullifier_proofs = self
@@ -202,9 +189,6 @@ where
                     first_uid - records_from
                 };
                 {
-                    let qcert_block_hash: [u8; H_256] =
-                        qcert.block_hash.try_into().unwrap_or([0u8; H_256]);
-                    let block_hash = BlockHash::<H_256>::from_array(qcert_block_hash);
                     let mut availability_store = self.availability_store.write().await;
                     if let Err(e) = availability_store.append_blocks(vec![(
                         Some(BlockQueryData {
@@ -221,14 +205,7 @@ where
                             block_id: block_index as u64,
                             continuation_event_index,
                         }),
-                        Some(QuorumCertificate {
-                            block_hash,
-                            leaf_hash: LeafHash::default(),
-                            view_number: qcert.view_number,
-                            stage: qcert.stage,
-                            signatures: qcert.signatures,
-                            genesis: qcert.genesis,
-                        }),
+                        Some(qcert),
                     )]) {
                         tracing::warn!("append_blocks returned error {}", e);
                     }
@@ -246,7 +223,7 @@ where
             status_store
                 .edit_status(|vs| {
                     vs.latest_block_id = self.validator_state.block_height as u64 - 1;
-                    vs.decided_block_count += block.len() as u64;
+                    vs.decided_block_count += leaf_chain.len() as u64;
                     vs.cumulative_txn_count += num_txns as u64;
                     vs.cumulative_size += cumulative_size as u64;
                     Ok(())

@@ -28,6 +28,7 @@ use espresso_catchup_api::data_source::{CatchUpDataSource, UpdateCatchUpData};
 use espresso_core::ledger::EspressoLedger;
 use espresso_core::state::{
     BlockCommitment, ElaboratedTransaction, SetMerkleProof, SetMerkleTree, TransactionCommitment,
+    ValidatorState,
 };
 use espresso_metastate_api::{
     api as metastate,
@@ -36,7 +37,7 @@ use espresso_metastate_api::{
 use espresso_status_api::data_source::{StatusDataSource, UpdateStatusData};
 use espresso_status_api::query_data::ValidatorStatus;
 use espresso_validator_api::data_source::{ConsensusEvent, ValidatorDataSource};
-use hotshot::{data::QuorumCertificate, HotShotError, H_256};
+use hotshot::{data::QuorumCertificate, HotShotError};
 use itertools::izip;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
@@ -66,7 +67,7 @@ pub struct QueryData {
     query_storage: AtomicStore,
     block_storage: AppendLog<BincodeLoadStore<BlockQueryData>>,
     state_storage: AppendLog<BincodeLoadStore<StateQueryData>>,
-    qcert_storage: AppendLog<BincodeLoadStore<QuorumCertificate<H_256>>>,
+    qcert_storage: AppendLog<BincodeLoadStore<QuorumCertificate<ValidatorState>>>,
     event_storage: AppendLog<BincodeLoadStore<LedgerEvent<EspressoLedger>>>,
     status_storage: RollingLog<BincodeLoadStore<ValidatorStatus>>,
     consensus: Consensus,
@@ -86,8 +87,8 @@ impl Extract<StateQueryData> for BlockAndAssociated {
         &self.1
     }
 }
-impl Extract<QuorumCertificate<H_256>> for BlockAndAssociated {
-    fn extract(&self) -> &Option<QuorumCertificate<H_256>> {
+impl Extract<QuorumCertificate<ValidatorState>> for BlockAndAssociated {
+    fn extract(&self) -> &Option<QuorumCertificate<ValidatorState>> {
         &self.2
     }
 }
@@ -201,9 +202,9 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
 
     type QCertIterType = DynamicPersistenceIterator<
         'a,
-        QuorumCertificate<H_256>,
+        QuorumCertificate<ValidatorState>,
         BlockAndAssociated,
-        ALIter<'a, BincodeLoadStore<QuorumCertificate<H_256>>>,
+        ALIter<'a, BincodeLoadStore<QuorumCertificate<ValidatorState>>>,
     >;
 
     fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType {
