@@ -261,12 +261,12 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
 
     async fn get_nullifier_proof(
         &self,
-        block_height: u64,
+        block_id: u64,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
     ) -> Result<(bool, SetMerkleProof), KeystoreError<EspressoLedger>> {
         let mut ledger = self.ledger.lock().await;
-        assert_eq!(block_height, ledger.network().committed_blocks.len() as u64);
+        assert_eq!(block_id, ledger.network().committed_blocks.len() as u64);
         if set.hash() == ledger.network().nullifiers.hash() {
             Ok(ledger.network().nullifiers.contains(nullifier).unwrap())
         } else {

@@ -61,6 +61,12 @@ impl ConsensusEvent for HotShotEvent {
     }
 }
 
+impl ConsensusEvent for HotShotEventType {
+    fn into_event(self) -> HotShotEventType {
+        self
+    }
+}
+
 pub type EventStream<Event> = Pin<Box<dyn Send + Stream<Item = Event>>>;
 
 #[async_trait]
@@ -817,8 +823,12 @@ where
         status_store: Arc<RwLock<TYPES::ST>>,
         event_handler: Arc<RwLock<TYPES::EH>>,
     ) -> Self {
-        let query_service =
-            HotShotQueryService::new(validator.subscribe(), univ_param, genesis, full_persisted);
+        let query_service = HotShotQueryService::new(
+            validator.subscribe(),
+            univ_param,
+            genesis.clone(),
+            full_persisted,
+        );
         let data_source_updater = UpdateQueryDataSource::new(
             validator.subscribe(),
             catchup_store,
@@ -826,7 +836,7 @@ where
             meta_state_store,
             status_store,
             event_handler,
-            ValidatorState::default(),
+            genesis,
         );
         Self {
             validator,

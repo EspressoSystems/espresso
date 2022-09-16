@@ -11,29 +11,12 @@
 // see <https://www.gnu.org/licenses/>.
 
 use async_trait::async_trait;
-use espresso_core::ledger::EspressoLedger;
-use postage::broadcast::Receiver;
-use seahorse::events::LedgerEvent;
+use espresso_core::state::ElaboratedTransaction;
 use std::error::Error;
 use std::fmt::Debug;
 
-pub trait CatchUpDataSource {
-    type EventIterType: Iterator<Item = Option<LedgerEvent<EspressoLedger>>>;
-
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool;
-    fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType;
-    fn subscribe(&self) -> Receiver<(usize, LedgerEvent<EspressoLedger>)>;
-}
-
 #[async_trait]
-pub trait UpdateCatchUpData {
+pub trait ValidatorDataSource {
     type Error: Error + Debug;
-
-    fn event_count(&self) -> usize;
-
-    async fn append_events(
-        &mut self,
-        events: Vec<Option<LedgerEvent<EspressoLedger>>>,
-    ) -> Result<(), Self::Error>;
+    async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), Self::Error>;
 }
