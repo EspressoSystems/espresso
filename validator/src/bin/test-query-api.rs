@@ -228,7 +228,7 @@ async fn main() {
     test(&Args::from_args()).await
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "slow-tests"))]
 mod test {
     use super::*;
     use espresso_client::{network::NetworkBackend, Keystore};
