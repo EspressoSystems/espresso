@@ -35,12 +35,12 @@ use key_set::{OrderByOutputs, ProverKeySet, VerifierKeySet};
 use reef::Ledger;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
-    sparse_merkle_tree::SparseMerkleTree,
+    ledger_state::LedgerState,
+    lw_merkle_tree::LWMerkleTree,
     testing,
     testing::MockEventSource,
     transactions::Transaction,
-    txn_builder::TransactionState,
-    KeystoreBackend, KeystoreError, KeystoreState,
+    KeystoreBackend, KeystoreError,
 };
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -226,21 +226,17 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
 
     async fn create(
         &mut self,
-    ) -> Result<KeystoreState<'a, EspressoLedger>, KeystoreError<EspressoLedger>> {
+    ) -> Result<LedgerState<'a, EspressoLedger>, KeystoreError<EspressoLedger>> {
         let state = {
             let mut ledger = self.ledger.lock().await;
 
-            KeystoreState {
-                proving_keys: ledger.network().proving_keys.clone(),
-                txn_state: TransactionState {
-                    validator: ledger.network().validator.clone(),
-
-                    nullifiers: ledger.network().nullifiers.clone(),
-                    record_mt: SparseMerkleTree::sparse(ledger.network().records.clone()),
-
-                    now: ledger.now(),
-                },
-            }
+            LedgerState::new(
+                ledger.network().proving_keys.clone(),
+                ledger.now(),
+                ledger.network().validator.clone(),
+                LWMerkleTree::sparse(ledger.network().records.clone()),
+                ledger.network().nullifiers.clone(),
+            )
         };
         Ok(state)
     }
@@ -265,11 +261,12 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
 
     async fn get_nullifier_proof(
         &self,
-        _block_id: u64,
+        block_id: u64,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
     ) -> Result<(bool, SetMerkleProof), KeystoreError<EspressoLedger>> {
         let mut ledger = self.ledger.lock().await;
+        assert_eq!(block_id, ledger.network().committed_blocks.len() as u64);
         if set.hash() == ledger.network().nullifiers.hash() {
             Ok(ledger.network().nullifiers.contains(nullifier).unwrap())
         } else {

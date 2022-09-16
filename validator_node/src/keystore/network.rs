@@ -38,9 +38,9 @@ use reef::Ledger;
 use seahorse::transactions::Transaction;
 use seahorse::{
     events::{EventIndex, EventSource, LedgerEvent},
-    sparse_merkle_tree::SparseMerkleTree,
-    txn_builder::TransactionState,
-    BincodeSnafu, ClientConfigSnafu, CryptoSnafu, KeystoreBackend, KeystoreError, KeystoreState,
+    ledger_state::LedgerState,
+    lw_merkle_tree::LWMerkleTree,
+    BincodeSnafu, ClientConfigSnafu, CryptoSnafu, KeystoreBackend, KeystoreError,
 };
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
@@ -173,7 +173,7 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
 
     async fn create(
         &mut self,
-    ) -> Result<KeystoreState<'a, EspressoLedger>, KeystoreError<EspressoLedger>> {
+    ) -> Result<LedgerState<'a, EspressoLedger>, KeystoreError<EspressoLedger>> {
         let block_id: u64 = self.get("status/latest_block_id").await?;
         let snapshot: StateQueryData = self
             .get(format!("availability/getstate/{}", block_id))
@@ -224,24 +224,22 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
                 .collect::<Result<_, _>>()?,
         });
 
-        let state = KeystoreState {
+        let state = LedgerState::new(
             proving_keys,
-            txn_state: TransactionState {
-                nullifiers: SetMerkleTree::sparse(snapshot.state.nullifiers_root()),
-                record_mt: SparseMerkleTree::restore_from_frontier(
-                    snapshot.state.record_merkle_commitment,
-                    &snapshot.state.record_merkle_frontier,
-                )
-                .ok_or_else(|| KeystoreError::Failed {
-                    msg: "failed to restore sparse Merkle tree from frontier".to_string(),
-                })?,
-                validator: snapshot.state,
-                now: EventIndex::from_source(
-                    EventSource::QueryService,
-                    snapshot.continuation_event_index as usize,
-                ),
-            },
-        };
+            EventIndex::from_source(
+                EventSource::QueryService,
+                snapshot.continuation_event_index as usize,
+            ),
+            snapshot.state.clone(),
+            LWMerkleTree::restore_from_frontier(
+                snapshot.state.record_merkle_commitment,
+                &snapshot.state.record_merkle_frontier,
+            )
+            .ok_or_else(|| KeystoreError::Failed {
+                msg: "failed to restore sparse Merkle tree from frontier".to_string(),
+            })?,
+            SetMerkleTree::sparse(snapshot.state.nullifiers_root()),
+        );
 
         Ok(state)
     }

@@ -64,8 +64,8 @@ use tracing::{event, Level};
 use validator_node::{
     api::client::response_body,
     keystore::{
+        ledger_state::TransactionUID,
         network::{NetworkBackend, Url},
-        txn_builder::TransactionUID,
         RecordAmount,
     },
 };

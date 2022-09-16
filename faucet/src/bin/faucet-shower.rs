@@ -31,9 +31,9 @@ use surf::Url;
 use tempdir::TempDir;
 use validator_node::keystore::{
     hd::{KeyTree, Mnemonic},
+    ledger_state::TransactionStatus,
     loader::{CreateLoader, MnemonicPasswordLogin},
     network::NetworkBackend,
-    txn_builder::TransactionStatus,
     EspressoKeystore, EspressoKeystoreError,
 };
 
