@@ -17,9 +17,9 @@
 //! mnemonics and public keys of the newly funded keystores.
 use espresso_client::{
     hd::{KeyTree, Mnemonic},
+    ledger_state::TransactionStatus,
     loader::{CreateLoader, MnemonicPasswordLogin},
     network::NetworkBackend,
-    txn_builder::TransactionStatus,
     EspressoKeystore, EspressoKeystoreError,
 };
 use espresso_core::universal_params::UNIVERSAL_PARAM;

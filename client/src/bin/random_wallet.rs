@@ -34,7 +34,7 @@
 use address_book::error::AddressBookError;
 use async_std::task::sleep;
 use derive_more::Deref;
-use espresso_client::{network::NetworkBackend, txn_builder::TransactionUID, RecordAmount};
+use espresso_client::{ledger_state::TransactionUID, network::NetworkBackend, RecordAmount};
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use human_bytes::human_bytes;
 use jf_cap::{

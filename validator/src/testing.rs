@@ -54,7 +54,7 @@ impl AddressBook {
         let dir = TempDir::new("address_book").unwrap();
         let store = FileStore::new(dir.path().to_owned());
         let port = pick_unused_port().unwrap();
-        let base_url: String = format!("http://127.0.0.1:{port}");
+        let base_url: String = format!("127.0.0.1:{port}");
         let api_path = std::env::current_dir()
             .unwrap()
             .join("..")
@@ -65,6 +65,9 @@ impl AddressBook {
         let app = address_book::init_web_server(api_path.to_str().unwrap().to_string(), store)
             .expect("address_book app");
         let handle = spawn(app.serve(base_url.clone()));
+        // Don't add `http://` to `base_url` until `handle` is created, to avoid the `spawn` failure
+        // due to `Can't assign requested address`.
+        let base_url: String = format!("http://{base_url}");
         wait_for_server(
             &Url::parse(&base_url).unwrap(),
             SERVER_STARTUP_RETRIES,
