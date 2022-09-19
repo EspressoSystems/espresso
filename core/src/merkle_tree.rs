@@ -14,10 +14,10 @@
 //! Implementation of the Merkle tree data structure.
 //!
 //! At a high level the Merkle tree is a ternary tree and the hash function H
-//! used is the rescue hash function. The node values are BlsScalar and each
-//! internal node value is obtained by computing v:=H(a,b,c) where a,b,c are
+//! used is SHA3_256 function. The node values are [u8;32] and each
+//! internal node value is obtained by computing v:=H(1u8,a,b,c) where a,b,c are
 //! the values of the left,middle and right child respectively. Leaf values
-//! for an element (uid,elem) is obtained as H(0,uid,elem).
+//! for an element (uid,elem) is obtained as H(0u8,little_endian(uid),CanonicalSerialize(elem)).
 //! The tree height is fixed during initial instantiation and a new leaf will
 //! be inserted at the leftmost available slot in the tree.
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
@@ -38,6 +38,11 @@ use jf_primitives::errors::PrimitivesError;
 use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use sha3::Digest;
+
+pub const NODE_VALUE_LEN: usize = 32usize;
+
+pub const DOM_SEP_INT_NODE: u8 = 1u8;
+pub const DOM_SEP_LEAF_NODE: u8 = 0u8;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Deserialize, Serialize)]
 /// Enum for identifying a position of a node (left, middle or right).
@@ -122,10 +127,8 @@ impl Default for NodePos {
 /// It consists of the following:
 /// * `sibling1` - the 1st sibling of the tree node
 /// * `sibling2` - the 2nd sibling of the tree node
-/// * `is_left_child` - indicates whether the tree node is the left child of its
+/// * `pos` - indicates whether the tree node is the left, middle or right child of its
 ///   parent
-/// * `is_right_child` - indicates whether the tree node is the right child of
-///   its parent
 #[derive(
     Clone,
     Default,
@@ -197,7 +200,7 @@ impl MerklePath {
 /// Represents the value for a node in the merkle tree.
 #[tagged_blob("NODE")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default, Copy)]
-pub struct NodeValue(pub(crate) [u8; 32]);
+pub struct NodeValue(pub(crate) [u8; NODE_VALUE_LEN]);
 
 impl CanonicalSerialize for NodeValue {
     fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
@@ -205,13 +208,13 @@ impl CanonicalSerialize for NodeValue {
     }
 
     fn serialized_size(&self) -> usize {
-        32
+        NODE_VALUE_LEN
     }
 }
 
 impl CanonicalDeserialize for NodeValue {
     fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut buf = [0u8; 32];
+        let mut buf = [0u8; NODE_VALUE_LEN];
         reader
             .read(&mut buf[..])
             .map_err(SerializationError::from)?;
@@ -221,7 +224,7 @@ impl CanonicalDeserialize for NodeValue {
 
 impl Distribution<NodeValue> for Standard
 where
-    Standard: Distribution<[u8; 32]>,
+    Standard: Distribution<[u8; NODE_VALUE_LEN]>,
 {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> NodeValue {
         NodeValue(rng.gen())
@@ -231,26 +234,17 @@ where
 // TODO: those APIs can be replaced with From/Into and Default?
 impl NodeValue {
     /*
-    /// Convert a node into a scalar field element.
-    pub fn to_scalar(self) -> F {
-        self.0
-    }
-
-    /// Convert a scalar field element into anode.
-    pub fn from_scalar(scalar: F) -> Self {
-        Self(scalar)
-    }*/
-
     pub fn from_elem<E: CanonicalSerialize>(elem: E) -> Self {
         let mut hasher = sha3::Sha3_256::new();
         let mut bytes = vec![0u8; elem.serialized_size()];
         elem.serialize(&mut bytes).unwrap();
         hasher.update(bytes);
         let digest = hasher.finalize();
-        let mut value = [0u8; 32];
-        value.copy_from_slice(&digest[0..32]);
+        let mut value = [0u8; NODE_VALUE_LEN];
+        value.copy_from_slice(&digest[0..NODE_VALUE_LEN]);
         NodeValue(value)
     }
+    */
 
     #[allow(dead_code)]
     fn to_bytes(self) -> Vec<u8> {
@@ -259,7 +253,7 @@ impl NodeValue {
 
     /// Empty node.
     pub fn empty_node_value() -> Self {
-        Self([0u8; 32])
+        Self([0u8; NODE_VALUE_LEN])
     }
 }
 
@@ -281,14 +275,15 @@ impl TryFrom<usize> for NodePos {
 /// * `b` - second input value (e.g.: middle child value)
 /// * `c` - third input value (e.g.: right child value)
 /// * `returns` - rescue_sponge_no_padding(a,b,c)
-pub(crate) fn hash(a: &NodeValue, b: &NodeValue, c: &NodeValue) -> NodeValue {
+fn hash(a: &NodeValue, b: &NodeValue, c: &NodeValue) -> NodeValue {
     let mut hasher = sha3::Sha3_256::new();
+    hasher.update(&[DOM_SEP_INT_NODE]);
     hasher.update(&a.0);
     hasher.update(&b.0);
     hasher.update(&c.0);
     let digest = hasher.finalize();
-    let mut value = [0u8; 32];
-    value.copy_from_slice(&digest[0..32]);
+    let mut value = [0u8; NODE_VALUE_LEN];
+    value.copy_from_slice(&digest[0..NODE_VALUE_LEN]);
     NodeValue(value)
 }
 
@@ -364,6 +359,7 @@ where
         value: NodeValue,
         uid: u64,
         #[serde(with = "jf_utils::field_elem")]
+        // this just implement serde for any type that implements ark_serialize traits
         elem: E,
     },
 }
@@ -373,14 +369,15 @@ where
     E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
 {
     fn new_leaf(uid: u64, elem: E) -> Self {
-        let mut hasher = sha3::Sha3_256::new();
-        hasher.update(&uid.to_le_bytes());
         let mut elem_bytes = vec![0u8; elem.serialized_size()];
         elem.serialize(&mut elem_bytes).unwrap();
+        let mut hasher = sha3::Sha3_256::new();
+        hasher.update(&[DOM_SEP_LEAF_NODE]);
+        hasher.update(&uid.to_le_bytes());
         hasher.update(&elem_bytes);
         let digest = hasher.finalize();
-        let mut value = [0u8; 32];
-        value.copy_from_slice(&digest[0..32]);
+        let mut value = [0u8; NODE_VALUE_LEN];
+        value.copy_from_slice(&digest[0..NODE_VALUE_LEN]);
         MerkleNode::Leaf {
             value: NodeValue(value),
             uid,
@@ -415,7 +412,7 @@ where
 
     fn insert_at_right(self, capacity: u64, ix: u64, elem: E) -> Self {
         if capacity <= 1 {
-            assert!(self.is_empty_subtree());
+            assert!(self.is_empty_subtree(), "Exceeded capacity of Merkle tree");
             Self::new_leaf(ix, elem)
         } else {
             let next_capacity = capacity / 3;
@@ -1868,7 +1865,7 @@ mod mt_tests {
         check_proof(&mt_state, 0, elem3, None, false);
         check_proof(&mt_state, 3, elem0, None, false);
 
-        let wrong_root_value = NodeValue([1u8; 32]);
+        let wrong_root_value = NodeValue([1u8; NODE_VALUE_LEN]);
         check_proof(&mt_state, 0, elem0, Some(wrong_root_value), false);
     }
 
