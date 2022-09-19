@@ -11,8 +11,9 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use async_std::task::{block_on, sleep, spawn_blocking};
+use async_std::task::{block_on, spawn_blocking};
 use escargot::CargoBuild;
+use espresso_esqs::ApiError;
 use espresso_validator::{testing::AddressBook, MINIMUM_NODES};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
@@ -24,7 +25,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::Duration;
-use surf::Url;
+use surf_disco::Url;
 use tempdir::TempDir;
 
 /// Set up and run a test of the keystore CLI.
@@ -512,7 +513,6 @@ impl Validator {
                 .args([
                     "--store-path",
                     store_path.as_os_str().to_str().unwrap(),
-                    "--full",
                     "--id",
                     &id.to_string(),
                     "--num-nodes",
@@ -607,16 +607,13 @@ fn cargo_run(package: impl AsRef<str>, bin: impl AsRef<str>) -> Result<Command, 
 
 async fn wait_for_connect(port: u16) -> Result<(), String> {
     let url: Url = format!("http://localhost:{}", port).parse().unwrap();
-    let mut backoff = Duration::from_millis(500);
-    for _ in 0..10 {
-        if surf::connect(&url).await.is_ok() {
-            return Ok(());
-        }
-        sleep(backoff).await;
-        backoff *= 2;
+    let timeout = Duration::from_secs(300);
+    if surf_disco::connect::<ApiError>(url, Some(timeout)).await {
+        Ok(())
+    } else {
+        Err(format!(
+            "failed to connect to port {} in {:?}",
+            port, timeout
+        ))
     }
-    Err(format!(
-        "failed to connect to port {} in {:?}",
-        port, backoff
-    ))
 }

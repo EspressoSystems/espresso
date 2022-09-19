@@ -45,10 +45,10 @@ impl Error {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Throughput {
-    blocks_finalized: u64,
-    transactions_finalized: u64,
-    bytes_finalized: u64,
-    time_operational: Duration,
+    pub blocks_finalized: u64,
+    pub transactions_finalized: u64,
+    pub bytes_finalized: u64,
+    pub time_operational: Duration,
 }
 
 pub fn define_api<State>(options: &Options) -> Result<Api<State, Error>, ApiError>

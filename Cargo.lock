@@ -2281,25 +2281,33 @@ dependencies = [
 name = "espresso-client"
 version = "0.1.0"
 dependencies = [
+ "address-book",
  "async-std",
  "async-trait",
  "bincode",
  "derive_more",
  "escargot",
+ "espresso-availability-api",
  "espresso-core",
+ "espresso-esqs",
+ "espresso-metastate-api",
  "espresso-validator",
  "futures",
+ "hex",
  "human_bytes",
+ "itertools 0.10.3",
  "jf-cap",
  "jf-plonk",
  "jf-primitives",
  "jf-utils 0.1.1",
+ "key-set",
  "lazy_static",
  "parse-size",
  "portpicker",
  "primitive-types",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "reef",
  "regex",
  "rustyline",
  "seahorse",
@@ -2308,7 +2316,7 @@ dependencies = [
  "serde_json",
  "snafu",
  "structopt",
- "surf",
+ "surf-disco",
  "tagged-base64",
  "tempdir",
  "toml",
@@ -2387,6 +2395,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "espresso-esqs"
+version = "0.1.0"
+dependencies = [
+ "ark-serialize",
+ "async-std",
+ "async-trait",
+ "async_executors",
+ "atomic_store 0.1.3 (git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.3)",
+ "clap 3.2.17",
+ "commit",
+ "derive_more",
+ "espresso-availability-api",
+ "espresso-catchup-api",
+ "espresso-core",
+ "espresso-metastate-api",
+ "espresso-status-api",
+ "espresso-validator-api",
+ "futures",
+ "hotshot",
+ "hotshot-types",
+ "itertools 0.10.3",
+ "jf-cap",
+ "postage",
+ "reef",
+ "seahorse",
+ "serde",
+ "snafu",
+ "tide-disco",
+ "tracing",
+]
+
+[[package]]
 name = "espresso-macros"
 version = "0.1.0"
 source = "git+https://github.com/EspressoSystems/espresso-macros.git?tag=0.1.0#9e0b0258c99757c567676c4dd92f1501db0cf580"
@@ -2454,23 +2494,21 @@ dependencies = [
  "address-book",
  "ark-serialize",
  "ark-std",
- "async-channel",
  "async-std",
- "async-trait",
  "async-tungstenite 0.15.0",
- "atomic_store 0.1.3 (git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.3)",
  "bincode",
  "clap 3.2.17",
  "cld",
+ "commit",
  "derive_more",
  "dirs",
  "escargot",
  "espresso-availability-api",
- "espresso-catchup-api",
+ "espresso-client",
  "espresso-core",
+ "espresso-esqs",
  "espresso-metastate-api",
  "espresso-status-api",
- "espresso-validator-api",
  "futures",
  "futures-util",
  "hotshot",
@@ -2486,7 +2524,6 @@ dependencies = [
  "markdown",
  "net",
  "portpicker",
- "postage",
  "procfs",
  "rand 0.8.5",
  "rand_chacha 0.2.2",
@@ -2505,12 +2542,11 @@ dependencies = [
  "tempdir",
  "tide",
  "tide-disco",
- "tide-websockets",
- "toml",
  "tracing",
  "tracing-distributed 0.3.1",
  "tracing-futures",
  "tracing-subscriber 0.3.15",
+ "tracing-test",
  "validator_node",
 ]
 
@@ -2523,6 +2559,7 @@ dependencies = [
  "derive_more",
  "espresso-core",
  "futures",
+ "hotshot",
  "serde",
  "snafu",
  "tide-disco",
@@ -2631,6 +2668,7 @@ dependencies = [
  "bincode",
  "dirs",
  "escargot",
+ "espresso-client",
  "espresso-core",
  "espresso-validator",
  "futures",
@@ -2656,7 +2694,6 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber 0.3.15",
  "tracing-test",
- "validator_node",
 ]
 
 [[package]]
@@ -6892,6 +6929,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "surf-disco"
+version = "0.1.0"
+source = "git+ssh://git@github.com/EspressoSystems/surf-disco.git?branch=main#2bd39463c93bdf62ea75ff2836f9c8244dfc0366"
+dependencies = [
+ "async-std",
+ "async-tungstenite 0.15.0",
+ "bincode",
+ "futures",
+ "hex",
+ "serde",
+ "serde_json",
+ "surf",
+ "tide-disco",
+]
+
+[[package]]
 name = "sval"
 version = "1.0.0-alpha.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7078,7 +7131,7 @@ dependencies = [
 [[package]]
 name = "tide-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#e081b97fae210bf478788b9bde443dd3afeb5f2e"
+source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#482f59a9314765ecd8928a7b051b3a9555190bbc"
 dependencies = [
  "ark-serialize",
  "async-std",
@@ -7673,15 +7726,12 @@ checksum = "936e4b492acfd135421d8dca4b1aa80a7bfc26e702ef3af710e0752684df5372"
 name = "validator_node"
 version = "0.1.0"
 dependencies = [
- "address-book",
  "arbitrary",
  "arbitrary-wrappers",
  "ark-serialize",
  "ark-std",
  "async-std",
  "async-trait",
- "async-tungstenite 0.15.0",
- "async_executors",
  "bincode",
  "bitvec 0.20.1",
  "commit",
@@ -7698,7 +7748,6 @@ dependencies = [
  "jf-cap",
  "jf-primitives",
  "jf-utils 0.1.1",
- "key-set",
  "lazy_static",
  "net",
  "proptest",

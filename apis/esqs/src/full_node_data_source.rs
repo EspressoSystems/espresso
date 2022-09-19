@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::From;
 use std::path::Path;
 
-use crate::Consensus;
+use crate::ApiError;
 use async_trait::async_trait;
 use atomic_store::{
     append_log::Iter as ALIter, load_store::BincodeLoadStore, AppendLog, AtomicStore,
@@ -29,10 +29,13 @@ use espresso_core::ledger::EspressoLedger;
 use espresso_core::state::{
     BlockCommitment, ElaboratedTransaction, SetMerkleProof, SetMerkleTree, TransactionCommitment,
 };
-use espresso_metastate_api::data_source::{MetaStateDataSource, UpdateMetaStateData};
+use espresso_metastate_api::{
+    api as metastate,
+    data_source::{MetaStateDataSource, UpdateMetaStateData},
+};
 use espresso_status_api::data_source::{StatusDataSource, UpdateStatusData};
 use espresso_status_api::query_data::ValidatorStatus;
-use espresso_validator_api::data_source::ValidatorDataSource;
+use espresso_validator_api::data_source::{ConsensusEvent, ValidatorDataSource};
 use hotshot::{data::QuorumCertificate, HotShotError, H_256};
 use itertools::izip;
 use jf_cap::structs::Nullifier;
@@ -40,13 +43,13 @@ use jf_cap::MerkleTree;
 use postage::{broadcast, sink::Sink};
 use seahorse::events::LedgerEvent;
 use tracing::warn;
-use validator_node::api::EspressoError;
-use validator_node::node::QueryServiceError;
 
 // This should probably be taken from a passed-in configuration, and stored locally.
 const CACHED_BLOCKS_COUNT: usize = 50;
 const CACHED_EVENTS_COUNT: usize = 500;
 const EVENT_CHANNEL_CAPACITY: usize = 500;
+
+pub type Consensus = Box<dyn ValidatorDataSource<Error = HotShotError> + Send + Sync>;
 
 pub struct QueryData {
     cached_blocks_start: usize,
@@ -315,7 +318,7 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
 }
 
 impl UpdateAvailabilityData for QueryData {
-    type Error = EspressoError;
+    type Error = ApiError;
 
     fn append_blocks(&mut self, blocks: Vec<BlockAndAssociated>) -> Result<(), Self::Error> {
         blocks.iter().for_each(|block_and_associated| {
@@ -399,7 +402,8 @@ impl<'a> CatchUpDataSource for &'a QueryData {
 
 #[async_trait]
 impl UpdateCatchUpData for QueryData {
-    type Error = EspressoError;
+    type Error = ApiError;
+
     async fn append_events(
         &mut self,
         events: Vec<Option<LedgerEvent<EspressoLedger>>>,
@@ -437,14 +441,14 @@ impl QueryData {
         &self,
         block_id: u64,
         op: impl FnOnce(&SetMerkleTree) -> U,
-    ) -> Result<U, EspressoError> {
+    ) -> Result<U, ApiError> {
         if block_id as usize > self.cached_blocks_start + self.cached_blocks.len() {
             tracing::error!(
                 "Max block index exceeded; max: {}, queried for {}",
                 self.cached_blocks_start + self.cached_blocks.len(),
                 block_id
             );
-            return Err(QueryServiceError::InvalidHistoricalIndex {}.into());
+            return Err(metastate::Error::InvalidBlockId { block_id }.into());
         }
         let default_nullifier_set = SetMerkleTree::default();
 
@@ -513,7 +517,7 @@ impl MetaStateDataSource for QueryData {
 }
 
 impl UpdateMetaStateData for QueryData {
-    type Error = EspressoError;
+    type Error = ApiError;
     fn append_block_nullifiers(
         &mut self,
         block_id: u64,
@@ -539,7 +543,7 @@ impl StatusDataSource for QueryData {
 }
 
 impl UpdateStatusData for QueryData {
-    type Error = EspressoError;
+    type Error = ApiError;
 
     fn set_status(&mut self, status: ValidatorStatus) -> Result<(), Self::Error> {
         self.node_status = status;
@@ -556,7 +560,7 @@ impl UpdateStatusData for QueryData {
         F: FnOnce(&mut ValidatorStatus) -> Result<(), U>,
         Self::Error: From<U>,
     {
-        op(&mut self.node_status).map_err(EspressoError::from)?;
+        op(&mut self.node_status).map_err(ApiError::from)?;
         if let Err(e) = self.status_storage.store_resource(&self.node_status) {
             warn!(
                 "Failed to store status {:?}, Error {}",
@@ -572,7 +576,11 @@ impl ValidatorDataSource for QueryData {
     type Error = HotShotError;
 
     async fn submit(&mut self, txn: ElaboratedTransaction) -> Result<(), Self::Error> {
-        self.consensus.submit_transaction(txn).await
+        self.consensus.submit(txn).await
+    }
+
+    async fn next_event(&mut self) -> Result<ConsensusEvent, Self::Error> {
+        self.consensus.next_event().await
     }
 }
 
@@ -779,7 +787,7 @@ impl QueryData {
     }
 }
 
-impl validator_node::update_query_data_source::EventProcessedHandler for QueryData {
+impl crate::update_query_data_source::EventProcessedHandler for QueryData {
     fn on_event_processing_complete(&mut self) {
         self.commit_all();
     }

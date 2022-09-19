@@ -309,10 +309,7 @@ target/release/faucet
 | Environment Variable       | Type | Affected Services    | Meaning
 |----------------------------|------|----------------------|---------
 | ESPRESSO_VALIDATOR_STORE_PATH | Path | espresso-validator | Path to persistence files for validator service
-| ESPRESSO_VALIDATOR_WEB_PATH | Path | espresso-validator | Path to validator assets including web server files.
-| ESPRESSO_VALIDATOR_API_PATH | Path | espresso-validator | Path to validator API specification
 | ESPRESSO_VALIDATOR_PUB_KEY_PATH | Path | espresso-validator | Path to validator public keys
-| ESPRESSO_VALIDATOR_QUERY_PORT    | u16  | espresso-validator   | Port on which to serve the query service and submit API
 | ESPRESSO_VALIDATOR_SECRET_KEY_SEED | TaggedBase64 (tag="SEED") | espresso-validator | Seed to use for generating threshold signature secret key
 | ESPRESSO_VALIDATOR_REPLICATION_FACTOR | usize | espresso-validator | Replication factor for entries in the DHT
 | ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH | usize | espresso-validator | `mesh_n_high` parameter for gossibpsub for bootstrap validators
@@ -327,6 +324,7 @@ target/release/faucet
 | ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT | u16 | espresso-validator | String for the port of the current validator if it's non-bootstrap
 | ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME | u64 | espresso-validator | Minimum time (in seconds) to wait for submitted transactions before proposing a block
 | ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME | u64 | espresso-validator | Maximum time (in seconds) to wait for submitted transactions before proposing a block
+| ESPRESSO_ESQS_PORT | u16 | espresso-validator | Port for the EsQS, if running
 | ESPRESSO_ADDRESS_BOOK_STORE_PATH | Path | address-book   | Path to persistence files for address book service (default `$LOCAL/.espresso/espresso/address-book/store`)
 | ESPRESSO_ADDRESS_BOOK_PORT | u16  | address-book         | Port on which to serve the address book
 | ESPRESSO_ADDRESS_BOOK_URL  | Url  | wallet-cli, faucet | URL of the address book service

@@ -17,6 +17,7 @@ members = [
     "address-book",
     "apis/availability",
     "apis/catchup",
+    "apis/esqs",
     "apis/metastate",
     "apis/status",
     "apis/validator",

@@ -12,7 +12,6 @@
 
 pub use seahorse::testing::MockLedger;
 
-use crate::node;
 use async_std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use espresso_core::{
@@ -270,7 +269,9 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for MockEspressoBackend<'a> {
         if set.hash() == ledger.network().nullifiers.hash() {
             Ok(ledger.network().nullifiers.contains(nullifier).unwrap())
         } else {
-            Err(node::QueryServiceError::InvalidNullifierRoot {}.into())
+            Err(KeystoreError::Failed {
+                msg: "invalid nullifier root".into(),
+            })
         }
     }
 
