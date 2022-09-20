@@ -1483,56 +1483,6 @@ impl<
     }
 }
 
-/// The proof of membership in an accumulator (Merkle tree) for an element
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-    Serialize,
-    Deserialize,
-)]
-#[serde(bound = "")]
-pub struct AccMemberWitness {
-    pub merkle_path: MerklePath,
-    pub root: NodeValue,
-    pub uid: u64,
-}
-
-impl AccMemberWitness {
-    /// Create a fake proof/witness for a dummy element
-    pub fn dummy(tree_depth: u8) -> Self {
-        let mut witness = Self::default();
-        let path = vec![MerklePathNode::default(); tree_depth as usize];
-        witness.merkle_path = MerklePath::new(path);
-        witness
-    }
-
-    /// Create a proof/witness for an accumulated ARC in the Merkle tree with
-    /// leaf position `uid`
-    pub fn lookup_from_tree<
-        E: Clone + CanonicalSerialize + Debug + PartialEq + Eq + Hash + Default + CanonicalDeserialize,
-    >(
-        mt: &MerkleTree<E>,
-        uid: u64,
-    ) -> LookupResult<E, Self> {
-        mt.get_leaf(uid).map(|_, MerkleLeafProof { leaf, path }| {
-            (
-                leaf.0,
-                Self {
-                    merkle_path: path,
-                    uid,
-                    root: mt.root.value(),
-                },
-            )
-        })
-    }
-}
-
 #[cfg(test)]
 mod mt_tests {
 
