@@ -1,15 +1,14 @@
 // Copyright (c) 2022 Espresso Systems (espressosys.com)
+// This file is part of the Espresso library.
 //
-// This program is free software: you can redistribute it and/or modify it under the terms of the
-// GNU General Public License as published by the Free Software Foundation, either version 3 of the
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+// General Public License as published by the Free Software Foundation, either version 3 of the
 // License, or (at your option) any later version.
-//
 // This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 // General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License along with this program. If
-// not, see <https://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU General Public License along with this program. If not,
+// see <https://www.gnu.org/licenses/>.
 
 use address_book::{
     init_web_server,
@@ -35,7 +34,7 @@ const NOT_FOUND_COUNT: u64 = 100;
 //
 async fn round_trip<T: Store + 'static>(store: T) {
     let port = pick_unused_port().unwrap();
-    let base_url: String = format!("http://127.0.0.1:{port}");
+    let base_url: String = format!("127.0.0.1:{port}");
     let api_path = std::env::current_dir()
         .unwrap()
         .join("api")
@@ -46,6 +45,9 @@ async fn round_trip<T: Store + 'static>(store: T) {
     // Note: we don't want to take base_url from the settings because we want to pick a free port
     // for testing.
     let handle = spawn(app.serve(base_url.clone()));
+    // Don't add `http://` to `base_url` until `handle` is created, to avoid the `spawn` failure
+    // due to `Can't assign requested address`.
+    let base_url: String = format!("http://{base_url}");
     wait_for_server(
         &Url::parse(&base_url).unwrap(),
         SERVER_STARTUP_RETRIES,

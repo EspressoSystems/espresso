@@ -21,6 +21,15 @@ use async_std::{
 use atomic_store::{
     load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
 };
+use espresso_client::{
+    events::EventIndex,
+    hd::Mnemonic,
+    ledger_state::{TransactionStatus, TransactionUID},
+    loader::{MnemonicPasswordLogin, RecoveryLoader},
+    network::NetworkBackend,
+    records::Record,
+    EspressoKeystore, RecordAmount,
+};
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use futures::{channel::mpsc, future::join_all, stream::StreamExt};
 use jf_cap::{
@@ -47,15 +56,6 @@ use tide::{
     StatusCode,
 };
 use tracing::{error, info, warn};
-use validator_node::keystore::{
-    events::EventIndex,
-    hd::Mnemonic,
-    loader::{MnemonicPasswordLogin, RecoveryLoader},
-    network::NetworkBackend,
-    records::Record,
-    txn_builder::{TransactionStatus, TransactionUID},
-    EspressoKeystore, RecordAmount,
-};
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -286,8 +286,8 @@ pub fn faucet_server_error<E: Into<FaucetError>>(err: E) -> tide::Error {
 /// filtering out keys that have a more recent `key -> None` entry.
 #[derive(Clone)]
 struct FaucetQueue {
-    sender: mpmc::Sender<UserPubKey>,
-    receiver: mpmc::Receiver<UserPubKey>,
+    sender: mpmc::Sender<(UserPubKey, usize)>,
+    receiver: mpmc::Receiver<(UserPubKey, usize)>,
     index: Arc<Mutex<FaucetQueueIndex>>,
     max_len: Option<usize>,
 }
@@ -333,8 +333,13 @@ impl FaucetQueueIndex {
     /// Otherwise, the counter is simply updated.
     ///
     /// Returns `true` if this key needs more grants.
-    fn grant(&mut self, key: UserPubKey, max_grants: usize) -> Result<bool, FaucetError> {
-        let grants_given = self.index[&key] + 1;
+    fn grant(
+        &mut self,
+        key: UserPubKey,
+        granted: usize,
+        max_grants: usize,
+    ) -> Result<bool, FaucetError> {
+        let grants_given = self.index[&key] + granted;
         if grants_given >= max_grants {
             // If this is the last grant to this key, remove it from the index.
             self.remove(&key)?;
@@ -369,6 +374,11 @@ impl FaucetQueueIndex {
         // Update our in-memory set.
         self.index.remove(key);
         Ok(())
+    }
+
+    /// Get the number of grants already given to this key.
+    fn grants(&self, key: &UserPubKey) -> usize {
+        self.index[key]
     }
 }
 
@@ -424,19 +434,23 @@ impl FaucetQueue {
             }
         }
 
+        // Post-process `index` to remove [None] values.
+        let index = index
+            .into_iter()
+            .filter_map(|(key, val)| val.map(|val| (key, val)))
+            .collect::<HashMap<_, _>>();
+
         let (sender, receiver) = mpmc::unbounded();
         for key in queue.into_iter().rev() {
+            let grants = index[&key];
             // `send` only fails if the receiving end of the channel has been dropped, but we have
             // the receiving end right now, so this `unwrap` will never fail.
-            sender.send(key).await.unwrap();
+            sender.send((key, grants)).await.unwrap();
         }
 
         Ok(Self {
             index: Arc::new(Mutex::new(FaucetQueueIndex {
-                index: index
-                    .into_iter()
-                    .filter_map(|(key, val)| val.map(|val| (key, val)))
-                    .collect(),
+                index,
                 queue: persistent_queue,
                 store,
             })),
@@ -462,27 +476,28 @@ impl FaucetQueue {
             }
         }
         // If we successfully added the key to the index, we can send it to a receiver.
-        if self.sender.send(key).await.is_err() {
+        if self.sender.send((key, 0)).await.is_err() {
             warn!("failed to add request to the queue: channel is closed");
         }
         Ok(())
     }
 
-    async fn pop(&mut self) -> Option<UserPubKey> {
-        let key = self.receiver.next().await?;
-        Some(key)
+    async fn pop(&mut self) -> Option<(UserPubKey, usize)> {
+        let req = self.receiver.next().await?;
+        Some(req)
     }
 
-    async fn grant(&mut self, request: UserPubKey, max_grants: usize) -> bool {
+    async fn grant(&mut self, request: UserPubKey, granted: usize, max_grants: usize) -> bool {
         self.index
             .lock()
             .await
-            .grant(request, max_grants)
+            .grant(request, granted, max_grants)
             .unwrap_or(false)
     }
 
-    async fn fail(&mut self, request: UserPubKey) {
-        if let Err(err) = self.sender.send(request).await {
+    async fn fail(&mut self, key: UserPubKey) {
+        let grants = { self.index.lock().await.grants(&key) };
+        if let Err(err) = self.sender.send((key, grants)).await {
             error!(
                 "error re-adding failed request; request will be dropped. {}",
                 err
@@ -538,12 +553,13 @@ async fn request_fee_assets(
 }
 
 async fn worker(id: usize, mut state: FaucetState) {
-    'wait_for_requests: while let Some(pub_key) = state.queue.pop().await {
+    'wait_for_requests: while let Some((pub_key, mut grants)) = state.queue.pop().await {
+        assert!(grants < state.num_grants);
         loop {
             // If we don't have a sufficient balance, to transfer, it is probably only because some
             // transactions are in flight. We are likely to get change back when the transactions
             // complete, so wait until we have a sufficient balance to do our job.
-            let mut keystore = loop {
+            let (mut keystore, balance) = loop {
                 let keystore = state.keystore.lock().await;
                 let balance = keystore.balance(&AssetCode::native()).await;
                 if balance < state.grant_size.into() {
@@ -556,39 +572,73 @@ async fn worker(id: usize, mut state: FaucetState) {
                 } else {
                     let records = spendable_records(&keystore, state.grant_size).await.count();
                     info!(
-                        "worker {}: transferring {} tokens to {}",
+                        "worker {}: keystore balance before transfer: {} across {} records",
+                        id, balance, records
+                    );
+                    break (keystore, balance);
+                }
+            };
+            let (res, new_grants) =
+                if state.num_grants - grants > 1 && balance >= (state.grant_size * 2).into() {
+                    // If the receiver is still owed multiple grants and we have enough balance to
+                    // make 2 simultaneous grants, take advantage of the 3-output proving key to
+                    // create 2 grants at the same time.
+                    info!(
+                        "worker {}: transferring 2 records of {} tokens each to {}",
                         id,
                         state.grant_size,
                         net::UserAddress(pub_key.address())
                     );
+                    (
+                        keystore
+                            .transfer(
+                                None,
+                                &AssetCode::native(),
+                                &[
+                                    (pub_key.clone(), state.grant_size),
+                                    (pub_key.clone(), state.grant_size),
+                                ],
+                                state.fee_size,
+                            )
+                            .await,
+                        2,
+                    )
+                } else {
                     info!(
-                        "worker {}: keystore balance before transfer: {} across {} records",
-                        id, balance, records
+                        "worker {}: transferring 1 record of {} tokens to {}",
+                        id,
+                        state.grant_size,
+                        net::UserAddress(pub_key.address())
                     );
-                    break keystore;
-                }
-            };
-            if let Err(err) = keystore
-                .transfer(
-                    None,
-                    &AssetCode::native(),
-                    &[(pub_key.clone(), state.grant_size)],
-                    state.fee_size,
-                )
-                .await
-            {
+                    (
+                        keystore
+                            .transfer(
+                                None,
+                                &AssetCode::native(),
+                                &[(pub_key.clone(), state.grant_size)],
+                                state.fee_size,
+                            )
+                            .await,
+                        1,
+                    )
+                };
+            if let Err(err) = res {
                 error!("worker {}: failed to transfer: {}", id, err);
-                // If we failed, mark the request as failed in the queue so it can be retried
-                // later.
+                // If we failed, mark the request as failed in the queue so it can be retried later.
                 state.queue.fail(pub_key).await;
                 continue 'wait_for_requests;
             }
 
             // Update the queue with the results of this grant; find out if the key needs more
             // grants or not.
-            if !state.queue.grant(pub_key.clone(), state.num_grants).await {
+            if !state
+                .queue
+                .grant(pub_key.clone(), new_grants, state.num_grants)
+                .await
+            {
                 break;
             }
+            grants += new_grants;
         }
 
         // Signal the record breaking thread that we have spent some records, so that it can create
@@ -608,7 +658,7 @@ async fn spendable_records(
     keystore: &EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin>,
     grant_size: RecordAmount,
 ) -> impl Iterator<Item = Record> {
-    let now = keystore.read().await.state().txn_state.validator.now();
+    let now = keystore.read().await.state().validator.now();
     keystore.records().await.into_iter().filter(move |record| {
         record.asset_code() == AssetCode::native()
             && record.amount() >= grant_size
@@ -942,6 +992,7 @@ mod test {
     use super::*;
     use async_std::task::{sleep, spawn_blocking};
     use escargot::CargoBuild;
+    use espresso_client::{hd::KeyTree, loader::CreateLoader};
     use espresso_validator::testing::minimal_test_network;
     use futures::{future::join_all, Future};
     use jf_cap::structs::AssetDefinition;
@@ -955,7 +1006,6 @@ mod test {
     use std::time::Duration;
     use tempdir::TempDir;
     use tracing_test::traced_test;
-    use validator_node::keystore::{hd::KeyTree, loader::CreateLoader};
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
         let mut backoff = Duration::from_millis(100);
@@ -1120,7 +1170,17 @@ mod test {
                 receiver_mnemonic,
                 Alphanumeric.sample_string(&mut rand::thread_rng(), 16),
             );
-            let mut receiver = network.create_keystore(&mut receiver_loader).await;
+            let backend = NetworkBackend::new(
+                &UNIVERSAL_PARAM,
+                network.query_api.clone(),
+                network.address_book_api.clone(),
+                network.submit_api.clone(),
+            )
+            .await
+            .unwrap();
+            let mut receiver = EspressoKeystore::new(backend, &mut receiver_loader)
+                .await
+                .unwrap();
             let receiver_key = receiver
                 .generate_sending_account("receiver".into(), None)
                 .await

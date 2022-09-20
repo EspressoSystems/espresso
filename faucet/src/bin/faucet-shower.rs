@@ -15,6 +15,13 @@
 //! Give faucet-shower a master mnemonic for a funded keystore and a number N and it will generate N
 //! new keystores, transfer some tokens from the master keystore to each new keystore, and print the
 //! mnemonics and public keys of the newly funded keystores.
+use espresso_client::{
+    hd::{KeyTree, Mnemonic},
+    ledger_state::TransactionStatus,
+    loader::{CreateLoader, MnemonicPasswordLogin},
+    network::NetworkBackend,
+    EspressoKeystore, EspressoKeystoreError,
+};
 use espresso_core::universal_params::UNIVERSAL_PARAM;
 use futures::stream::{iter, StreamExt};
 use jf_cap::structs::AssetCode;
@@ -29,13 +36,6 @@ use std::time::Duration;
 use structopt::StructOpt;
 use surf::Url;
 use tempdir::TempDir;
-use validator_node::keystore::{
-    hd::{KeyTree, Mnemonic},
-    loader::{CreateLoader, MnemonicPasswordLogin},
-    network::NetworkBackend,
-    txn_builder::TransactionStatus,
-    EspressoKeystore, EspressoKeystoreError,
-};
 
 #[derive(Debug, StructOpt)]
 pub struct Options {
