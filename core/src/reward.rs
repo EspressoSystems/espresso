@@ -245,9 +245,10 @@ struct EligibilityWitness {
     Deserialize,
 )]
 pub struct RewardNoteProofs {
+    /// Proof for stake table commitment and total stake for view number
     stake_table_commitment_leaf_proof:
         crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount)>,
-    /// Proof for stake_amount for staking key on that view number
+    /// Proof for stake_amount for staking key under above stake table commitment
     stake_amount_proof: KVMerkleProof<StakeTableHash>,
     /// Proof that reward hasn't been collected
     uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
@@ -290,10 +291,13 @@ impl RewardNoteProofs {
         view_number: hotshot_types::data::ViewNumber,
     ) -> Result<KVMerkleProof<CollectedRewardsHash>, RewardError> {
         let key = CollectedRewards((staking_key.clone(), view_number.into()));
+        // if (key, proof) not found, then key is present but not in memory. Hence, reward was collected.
+        // if value is found, then reward was also collected
+        // if value not found, return proof for it
         let (found, proof) = validator_state
             .collected_rewards
             .lookup(key)
-            .ok_or(RewardError::ProofNotInMemory {})?;
+            .ok_or(RewardError::RewardAlreadyCollected {})?;
         if found.is_none() {
             Ok(proof)
         } else {

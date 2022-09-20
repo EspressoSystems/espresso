@@ -833,7 +833,7 @@ mod mock_eligibility {
     use sha3::{Digest, Sha3_256};
 
     /// check weather a staking key is elegible for rewards
-    pub fn is_elegible(
+    pub fn is_eligible(
         view_number: hotshot_types::data::ViewNumber,
         staking_key: &StakingKey,
         proof: &VrfProof,
@@ -860,7 +860,7 @@ mod mock_eligibility {
         let proof = StakingKey::sign(staking_priv_key, &data[..]);
         let pub_key = StakingKey::from_priv_key(staking_priv_key);
         // 2. check eligibility
-        if is_elegible(view_number, &pub_key, &proof) {
+        if is_eligible(view_number, &pub_key, &proof) {
             Some(proof)
         } else {
             None
