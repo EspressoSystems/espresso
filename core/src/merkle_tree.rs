@@ -330,7 +330,7 @@ impl<E, P> From<LookupResult<E, P>> for Option<Option<(E, P)>> {
 #[serde(bound = "")]
 pub(crate) enum MerkleNode<E>
 where
-    E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
+    E: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
 {
     EmptySubtree,
     Branch {
@@ -353,7 +353,7 @@ where
 
 impl<E> MerkleNode<E>
 where
-    E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
+    E: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
 {
     fn new_leaf(uid: u64, elem: E) -> Self {
         let mut elem_bytes = vec![0u8; elem.serialized_size()];
@@ -835,9 +835,9 @@ pub struct MerkleCommitment {
 
 /// Data struct for a merkle leaf.
 #[tagged_blob("LEAF")]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Default, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 pub struct MerkleLeaf<
-    E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
+    E: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
 >(pub E);
 
 /// Inclusive proof of a merkle leaf.
@@ -847,7 +847,6 @@ pub struct MerkleLeaf<
     PartialEq,
     Eq,
     Hash,
-    Default,
     CanonicalSerialize,
     CanonicalDeserialize,
     Serialize,
@@ -856,7 +855,7 @@ pub struct MerkleLeaf<
 #[serde(bound = "")]
 pub struct MerkleLeafProof<E>
 where
-    E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
+    E: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
 {
     /// The leaf node.
     pub leaf: MerkleLeaf<E>,
@@ -866,7 +865,7 @@ where
 
 impl<E> MerkleLeafProof<E>
 where
-    E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
+    E: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
 {
     /// Input a leaf and the path, build a proof.
     pub fn new(leaf: E, path: MerklePath) -> MerkleLeafProof<E> {
@@ -882,7 +881,7 @@ where
 #[serde(bound = "")]
 pub enum MerkleFrontier<E>
 where
-    E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
+    E: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
 {
     /// Without proof.
     Empty {
@@ -895,7 +894,7 @@ where
 
 impl<E> MerkleFrontier<E>
 where
-    E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
+    E: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
 {
     /// If the merkle frontier is empty or not.
     pub fn non_empty(&self) -> Option<&MerkleLeafProof<E>> {
