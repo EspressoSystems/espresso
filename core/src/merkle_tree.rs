@@ -14,7 +14,7 @@
 //! Implementation of the Merkle tree data structure.
 //!
 //! At a high level the Merkle tree is a ternary tree and the hash function H
-//! used is SHA3_256 function. The node values are [u8;32] and each
+//! used is SHA3_256 function. The node values are 32 bytes and each
 //! internal node value is obtained by computing v:=H(1u8,a,b,c) where a,b,c are
 //! the values of the left,middle and right child respectively. Leaf values
 //! for an element (uid,elem) is obtained as H(0u8,little_endian(uid),CanonicalSerialize(elem)).
@@ -233,19 +233,6 @@ where
 
 // TODO: those APIs can be replaced with From/Into and Default?
 impl NodeValue {
-    /*
-    pub fn from_elem<E: CanonicalSerialize>(elem: E) -> Self {
-        let mut hasher = sha3::Sha3_256::new();
-        let mut bytes = vec![0u8; elem.serialized_size()];
-        elem.serialize(&mut bytes).unwrap();
-        hasher.update(bytes);
-        let digest = hasher.finalize();
-        let mut value = [0u8; NODE_VALUE_LEN];
-        value.copy_from_slice(&digest[0..NODE_VALUE_LEN]);
-        NodeValue(value)
-    }
-    */
-
     #[allow(dead_code)]
     fn to_bytes(self) -> Vec<u8> {
         self.0.to_vec()
@@ -1715,7 +1702,7 @@ mod mt_tests {
     ) {
         let proof = mt_state.get_leaf(pos).expect_ok().unwrap().1;
         let rt = root_value.unwrap_or_else(|| mt_state.root.value());
-        let new_proof = MerkleLeafProof::new(elem, proof.path.clone());
+        let new_proof = MerkleLeafProof::new(elem, proof.path);
         assert_eq!(
             MerkleTree::check_proof(rt, pos, &new_proof).is_ok(),
             expected_res
