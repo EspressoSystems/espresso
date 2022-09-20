@@ -11,12 +11,13 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    gen_keys, genesis, init_validator, init_web_server, open_data_source, ConsensusOpt, Node,
-    NodeOpt, MINIMUM_NODES,
+    gen_keys, genesis, init_validator, open_data_source, run_consensus, ConsensusOpt, NodeOpt,
+    MINIMUM_NODES,
 };
 use address_book::store::FileStore;
 use async_std::task::{block_on, spawn, JoinHandle};
-use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
+use espresso_core::state::ElaboratedBlock;
+use espresso_esqs::full_node::{self, EsQS};
 use futures::{channel::oneshot, future::join_all};
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
@@ -28,18 +29,9 @@ use std::time::{Duration, Instant};
 use surf::Url;
 use tempdir::TempDir;
 use tide_disco::{wait_for_server, SERVER_STARTUP_RETRIES, SERVER_STARTUP_SLEEP_MS};
-use validator_node::{
-    keystore::{
-        loader::{KeystoreLoader, MnemonicPasswordLogin},
-        network::NetworkBackend,
-        EspressoKeystore,
-    },
-    node::Validator,
-};
 
 pub struct TestNode {
-    pub query_api: Option<Url>,
-    pub submit_api: Option<Url>,
+    esqs: Option<EsQS>,
     kill: oneshot::Sender<()>,
     wait: JoinHandle<()>,
 }
@@ -62,7 +54,7 @@ impl AddressBook {
         let dir = TempDir::new("address_book").unwrap();
         let store = FileStore::new(dir.path().to_owned());
         let port = pick_unused_port().unwrap();
-        let base_url: String = format!("http://127.0.0.1:{port}");
+        let base_url: String = format!("127.0.0.1:{port}");
         let api_path = std::env::current_dir()
             .unwrap()
             .join("..")
@@ -73,6 +65,9 @@ impl AddressBook {
         let app = address_book::init_web_server(api_path.to_str().unwrap().to_string(), store)
             .expect("address_book app");
         let handle = spawn(app.serve(base_url.clone()));
+        // Don't add `http://` to `base_url` until `handle` is created, to avoid the `spawn` failure
+        // due to `Can't assign requested address`.
+        let base_url: String = format!("http://{base_url}");
         wait_for_server(
             &Url::parse(&base_url).unwrap(),
             SERVER_STARTUP_RETRIES,
@@ -109,21 +104,6 @@ pub struct TestNetwork {
 }
 
 impl TestNetwork {
-    pub async fn create_keystore(
-        &self,
-        loader: &mut impl KeystoreLoader<EspressoLedger, Meta = MnemonicPasswordLogin>,
-    ) -> EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin> {
-        let backend = NetworkBackend::new(
-            &UNIVERSAL_PARAM,
-            self.query_api.clone(),
-            self.address_book_api.clone(),
-            self.submit_api.clone(),
-        )
-        .await
-        .unwrap();
-        EspressoKeystore::new(backend, loader).await.unwrap()
-    }
-
     pub async fn kill(mut self) {
         Self::kill_impl(take(&mut self.nodes), take(&mut self.address_book)).await
     }
@@ -188,51 +168,43 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
 
         store_path.push(i.to_string());
         async move {
-            let mut node_opt = NodeOpt {
+            let node_opt = NodeOpt {
                 store_path: Some(store_path),
                 nonbootstrap_base_port: base_port as usize,
                 next_view_timeout: Duration::from_secs(10 * 60),
                 ..NodeOpt::default()
             };
-            if i == 0 {
-                node_opt.full = true;
-                node_opt.web_server_port = pick_unused_port().unwrap();
-            }
-            let data_source = open_data_source(&mut node_opt, i);
-            let node = init_validator(
+            let consensus = init_validator(
                 &node_opt,
                 &consensus_opt,
                 priv_key,
                 pub_keys,
-                genesis,
+                genesis.clone(),
                 i,
-                data_source.clone(),
             )
             .await;
+            let data_source = open_data_source(&node_opt, i, consensus.clone());
 
             // If applicable, run a query service.
-            let url = if let Node::Full(node) = &node {
-                // This returns a JoinHandle for the server, but there's no way to kill a Tide
-                // server (this is a known bug/limitation of Tide) so all we can really do is drop
-                // the handle, detaching the task.
-                init_web_server(&node_opt, node.clone()).unwrap();
+            let esqs = if i == 0 {
+                let port = pick_unused_port().unwrap();
+                tracing::info!("spawning EsQS at http://localhost:{}", port);
                 Some(
-                    format!("http://0.0.0.0:{}", node_opt.web_server_port)
-                        .parse()
-                        .unwrap(),
+                    EsQS::new(
+                        &full_node::Command::with_port(port),
+                        data_source,
+                        consensus.clone(),
+                        ElaboratedBlock::genesis(genesis),
+                    )
+                    .unwrap(),
                 )
             } else {
                 None
             };
 
             let (kill, recv_kill) = oneshot::channel();
-            let wait = spawn(node.run(recv_kill));
-            TestNode {
-                query_api: url.clone(),
-                submit_api: url,
-                kill,
-                wait,
-            }
+            let wait = spawn(run_consensus(consensus, recv_kill));
+            TestNode { esqs, kill, wait }
         }
     }))
     .await;
@@ -241,8 +213,8 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     let address_book_api = address_book.url();
 
     TestNetwork {
-        query_api: nodes[0].query_api.clone().unwrap(),
-        submit_api: nodes[0].submit_api.clone().unwrap(),
+        query_api: nodes[0].esqs.as_ref().unwrap().url(),
+        submit_api: nodes[0].esqs.as_ref().unwrap().url(),
         address_book_api,
         nodes,
         address_book: Some(address_book),

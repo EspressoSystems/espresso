@@ -19,22 +19,13 @@ RUN apt-get update \
 COPY target/x86_64-unknown-linux-musl/release/espresso-validator /bin/espresso-validator
 RUN chmod +x /bin/espresso-validator
 
-COPY validator/api /api
-COPY validator/public /public
-
 # Set file locations.
 ENV ESPRESSO_VALIDATOR_PUB_KEY_PATH=/config
-ENV ESPRESSO_VALIDATOR_API_PATH=/api/api.toml
-ENV ESPRESSO_VALIDATOR_WEB_PATH=/public
 ENV ESPRESSO_VALIDATOR_STORE_PATH=/store/atomicstore
 
 # Run a query service at port 50000.
-ENV ESPRESSO_VALIDATOR_QUERY_PORT=50000
-EXPOSE $ESPRESSO_VALIDATOR_QUERY_PORT
-
-# The new query service runs at 50001. It is under construction, but when it is finished it will
-# replace the old query service at 50000.
-ENV ESPRESSO_ESQS_PORT=50001
+ENV ESPRESSO_ESQS_PORT=50000
+EXPOSE $ESPRESSO_ESQS_PORT
 
 # Set a default number of nodes.
 ENV ESPRESSO_VALIDATOR_NUM_NODES=10
@@ -54,6 +45,6 @@ ENV ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N=12
 # ESPRESSO_VALIDATOR_ID
 # ESPRESSO_VALIDATOR_BOOTSTRAP_NODES
 
-HEALTHCHECK CMD curl -f 127.0.0.1:$ESPRESSO_VALIDATOR_QUERY_PORT/healthcheck || exit 1
+HEALTHCHECK CMD curl -f 127.0.0.1:$ESPRESSO_ESQS_PORT/healthcheck || exit 1
 
-CMD [ "/bin/espresso-validator", "--full", "esqs"]
+CMD [ "/bin/espresso-validator", "esqs"]

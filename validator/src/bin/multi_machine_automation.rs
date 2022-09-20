@@ -13,7 +13,8 @@
 use async_std::task::{sleep, spawn_blocking};
 use clap::Parser;
 use escargot::CargoBuild;
-use espresso_validator::{full_node_esqs, NodeOpt};
+use espresso_esqs::full_node;
+use espresso_validator::NodeOpt;
 use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
@@ -56,7 +57,7 @@ struct Options {
 
     /// Options for the new EsQS.
     #[clap(subcommand)]
-    pub esqs: Option<full_node_esqs::Command>,
+    pub esqs: Option<full_node::Command>,
 
     #[clap(long, short)]
     verbose: bool,
@@ -119,33 +120,12 @@ async fn main() {
     if options.node_opt.reset_store_state {
         args.push("--reset-store-state");
     }
-    if options.node_opt.full {
-        args.push("--full");
-    }
-    if options.wait {
-        args.push("--wait");
-    }
     let store_path;
     if let Some(path) = &options.node_opt.store_path {
         store_path = path.display().to_string();
         args.push("--store-path");
         args.push(&store_path);
     }
-    let web_path;
-    if let Some(path) = &options.node_opt.web_path {
-        web_path = path.display().to_string();
-        args.push("--assets");
-        args.push(&web_path);
-    }
-    let api_path;
-    if let Some(path) = &options.node_opt.api_path {
-        api_path = path.display().to_string();
-        args.push("--api");
-        args.push(&api_path);
-    }
-    let web_server_port = options.node_opt.web_server_port.to_string();
-    args.push("--web-server-port");
-    args.push(&web_server_port);
     let min_propose_time = format!("{}ms", options.node_opt.min_propose_time.as_millis());
     args.push("--min-propose-time");
     args.push(&min_propose_time);
@@ -217,7 +197,7 @@ async fn main() {
                 this_args.push(&num_txn_str);
             }
             let mut esqs_args = vec![];
-            if let Some(full_node_esqs::Command::Esqs(opt)) = &options.esqs {
+            if let Some(full_node::Command::Esqs(opt)) = &options.esqs {
                 esqs_args = vec!["esqs".to_string(), "-p".to_string(), opt.port.to_string()];
                 if let Some(path) = &opt.metastate.api_path {
                     esqs_args.push("--metastate-api-path".to_string());

@@ -17,7 +17,7 @@ use espresso_core::state::{
 use jf_cap::structs::RecordCommitment;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockQueryData {
     pub raw_block: ElaboratedBlock,
     pub block_hash: BlockCommitment,
@@ -53,7 +53,7 @@ impl BlockQueryData {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionQueryData {
     pub raw_transaction: ElaboratedTransaction,
     pub block_id: u64,
@@ -61,7 +61,7 @@ pub struct TransactionQueryData {
     pub transaction_hash: TransactionCommitment,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecordQueryData {
     pub commitment: RecordCommitment,
     pub uid: u64,
@@ -70,10 +70,11 @@ pub struct RecordQueryData {
     pub output_index: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StateQueryData {
     pub state: ValidatorState,
     pub commitment: LedgerStateCommitment,
     pub block_id: u64,
-    pub event_index: u64,
+    /// Event index to subscribe to to follow chain events built on top of this state.
+    pub continuation_event_index: u64,
 }
