@@ -2301,9 +2301,6 @@ version = "0.1.0"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
- "ark-ed-on-bls12-377",
- "ark-ed-on-bls12-381",
- "ark-ed-on-bn254",
  "ark-ff",
  "ark-serialize",
  "ark-std",
@@ -2330,7 +2327,6 @@ dependencies = [
  "jf-cap",
  "jf-plonk",
  "jf-primitives",
- "jf-rescue",
  "jf-utils 0.1.1",
  "key-set",
  "lazy_static",

@@ -1537,10 +1537,6 @@ impl AccMemberWitness {
 mod mt_tests {
 
     use crate::merkle_tree::*;
-    use ark_ed_on_bls12_377::Fq as Fq377;
-    use ark_ed_on_bls12_381::Fq as Fq381;
-    use ark_ed_on_bn254::Fq as Fq254;
-    use jf_rescue::*;
     use quickcheck::{Gen, QuickCheck};
 
     #[derive(Clone, Debug)]
@@ -1575,35 +1571,25 @@ mod mt_tests {
     fn quickcheck_mt_test_against_array() {
         QuickCheck::new()
             .tests(10)
-            .quickcheck(mt_test_against_array_helper::<Fq254> as fn(_, Vec<_>) -> ());
-
-        QuickCheck::new()
-            .tests(10)
-            .quickcheck(mt_test_against_array_helper::<Fq377> as fn(_, Vec<_>) -> ());
-
-        QuickCheck::new()
-            .tests(10)
-            .quickcheck(mt_test_against_array_helper::<Fq381> as fn(_, Vec<_>) -> ());
+            .quickcheck(mt_test_against_array_helper as fn(_, Vec<_>) -> ());
     }
 
     #[test]
     fn mt_test_against_array_regressions() {
         use ArrayOp::*;
 
-        mt_test_against_array_helper::<Fq254>(0, vec![Push(18446744073709551615), Challenge(0)]);
-        mt_test_against_array_helper::<Fq377>(0, vec![Push(18446744073709551615), Challenge(0)]);
-        mt_test_against_array_helper::<Fq381>(0, vec![Push(18446744073709551615), Challenge(0)]);
+        mt_test_against_array_helper(0, vec![Push(18446744073709551614), Challenge(0)]);
     }
 
-    fn mt_test_against_array_helper<F: RescueParameter>(height: u8, ops: Vec<ArrayOp>) {
+    fn mt_test_against_array_helper(height: u8, ops: Vec<ArrayOp>) {
         let height = height / 13 + 1; // cap it to ~20
-        let mut full = MerkleTree::<F>::new(height).unwrap();
+        let mut full = MerkleTree::<u64>::new(height).unwrap();
         let mut full_vec = vec![];
-        let mut sparse_l = MerkleTree::<F>::new(height).unwrap();
+        let mut sparse_l = MerkleTree::<u64>::new(height).unwrap();
         let mut sparse_l_vec = vec![];
-        let mut sparse_r = MerkleTree::<F>::new(height).unwrap();
+        let mut sparse_r = MerkleTree::<u64>::new(height).unwrap();
         let mut sparse_r_vec = vec![];
-        let mut pruned = MerkleTree::<F>::new(height).unwrap();
+        let mut pruned = MerkleTree::<u64>::new(height).unwrap();
         let mut pruned_vec = vec![];
 
         for op in ops {
@@ -1613,11 +1599,11 @@ mod mt_tests {
             assert_eq!(full.num_leaves(), sparse_r.num_leaves());
 
             match op {
-                ArrayOp::Push(val) => {
+                ArrayOp::Push(val_v) => {
                     if full.num_leaves == full.capacity {
                         continue;
                     }
-                    let val_v = F::from(val);
+                    // let val_v = F::from(val);
                     full.push(val_v);
                     full_vec.push(Some(val_v));
                     sparse_l.push(val_v);
@@ -1722,7 +1708,7 @@ mod mt_tests {
                     );
 
                     if let Some((_, proof)) = res {
-                        let v_bad = proof.leaf.0 + F::one();
+                        let v_bad = proof.leaf.0 + 1;
                         MerkleTree::check_proof(full.root.value(), ix, &proof).unwrap();
                         MerkleTree::check_proof(
                             full.root.value(),
@@ -1733,7 +1719,7 @@ mod mt_tests {
                     }
 
                     // check against full tree restored from builder
-                    let mut full_builder = FilledMTBuilder::<F>::new(height).unwrap();
+                    let mut full_builder = FilledMTBuilder::<u64>::new(height).unwrap();
                     for leaf in full_vec.iter() {
                         full_builder.push(leaf.unwrap());
                     }
@@ -1760,27 +1746,23 @@ mod mt_tests {
 
     #[test]
     fn mt_gen() {
-        mt_gen_helper::<Fq254>();
-        mt_gen_helper::<Fq377>();
-        mt_gen_helper::<Fq381>();
+        mt_gen_helper();
     }
-    fn mt_gen_helper<F: RescueParameter>() {
+    fn mt_gen_helper() {
         const HEIGHT: u8 = 5;
-        let mt = MerkleTree::<F>::new(HEIGHT).unwrap();
+        let mt = MerkleTree::<u64>::new(HEIGHT).unwrap();
         assert_eq!(mt.height, HEIGHT);
         assert_eq!(mt.root.value(), NodeValue::empty_node_value());
         assert_eq!(mt.num_leaves, 0);
     }
 
-    fn check_proof<F>(
-        mt_state: &MerkleTree<F>,
+    fn check_proof(
+        mt_state: &MerkleTree<u64>,
         pos: u64,
-        elem: F,
+        elem: u64,
         root_value: Option<NodeValue>,
         expected_res: bool,
-    ) where
-        F: RescueParameter,
-    {
+    ) {
         let proof = mt_state.get_leaf(pos).expect_ok().unwrap().1;
         let rt = root_value.unwrap_or_else(|| mt_state.root.value());
         let new_proof = MerkleLeafProof::new(elem, proof.path.clone());
@@ -1792,19 +1774,17 @@ mod mt_tests {
 
     #[test]
     fn mt_get_leaf_value() {
-        mt_get_leaf_value_helper::<Fq254>();
-        mt_get_leaf_value_helper::<Fq377>();
-        mt_get_leaf_value_helper::<Fq381>();
+        mt_get_leaf_value_helper();
     }
 
-    fn mt_get_leaf_value_helper<F: RescueParameter>() {
+    fn mt_get_leaf_value_helper() {
         const HEIGHT: u8 = 3;
-        let mut mt = MerkleTree::<F>::new(HEIGHT).unwrap();
+        let mut mt = MerkleTree::<u64>::new(HEIGHT).unwrap();
 
-        let elem1 = F::from(2u64);
+        let elem1 = 2u64;
         mt.push(elem1);
 
-        let elem2 = F::from(4u64);
+        let elem2 = 4u64;
         mt.push(elem2);
 
         let expected_leaf_value1 = mt.get_leaf(0).expect_ok().unwrap().1.leaf.0;
@@ -1819,42 +1799,38 @@ mod mt_tests {
 
     #[test]
     fn mt_get_num_leaves() {
-        mt_get_num_leaves_helper::<Fq254>();
-        mt_get_num_leaves_helper::<Fq377>();
-        mt_get_num_leaves_helper::<Fq381>();
+        mt_get_num_leaves_helper();
     }
 
-    fn mt_get_num_leaves_helper<F: RescueParameter>() {
+    fn mt_get_num_leaves_helper() {
         const HEIGHT: u8 = 3;
-        let mut mt = MerkleTree::<F>::new(HEIGHT).unwrap();
+        let mut mt = MerkleTree::<u64>::new(HEIGHT).unwrap();
         assert_eq!(mt.num_leaves(), 0);
 
-        mt.push(F::from(2u64));
+        mt.push(2u64);
         assert_eq!(mt.num_leaves(), 1);
 
-        mt.push(F::from(4u64));
+        mt.push(4u64);
         assert_eq!(mt.num_leaves(), 2);
     }
 
     #[test]
     fn mt_prove_and_verify() {
-        mt_prove_and_verify_helper::<Fq254>();
-        mt_prove_and_verify_helper::<Fq377>();
-        mt_prove_and_verify_helper::<Fq381>();
+        mt_prove_and_verify_helper();
     }
 
-    fn mt_prove_and_verify_helper<F: RescueParameter>() {
-        let mut mt_state = MerkleTree::<F>::new(3).unwrap();
-        let elem0 = F::from(4u64);
+    fn mt_prove_and_verify_helper() {
+        let mut mt_state = MerkleTree::<u64>::new(3).unwrap();
+        let elem0 = 4u64;
         mt_state.push(elem0);
 
-        let elem1 = F::from(7u64);
+        let elem1 = 7u64;
         mt_state.push(elem1);
 
-        let elem2 = F::from(20u64);
+        let elem2 = 20u64;
         mt_state.push(elem2);
 
-        let elem3 = F::from(16u64);
+        let elem3 = 16u64;
         mt_state.push(elem3);
 
         check_proof(&mt_state, 0, elem0, None, true);
@@ -1871,22 +1847,20 @@ mod mt_tests {
 
     #[test]
     fn test_sparse_proof_update() {
-        test_sparse_proof_update_helper::<Fq254>();
-        test_sparse_proof_update_helper::<Fq377>();
-        test_sparse_proof_update_helper::<Fq381>();
+        test_sparse_proof_update_helper();
     }
-    fn test_sparse_proof_update_helper<F: RescueParameter>() {
-        let mut mt = MerkleTree::<F>::new(3).unwrap();
-        mt.push(F::from(50u64));
-        mt.push(F::from(100u64));
+    fn test_sparse_proof_update_helper() {
+        let mut mt = MerkleTree::<u64>::new(3).unwrap();
+        mt.push(50u64);
+        mt.push(100u64);
         let mut mt_sparse = mt.clone();
         mt_sparse.forget(1);
-        mt.push(F::from(500u64));
-        mt_sparse.push(F::from(500u64));
+        mt.push(500u64);
+        mt_sparse.push(500u64);
         mt_sparse.forget(2);
         // `proof` is relative to the tree with [50,100,500]
         let proof = mt_sparse.get_leaf(0).expect_ok().unwrap().1;
-        assert_eq!(proof.leaf.0, F::from(50u64));
+        assert_eq!(proof.leaf.0, 50u64);
         MerkleTree::check_proof(mt.root.value(), 0, &proof).unwrap()
     }
 
@@ -1964,27 +1938,21 @@ mod mt_tests {
 
     #[test]
     fn test_mt_restore_from_frontier() {
-        test_mt_restore_from_frontier_helper::<Fq254>(39, 59);
-        test_mt_restore_from_frontier_helper::<Fq377>(39, 59);
-        test_mt_restore_from_frontier_helper::<Fq381>(39, 59);
+        test_mt_restore_from_frontier_helper(39, 59);
 
-        test_mt_restore_from_frontier_helper::<Fq254>(1, 1);
-        test_mt_restore_from_frontier_helper::<Fq377>(1, 1);
-        test_mt_restore_from_frontier_helper::<Fq381>(1, 1);
+        test_mt_restore_from_frontier_helper(1, 1);
 
-        test_mt_restore_from_frontier_empty::<Fq254>();
-        test_mt_restore_from_frontier_empty::<Fq377>();
-        test_mt_restore_from_frontier_empty::<Fq381>();
+        test_mt_restore_from_frontier_empty();
     }
-    fn test_mt_restore_from_frontier_helper<F: RescueParameter>(height: u8, count: u64) {
+    fn test_mt_restore_from_frontier_helper(height: u8, count: u64) {
         let height = height / 13 + 1; // cap it to ~20
         let capacity = (3_u64).checked_pow(height as u32).unwrap();
         let count = count % capacity;
-        let mut full_tree = MerkleTree::<F>::new(height).unwrap();
-        let mut pruned_tree = MerkleTree::<F>::new(height).unwrap();
+        let mut full_tree = MerkleTree::<u64>::new(height).unwrap();
+        let mut pruned_tree = MerkleTree::<u64>::new(height).unwrap();
         let mut rng = ark_std::test_rng();
         for idx in 0..count {
-            let val = F::rand(&mut rng);
+            let val: u64 = rng.gen();
             full_tree.push(val);
             pruned_tree.push(val);
             if idx > 0 {
@@ -1996,22 +1964,23 @@ mod mt_tests {
         let full_proof = full_tree.frontier();
         let pruned_comm = pruned_tree.commitment();
         let pruned_proof = pruned_tree.frontier();
-        let restored_full = MerkleTree::<F>::restore_from_frontier(full_comm, &full_proof).unwrap();
+        let restored_full =
+            MerkleTree::<u64>::restore_from_frontier(full_comm, &full_proof).unwrap();
         let restored_pruned =
-            MerkleTree::<F>::restore_from_frontier(pruned_comm, &pruned_proof).unwrap();
+            MerkleTree::<u64>::restore_from_frontier(pruned_comm, &pruned_proof).unwrap();
         assert_eq!(full_tree.root.value(), restored_full.root.value());
         assert_eq!(pruned_tree.root.value(), restored_pruned.root.value());
     }
-    fn test_mt_restore_from_frontier_empty<F: RescueParameter>() {
-        let mut pruned_tree_h3 = MerkleTree::<F>::new(3).unwrap();
-        let mut pruned_tree_h4 = MerkleTree::<F>::new(4).unwrap();
+    fn test_mt_restore_from_frontier_empty() {
+        let mut pruned_tree_h3 = MerkleTree::<u64>::new(3).unwrap();
+        let mut pruned_tree_h4 = MerkleTree::<u64>::new(4).unwrap();
         let empty_commitment_h3 = pruned_tree_h3.commitment();
         let empty_commitment_h4 = pruned_tree_h4.commitment();
         let empty_frontier_h3 = pruned_tree_h3.frontier();
         let empty_frontier_h4 = pruned_tree_h4.frontier();
         let mut rng = ark_std::test_rng();
         for idx in 0..7 {
-            let val = F::rand(&mut rng);
+            let val = rng.gen();
             pruned_tree_h3.push(val);
             pruned_tree_h4.push(val);
             if idx > 0 {
@@ -2025,83 +1994,79 @@ mod mt_tests {
         let frontier_h4 = pruned_tree_h4.frontier();
 
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(empty_commitment_h3, &empty_frontier_h4),
+            MerkleTree::<u64>::restore_from_frontier(empty_commitment_h3, &empty_frontier_h4),
             None
         );
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(empty_commitment_h4, &empty_frontier_h3),
+            MerkleTree::<u64>::restore_from_frontier(empty_commitment_h4, &empty_frontier_h3),
             None
         );
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(empty_commitment_h3, &frontier_h3),
+            MerkleTree::<u64>::restore_from_frontier(empty_commitment_h3, &frontier_h3),
             None
         );
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(commitment_h3, &empty_frontier_h3),
+            MerkleTree::<u64>::restore_from_frontier(commitment_h3, &empty_frontier_h3),
             None
         );
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(empty_commitment_h4, &frontier_h4),
+            MerkleTree::<u64>::restore_from_frontier(empty_commitment_h4, &frontier_h4),
             None
         );
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(commitment_h4, &empty_frontier_h4),
+            MerkleTree::<u64>::restore_from_frontier(commitment_h4, &empty_frontier_h4),
             None
         );
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(empty_commitment_h3, &frontier_h4),
+            MerkleTree::<u64>::restore_from_frontier(empty_commitment_h3, &frontier_h4),
             None
         );
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(commitment_h3, &empty_frontier_h4),
+            MerkleTree::<u64>::restore_from_frontier(commitment_h3, &empty_frontier_h4),
             None
         );
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(empty_commitment_h4, &frontier_h3),
+            MerkleTree::<u64>::restore_from_frontier(empty_commitment_h4, &frontier_h3),
             None
         );
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(commitment_h4, &empty_frontier_h3),
+            MerkleTree::<u64>::restore_from_frontier(commitment_h4, &empty_frontier_h3),
             None
         );
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(commitment_h3, &frontier_h4),
+            MerkleTree::<u64>::restore_from_frontier(commitment_h3, &frontier_h4),
             None
         );
         assert_eq!(
-            MerkleTree::<F>::restore_from_frontier(commitment_h4, &frontier_h3),
+            MerkleTree::<u64>::restore_from_frontier(commitment_h4, &frontier_h3),
             None
         );
 
         let empty_restore_3 =
-            MerkleTree::<F>::restore_from_frontier(empty_commitment_h3, &empty_frontier_h3)
+            MerkleTree::<u64>::restore_from_frontier(empty_commitment_h3, &empty_frontier_h3)
                 .unwrap();
         assert_eq!(empty_restore_3.num_leaves(), 0);
         let empty_restore_4 =
-            MerkleTree::<F>::restore_from_frontier(empty_commitment_h4, &empty_frontier_h4)
+            MerkleTree::<u64>::restore_from_frontier(empty_commitment_h4, &empty_frontier_h4)
                 .unwrap();
         assert_eq!(empty_restore_4.num_leaves(), 0);
     }
 
     #[test]
     fn test_mt_restore_from_leafs() {
-        test_mt_restore_from_leafs_helper::<Fq254>(39, 59);
-        test_mt_restore_from_leafs_helper::<Fq377>(39, 59);
-        test_mt_restore_from_leafs_helper::<Fq381>(39, 59);
+        test_mt_restore_from_leafs_helper(39, 59);
 
-        test_mt_restore_from_leafs_helper::<Fq254>(0, 1);
-        test_mt_restore_from_leafs_helper::<Fq377>(0, 1);
-        test_mt_restore_from_leafs_helper::<Fq381>(0, 1);
+        test_mt_restore_from_leafs_helper(0, 1);
     }
-    fn test_mt_restore_from_leafs_helper<F: RescueParameter>(height: u8, count: u64) {
+    fn test_mt_restore_from_leafs_helper(height: u8, count: u64) {
         let height = height / 13 + 1; // cap it to ~20
         let capacity = (3_u64).checked_pow(height as u32).unwrap();
         let count = count % capacity;
-        let mut full_tree = MerkleTree::<F>::new(height).unwrap();
+        let mut full_tree = MerkleTree::<u64>::new(height).unwrap();
         let mut full_array = Vec::new();
         let mut rng = ark_std::test_rng();
         for _ in 0..count {
-            let val = F::rand(&mut rng);
+            let val = rng.gen();
             full_tree.push(val);
             full_array.push(val);
         }
@@ -2117,22 +2082,16 @@ mod mt_tests {
 
     #[test]
     fn test_mt_batch_insertion() {
-        test_mt_batch_insertion_helper::<Fq254>(52, 59, 25);
-        test_mt_batch_insertion_helper::<Fq377>(52, 59, 25);
-        test_mt_batch_insertion_helper::<Fq381>(52, 59, 25);
+        test_mt_batch_insertion_helper(52, 59, 25);
     }
-    fn test_mt_batch_insertion_helper<F: RescueParameter>(
-        height: u8,
-        initial_count: u64,
-        batch_count: u64,
-    ) {
+    fn test_mt_batch_insertion_helper(height: u8, initial_count: u64, batch_count: u64) {
         let height = height / 13 + 1; // cap it to ~20
         let capacity = (3_u64).checked_pow(height as u32).unwrap();
         let initial_count = initial_count % capacity;
-        let mut full_tree = MerkleTree::<F>::new(height).unwrap();
+        let mut full_tree = MerkleTree::<u64>::new(height).unwrap();
         let mut rng = ark_std::test_rng();
         for _ in 0..initial_count {
-            let val = F::rand(&mut rng);
+            let val = rng.gen();
             full_tree.push(val);
         }
 
@@ -2149,7 +2108,7 @@ mod mt_tests {
             FilledMTBuilder::from_frontier(&commitment, &frontier).unwrap();
 
         for ix in initial_count..initial_count + batch_count {
-            let val = F::rand(&mut rng);
+            let val = rng.gen();
             full_tree.push(val);
             sparse_tree.push(val);
             if ix > 0 {
