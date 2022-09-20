@@ -32,7 +32,7 @@ use num_bigint::BigInt;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
-use seahorse::txn_builder::RecordAmount;
+use seahorse::ledger_state::RecordAmount;
 use std::collections::HashSet;
 use std::time::Instant;
 

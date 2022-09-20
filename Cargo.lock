@@ -743,6 +743,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b88d82667eca772c4aa12f0f1348b3ae643424c8876448f3f7bd5787032e234c"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1537,6 +1546,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-queue"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cd42583b04998a5363558e5f9291ee5a5ff6b49944332103f251e7479a82aa7"
+dependencies = [
+ "cfg-if 1.0.0",
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2237,47 +2256,58 @@ dependencies = [
  "snafu",
  "tide-disco",
  "toml",
+ "tracing",
 ]
 
 [[package]]
 name = "espresso-catchup-api"
 version = "0.1.0"
 dependencies = [
- "async-channel",
+ "async-trait",
  "clap 3.2.17",
  "derive_more",
  "espresso-core",
  "futures",
+ "postage",
  "seahorse",
  "serde",
  "snafu",
  "tide-disco",
  "toml",
+ "tracing",
 ]
 
 [[package]]
 name = "espresso-client"
 version = "0.1.0"
 dependencies = [
+ "address-book",
  "async-std",
  "async-trait",
  "bincode",
  "derive_more",
  "escargot",
+ "espresso-availability-api",
  "espresso-core",
+ "espresso-esqs",
+ "espresso-metastate-api",
  "espresso-validator",
  "futures",
+ "hex",
  "human_bytes",
+ "itertools 0.10.3",
  "jf-cap",
  "jf-plonk",
  "jf-primitives",
  "jf-utils 0.1.1",
+ "key-set",
  "lazy_static",
  "parse-size",
  "portpicker",
  "primitive-types",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "reef",
  "regex",
  "rustyline",
  "seahorse",
@@ -2286,7 +2316,7 @@ dependencies = [
  "serde_json",
  "snafu",
  "structopt",
- "surf",
+ "surf-disco",
  "tagged-base64",
  "tempdir",
  "toml",
@@ -2365,6 +2395,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "espresso-esqs"
+version = "0.1.0"
+dependencies = [
+ "ark-serialize",
+ "async-std",
+ "async-trait",
+ "async_executors",
+ "atomic_store 0.1.3 (git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.3)",
+ "clap 3.2.17",
+ "commit",
+ "derive_more",
+ "espresso-availability-api",
+ "espresso-catchup-api",
+ "espresso-core",
+ "espresso-metastate-api",
+ "espresso-status-api",
+ "espresso-validator-api",
+ "futures",
+ "hotshot",
+ "hotshot-types",
+ "itertools 0.10.3",
+ "jf-cap",
+ "postage",
+ "reef",
+ "seahorse",
+ "serde",
+ "snafu",
+ "tide-disco",
+ "tracing",
+]
+
+[[package]]
 name = "espresso-macros"
 version = "0.1.0"
 source = "git+https://github.com/EspressoSystems/espresso-macros.git?tag=0.1.0#9e0b0258c99757c567676c4dd92f1501db0cf580"
@@ -2432,20 +2494,19 @@ dependencies = [
  "address-book",
  "ark-serialize",
  "ark-std",
- "async-channel",
  "async-std",
- "async-trait",
  "async-tungstenite 0.15.0",
- "atomic_store 0.1.3 (git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.3)",
  "bincode",
  "clap 3.2.17",
  "cld",
+ "commit",
  "derive_more",
  "dirs",
  "escargot",
  "espresso-availability-api",
- "espresso-catchup-api",
+ "espresso-client",
  "espresso-core",
+ "espresso-esqs",
  "espresso-metastate-api",
  "espresso-status-api",
  "futures",
@@ -2481,13 +2542,28 @@ dependencies = [
  "tempdir",
  "tide",
  "tide-disco",
- "tide-websockets",
- "toml",
  "tracing",
  "tracing-distributed 0.3.1",
  "tracing-futures",
  "tracing-subscriber 0.3.15",
+ "tracing-test",
  "validator_node",
+]
+
+[[package]]
+name = "espresso-validator-api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "clap 3.2.17",
+ "derive_more",
+ "espresso-core",
+ "futures",
+ "hotshot",
+ "serde",
+ "snafu",
+ "tide-disco",
+ "toml",
 ]
 
 [[package]]
@@ -2592,6 +2668,7 @@ dependencies = [
  "bincode",
  "dirs",
  "escargot",
+ "espresso-client",
  "espresso-core",
  "espresso-validator",
  "futures",
@@ -2617,7 +2694,6 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber 0.3.15",
  "tracing-test",
- "validator_node",
 ]
 
 [[package]]
@@ -5291,6 +5367,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pollster"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5da3b0203fd7ee5720aa0b5e790b591aa5d3f41c3ed2c34a3a393382198af2f7"
+
+[[package]]
 name = "poly1305"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5331,6 +5413,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be97d76faf1bfab666e1375477b23fde79eccf0276e9b63b92a39d676a889ba9"
 dependencies = [
  "rand 0.8.5",
+]
+
+[[package]]
+name = "postage"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af3fb618632874fb76937c2361a7f22afd393c982a2165595407edc75b06d3c1"
+dependencies = [
+ "atomic",
+ "crossbeam-queue",
+ "futures",
+ "log",
+ "parking_lot 0.12.1",
+ "pin-project",
+ "pollster",
+ "static_assertions",
+ "thiserror",
 ]
 
 [[package]]
@@ -6136,7 +6235,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#87bb3860124362f0624beae2cbb32dee1dcc4f8b"
+source = "git+https://github.com/EspressoSystems/seahorse.git#369c0504837d93f4011c1d47df39ff0cb39f83cc"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -6830,6 +6929,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "surf-disco"
+version = "0.1.0"
+source = "git+ssh://git@github.com/EspressoSystems/surf-disco.git?branch=main#2bd39463c93bdf62ea75ff2836f9c8244dfc0366"
+dependencies = [
+ "async-std",
+ "async-tungstenite 0.15.0",
+ "bincode",
+ "futures",
+ "hex",
+ "serde",
+ "serde_json",
+ "surf",
+ "tide-disco",
+]
+
+[[package]]
 name = "sval"
 version = "1.0.0-alpha.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7016,7 +7131,7 @@ dependencies = [
 [[package]]
 name = "tide-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#e081b97fae210bf478788b9bde443dd3afeb5f2e"
+source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?branch=main#482f59a9314765ecd8928a7b051b3a9555190bbc"
 dependencies = [
  "ark-serialize",
  "async-std",
@@ -7611,15 +7726,12 @@ checksum = "936e4b492acfd135421d8dca4b1aa80a7bfc26e702ef3af710e0752684df5372"
 name = "validator_node"
 version = "0.1.0"
 dependencies = [
- "address-book",
  "arbitrary",
  "arbitrary-wrappers",
  "ark-serialize",
  "ark-std",
  "async-std",
  "async-trait",
- "async-tungstenite 0.15.0",
- "async_executors",
  "bincode",
  "bitvec 0.20.1",
  "commit",
@@ -7636,7 +7748,6 @@ dependencies = [
  "jf-cap",
  "jf-primitives",
  "jf-utils 0.1.1",
- "key-set",
  "lazy_static",
  "net",
  "proptest",

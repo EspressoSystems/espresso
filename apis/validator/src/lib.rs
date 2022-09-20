@@ -10,13 +10,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-pub mod network;
-#[cfg(any(test, feature = "mocks"))]
-pub mod testing;
+pub mod api;
+pub mod data_source;
 
-use espresso_core::ledger::EspressoLedger;
-
-pub use seahorse::*;
-
-pub type EspressoKeystore<'a, Backend, Meta> = Keystore<'a, Backend, EspressoLedger, Meta>;
-pub type EspressoKeystoreError = KeystoreError<EspressoLedger>;
+pub use api::*;

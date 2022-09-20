@@ -19,15 +19,15 @@ use espresso_core::{
     state::ElaboratedBlock,
     testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo},
 };
+use espresso_esqs::full_node::{self, EsQS};
 use espresso_validator::*;
-use futures::{future::pending, StreamExt};
+use futures::future::pending;
 use hotshot::types::EventType;
 use jf_cap::keys::UserPubKey;
 use std::process::exit;
 use std::time::Duration;
 use tagged_base64::TaggedBase64;
 use tracing::info;
-use validator_node::node::Validator;
 
 #[derive(Parser)]
 #[clap(
@@ -69,10 +69,6 @@ struct Options {
     #[clap(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txn: Option<u64>,
 
-    /// Wait for web server to exit after transactions complete.
-    #[clap(long)]
-    pub wait: bool,
-
     /// Whether to color log output with ANSI color codes.
     #[clap(long, env = "ESPRESSO_COLORED_LOGS")]
     pub colored_logs: bool,
@@ -82,13 +78,13 @@ struct Options {
     pub chain_id: u16,
 
     #[clap(subcommand)]
-    pub esqs: Option<full_node_esqs::Command>,
+    pub esqs: Option<full_node::Command>,
 }
 
 async fn generate_transactions(
     num_txn: u64,
     own_id: usize,
-    hotshot: Node,
+    mut hotshot: Consensus,
     mut state: MultiXfrTestState,
 ) {
     #[cfg(target_os = "linux")]
@@ -112,8 +108,6 @@ async fn generate_transactions(
         fence();
     };
 
-    let mut events = hotshot.subscribe();
-
     // Start consensus for each transaction
     let mut round = 0;
     let mut succeeded_round = 0;
@@ -125,7 +119,7 @@ async fn generate_transactions(
         report_mem();
         info!(
             "Commitment: {}",
-            hotshot.current_state().await.unwrap().unwrap().commit()
+            hotshot.get_state().await.unwrap().unwrap().commit()
         );
 
         // Generate a transaction if the node ID is 0 and if there isn't a keystore to generate it.
@@ -171,10 +165,13 @@ async fn generate_transactions(
             }
         }
 
-        hotshot.start_consensus().await;
+        hotshot.start().await;
         let success = loop {
             info!("Waiting for HotShot event");
-            let event = events.next().await.expect("HotShot unexpectedly closed");
+            let event = hotshot
+                .next_event()
+                .await
+                .expect("HotShot unexpectedly closed");
 
             match event.event {
                 EventType::Decide {
@@ -253,7 +250,7 @@ async fn generate_transactions(
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
-    let mut options = Options::from_args();
+    let options = Options::from_args();
     if let Err(msg) = options.node_opt.check() {
         eprintln!("{}", msg);
         exit(1);
@@ -265,7 +262,6 @@ async fn main() -> Result<(), std::io::Error> {
         .init();
 
     let own_id = options.id;
-    let data_source = open_data_source(&mut options.node_opt, own_id);
     // Initialize the state and hotshot
     let (genesis, state) = if options.num_txn.is_some() {
         // If we are going to generate transactions, we need to initialize the ledger with a
@@ -287,23 +283,20 @@ async fn main() -> Result<(), std::io::Error> {
         &options.consensus_opt,
         priv_key,
         known_nodes,
-        genesis,
+        genesis.clone(),
         own_id,
-        data_source.clone(),
     )
     .await;
+    let data_source = open_data_source(&options.node_opt, own_id, hotshot.clone());
 
     // Start an EsQS server if requested.
     if let Some(esqs) = &options.esqs {
-        async_std::task::spawn(full_node_esqs::init_server(esqs, data_source)?);
-    }
-
-    // If we are running a full node, also host a query API to inspect the accumulated state.
-    let web_server = if let Node::Full(node) = &hotshot {
-        Some(
-            init_web_server(&options.node_opt, node.clone())
-                .expect("Failed to initialize web server"),
-        )
+        Some(EsQS::new(
+            esqs,
+            data_source,
+            hotshot.clone(),
+            ElaboratedBlock::genesis(genesis),
+        )?)
     } else {
         None
     };
@@ -311,15 +304,7 @@ async fn main() -> Result<(), std::io::Error> {
     if let Some(num_txn) = options.num_txn {
         generate_transactions(num_txn, own_id, hotshot, state.unwrap()).await;
     } else {
-        hotshot.run(pending::<()>()).await;
-    }
-
-    if options.wait {
-        if let Some(join_handle) = web_server {
-            join_handle.await.unwrap_or_else(|err| {
-                panic!("web server exited with an error: {}", err);
-            });
-        }
+        run_consensus(hotshot, pending::<()>()).await;
     }
 
     Ok(())

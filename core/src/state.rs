@@ -887,6 +887,7 @@ pub mod state_comm {
     pub struct LedgerCommitmentOpening {
         pub chain: Commitment<ChainVariables>,
         pub prev_commit_time: u64,
+        pub block_height: u64,
         pub prev_state: Option<state_comm::LedgerStateCommitment>,
         pub record_merkle_commitment: Commitment<RecordMerkleCommitment>,
         pub record_merkle_frontier: Commitment<RecordMerkleFrontier>,
@@ -920,6 +921,8 @@ pub mod state_comm {
         fn commit(&self) -> Commitment<Self> {
             commit::RawCommitmentBuilder::new("Ledger Comm")
                 .field("chain", self.chain)
+                .u64_field("prev_commit_time", self.prev_commit_time)
+                .u64_field("block_height", self.block_height)
                 .array_field(
                     "prev_state",
                     &self
@@ -1059,7 +1062,20 @@ impl ChainVariables {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidatorState {
     pub chain: ChainVariables,
+    /// The consensus time at which this state was created.
+    ///
+    /// "Consensus time" is an opaque notion of time which is meaningful in the consensus layer.
+    /// From outside the consensus protocol, it can be treated as a monotonically (but possibly
+    /// non-consecutively) increasing counter.
     pub prev_commit_time: u64,
+    /// The number of blocks in the chain which led to this state.
+    ///
+    /// This field can also be used to determine the index of the block which created this state or
+    /// the next block to be appended to this state. The 0-based index of a block appended to a
+    /// chain of `n` blocks is `n`, so `block_height` is the index of the next block to be appended,
+    /// and `block_height - 1` is the index of the previous block, which created this state. (The
+    /// default, pre-genesis state has `block_height == 0`, since it was not created by any block.)
+    pub block_height: u64,
     pub prev_state: Option<state_comm::LedgerStateCommitment>,
     /// The current record Merkle commitment
     pub record_merkle_commitment: MerkleCommitment,
@@ -1102,6 +1118,7 @@ impl ValidatorState {
         Self {
             chain,
             prev_commit_time: 0u64,
+            block_height: 0u64,
             prev_state: None,
             record_merkle_commitment: record_merkle_frontier.commitment(),
             record_merkle_frontier: record_merkle_frontier.frontier(),
@@ -1122,6 +1139,7 @@ impl ValidatorState {
         let inputs = state_comm::LedgerCommitmentOpening {
             chain: self.chain.commit(),
             prev_commit_time: self.prev_commit_time,
+            block_height: self.block_height,
             prev_state: self.prev_state,
             record_merkle_commitment: RecordMerkleCommitment(self.record_merkle_commitment)
                 .commit(),
@@ -1309,6 +1327,7 @@ impl ValidatorState {
         // error; this must remain true if code changes.
         let comm = self.commit();
         self.prev_commit_time = now;
+        self.block_height += 1;
         self.prev_block = BlockCommitment(txns.commit());
         let null_pfs = self
             .past_nullifiers

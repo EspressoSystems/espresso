@@ -13,6 +13,7 @@
 extern crate espresso_client;
 use async_std::task::block_on;
 use espresso_client::CliClient;
+use surf_disco::error::ClientError;
 
 fn main() {
     let mut cli = CliClient::new().unwrap();
@@ -175,15 +176,14 @@ fn validator_command(
         "query" => {
             let v = cli.validator(validator)?;
             let res: serde_json::Value = block_on(
-                surf::get(format!(
-                    "http://{}:{}/{}",
-                    v.hostname(),
-                    v.server_port(),
-                    args
-                ))
-                .recv_json(),
+                surf_disco::get(
+                    format!("http://{}:{}/{}", v.hostname(), v.server_port(), args)
+                        .parse()
+                        .unwrap(),
+                )
+                .send(),
             )
-            .map_err(|err| err.to_string())?;
+            .map_err(|err: ClientError| err.to_string())?;
             let output = serde_json::to_string_pretty(&res).map_err(|err| err.to_string())?;
             Ok(vec![output])
         }

@@ -19,28 +19,25 @@ license = "Copyright (c) 2022 Espresso Systems (espressosys.com)"
 default-run = "espresso-validator"
 
 [dependencies]
-address-book = { path = "../address-book" }
+address-book = { path = "../address-book", optional = true }
 ark-serialize = { version = "0.3.0", features = ["derive"] }
 ark-std = { version = "0.3.0", default-features = false }
-async-channel = "1.6"
 async-std = { version = "1.9.0", features = ["unstable", "attributes"] }
-async-trait = "0.1.56"
-async-tungstenite = { version = "0.15.0", features = ["async-std-runtime"] }
-atomic_store = { git = "https://github.com/EspressoSystems/atomicstore.git", tag = "0.1.3" }
+async-tungstenite = { version = "0.15.0", features = ["async-std-runtime"], optional = true }
 bincode = "1.3.3"
 clap = { version = "3.2.17", features = ["derive", "env"] }
 cld = "0.4"
+commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.1.0" }
 derive_more = "0.99"
 dirs = "4.0"
 escargot = "0.5.2"
-espresso-availability-api = { path = "../apis/availability" }
-espresso-catchup-api = { path = "../apis/catchup" }
+espresso-availability-api = { path = "../apis/availability", optional = true }
 espresso-core = { path = "../core/" }
-espresso-metastate-api = { path = "../apis/metastate" }
-espresso-status-api = { path = "../apis/status" }
+espresso-esqs = { path = "../apis/esqs" }
+espresso-metastate-api = { path = "../apis/metastate", optional = true }
+espresso-status-api = { path = "../apis/status", optional = true }
 futures = "0.3.0"
 futures-util = "0.3.8"
-#hex = "0.4.3"
 hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.3" }
 human_bytes = "0.3"
 itertools = "0.10.1"
@@ -57,8 +54,8 @@ portpicker = { version = "0.1", optional = true }
 rand = "0.8.5"
 rand_chacha = { package = "rand_chacha", version = "0.3.1" }
 rand_chacha_02 = { package = "rand_chacha", version = "0.2.2" }
-reef = { git = "https://github.com/EspressoSystems/reef.git", features = ["testing"] }
-seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
+reef = { git = "https://github.com/EspressoSystems/reef.git", optional = true }
+seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", optional = true }
 serde = { version = "1.0.139", features = ["derive", "rc"] }
 serde_derive = "1.0.118"
 serde_json = "1.0.61"
@@ -70,9 +67,7 @@ surf = "2.3.1"
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.2.0" }
 tempdir = "0.3.7"
 tide = { version = "0.16.0", default-features = false }
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main" }
-tide-websockets = "0.4.0"
-toml = "0.5"
+tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main", optional = true }
 tracing = "0.1.35"
 tracing-distributed = "0.3.1"
 tracing-futures = "0.2"
@@ -81,10 +76,28 @@ validator_node = { path = "../validator_node/" }
 
 [features]
 slow-tests = []
-testing = ["portpicker"]
+testing = [ "address-book"
+          , "async-tungstenite"
+          , "espresso-availability-api"
+          , "espresso-metastate-api"
+          , "espresso-status-api"
+          , "portpicker"
+          , "reef/testing"
+          , "seahorse"
+          , "tide-disco"
+          ]
 
 [dev-dependencies]
+address-book = { path = "../address-book" }
+espresso-client = { path = "../client" }
 portpicker = "0.1"
+tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main" }
+tracing-test = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.11.0"
+
+[[bin]]
+name = "test-query-api"
+required-features = ["testing"]
+test = true

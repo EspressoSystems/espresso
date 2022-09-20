@@ -28,6 +28,20 @@ impl LWPersistence {
     pub fn new(store_path: &Path, key_tag: &str) -> Result<LWPersistence, PersistenceError> {
         let mut lw_store_path = PathBuf::from(store_path);
         lw_store_path.push("lw_validator");
+        let mut loader = AtomicStoreLoader::create(&lw_store_path, key_tag)?;
+        let snapshot_tag = format!("{}_state", key_tag);
+        let state_snapshot =
+            AppendLog::create(&mut loader, Default::default(), &snapshot_tag, 1024)?;
+        let atomic_store = AtomicStore::open(loader)?;
+        Ok(LWPersistence {
+            atomic_store,
+            state_snapshot,
+        })
+    }
+
+    pub fn load(store_path: &Path, key_tag: &str) -> Result<LWPersistence, PersistenceError> {
+        let mut lw_store_path = PathBuf::from(store_path);
+        lw_store_path.push("lw_validator");
         let mut loader = AtomicStoreLoader::load(&lw_store_path, key_tag)?;
         let snapshot_tag = format!("{}_state", key_tag);
         let state_snapshot = AppendLog::load(&mut loader, Default::default(), &snapshot_tag, 1024)?;
