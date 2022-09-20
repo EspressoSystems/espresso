@@ -245,12 +245,7 @@ struct EligibilityWitness {
     Deserialize,
 )]
 pub struct RewardNoteProofs {
-    /// Stake table commitment for the view number reward
-    stake_table_commitment: StakeTableCommitment,
-    /// Total stake at view_number
-    total_stake: Amount,
-    /// Proof for stake_table_commitment
-    stake_table_commitment_proof:
+    stake_table_commitment_leaf_proof:
         crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount)>,
     /// Proof for stake_amount for staking key on that view number
     stake_amount_proof: KVMerkleProof<StakeTableHash>,
@@ -266,14 +261,12 @@ impl RewardNoteProofs {
         stake_key: &StakingKey,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
     ) -> Result<Self, RewardError> {
-        let (stake_table_commitment, total_stake, stake_table_commitment_proof) =
+        let stake_table_commitment_leaf_proof =
             Self::get_stake_commitment_total_stake_and_proof(validator_state)?;
         let uncollected_reward_proof =
             Self::proof_uncollected_rewards(validator_state, stake_key, view_number)?;
         Ok(Self {
-            stake_table_commitment,
-            total_stake,
-            stake_table_commitment_proof,
+            stake_table_commitment_leaf_proof,
             stake_amount_proof,
             uncollected_reward_proof,
         })
@@ -282,32 +275,12 @@ impl RewardNoteProofs {
     /// Returns StakeTable commitment for view number, if view number is valid, otherwise return RewardError::InvalidViewNumber
     fn get_stake_commitment_total_stake_and_proof(
         validator_state: &ValidatorState,
-    ) -> Result<
-        (
-            StakeTableCommitment,
-            Amount,
-            crate::merkle_tree::MerkleLeafProof<StakeTableCommitment>,
-        ),
-        RewardError,
-    > {
+    ) -> Result<crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount)>, RewardError>
+    {
         match validator_state.stake_table_commitments.clone() {
             MerkleFrontier::Empty { .. } => Err(RewardError::EmptyStakeTableCommitmentSet {}),
-            MerkleFrontier::Proof(merkle_proof) => {
-                let commitment = merkle_proof.leaf.0;
-                Ok((commitment, Amount::from(0u128), merkle_proof))
-            }
+            MerkleFrontier::Proof(merkle_proof) => Ok(merkle_proof),
         }
-        /*
-        let (option_value, proof) = validator_state
-            .stake_table_commitments
-            .(view_number.into())
-            .ok_or(RewardError::ProofNotInMemory {})?;
-        let (stake_table_commitment, total_stake) =
-            option_value.ok_or(RewardError::InvalidViewNumber {
-                view_number: view_number.into(),
-            })?;
-        Ok((stake_table_commitment, total_stake, proof))
-         */
     }
 
     /// Returns proof if reward hasn't been collected, otherwise RewardError::RewardAlreadyCollected
