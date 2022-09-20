@@ -925,11 +925,20 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                     mock_eligibility::prove_eligibility(view_number, staking_priv_key)
                 {
                     // 1. generate collect reward transaction
+                    /*
+                    let total_stake = match validator_state.stake_table_commitments {
+                        MerkleFrontier::Empty { .. } => { continue; }
+                        MerkleFrontier::Proof(proof) => {proof.leaf.0}
+                    };
+                    */
+                    let total_stake = Amount::from(10u128);
+                    /*
                     let (option_total_stake, _) = validator_state
                         .stake_table_commitments
                         .lookup(view_number.into())
                         .unwrap();
                     let (_, total_stake) = option_total_stake.unwrap();
+                    */
 
                     let (note, proof) = CollectRewardNote::generate(
                         rng,

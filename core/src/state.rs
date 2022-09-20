@@ -27,7 +27,7 @@ pub use crate::{PrivKey, PubKey};
 
 use crate::genesis::GenesisNote;
 use crate::reward::CollectedRewardsHash;
-use crate::stake_table::{StakeTableCommitmentsHash, StakeTableHash};
+use crate::stake_table::{StakeTableCommitment, StakeTableHash};
 use crate::universal_params::{MERKLE_HEIGHT, VERIF_CRS};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
@@ -1089,7 +1089,7 @@ pub struct ValidatorState {
     /// Staking table. For fixed-stake, this will be the same each round
     pub stake_table: KVMerkleTree<StakeTableHash>,
     /// Keeps track of previous stake tables
-    pub stake_table_commitments: KVMerkleTree<StakeTableCommitmentsHash>,
+    pub stake_table_commitments: crate::merkle_tree::MerkleFrontier<StakeTableCommitment>,
     /// Track already-collected rewards via (staking_key, block number) tuples
     pub collected_rewards: KVMerkleTree<CollectedRewardsHash>,
 }
@@ -1129,7 +1129,10 @@ impl ValidatorState {
             prev_block: BlockCommitment(Block::default().commit()),
             //KALEY: ask about stake table initialization
             stake_table: KVMerkleTree::<StakeTableHash>::EmptySubtree,
-            stake_table_commitments: KVMerkleTree::<StakeTableCommitmentsHash>::EmptySubtree,
+            stake_table_commitments:
+                crate::merkle_tree::MerkleFrontier::<StakeTableCommitment>::Empty {
+                    height: MERKLE_HEIGHT,
+                },
             collected_rewards: KVMerkleTree::<CollectedRewardsHash>::EmptySubtree,
         }
     }

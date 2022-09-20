@@ -158,10 +158,3 @@ impl CommitableHashTag for StakeTableCommitmentTag {
 
 /// Stake table commitment type
 pub type StakeTableCommitment = <StakeTableHash as KVTreeHash>::Digest;
-
-/// Hash for tree which stores commitment hash and total stake of previous rounds' stake tables in (view_number->(stake table commitment, total stake)) kv map
-pub type StakeTableCommitmentsHash = CommitableHash<
-    ViewNumber,
-    (<StakeTableHash as KVTreeHash>::Digest, Amount),
-    StakeTableCommitmentTag,
->;
