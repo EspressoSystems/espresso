@@ -77,6 +77,10 @@ struct Options {
     #[clap(long, env = "ESPRESSO_COLORED_LOGS")]
     pub colored_logs: bool,
 
+    /// Unique identifier for this instance of Espresso.
+    #[clap(long, env = "ESPRESSO_VALIDATOR_CHAIN_ID", default_value = "0")]
+    pub chain_id: u16,
+
     #[clap(subcommand)]
     pub esqs: Option<full_node_esqs::Command>,
 }
@@ -211,23 +215,12 @@ async fn generate_transactions(
             if let Some(txn) = core::mem::take(&mut txn) {
                 info!("  - Adding the transaction");
                 let mut blk = ElaboratedBlock::default();
-                let (owner_memos, kixs) = {
-                    let mut owner_memos = vec![];
-                    let mut kixs = vec![];
-
-                    for (kix, memo) in txn.keys_and_memos {
-                        kixs.push(kix);
-                        owner_memos.push(memo);
-                    }
-                    (owner_memos, kixs)
-                };
-
+                let kixs = txn.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
                 state
                     .try_add_transaction(
                         &mut blk,
                         txn.transaction,
                         txn.index,
-                        owner_memos,
                         kixs,
                         TxnPrintInfo::new_no_time(round as usize, 1),
                     )
@@ -277,10 +270,13 @@ async fn main() -> Result<(), std::io::Error> {
     let (genesis, state) = if options.num_txn.is_some() {
         // If we are going to generate transactions, we need to initialize the ledger with a
         // test state.
-        let (genesis, state) = GenesisState::new_for_test();
+        let (genesis, state) = genesis_for_test();
         (genesis, Some(state))
     } else {
-        (GenesisState::new(options.faucet_pub_key.clone()), None)
+        (
+            genesis(options.chain_id, options.faucet_pub_key.clone()),
+            None,
+        )
     };
     let keys = gen_keys(&options.consensus_opt, options.num_nodes);
     let priv_key = keys[own_id].private.clone();

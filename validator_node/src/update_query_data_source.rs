@@ -162,7 +162,7 @@ where
                             .collect::<Vec<_>>();
                         events.push(Some(LedgerEvent::Memos {
                             outputs: izip!(
-                                memos.clone(),
+                                memos.clone().map(|(memos, _)| memos).unwrap_or_default(),
                                 txn.output_commitments(),
                                 txn_uids,
                                 merkle_paths

@@ -26,12 +26,13 @@ use cld::ClDuration;
 use dirs::data_local_dir;
 use espresso_core::{
     committee::Committee,
+    genesis::GenesisNote,
     state::{
-        ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence, SetMerkleTree,
-        ValidatorState, MERKLE_HEIGHT,
+        ChainVariables, ElaboratedBlock, ElaboratedTransaction, FullPersistence, LWPersistence,
+        NullifierHistory, SetMerkleTree, ValidatorState,
     },
     testing::{MultiXfrRecordSpec, MultiXfrTestState},
-    universal_params::UNIVERSAL_PARAM,
+    universal_params::{UNIVERSAL_PARAM, VERIF_CRS},
     PrivKey, PubKey,
 };
 use hotshot::traits::implementations::Libp2pNetwork;
@@ -42,13 +43,8 @@ use hotshot::{
     types::{Message, SignatureKey},
     HotShot, HotShotConfig, HotShotError, H_256,
 };
-use jf_cap::{
-    structs::{Amount, AssetDefinition, FreezeFlag, ReceiverMemo, RecordCommitment, RecordOpening},
-    MerkleTree, TransactionVerifyingKey,
-};
-use jf_primitives::merkle_tree::FilledMTBuilder;
+use jf_cap::structs::{Amount, AssetDefinition, FreezeFlag, RecordOpening};
 use jf_utils::tagged_blob;
-use key_set::{KeySet, VerifierKeySet};
 use libp2p::identity::ed25519::SecretKey;
 use libp2p::identity::Keypair;
 use libp2p::{multiaddr, Multiaddr, PeerId};
@@ -536,122 +532,75 @@ impl Validator for Node {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct GenesisState {
-    pub validator: ValidatorState,
-    pub records: MerkleTree,
-    pub nullifiers: SetMerkleTree,
-    pub memos: Vec<(ReceiverMemo, u64)>,
-}
+pub fn genesis(
+    chain_id: u16,
+    faucet_pub_keys: impl IntoIterator<Item = UserPubKey>,
+) -> GenesisNote {
+    let mut rng = ChaChaRng::from_seed(GENESIS_SEED);
 
-impl GenesisState {
-    pub fn new(faucet_pub_keys: impl IntoIterator<Item = UserPubKey>) -> Self {
-        let mut rng = ChaChaRng::from_seed(GENESIS_SEED);
-        let mut records = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
-        let mut memos = Vec::new();
-
-        // Process the initial native token records for the faucet.
-        for (i, pub_key) in faucet_pub_keys.into_iter().enumerate() {
+    // Process the initial native token records for the faucet.
+    let faucet_records = faucet_pub_keys
+        .into_iter()
+        .map(|pub_key| {
             // Create the initial grant.
             event!(
                 Level::INFO,
                 "creating initial native token record for {}",
                 pub_key.address()
             );
-            let ro = RecordOpening::new(
+            RecordOpening::new(
                 &mut rng,
                 Amount::from(1u64 << 32),
                 AssetDefinition::native(),
                 pub_key,
                 FreezeFlag::Unfrozen,
-            );
-            records.push(RecordCommitment::from(&ro).to_field_element());
-            memos.push((ReceiverMemo::from_ro(&mut rng, &ro, &[]).unwrap(), i as u64));
-        }
-        let records = records.build();
-
-        // Set up the validator.
-        let univ_setup = &*UNIVERSAL_PARAM;
-        let (_, xfr_verif_key_12, _) =
-            jf_cap::proof::transfer::preprocess(univ_setup, 1, 2, MERKLE_HEIGHT).unwrap();
-        let (_, xfr_verif_key_23, _) =
-            jf_cap::proof::transfer::preprocess(univ_setup, 2, 3, MERKLE_HEIGHT).unwrap();
-        let (_, mint_verif_key, _) =
-            jf_cap::proof::mint::preprocess(univ_setup, MERKLE_HEIGHT).unwrap();
-        let (_, freeze_verif_key, _) =
-            jf_cap::proof::freeze::preprocess(univ_setup, 2, MERKLE_HEIGHT).unwrap();
-        let verif_keys = VerifierKeySet {
-            mint: TransactionVerifyingKey::Mint(mint_verif_key),
-            xfr: KeySet::new(
-                vec![
-                    TransactionVerifyingKey::Transfer(xfr_verif_key_12),
-                    TransactionVerifyingKey::Transfer(xfr_verif_key_23),
-                ]
-                .into_iter(),
             )
-            .unwrap(),
-            freeze: KeySet::new(
-                vec![TransactionVerifyingKey::Freeze(freeze_verif_key)].into_iter(),
-            )
-            .unwrap(),
-        };
+        })
+        .collect();
+    GenesisNote::new(
+        ChainVariables::new(chain_id, VERIF_CRS.clone()),
+        Arc::new(faucet_records),
+    )
+}
 
-        let nullifiers = Default::default();
-        let validator = ValidatorState::new(verif_keys, records.clone());
-        Self {
-            validator,
-            records,
-            nullifiers,
-            memos,
-        }
-    }
-
-    pub fn new_for_test() -> (Self, MultiXfrTestState) {
-        let state = MultiXfrTestState::initialize(
-            GENESIS_SEED,
-            10,
-            10,
-            (
+pub fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
+    let mut state = MultiXfrTestState::initialize(
+        GENESIS_SEED,
+        10,
+        10,
+        (
+            MultiXfrRecordSpec {
+                asset_def_ix: 0,
+                owner_key_ix: 0,
+                asset_amount: 100,
+            },
+            vec![
+                MultiXfrRecordSpec {
+                    asset_def_ix: 1,
+                    owner_key_ix: 0,
+                    asset_amount: 50,
+                },
                 MultiXfrRecordSpec {
                     asset_def_ix: 0,
                     owner_key_ix: 0,
-                    asset_amount: 100,
+                    asset_amount: 70,
                 },
-                vec![
-                    MultiXfrRecordSpec {
-                        asset_def_ix: 1,
-                        owner_key_ix: 0,
-                        asset_amount: 50,
-                    },
-                    MultiXfrRecordSpec {
-                        asset_def_ix: 0,
-                        owner_key_ix: 0,
-                        asset_amount: 70,
-                    },
-                ],
-            ),
-        )
-        .unwrap();
+            ],
+        ),
+    )
+    .unwrap();
 
-        let mut validator = state.validator.clone();
-        // It's important for the EsQS (and as a general consistency thing) that `prev_commit_time`
-        // for the genesis state is 0. This effectively wipes the mint transactions from
-        // `MultiXfrTestState` out of the history, but keeps their effects on the starting state.
-        validator.prev_commit_time = 0;
+    // [GenesisNote] doesn't support a non-empty nullifiers set, so we clear the nullifiers set in
+    // our test state. This effectively "unspends" the records which were used to set up the initial
+    // state. This is fine for testing purposes.
+    state.nullifiers = SetMerkleTree::default();
+    state.validator.past_nullifiers = NullifierHistory::default();
 
-        let records = state.record_merkle_tree.clone();
-        let nullifiers = state.nullifiers.clone();
-        let memos = state.unspent_memos();
-        (
-            Self {
-                validator,
-                records,
-                nullifiers,
-                memos,
-            },
-            state,
-        )
-    }
+    let genesis = GenesisNote::new(
+        ChainVariables::new(42, VERIF_CRS.clone()),
+        Arc::new(state.records().collect()),
+    );
+    (genesis, state)
 }
 
 /// Creates the initial state and hotshot for simulation.
@@ -664,7 +613,7 @@ async fn init_hotshot(
     node_id: usize,
     networking: PLNetwork,
     full_node: bool,
-    state: GenesisState,
+    genesis: GenesisNote,
     data_source: Arc<RwLock<QueryData>>,
     num_bootstrap: usize,
 ) -> Node {
@@ -685,7 +634,6 @@ async fn init_hotshot(
         num_bootstrap,
     };
     debug!(?config);
-    let genesis = ElaboratedBlock::default();
 
     let storage = get_store_dir(options, node_id);
     let storage_path = Path::new(&storage);
@@ -695,12 +643,21 @@ async fn init_hotshot(
         debug!("Restoring from persisted session");
     }
     let lw_persistence = LWPersistence::new(storage_path, "validator").unwrap();
-    let stored_state = if options.reset_store_state {
-        state.validator.clone()
+    let genesis = ElaboratedBlock::genesis(genesis);
+    let state = if options.reset_store_state {
+        // HotShot does not currently support genesis nicely. It should take a genesis block and
+        // apply it to the default state. However, it currently takes the genesis block _and_ the
+        // resulting state. This means we must apply the genesis block to the default state
+        // ourselves.
+        let mut state = ValidatorState::default();
+        state
+            .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
+            .unwrap();
+        state
     } else {
         lw_persistence
             .load_latest_state()
-            .unwrap_or_else(|_| state.validator.clone())
+            .expect("failed to load saved state")
     };
 
     let univ_param = if full_node {
@@ -717,13 +674,13 @@ async fn init_hotshot(
         .collect::<PathBuf>();
 
     let hotshot = HotShot::init(
-        genesis,
+        genesis.clone(),
         config.known_nodes.clone(),
         pub_key,
         priv_key,
         node_id as u64,
         config,
-        state.validator,
+        state,
         networking,
         AtomicStorage::open(&hotshot_persistence).unwrap(),
         lw_persistence,
@@ -736,30 +693,10 @@ async fn init_hotshot(
 
     let validator = if full_node {
         let full_persisted = FullPersistence::new(&node_persistence, "full_node").unwrap();
-
-        let records = if options.reset_store_state {
-            state.records
-        } else {
-            let mut builder = FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
-            for leaf in full_persisted.rmt_leaf_iter() {
-                builder.push(leaf.unwrap().0);
-            }
-            builder.build()
-        };
-        let nullifiers = if options.reset_store_state {
-            state.nullifiers
-        } else {
-            full_persisted
-                .get_latest_nullifier_set()
-                .unwrap_or_else(|_| Default::default())
-        };
         let node = FullNode::new(
             hotshot,
             univ_param.unwrap(),
-            stored_state,
-            records,
-            nullifiers,
-            state.memos,
+            genesis,
             full_persisted,
             data_source.clone(),
             data_source.clone(),
@@ -1131,7 +1068,7 @@ pub async fn init_validator(
     consensus_opt: &ConsensusOpt,
     priv_key: PrivKey,
     pub_keys: Vec<PubKey>,
-    genesis: GenesisState,
+    genesis: GenesisNote,
     own_id: usize,
     data_source: Arc<RwLock<QueryData>>,
 ) -> Node {

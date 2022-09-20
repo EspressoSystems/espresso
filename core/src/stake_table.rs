@@ -157,18 +157,8 @@ impl CommitableHashTag for StakeTableCommitmentTag {
 }
 
 /// Stake table commitment type
-#[derive(
-    Clone,
-    Debug,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    Hash,
-    CanonicalDeserialize,
-    CanonicalSerialize,
-)]
+#[tagged_blob("STAKETABLE")]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, CanonicalDeserialize, CanonicalSerialize)]
 
 pub struct StakeTableCommitment(pub <StakeTableHash as KVTreeHash>::Digest);
 

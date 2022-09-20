@@ -30,7 +30,10 @@ use serde::{Deserialize, Serialize};
 /// Previously collected rewards are recorded in (StakingKey, view_number) pairs
 #[tagged_blob("COLLECTED-REWARD")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
-pub struct CollectedRewards(pub (StakingKey, ViewNumber));
+pub struct CollectedRewards {
+    pub staking_key: StakingKey,
+    pub view_number: ViewNumber,
+}
 
 /// Identifying tag for CollectedReward
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -169,4 +172,13 @@ pub struct RewardNoteProofs {
     pub stake_amount_proof: KVMerkleProof<StakeTableHash>,
     /// Proof that reward hasn't been collected
     pub uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+}
+
+//KALEY TODO: update after Fernando's PR w/ total_stake is merged
+pub fn max_allowed_reward(
+    _stake_amount: Amount,
+    _total_stake: Amount,
+    _view: ViewNumber,
+) -> Amount {
+    Amount::from(1_u64)
 }
