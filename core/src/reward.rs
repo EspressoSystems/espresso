@@ -12,8 +12,7 @@
 
 use crate::kv_merkle_tree::KVMerkleProof;
 use crate::stake_table::{
-    StakeTableCommitment, StakeTableCommitmentsHash, StakeTableHash, StakingKey,
-    StakingKeySignature, ViewNumber,
+    StakeTableCommitment, StakeTableHash, StakingKey, StakingKeySignature, ViewNumber,
 };
 use crate::state::{CommitableHash, CommitableHashTag};
 use ark_serialize::*;
@@ -152,7 +151,7 @@ pub struct RewardNoteProofs {
     /// Stake table commitment for the view number reward
     stake_table_commitment: StakeTableCommitment,
     /// Proof for stake_table_commitment
-    stake_table_commitment_proof: KVMerkleProof<StakeTableCommitmentsHash>,
+    stake_table_commitment_proof: crate::merkle_tree::MerkleLeafProof<StakeTableCommitment>,
     /// Proof for stake_amount for staking key on that view number
     stake_amount_proof: KVMerkleProof<StakeTableHash>,
     /// Proof that reward hasn't been collected
