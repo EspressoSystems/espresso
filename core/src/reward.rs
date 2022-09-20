@@ -151,7 +151,8 @@ pub struct RewardNoteProofs {
     /// Stake table commitment for the view number reward
     stake_table_commitment: StakeTableCommitment,
     /// Proof for stake_table_commitment
-    stake_table_commitment_proof: crate::merkle_tree::MerkleLeafProof<StakeTableCommitment>,
+    stake_table_commitment_proof:
+        crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount)>,
     /// Proof for stake_amount for staking key on that view number
     stake_amount_proof: KVMerkleProof<StakeTableHash>,
     /// Proof that reward hasn't been collected
