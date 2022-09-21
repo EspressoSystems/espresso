@@ -421,6 +421,9 @@ pub enum ValidationError {
     /// Reward in transaction has already been collected
     PreviouslyCollectedReward,
 
+    /// Incorrect collected rewards noninclusion proof
+    BadCollectedRewardProof,
+
     /// Incorrect stake table commitment proof
     BadStakeTableCommitmentProof,
 
@@ -484,6 +487,7 @@ impl Clone for ValidationError {
             InconsistentHelperProofs => InconsistentHelperProofs,
             UnexpectedGenesis => UnexpectedGenesis,
             PreviouslyCollectedReward => PreviouslyCollectedReward,
+            BadCollectedRewardProof => BadCollectedRewardProof,
             BadStakeTableCommitmentProof => BadStakeTableCommitmentProof,
             BadStakeTableProof => BadStakeTableProof,
             RewardAmountTooLarge => RewardAmountTooLarge,
@@ -975,7 +979,7 @@ pub struct ValidationOutputs {
     /// Sparse [SetMerkleTree] containing up-to-date non-membership proofs for every nullifier in
     /// this block, relative to the nullifier set root hash just before applying this block.
     pub nullifier_proofs: SetMerkleTree,
-    /// Sparse [MerkleTree] containing membership profos for each new record created by this block,
+    /// Sparse [MerkleTree] containing membership proofs for each new record created by this block,
     /// relative to the record set root hash after applying this block.
     pub record_proofs: MerkleTree,
 }
@@ -1122,6 +1126,9 @@ pub struct ValidatorState {
 /// Nullifier proofs, organized by the root hash for which they are valid.
 pub type NullifierProofs = Vec<(Nullifier, SetMerkleProof, set_hash::Hash)>;
 
+/// Information to mint CAP records for reward collectors
+pub type VerifiedRewards = Vec<CollectedRewards>;
+
 impl Default for ValidatorState {
     fn default() -> Self {
         Self::new(
@@ -1209,6 +1216,7 @@ impl ValidatorState {
     /// - [ValidationError::UnsupportedFreezeSize]
     /// - [ValidationError::UnsupportedTransferSize]
     /// - [ValidationError::PreviouslyCollectedReward]
+    /// - [ValidationError::BadCollectedRewardProof]
     /// - [ValidationError::BadStakeTableCommitmentProof]
     /// - [ValidationError::BadStakeTableProof]
     /// - [ValidationError::RewardAmountTooLarge]
@@ -1218,7 +1226,7 @@ impl ValidatorState {
         now: u64,
         txns: Block,
         txns_helper_proofs: Vec<EspressoTxnHelperProofs>,
-    ) -> Result<(Block, NullifierProofs), ValidationError> {
+    ) -> Result<(Block, NullifierProofs, VerifiedRewards), ValidationError> {
         // Check if this is a genesis block. If it is, validation is trivial and we can skip the
         // rest of this. If it is not, then we will reject the block later if it contains any
         // genesis transactions.
@@ -1230,7 +1238,7 @@ impl ValidatorState {
             }
             // An acceptable genesis block is always valid, regardless of the contents, and it has
             // no nullifier proofs.
-            return Ok((txns, vec![]));
+            return Ok((txns, vec![], vec![]));
         }
 
         let mut cap_txns = vec![];
@@ -1324,6 +1332,8 @@ impl ValidatorState {
                     .map_err(|err| CryptoError { err: Ok(err) })?;
             }
         }
+        let mut verified_rewards = vec![];
+
         {
             //verify rewards collection transactions
             for (pfs, txn) in rewards_proofs
@@ -1338,9 +1348,13 @@ impl ValidatorState {
                     },
                     self.collected_rewards.hash(),
                 );
-                if let Some((Some(_), _)) = collected_reward_check {
+                match collected_reward_check {
+                    None => return Err(ValidationError::BadCollectedRewardProof),
+                    Some((None, _)) => {}
                     //reward exists in the table; reward has been collected
-                    return Err(ValidationError::PreviouslyCollectedReward);
+                    Some((Some(_), _)) => {
+                        return Err(ValidationError::PreviouslyCollectedReward);
+                    }
                 }
 
                 //check stake_table_commitment_proof
@@ -1358,7 +1372,7 @@ impl ValidatorState {
 
                 //check stake amount proof
                 let stake_amount_check = pfs.stake_amount_proof.check(
-                    txn.body.vrf_witness.staking_key,
+                    txn.body.vrf_witness.staking_key.clone(),
                     pfs.stake_table_commitment.0,
                 );
                 match stake_amount_check {
@@ -1379,6 +1393,11 @@ impl ValidatorState {
                         return Err(ValidationError::BadStakeTableProof);
                     }
                 }
+
+                verified_rewards.push(CollectedRewards {
+                    staking_key: txn.body.vrf_witness.staking_key,
+                    view_number: txn.body.vrf_witness.view_number,
+                });
             }
         }
         // assemble Block
@@ -1388,7 +1407,7 @@ impl ValidatorState {
             .chain(reward_txns.into_iter().map(EspressoTransaction::Reward))
             .collect();
 
-        Ok((Block(txns), nullifiers_proofs))
+        Ok((Block(txns), nullifiers_proofs, verified_rewards))
     }
 
     /// Performs validation for a block, updating the ValidatorState.
@@ -1410,7 +1429,7 @@ impl ValidatorState {
         txns: Block,
         proofs: Vec<EspressoTxnHelperProofs>,
     ) -> Result<ValidationOutputs, ValidationError> {
-        let (txns, null_pfs) = self.validate_block_check(now, txns, proofs)?;
+        let (txns, null_pfs, rewards) = self.validate_block_check(now, txns, proofs)?;
         // If the block successfully validates, and the nullifier proofs apply correctly, the
         // remaining (mutating) operations cannot fail, as this would result in an inconsistent
         // state. No operations after the first assignement to a member of self have a possible
@@ -1456,10 +1475,17 @@ impl ValidatorState {
             .push_front(self.record_merkle_commitment.root_value);
         self.record_merkle_commitment = record_merkle_frontier.commitment();
         self.record_merkle_frontier = record_merkle_frontier.frontier();
-        self.stake_table_commitments.insert(
-            ViewNumber(now),
-            StakeTableCommitment(self.stake_table.hash()),
-        );
+        self.stake_table_commitments
+            .insert(
+                ViewNumber(now),
+                StakeTableCommitment(self.stake_table.hash()),
+            )
+            .expect("failed to add stake table commitment");
+        for r in rewards {
+            self.collected_rewards
+                .insert(r, ())
+                .expect("failed to add collected rewards");
+        }
         self.prev_state = Some(comm);
         Ok(ValidationOutputs {
             uids,
