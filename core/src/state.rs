@@ -12,7 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use espresso_macros::*;
-use jf_cap::structs::ReceiverMemo;
+use jf_cap::structs::{Amount, ReceiverMemo};
 use jf_cap::Signature;
 
 pub use crate::full_persistence::FullPersistence;
@@ -27,7 +27,7 @@ pub use crate::{PrivKey, PubKey};
 
 use crate::genesis::GenesisNote;
 use crate::reward::CollectedRewardsHash;
-use crate::stake_table::{StakeTableCommitmentsHash, StakeTableHash};
+use crate::stake_table::{StakeTableCommitment, StakeTableHash};
 use crate::universal_params::{MERKLE_HEIGHT, VERIF_CRS};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
@@ -1088,8 +1088,8 @@ pub struct ValidatorState {
     pub prev_block: BlockCommitment,
     /// Staking table. For fixed-stake, this will be the same each round
     pub stake_table: KVMerkleTree<StakeTableHash>,
-    /// Keeps track of previous stake tables
-    pub stake_table_commitments: KVMerkleTree<StakeTableCommitmentsHash>,
+    /// Keeps track of previous stake tables and their total stake
+    pub stake_table_commitments: crate::merkle_tree::MerkleFrontier<(StakeTableCommitment, Amount)>,
     /// Track already-collected rewards via (staking_key, block number) tuples
     pub collected_rewards: KVMerkleTree<CollectedRewardsHash>,
 }
@@ -1129,7 +1129,12 @@ impl ValidatorState {
             prev_block: BlockCommitment(Block::default().commit()),
             //KALEY: ask about stake table initialization
             stake_table: KVMerkleTree::<StakeTableHash>::EmptySubtree,
-            stake_table_commitments: KVMerkleTree::<StakeTableCommitmentsHash>::EmptySubtree,
+            stake_table_commitments: crate::merkle_tree::MerkleFrontier::<(
+                StakeTableCommitment,
+                Amount,
+            )>::Empty {
+                height: MERKLE_HEIGHT,
+            },
             collected_rewards: KVMerkleTree::<CollectedRewardsHash>::EmptySubtree,
         }
     }
