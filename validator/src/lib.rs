@@ -868,7 +868,7 @@ mod mock_eligibility {
     }
     #[cfg(test)]
     mod test_eligibility {
-        use crate::mock_eligibility::{is_elegible, prove_eligibility};
+        use crate::mock_eligibility::{is_eligible, prove_eligibility};
         use espresso_core::stake_table::{StakingKey, StakingPrivKey};
         use std::ops::Add;
 
@@ -882,8 +882,8 @@ mod mock_eligibility {
             for _ in 0..600 {
                 // with 600 runs we get ~2^{-100} failure pbb
                 if let Some(proof) = prove_eligibility(view_number, &priv_key) {
-                    assert!(is_elegible(view_number, &pub_key, &proof));
-                    assert!(!is_elegible(view_number, &bad_pub_key, &proof));
+                    assert!(is_eligible(view_number, &pub_key, &proof));
+                    assert!(!is_eligible(view_number, &bad_pub_key, &proof));
                     found += 1;
                 }
                 view_number = view_number.add(1);
