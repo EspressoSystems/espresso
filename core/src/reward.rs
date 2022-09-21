@@ -35,7 +35,7 @@ pub type VrfProof = StakingKeySignature;
 /// Hard-coded to 0 for FST
 pub fn compute_reward_amount(
     _validator_state: &ValidatorState,
-    _view_number: hotshot_types::data::ViewNumber,
+    _block_height: u64,
     _stake: Amount,
 ) -> Amount {
     Amount::from(0u64)
@@ -83,6 +83,7 @@ impl CollectRewardNote {
         rng: &mut R,
         validator_state: &ValidatorState,
         view_number: hotshot_types::data::ViewNumber,
+        block_height: u64,
         staking_priv_key: &StakingPrivKey,
         cap_address: UserAddress,
         stake_amount: Amount,
@@ -94,6 +95,7 @@ impl CollectRewardNote {
             rng,
             validator_state,
             view_number,
+            block_height,
             staking_key,
             cap_address,
             stake_amount,
@@ -171,13 +173,14 @@ impl CollectRewardBody {
         rng: &mut R,
         validator_state: &ValidatorState,
         view_number: hotshot_types::data::ViewNumber,
+        block_height: u64,
         staking_key: StakingKey,
         cap_address: UserAddress,
         stake_amount: Amount,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
         vrf_proof: VrfProof,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
-        let reward_amount = compute_reward_amount(validator_state, view_number, stake_amount);
+        let reward_amount = compute_reward_amount(validator_state, block_height, stake_amount);
         let blind_factor = BlindFactor::rand(rng);
         let rewards_proofs = RewardNoteProofs::generate(
             validator_state,

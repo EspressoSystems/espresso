@@ -855,6 +855,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                         rng,
                         validator_state,
                         view_number,
+                        validator_state.block_height,
                         staking_priv_key,
                         cap_address.clone(),
                         stake_amount,
