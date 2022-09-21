@@ -19,9 +19,7 @@ use async_std::sync::{Arc, RwLock};
 use clap::{Args, Parser};
 use cld::ClDuration;
 use dirs::data_local_dir;
-use espresso_core::merkle_tree::MerkleFrontier;
-use espresso_core::reward::{CollectRewardNote, VrfProof};
-use espresso_core::stake_table::StakingKey;
+use espresso_core::reward::{mock_eligibility, CollectRewardNote};
 use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof};
 use espresso_core::{
     committee::Committee,
@@ -826,79 +824,6 @@ pub fn open_data_source(
     }))
 }
 
-mod mock_eligibility {
-    // TODO this is only mock implementation (and totally insecure as Staking keys (VRF keys) are not currently bls signature keys)
-    // eligibility will be implemented in hotshot repo from a pro
-    use super::*;
-    use sha3::{Digest, Sha3_256};
-
-    /// check weather a staking key is elegible for rewards
-    pub fn is_eligible(
-        view_number: hotshot_types::data::ViewNumber,
-        staking_key: &StakingKey,
-        proof: &VrfProof,
-    ) -> bool {
-        // 1. compute vrf value = Hash ( vrf_proof)
-        let mut hasher = Sha3_256::new();
-        hasher.update(&bincode::serialize(proof).unwrap());
-        let vrf_value = hasher.finalize();
-        // 2. validate proof
-        let data = bincode::serialize(&view_number).unwrap();
-        if !staking_key.validate(proof, &data[..]) {
-            return false;
-        }
-        // mock eligibility return true ~10% of times
-        vrf_value[0] < 25
-    }
-
-    pub(super) fn prove_eligibility(
-        view_number: hotshot_types::data::ViewNumber,
-        staking_priv_key: &StakingPrivKey,
-    ) -> Option<VrfProof> {
-        // 1. compute vrf proof
-        let data = bincode::serialize(&view_number).unwrap();
-        let proof = StakingKey::sign(staking_priv_key, &data[..]);
-        let pub_key = StakingKey::from_priv_key(staking_priv_key);
-        // 2. check eligibility
-        if is_eligible(view_number, &pub_key, &proof) {
-            Some(proof)
-        } else {
-            None
-        }
-    }
-    #[cfg(test)]
-    mod test_eligibility {
-        use crate::mock_eligibility::{is_eligible, prove_eligibility};
-        use espresso_core::stake_table::{StakingKey, StakingPrivKey};
-        use std::ops::Add;
-
-        #[test]
-        fn test_reward_eligibility() {
-            let mut view_number = hotshot_types::data::ViewNumber::genesis();
-            let priv_key = StakingPrivKey::generate();
-            let bad_pub_key = StakingKey::from_priv_key(&StakingPrivKey::generate());
-            let pub_key = StakingKey::from_priv_key(&priv_key);
-            let mut found = 0;
-            for _ in 0..600 {
-                // with 600 runs we get ~2^{-100} failure pbb
-                if let Some(proof) = prove_eligibility(view_number, &priv_key) {
-                    assert!(is_eligible(view_number, &pub_key, &proof));
-                    assert!(!is_eligible(view_number, &bad_pub_key, &proof));
-                    found += 1;
-                }
-                view_number = view_number.add(1);
-            }
-            assert_ne!(found, 0, "Staking key was never eligible");
-            println!(
-                "Staking key was found {} times out of 600: {:0.2}%, view_number:{:?}",
-                found,
-                (found as f64) / 6.0,
-                view_number
-            )
-        }
-    }
-}
-
 #[allow(dead_code)] // FIXME use this function in main
 async fn collect_reward_daemon<R: CryptoRng + RngCore>(
     rng: &mut R,
@@ -923,16 +848,9 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                 let view_number = qc.view_number;
                 // 0. check if I'm elected
                 if let Some(vrf_proof) =
-                    mock_eligibility::prove_eligibility(view_number, staking_priv_key)
+                    mock_eligibility::prove_eligibility(view_number.into(), staking_priv_key)
                 {
                     // 1. generate collect reward transaction
-                    let total_stake = match &validator_state.stake_table_commitments {
-                        MerkleFrontier::Empty { .. } => {
-                            continue;
-                        }
-                        MerkleFrontier::Proof(proof) => proof.leaf.0 .1,
-                    };
-
                     let (note, proof) = CollectRewardNote::generate(
                         rng,
                         validator_state,
@@ -941,7 +859,6 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                         cap_address.clone(),
                         stake_amount,
                         stake_proof.clone(),
-                        total_stake,
                         vrf_proof,
                     )
                     .expect("Failed to create Collect Reward Note");
