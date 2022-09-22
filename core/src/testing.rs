@@ -318,6 +318,7 @@ impl MultiXfrTestState {
                 ChainVariables::new(42, VERIF_CRS.clone()),
                 t,
                 StakeTableMap::EmptySubtree,
+                Amount::from(0u64),
                 StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
             ),
             outer_timer: timer,

@@ -939,7 +939,7 @@ pub mod state_comm {
         pub past_nullifiers: Commitment<NullifierHistory>,
         pub prev_block: Commitment<Block>,
         pub stake_table: Commitment<StakeTableCommitment>,
-        pub total_stake: u128,
+        pub total_stake: Amount,
         pub stake_table_commitments: Commitment<StakeTableCommitmentsCommitment>,
         pub collected_rewards: Commitment<CollectedRewardsCommitment>,
     }
@@ -1130,7 +1130,7 @@ pub struct ValidatorState {
     pub stake_table: StakeTableMap,
     /// Total amount staked for the current table
     // TODO: this type should match the type of stake
-    pub total_stake: u128,
+    pub total_stake: Amount,
     /// Keeps track of previous stake tables and their total stake
     pub stake_table_commitments: StakeTableCommFrontier,
     /// Commitment to stake table commitments set
@@ -1151,6 +1151,7 @@ impl Default for ValidatorState {
             ChainVariables::default(),
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
             StakeTableMap::EmptySubtree,
+            Amount::from(0u64),
             StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
         )
     }
@@ -1168,10 +1169,9 @@ impl ValidatorState {
         chain: ChainVariables,
         record_merkle_frontier: MerkleTree,
         stake_table_map: StakeTableMap,
+        total_stake: Amount,
         stake_table_commitments_mt: StakeTableCommMT,
     ) -> Self {
-        //TODO: update with proper value once stake transactions are added
-        let total_stake = 0u128;
         Self {
             chain,
             prev_commit_time: 0u64,
@@ -1415,7 +1415,10 @@ impl ValidatorState {
                         return Err(ValidationError::BadStakeTableProof);
                     }
                 }
-                //KALEY
+                //KALEY add vrf witness check
+                /*match pfs.verify() {
+                Ok(()) => {},
+                Err(err) => {return Err(err);}*/
 
                 verified_rewards.push(CollectedRewards {
                     staking_key: txn.body.vrf_witness.staking_key,
@@ -1467,6 +1470,7 @@ impl ValidatorState {
             .expect("failed to append nullifiers after validation");
 
         // If this is a genesis block, apply system parameter updates.
+        // TODO: update total_stake when stake table is added to genesis note
         if let Some(EspressoTransaction::Genesis(txn)) = txns.0.get(0) {
             self.chain = txn.chain.clone()
         }
@@ -1501,7 +1505,7 @@ impl ValidatorState {
         //let circulating_supply = Amount::from(10000000000u128);
         stc_builder.push((
             StakeTableCommitment(self.stake_table.hash()),
-            Amount::from(self.total_stake),
+            self.total_stake,
         ));
         let stc_mt = stc_builder.build();
         assert_eq!(now, stc_mt.num_leaves());
