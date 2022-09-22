@@ -1054,6 +1054,19 @@ impl ChainVariables {
     }
 }
 
+/// KeyValue Merkle tree alias for StakeTable
+pub type StakeTableMap = KVMerkleTree<StakeTableHash>;
+
+/// Merkle Tree for Stake table commitments merkle tree
+pub type StakeTableCommMT = crate::merkle_tree::MerkleTree<(StakeTableCommitment, Amount)>;
+
+/// Merkle Frontier for Stake table commitments
+pub type StakeTableCommFrontier =
+    crate::merkle_tree::MerkleFrontier<(StakeTableCommitment, Amount)>;
+
+/// Merkle Frontier for Stake table commitments
+pub type StakeTableCommCommitment = crate::merkle_tree::MerkleCommitment;
+
 /// The working state of the ledger
 ///
 /// Only the previous state is represented as a commitment. Other
@@ -1087,9 +1100,11 @@ pub struct ValidatorState {
     pub past_nullifiers: NullifierHistory,
     pub prev_block: BlockCommitment,
     /// Staking table. For fixed-stake, this will be the same each round
-    pub stake_table: KVMerkleTree<StakeTableHash>,
+    pub stake_table: StakeTableMap,
     /// Keeps track of previous stake tables and their total stake
-    pub stake_table_commitments: crate::merkle_tree::MerkleFrontier<(StakeTableCommitment, Amount)>,
+    pub stake_table_commitments: StakeTableCommFrontier,
+    /// Commitment to stake table commitments set
+    pub stake_table_commitments_commitment: StakeTableCommCommitment,
     /// Track already-collected rewards via (staking_key, block number) tuples
     pub collected_rewards: KVMerkleTree<CollectedRewardsHash>,
 }
@@ -1102,6 +1117,8 @@ impl Default for ValidatorState {
         Self::new(
             ChainVariables::default(),
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
+            StakeTableMap::EmptySubtree,
+            StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
         )
     }
 }
@@ -1114,7 +1131,12 @@ impl ValidatorState {
     /// were generated using a validator state that is in the last HISTORY_SIZE states.
     pub const HISTORY_SIZE: usize = 10;
 
-    pub fn new(chain: ChainVariables, record_merkle_frontier: MerkleTree) -> Self {
+    pub fn new(
+        chain: ChainVariables,
+        record_merkle_frontier: MerkleTree,
+        stake_table_map: StakeTableMap,
+        stake_table_commitments_mt: StakeTableCommMT,
+    ) -> Self {
         Self {
             chain,
             prev_commit_time: 0u64,
@@ -1128,13 +1150,9 @@ impl ValidatorState {
             past_nullifiers: NullifierHistory::default(),
             prev_block: BlockCommitment(Block::default().commit()),
             //KALEY: ask about stake table initialization
-            stake_table: KVMerkleTree::<StakeTableHash>::EmptySubtree,
-            stake_table_commitments: crate::merkle_tree::MerkleFrontier::<(
-                StakeTableCommitment,
-                Amount,
-            )>::Empty {
-                height: MERKLE_HEIGHT,
-            },
+            stake_table: stake_table_map,
+            stake_table_commitments: stake_table_commitments_mt.frontier(),
+            stake_table_commitments_commitment: stake_table_commitments_mt.commitment(),
             collected_rewards: KVMerkleTree::<CollectedRewardsHash>::EmptySubtree,
         }
     }

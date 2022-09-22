@@ -314,7 +314,12 @@ impl MultiXfrTestState {
             memos,
             nullifiers, /*asset_defs,*/
             record_merkle_tree: t.clone(),
-            validator: ValidatorState::new(ChainVariables::new(42, VERIF_CRS.clone()), t),
+            validator: ValidatorState::new(
+                ChainVariables::new(42, VERIF_CRS.clone()),
+                t,
+                StakeTableMap::EmptySubtree,
+                StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+            ),
             outer_timer: timer,
             inner_timer: Instant::now(),
         };
@@ -1409,6 +1414,8 @@ mod tests {
 
         let validator = |xfrs: &[_], freezes: &[_]| {
             let record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
+            let stake_table_map = StakeTableMap::EmptySubtree;
+            let stake_table_commitments_mt = StakeTableCommMT::new(MERKLE_HEIGHT).unwrap();
             ValidatorState::new(
                 ChainVariables::new(
                     42,
@@ -1433,6 +1440,8 @@ mod tests {
                     }),
                 ),
                 record_merkle_tree,
+                stake_table_map,
+                stake_table_commitments_mt,
             )
         };
 
@@ -1461,6 +1470,8 @@ mod tests {
         let mut v1 = ValidatorState::new(
             ChainVariables::new(42, VERIF_CRS.clone()),
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
+            StakeTableMap::EmptySubtree,
+            StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
         );
         let mut v2 = v1.clone();
 
@@ -1610,7 +1621,12 @@ mod tests {
         };
 
         let mut keystore_merkle_tree = t.clone();
-        let mut validator = ValidatorState::new(ChainVariables::new(42, VERIF_CRS.clone()), t);
+        let mut validator = ValidatorState::new(
+            ChainVariables::new(42, VERIF_CRS.clone()),
+            t,
+            StakeTableMap::EmptySubtree,
+            StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+        );
 
         println!("Validator set up: {}s", now.elapsed().as_secs_f32());
         let now = Instant::now();
