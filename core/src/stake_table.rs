@@ -15,6 +15,7 @@ use crate::tree_hash::KVTreeHash;
 use crate::util::canonical;
 use crate::{PrivKey, PubKey};
 
+use crate::merkle_tree::NodeValue;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use espresso_macros::*;
 use hotshot_types::traits::signature_key::{EncodedSignature, SignatureKey};
@@ -127,14 +128,6 @@ impl CanonicalDeserialize for StakingKeySignature {
 )]
 pub struct ViewNumber(pub(crate) u64);
 
-impl commit::Committable for ViewNumber {
-    fn commit(&self) -> commit::Commitment<Self> {
-        commit::RawCommitmentBuilder::new("View Number")
-            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
-            .finalize()
-    }
-}
-
 ///Identifying tag for a StakeTable
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub struct StakeTableTag();
@@ -147,20 +140,9 @@ impl CommitableHashTag for StakeTableTag {
 /// Hash function for the Stake Table
 pub type StakeTableHash = CommitableHash<StakingKey, Amount, StakeTableTag>;
 
-/// Identifying tag for a StakeTableCommitment
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub struct StakeTableCommitmentTag();
-impl CommitableHashTag for StakeTableCommitmentTag {
-    fn commitment_diversifier() -> &'static str {
-        "Stake Table Commitment"
-    }
-}
-
 /// Stake table commitment type
-/*
 #[tagged_blob("STAKETABLE")]
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, CanonicalDeserialize, CanonicalSerialize)]
-
 pub struct StakeTableCommitment(pub <StakeTableHash as KVTreeHash>::Digest);
 
 impl commit::Committable for StakeTableCommitment {
@@ -171,25 +153,12 @@ impl commit::Committable for StakeTableCommitment {
     }
 }
 
-/// Hash for tree which stores commitment hash of previous rounds' stake tables in (view_number, stake table commitment) kv pairs
-pub type StakeTableCommitmentsHash =
-    CommitableHash<ViewNumber, StakeTableCommitment, StakeTableCommitmentTag>;
+/// Hash for tree which stores commitment hash of previous rounds' stake tables and their total amount
+pub struct StakeTableCommitmentsCommitment(pub NodeValue);
 
-pub struct StakeTableCommitmentsCommitment(pub <StakeTableCommitmentsHash as KVTreeHash>::Digest);
 impl commit::Committable for StakeTableCommitmentsCommitment {
     fn commit(&self) -> commit::Commitment<Self> {
-        commit::RawCommitmentBuilder::new("Stake Table Commitments Commitment")
-            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
-            .finalize()
-    }
-}*/
-#[tagged_blob("STAKETABLE")]
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, CanonicalDeserialize, CanonicalSerialize)]
-pub struct StakeTableCommitment(pub <StakeTableHash as KVTreeHash>::Digest);
-
-impl commit::Committable for StakeTableCommitment {
-    fn commit(&self) -> commit::Commitment<Self> {
-        commit::RawCommitmentBuilder::new("Stake Table Commitment")
+        commit::RawCommitmentBuilder::new("Stake Table Commitments Commitments")
             .var_size_bytes(&canonical::serialize(&self.0).unwrap())
             .finalize()
     }

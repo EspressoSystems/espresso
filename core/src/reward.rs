@@ -29,8 +29,8 @@ use serde::{Deserialize, Serialize};
 #[tagged_blob("COLLECTED-REWARD")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 pub struct CollectedRewards {
-    staking_key: StakingKey,
-    view_number: ViewNumber,
+    pub staking_key: StakingKey,
+    pub view_number: ViewNumber,
 }
 
 /// Identifying tag for CollectedReward
@@ -133,7 +133,7 @@ impl CollectRewardNote {
     Serialize,
     Deserialize,
 )]
-struct VrfWitness {
+pub struct VrfWitness {
     /// Staking public key
     pub staking_key: StakingKey,
     /// View number for which the key was elected
