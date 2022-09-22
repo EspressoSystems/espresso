@@ -16,7 +16,7 @@ use crate::{
 };
 use clap::Args;
 use derive_more::From;
-use espresso_core::state::{BlockCommitment, TransactionCommitment};
+use espresso_core::state::{ElaboratedBlockCommitment, TransactionCommitment};
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, Snafu};
@@ -42,7 +42,7 @@ pub enum Error {
     #[from(ignore)]
     #[snafu(display("the requested block hash {} does not exist", hash))]
     UnknownBlockHash {
-        hash: BlockCommitment,
+        hash: ElaboratedBlockCommitment,
     },
 
     #[from(ignore)]

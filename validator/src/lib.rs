@@ -36,9 +36,11 @@ use espresso_core::{
 use espresso_esqs::full_node_data_source::QueryData;
 use futures::{select, Future, FutureExt};
 use hotshot::traits::implementations::Libp2pNetwork;
-use hotshot::traits::NetworkError;
-use hotshot::types::ed25519::{Ed25519Priv, Ed25519Pub};
-use hotshot::types::EventType;
+use hotshot::traits::{NetworkError, StateContents};
+use hotshot::types::{
+    ed25519::{Ed25519Priv, Ed25519Pub},
+    EventType,
+};
 use hotshot::{
     traits::implementations::MemoryStorage,
     types::{HotShotHandle, Message, SignatureKey},
@@ -553,11 +555,7 @@ async fn init_hotshot(
         // apply it to the default state. However, it currently takes the genesis block _and_ the
         // resulting state. This means we must apply the genesis block to the default state
         // ourselves.
-        let mut state = ValidatorState::default();
-        state
-            .validate_and_apply(1, genesis.block.clone(), genesis.proofs.clone())
-            .unwrap();
-        state
+        ValidatorState::default().append(&genesis).unwrap()
     });
 
     let hotshot = HotShot::init(

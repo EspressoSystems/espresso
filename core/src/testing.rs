@@ -480,22 +480,14 @@ impl MultiXfrTestState {
             }
 
             keys_in_block.clear();
-            ret.validate_and_apply(
-                core::mem::take(&mut setup_block),
-                0.0,
-                TxnPrintInfo::new_no_time(0, 0),
-            )
-            .unwrap();
+            ret.validate_and_apply(setup_block, 0.0, TxnPrintInfo::new_no_time(0, 0))
+                .unwrap();
 
             setup_block = ret.validator.next_block();
         }
 
-        ret.validate_and_apply(
-            core::mem::take(&mut setup_block),
-            0.0,
-            TxnPrintInfo::new_no_time(0, 0),
-        )
-        .unwrap();
+        ret.validate_and_apply(setup_block, 0.0, TxnPrintInfo::new_no_time(0, 0))
+            .unwrap();
 
         Ok(ret)
     }
@@ -1133,6 +1125,7 @@ impl MultiXfrTestState {
 
         self.validator.validate_block_check(
             self.validator.prev_commit_time + 1,
+            blk.parent_state,
             blk.block.clone(),
             blk.proofs.clone(),
         )?;
@@ -1348,7 +1341,7 @@ mod tests {
                 println!("Block {}/{} txns generated: {}s", i + 1, num_txs, t)
             });
 
-            let mut blk = ElaboratedBlock::default();
+            let mut blk = state.validator.next_block();
             for tx in txns {
                 let kixs = tx.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
                 let _ = state.try_add_transaction(
@@ -1531,7 +1524,7 @@ mod tests {
         // against an updated nullifier set.
         for (i, tx) in txns.into_iter().enumerate() {
             let kixs = tx.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
-            let mut blk = ElaboratedBlock::default();
+            let mut blk = state.validator.next_block();
             let _ = state.try_add_transaction(
                 &mut blk,
                 tx.transaction,
@@ -1706,6 +1699,7 @@ mod tests {
         let new_uids = validator
             .validate_and_apply(
                 1,
+                validator.commit(),
                 Block(vec![EspressoTransaction::CAP(TransactionNote::Transfer(
                     Box::new(txn1),
                 ))]),

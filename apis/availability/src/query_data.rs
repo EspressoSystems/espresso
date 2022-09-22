@@ -11,8 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use espresso_core::state::{
-    state_comm::LedgerStateCommitment, BlockCommitment, ElaboratedBlock, ElaboratedTransaction,
-    TransactionCommitment, ValidatorState,
+    state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedBlockCommitment,
+    ElaboratedTransaction, TransactionCommitment, ValidatorState,
 };
 use jf_cap::structs::RecordCommitment;
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockQueryData {
     pub raw_block: ElaboratedBlock,
-    pub block_hash: BlockCommitment,
+    pub block_hash: ElaboratedBlockCommitment,
     pub block_id: u64,
     pub records_from: u64,
     pub record_count: u64,

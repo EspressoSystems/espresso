@@ -27,8 +27,8 @@ use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
 use espresso_catchup_api::data_source::{CatchUpDataSource, UpdateCatchUpData};
 use espresso_core::ledger::EspressoLedger;
 use espresso_core::state::{
-    BlockCommitment, ElaboratedTransaction, SetMerkleProof, SetMerkleTree, TransactionCommitment,
-    ValidatorState,
+    ElaboratedBlockCommitment, ElaboratedTransaction, SetMerkleProof, SetMerkleTree,
+    TransactionCommitment, ValidatorState,
 };
 use espresso_metastate_api::{
     api as metastate,
@@ -55,7 +55,7 @@ pub type Consensus = Box<dyn ValidatorDataSource<Error = HotShotError> + Send + 
 pub struct QueryData {
     cached_blocks_start: usize,
     cached_blocks: Vec<BlockAndAssociated>,
-    index_by_block_hash: HashMap<BlockCommitment, u64>,
+    index_by_block_hash: HashMap<ElaboratedBlockCommitment, u64>,
     index_by_txn_hash: HashMap<TransactionCommitment, (u64, u64)>,
     index_by_last_record_id: BTreeMap<u64, u64>,
     cached_events_start: usize,
@@ -228,7 +228,7 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
         }
         dynamic_persistence_iter(n, self.cached_blocks_start, &self.cached_blocks, iter)
     }
-    fn get_block_index_by_hash(&self, hash: BlockCommitment) -> Option<u64> {
+    fn get_block_index_by_hash(&self, hash: ElaboratedBlockCommitment) -> Option<u64> {
         self.index_by_block_hash.get(&hash).cloned()
     }
     fn get_txn_index_by_hash(&self, hash: TransactionCommitment) -> Option<(u64, u64)> {

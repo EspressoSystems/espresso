@@ -22,7 +22,7 @@ use espresso_core::{
 use espresso_esqs::full_node::{self, EsQS};
 use espresso_validator::*;
 use futures::future::pending;
-use hotshot::types::EventType;
+use hotshot::{traits::StateContents, types::EventType};
 use jf_cap::keys::UserPubKey;
 use std::process::exit;
 use std::time::Duration;
@@ -162,7 +162,7 @@ async fn generate_transactions(
         }
 
         hotshot.start().await;
-        let success = loop {
+        loop {
             info!("Waiting for HotShot event");
             let event = hotshot
                 .next_event()
@@ -171,6 +171,46 @@ async fn generate_transactions(
 
             match event.event {
                 EventType::Decide { leaf_chain } => {
+                    for leaf in leaf_chain.iter().rev() {
+                        // Add the block if the node ID is 0 (i.e., the transaction is proposed by
+                        // the current node).
+                        if own_id == 0 {
+                            if leaf.deltas.is_empty() {
+                                state
+                                    .validate_and_apply(
+                                        leaf.deltas.clone(),
+                                        0.0,
+                                        TxnPrintInfo::new_no_time(round as usize, 1),
+                                    )
+                                    .unwrap();
+                            } else {
+                                // In this demo, the only blocks should be empty blocks and the
+                                // singleton block that we submitted.
+                                let txn = core::mem::take(&mut txn).unwrap();
+                                assert_eq!(txn.transaction.txn, leaf.deltas.block.0[0]);
+                                let mut blk = state.validator.next_block();
+                                let kixs =
+                                    txn.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
+                                state
+                                    .try_add_transaction(
+                                        &mut blk,
+                                        txn.transaction,
+                                        txn.index,
+                                        kixs,
+                                        TxnPrintInfo::new_no_time(round as usize, 1),
+                                    )
+                                    .unwrap();
+                                state
+                                    .validate_and_apply(
+                                        blk,
+                                        0.0,
+                                        TxnPrintInfo::new_no_time(round as usize, 1),
+                                    )
+                                    .unwrap();
+                            }
+                        }
+                    }
+
                     if let Some(leaf) = leaf_chain.last() {
                         succeeded_round += 1;
                         println!(
@@ -179,42 +219,20 @@ async fn generate_transactions(
                             leaf.state.commit()
                         );
                         final_commitment = Some(leaf.state.commit());
-                        break true;
+                        break;
                     }
                 }
                 EventType::ReplicaViewTimeout { .. } | EventType::NextLeaderViewTimeout { .. } => {
                     info!("  - Round {} timed out.", round + 1);
-                    break false;
+                    break;
                 }
                 EventType::Error { error } => {
                     info!("  - Round {} error: {}", round + 1, error);
-                    break false;
+                    break;
                 }
                 _ => {
                     info!("EVENT: {:?}", event);
                 }
-            }
-        };
-
-        if success {
-            // Add the transaction if the node ID is 0 (i.e., the transaction is proposed by the
-            // current node), and there is no attached keystore.
-            if let Some(txn) = core::mem::take(&mut txn) {
-                info!("  - Adding the transaction");
-                let mut blk = ElaboratedBlock::default();
-                let kixs = txn.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
-                state
-                    .try_add_transaction(
-                        &mut blk,
-                        txn.transaction,
-                        txn.index,
-                        kixs,
-                        TxnPrintInfo::new_no_time(round as usize, 1),
-                    )
-                    .unwrap();
-                state
-                    .validate_and_apply(blk, 0.0, TxnPrintInfo::new_no_time(round as usize, 1))
-                    .unwrap();
             }
         }
 

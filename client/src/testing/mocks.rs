@@ -60,6 +60,10 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
         self.events.now()
     }
 
+    fn state(&self) -> &ValidatorState {
+        &self.validator
+    }
+
     fn event(
         &self,
         index: EventIndex,
@@ -76,6 +80,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
     fn submit(&mut self, block: ElaboratedBlock) -> Result<usize, KeystoreError<EspressoLedger>> {
         match self.validator.validate_and_apply(
             self.validator.prev_commit_time + 1,
+            block.parent_state,
             block.block.clone(),
             block.proofs.clone(),
         ) {

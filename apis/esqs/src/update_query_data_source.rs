@@ -24,8 +24,8 @@ use espresso_availability_api::{
 };
 use espresso_catchup_api::data_source::UpdateCatchUpData;
 use espresso_core::state::{
-    BlockCommitment, ElaboratedBlock, EspressoTransaction, EspressoTxnHelperProofs,
-    TransactionCommitment, ValidatorState,
+    ElaboratedBlock, EspressoTransaction, EspressoTxnHelperProofs, TransactionCommitment,
+    ValidatorState,
 };
 use espresso_metastate_api::data_source::UpdateMetaStateData;
 use espresso_status_api::data_source::UpdateStatusData;
@@ -193,7 +193,7 @@ where
                     if let Err(e) = availability_store.append_blocks(vec![(
                         Some(BlockQueryData {
                             raw_block: block.clone(),
-                            block_hash: BlockCommitment(block.block.commit()),
+                            block_hash: block.commit().into(),
                             block_id: block_index as u64,
                             records_from,
                             record_count,

@@ -24,6 +24,7 @@ pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
 pub use crate::util::canonical;
 pub use crate::{PrivKey, PubKey};
+pub use state_comm::LedgerStateCommitment;
 
 use crate::genesis::GenesisNote;
 use crate::reward::CollectedRewardsHash;
@@ -35,6 +36,7 @@ use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
+use derive_more::{From, Into};
 use hotshot::traits::{BlockContents, StateContents};
 use jf_cap::{
     errors::TxnApiError, structs::Nullifier, txn_batch_verify, MerkleCommitment, MerkleFrontier,
@@ -244,9 +246,8 @@ pub struct Block(pub Vec<EspressoTransaction>);
 /// information to create a nullifier for the record, but validators
 /// can check nullifiers are not already present in the ledger without
 /// the secret information.
-#[ser_test]
+#[ser_test(arbitrary)]
 #[derive(
-    Default,
     Debug,
     Clone,
     CanonicalSerialize,
@@ -258,18 +259,47 @@ pub struct Block(pub Vec<EspressoTransaction>);
     Deserialize,
 )]
 pub struct ElaboratedBlock {
+    /// Commitment to the state this block is intended to be appended to.
+    ///
+    /// This ensures every block is unique (since every state is unique) and requires that a block
+    /// is only appended to the state that the proposer intended it for.
+    pub parent_state: LedgerStateCommitment,
     pub block: Block,
     pub proofs: Vec<EspressoTxnHelperProofs>,
     pub memos: Vec<Option<(Vec<ReceiverMemo>, Signature)>>,
 }
 
+impl<'a> Arbitrary<'a> for ElaboratedBlock {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self::genesis(u.arbitrary()?))
+    }
+}
+
 impl ElaboratedBlock {
+    pub fn new(parent_state: LedgerStateCommitment) -> Self {
+        Self {
+            parent_state,
+            block: Default::default(),
+            proofs: Default::default(),
+            memos: Default::default(),
+        }
+    }
+
     pub fn genesis(txn: GenesisNote) -> Self {
         Self {
+            parent_state: ValidatorState::default().commit(),
             block: Block(vec![EspressoTransaction::Genesis(txn)]),
             proofs: vec![EspressoTxnHelperProofs::Genesis],
             memos: vec![None],
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.block.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.block.0.is_empty()
     }
 }
 
@@ -281,11 +311,32 @@ impl Committable for ElaboratedBlock {
     fn commit(&self) -> Commitment<Self> {
         commit::RawCommitmentBuilder::new("ElaboratedBlock")
             .field("Block contents", self.block.commit())
+            .field("Block parent", self.parent_state.into())
             .var_size_field("Block proofs", &canonical::serialize(&self.proofs).unwrap())
             .var_size_field("Block memos", &canonical::serialize(&self.memos).unwrap())
             .finalize()
     }
 }
+
+/// A cryptographic commitment to a block
+#[ser_test(arbitrary)]
+#[tagged_blob("BLOCK")]
+#[derive(
+    Arbitrary,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+    From,
+    Into,
+)]
+pub struct ElaboratedBlockCommitment(pub commit::Commitment<ElaboratedBlock>);
+// Implements From<CanonicalBytes>. See serialize.rs in Jellyfish.
+deserialize_canonical_bytes!(ElaboratedBlockCommitment);
 
 impl Committable for ElaboratedTransaction {
     /// Get a commitment to an elaborated transaction.
@@ -417,6 +468,9 @@ pub enum ValidationError {
 
     /// A genesis transaction was included in a non-genesis block
     UnexpectedGenesis,
+
+    /// Attempted to apply a block to a state which was not its intended parent state
+    IncorrectParent,
 }
 
 pub(crate) mod ser_display {
@@ -471,20 +525,10 @@ impl Clone for ValidationError {
             },
             InconsistentHelperProofs => InconsistentHelperProofs,
             UnexpectedGenesis => UnexpectedGenesis,
+            IncorrectParent => IncorrectParent,
         }
     }
 }
-
-/// A cryptographic commitment to a block
-#[ser_test(arbitrary)]
-#[tagged_blob("BLOCK")]
-#[derive(
-    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize,
-)]
-pub struct BlockCommitment(pub commit::Commitment<Block>);
-
-// Implements From<CanonicalBytes>. See serialize.rs in Jellyfish.
-deserialize_canonical_bytes!(BlockCommitment);
 
 impl Committable for Block {
     fn commit(&self) -> commit::Commitment<Self> {
@@ -892,7 +936,7 @@ pub mod state_comm {
         pub chain: Commitment<ChainVariables>,
         pub prev_commit_time: u64,
         pub block_height: u64,
-        pub prev_state: Option<state_comm::LedgerStateCommitment>,
+        pub prev_state: Option<LedgerStateCommitment>,
         pub record_merkle_commitment: Commitment<RecordMerkleCommitment>,
         pub record_merkle_frontier: Commitment<RecordMerkleFrontier>,
         /// We need to include all the cached past record Merkle roots
@@ -979,6 +1023,12 @@ pub struct ValidationOutputs {
 )]
 pub struct ArcSer<T>(Arc<T>);
 
+impl<T> ArcSer<T> {
+    pub fn new(val: T) -> Self {
+        Arc::new(val).into()
+    }
+}
+
 impl<T: CanonicalSerialize> CanonicalSerialize for ArcSer<T> {
     fn serialize<W: Write>(&self, writer: W) -> Result<(), SerializationError> {
         (*self.0).serialize(writer)
@@ -1028,6 +1078,16 @@ impl Committable for ChainVariables {
             .u64_field("chain_id", self.chain_id as u64)
             .var_size_bytes(&canonical::serialize(&self.verif_crs).unwrap())
             .finalize()
+    }
+}
+
+impl<'a> Arbitrary<'a> for ChainVariables {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            protocol_version: u.arbitrary()?,
+            chain_id: u.arbitrary()?,
+            verif_crs: VERIF_CRS.clone().into(),
+        })
     }
 }
 
@@ -1094,7 +1154,7 @@ pub struct ValidatorState {
     /// and `block_height - 1` is the index of the previous block, which created this state. (The
     /// default, pre-genesis state has `block_height == 0`, since it was not created by any block.)
     pub block_height: u64,
-    pub prev_state: Option<state_comm::LedgerStateCommitment>,
+    pub prev_state: Option<LedgerStateCommitment>,
     /// The current record Merkle commitment
     pub record_merkle_commitment: MerkleCommitment,
     /// The current frontier of the record Merkle tree
@@ -1103,7 +1163,7 @@ pub struct ValidatorState {
     pub past_record_merkle_roots: RecordMerkleHistory,
     /// Nullifiers from recent blocks, which allows validating slightly out-of-date-transactions
     pub past_nullifiers: NullifierHistory,
-    pub prev_block: BlockCommitment,
+    pub prev_block: Commitment<Block>,
     /// Staking table. For fixed-stake, this will be the same each round
     pub stake_table: StakeTableMap,
     /// Keeps track of previous stake tables and their total stake
@@ -1142,7 +1202,7 @@ impl Committable for ValidatorState {
             past_record_merkle_roots: self.past_record_merkle_roots.commit(),
 
             past_nullifiers: self.past_nullifiers.commit(),
-            prev_block: self.prev_block.0,
+            prev_block: self.prev_block,
         };
         inputs.commit().into()
     }
@@ -1173,7 +1233,7 @@ impl ValidatorState {
                 Self::HISTORY_SIZE,
             )),
             past_nullifiers: NullifierHistory::default(),
-            prev_block: BlockCommitment(Block::default().commit()),
+            prev_block: Block::default().commit(),
             //KALEY: ask about stake table initialization
             stake_table: stake_table_map,
             stake_table_commitments: stake_table_commitments_mt.frontier(),
@@ -1183,7 +1243,7 @@ impl ValidatorState {
     }
 
     /// Cryptographic commitment to the validator state
-    pub fn commit(&self) -> state_comm::LedgerStateCommitment {
+    pub fn commit(&self) -> LedgerStateCommitment {
         Committable::commit(self).into()
     }
 
@@ -1214,9 +1274,15 @@ impl ValidatorState {
     pub fn validate_block_check(
         &self,
         now: u64,
+        parent_state: LedgerStateCommitment,
         txns: Block,
         txns_helper_proofs: Vec<EspressoTxnHelperProofs>,
     ) -> Result<(Block, NullifierProofs), ValidationError> {
+        // The block must be intended for this state.
+        if parent_state != self.commit() {
+            return Err(ValidationError::IncorrectParent);
+        }
+
         // Check if this is a genesis block. If it is, validation is trivial and we can skip the
         // rest of this. If it is not, then we will reject the block later if it contains any
         // genesis transactions.
@@ -1351,10 +1417,11 @@ impl ValidatorState {
     pub fn validate_and_apply(
         &mut self,
         now: u64,
+        parent_state: LedgerStateCommitment,
         txns: Block,
         proofs: Vec<EspressoTxnHelperProofs>,
     ) -> Result<ValidationOutputs, ValidationError> {
-        let (txns, null_pfs) = self.validate_block_check(now, txns, proofs)?;
+        let (txns, null_pfs) = self.validate_block_check(now, parent_state, txns, proofs)?;
         // If the block successfully validates, and the nullifier proofs apply correctly, the
         // remaining (mutating) operations cannot fail, as this would result in an inconsistent
         // state. No operations after the first assignement to a member of self have a possible
@@ -1362,7 +1429,7 @@ impl ValidatorState {
         let comm = self.commit();
         self.prev_commit_time = now;
         self.block_height += 1;
-        self.prev_block = BlockCommitment(txns.commit());
+        self.prev_block = txns.commit();
         let null_pfs = self
             .past_nullifiers
             .append_block(null_pfs)
@@ -1484,13 +1551,14 @@ impl StateContents for ValidatorState {
     type Block = ElaboratedBlock;
 
     fn next_block(&self) -> Self::Block {
-        Self::Block::default()
+        Self::Block::new(self.commit())
     }
 
     /// Validate a block for consensus
     fn validate_block(&self, block: &Self::Block) -> bool {
         self.validate_block_check(
             self.prev_commit_time + 1,
+            block.parent_state,
             block.block.clone(),
             block.proofs.clone(),
         )
@@ -1505,6 +1573,7 @@ impl StateContents for ValidatorState {
         let mut state = self.clone();
         state.validate_and_apply(
             state.prev_commit_time + 1,
+            block.parent_state,
             block.block.clone(),
             block.proofs.clone(),
         )?;

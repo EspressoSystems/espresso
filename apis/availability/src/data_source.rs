@@ -11,7 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::query_data::{BlockQueryData, StateQueryData};
-use espresso_core::state::{BlockCommitment, TransactionCommitment, ValidatorState};
+use espresso_core::state::{ElaboratedBlockCommitment, TransactionCommitment, ValidatorState};
 use hotshot_types::data::QuorumCertificate;
 use jf_cap::MerkleTree;
 use std::error::Error;
@@ -31,7 +31,7 @@ pub trait AvailabilityDataSource {
     fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType;
     fn get_nth_state_iter(&self, n: usize) -> Self::StateIterType;
     fn get_nth_qcert_iter(&self, n: usize) -> Self::QCertIterType;
-    fn get_block_index_by_hash(&self, hash: BlockCommitment) -> Option<u64>;
+    fn get_block_index_by_hash(&self, hash: ElaboratedBlockCommitment) -> Option<u64>;
     fn get_txn_index_by_hash(&self, hash: TransactionCommitment) -> Option<(u64, u64)>;
     fn get_record_index_by_uid(&self, uid: u64) -> Option<(u64, u64, u64)>; // None if OOB
                                                                             // it should be possible to implement this one in terms of the above,

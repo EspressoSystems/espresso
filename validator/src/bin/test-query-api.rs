@@ -30,7 +30,7 @@ use async_tungstenite::async_std::connect_async;
 use clap::Parser;
 use commit::Committable;
 use espresso_availability_api::query_data::*;
-use espresso_core::{ledger::EspressoLedger, state::BlockCommitment};
+use espresso_core::ledger::EspressoLedger;
 use espresso_metastate_api::api::NullifierCheck;
 use futures::prelude::*;
 use itertools::izip;
@@ -82,24 +82,17 @@ async fn validate_committed_block(opt: &Args, block: &BlockQueryData, ix: u64, n
     // Check well-formedness of the data.
     assert_eq!(ix, block.block_id);
     assert!(ix < num_blocks);
-    assert_eq!(
-        block.block_hash,
-        BlockCommitment(block.raw_block.block.commit()),
-    );
+    assert_eq!(block.block_hash, block.raw_block.commit().into(),);
 
     // Check that we get the same block if we query by other methods.
-    if !block.txn_hashes.is_empty() {
-        // Only lookup by hash if the block is not empty. Querying by hash for empty blocks is not
-        // guaranteed to return the same block, since all empty blocks have the same hash.
-        assert_eq!(
-            *block,
-            get(
-                opt,
-                format!("/availability/getblock/hash/{}", block.block_hash)
-            )
-            .await
-        );
-    }
+    assert_eq!(
+        *block,
+        get(
+            opt,
+            format!("/availability/getblock/hash/{}", block.block_hash)
+        )
+        .await
+    );
 
     // Check the output state of this block.
     let state: StateQueryData =
