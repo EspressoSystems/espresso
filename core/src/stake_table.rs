@@ -157,6 +157,7 @@ impl CommitableHashTag for StakeTableCommitmentTag {
 }
 
 /// Stake table commitment type
+/*
 #[tagged_blob("STAKETABLE")]
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, CanonicalDeserialize, CanonicalSerialize)]
 
@@ -178,6 +179,17 @@ pub struct StakeTableCommitmentsCommitment(pub <StakeTableCommitmentsHash as KVT
 impl commit::Committable for StakeTableCommitmentsCommitment {
     fn commit(&self) -> commit::Commitment<Self> {
         commit::RawCommitmentBuilder::new("Stake Table Commitments Commitment")
+            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
+            .finalize()
+    }
+}*/
+#[tagged_blob("STAKETABLE")]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, CanonicalDeserialize, CanonicalSerialize)]
+pub struct StakeTableCommitment(pub <StakeTableHash as KVTreeHash>::Digest);
+
+impl commit::Committable for StakeTableCommitment {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Stake Table Commitment")
             .var_size_bytes(&canonical::serialize(&self.0).unwrap())
             .finalize()
     }
