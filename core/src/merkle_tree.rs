@@ -910,7 +910,7 @@ where
 #[serde(bound = "")]
 pub struct MerkleTree<E>
 where
-    E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
+    E: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
 {
     root: MerkleNode<E>,
     height: u8,
@@ -920,7 +920,7 @@ where
 
 impl<E> MerkleTree<E>
 where
-    E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
+    E: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
 {
     /// Create a new Merkle with a specific height
     /// * `height` - height of the tree (number of hops from the root to a
