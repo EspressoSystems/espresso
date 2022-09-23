@@ -14,13 +14,17 @@
 #![allow(clippy::format_push_string)]
 
 use ark_serialize::*;
+use ark_std::rand::{CryptoRng, RngCore};
 use async_std::sync::{Arc, RwLock};
 use clap::{Args, Parser};
 use cld::ClDuration;
 use dirs::data_local_dir;
+use espresso_core::reward::{mock_eligibility, CollectRewardNote};
+use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof};
 use espresso_core::{
     committee::Committee,
     genesis::GenesisNote,
+    stake_table::{StakeTableHash, StakingPrivKey},
     state::{
         ChainVariables, ElaboratedBlock, ElaboratedTransaction, LWPersistence, NullifierHistory,
         SetMerkleTree, ValidatorState,
@@ -33,15 +37,14 @@ use espresso_esqs::full_node_data_source::QueryData;
 use futures::{select, Future, FutureExt};
 use hotshot::traits::implementations::Libp2pNetwork;
 use hotshot::traits::NetworkError;
-use hotshot::types::{
-    ed25519::{Ed25519Priv, Ed25519Pub},
-    EventType,
-};
+use hotshot::types::ed25519::{Ed25519Priv, Ed25519Pub};
+use hotshot::types::EventType;
 use hotshot::{
     traits::implementations::AtomicStorage,
     types::{HotShotHandle, Message, SignatureKey},
     HotShot, HotShotConfig, H_256,
 };
+use jf_cap::keys::UserAddress;
 use jf_cap::{
     keys::UserPubKey,
     structs::{Amount, AssetDefinition, FreezeFlag, RecordOpening},
@@ -819,4 +822,63 @@ pub fn open_data_source(
     } else {
         QueryData::load(&storage, Box::new(consensus)).unwrap()
     }))
+}
+
+#[allow(dead_code)] // FIXME use this function in main
+async fn collect_reward_daemon<R: CryptoRng + RngCore>(
+    rng: &mut R,
+    stake_proof: KVMerkleProof<StakeTableHash>,
+    stake_amount: Amount,
+    staking_priv_key: &StakingPrivKey,
+    cap_address: &UserAddress,
+    mut hotshot: Consensus,
+) {
+    loop {
+        let event = hotshot
+            .next_event()
+            .await
+            .expect("HotShot unexpectedly closed");
+        if let EventType::Decide {
+            block: _,
+            state,
+            qcs,
+        } = event.event
+        {
+            for (validator_state, qc) in state.iter().rev().zip(qcs.iter().rev()) {
+                let view_number = qc.view_number;
+                // 0. check if I'm elected
+                if let Some(vrf_proof) =
+                    mock_eligibility::prove_eligibility(view_number.into(), staking_priv_key)
+                {
+                    // 1. generate collect reward transaction
+                    let (note, proof) = CollectRewardNote::generate(
+                        rng,
+                        validator_state,
+                        view_number,
+                        validator_state.block_height,
+                        staking_priv_key,
+                        cap_address.clone(),
+                        stake_amount,
+                        stake_proof.clone(),
+                        vrf_proof,
+                    )
+                    .expect("Failed to create Collect Reward Note");
+                    let elaborated_tx = ElaboratedTransaction {
+                        txn: EspressoTransaction::Reward(Box::new(note)),
+                        proofs: EspressoTxnHelperProofs::Reward(Box::new(proof)),
+                        memos: None,
+                    };
+
+                    // 2. submit transaction
+                    hotshot
+                        .submit_transaction(elaborated_tx)
+                        .await
+                        .expect("Failed to submit reward transaction")
+
+                    // 3. Check block if contain stake transfer transaction and update stake proof
+                    // TODO we haven't implemented stake transfer yet
+                }
+            }
+        }
+    }
 }

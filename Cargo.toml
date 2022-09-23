@@ -24,6 +24,7 @@ members = [
     "client",
     "core",
     "faucet",
+    "faucet/types",
     "validator",
   ]
 [profile.dev]

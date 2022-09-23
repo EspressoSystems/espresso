@@ -18,9 +18,7 @@ use async_std::{
     sync::{Arc, Mutex, RwLock},
     task::{sleep, spawn, JoinHandle},
 };
-use atomic_store::{
-    load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
-};
+use atomic_store::{load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader};
 use espresso_client::{
     events::EventIndex,
     hd::Mnemonic,
@@ -31,6 +29,7 @@ use espresso_client::{
     EspressoKeystore, RecordAmount,
 };
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
+use faucet_types::*;
 use futures::{channel::mpsc, future::join_all, stream::StreamExt};
 use jf_cap::{
     keys::{UserKeyPair, UserPubKey},
@@ -44,7 +43,6 @@ use rand::{
 use rand_chacha::ChaChaRng;
 use reef::traits::Validator;
 use serde::{Deserialize, Serialize};
-use snafu::Snafu;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -53,7 +51,6 @@ use surf::Url;
 use tide::{
     http::headers::HeaderValue,
     security::{CorsMiddleware, Origin},
-    StatusCode,
 };
 use tracing::{error, info, warn};
 
@@ -203,59 +200,6 @@ impl FaucetState {
             signal_breaker_thread,
         })
     }
-}
-
-#[derive(Debug, Snafu, Serialize, Deserialize)]
-#[snafu(module(error))]
-pub enum FaucetError {
-    #[snafu(display("error in faucet transfer: {}", msg))]
-    Transfer { msg: String },
-
-    #[snafu(display("internal server error: {}", msg))]
-    Internal { msg: String },
-
-    #[snafu(display("the queue is full with {} requests, try again later", max_len))]
-    QueueFull { max_len: usize },
-
-    #[snafu(display(
-        "there is a pending request with key {}, you can only request once at a time",
-        key
-    ))]
-    AlreadyInQueue { key: UserPubKey },
-
-    #[snafu(display("error with persistent storage: {}", msg))]
-    Persistence { msg: String },
-
-    #[snafu(display("faucet service temporarily unavailable"))]
-    Unavailable,
-}
-
-impl net::Error for FaucetError {
-    fn catch_all(msg: String) -> Self {
-        Self::Internal { msg }
-    }
-    fn status(&self) -> StatusCode {
-        match self {
-            Self::Transfer { .. } => StatusCode::BadRequest,
-            Self::Internal { .. } => StatusCode::InternalServerError,
-            Self::AlreadyInQueue { .. } => StatusCode::TooManyRequests,
-            Self::QueueFull { .. } => StatusCode::InternalServerError,
-            Self::Persistence { .. } => StatusCode::InternalServerError,
-            Self::Unavailable => StatusCode::ServiceUnavailable,
-        }
-    }
-}
-
-impl From<PersistenceError> for FaucetError {
-    fn from(source: PersistenceError) -> Self {
-        Self::Persistence {
-            msg: source.to_string(),
-        }
-    }
-}
-
-pub fn faucet_server_error<E: Into<FaucetError>>(err: E) -> tide::Error {
-    net::server_error(err)
 }
 
 /// A shared, asynchronous queue of requests.
@@ -1005,6 +949,7 @@ mod test {
     use std::process::Child;
     use std::time::Duration;
     use tempdir::TempDir;
+    use tide::StatusCode;
     use tracing_test::traced_test;
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {

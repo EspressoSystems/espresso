@@ -92,7 +92,7 @@ jobs:
             target/x86_64-unknown-linux-musl/release/address-book
             target/x86_64-unknown-linux-musl/release/espresso-validator
             target/x86_64-unknown-linux-musl/release/faucet
-            target/x86_64-unknown-linux-musl/release/random_wallet
+            target/x86_64-unknown-linux-musl/release/random-wallet
 
   static-dockers:
     runs-on: ubuntu-latest

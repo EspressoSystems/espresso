@@ -1367,63 +1367,11 @@ impl ValidatorState {
                 .into_iter()
                 .zip(reward_txns.clone().into_iter())
             {
-                //check collected reward non-inclusion proof
-                let collected_reward_check = pfs.uncollected_reward_proof.check(
-                    CollectedRewards {
-                        staking_key: txn.body.vrf_witness.staking_key.clone(),
-                        view_number: txn.body.vrf_witness.view_number,
-                    },
-                    self.collected_rewards.hash(),
-                );
-                match collected_reward_check {
-                    None => return Err(ValidationError::BadCollectedRewardProof),
-                    Some((None, _)) => {}
-                    //reward exists in the table; reward has been collected
-                    Some((Some(_), _)) => {
-                        return Err(ValidationError::PreviouslyCollectedReward);
-                    }
-                }
+                let collected_reward = pfs
+                    .verify(self, *txn)
+                    .expect("Failed to verify reward proofs");
 
-                //check stake_table_commitment_proof
-                crate::merkle_tree::MerkleTree::check_proof(
-                    self.stake_table_commitments_commitment.root_value,
-                    txn.body.vrf_witness.view_number.0,
-                    &pfs.stake_table_commitment_proof,
-                )
-                .map_err(|_| ValidationError::BadStakeTableCommitmentProof)?;
-
-                //check stake amount proof
-                let stake_amount_check = pfs.stake_amount_proof.check(
-                    txn.body.vrf_witness.staking_key.clone(),
-                    pfs.stake_table_commitment.0,
-                );
-                match stake_amount_check {
-                    //check that stored view_number->commitment matches provided commtiment
-                    Some((Some(_amt), _)) => {
-                        //KALEY TODO: update with total stake amt after Fernando's PR is merged
-                        if txn.body.reward_amount > Amount::from(0u64)
-                        /* > reward::compute_reward_amount(
-                            &self,
-                            now,
-                            amt,
-                        )*/
-                        {
-                            return Err(ValidationError::RewardAmountTooLarge);
-                        }
-                    }
-                    _ => {
-                        return Err(ValidationError::BadStakeTableProof);
-                    }
-                }
-                //KALEY add vrf witness check
-                /*match pfs.verify() {
-                Ok(()) => {},
-                Err(err) => {return Err(err);}*/
-
-                verified_rewards.push(CollectedRewards {
-                    staking_key: txn.body.vrf_witness.staking_key,
-                    view_number: txn.body.vrf_witness.view_number,
-                });
+                verified_rewards.push(collected_reward);
             }
         }
         // assemble Block
@@ -1498,11 +1446,8 @@ impl ValidatorState {
             &self.stake_table_commitments_commitment,
             &self.stake_table_commitments,
         )
-        .expect("failed to restore stake table commitments merkle tree form frontier");
+        .expect("failed to restore stake table commitments merkle tree from frontier");
 
-        // TODO (fernando) add empty views as well
-        // TODO (fernando) where to get total amount
-        //let circulating_supply = Amount::from(10000000000u128);
         stc_builder.push((
             StakeTableCommitment(self.stake_table.hash()),
             self.total_stake,

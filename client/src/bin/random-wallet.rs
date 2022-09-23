@@ -36,6 +36,7 @@ use async_std::task::sleep;
 use derive_more::Deref;
 use espresso_client::{ledger_state::TransactionUID, network::NetworkBackend, RecordAmount};
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
+use faucet_types::FaucetError;
 use human_bytes::human_bytes;
 use jf_cap::{
     keys::{FreezerPubKey, UserKeyPair, UserPubKey},
@@ -210,7 +211,7 @@ async fn get_peers(url: &Url) -> Result<Vec<UserPubKey>, AddressBookError> {
 async fn get_native_from_faucet(keystore: &mut Keystore, pub_key: &UserPubKey, url: &Url) {
     // Request native asset for the keystore.
     loop {
-        match surf_disco::post::<(), AddressBookError>(url.join("request_fee_assets").unwrap())
+        match surf_disco::post::<(), FaucetError>(url.join("request_fee_assets").unwrap())
             .body_binary(pub_key)
             .unwrap()
             .send()
