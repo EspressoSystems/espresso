@@ -290,7 +290,7 @@ impl SetMerkleProof {
                 SetMerkleTerminalNode::EmptySubtree {} => false,
                 SetMerkleTerminalNode::Leaf {
                     elem: leaf_elem, ..
-                } => (leaf_elem == &elem),
+                } => leaf_elem == &elem,
             })
         } else {
             Err(running_hash)
