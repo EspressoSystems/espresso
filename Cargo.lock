@@ -2323,7 +2323,6 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber 0.3.15",
- "validator_node",
 ]
 
 [[package]]
@@ -2550,7 +2549,6 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber 0.3.15",
  "tracing-test",
- "validator_node",
 ]
 
 [[package]]
@@ -7738,50 +7736,6 @@ name = "utf8parse"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "936e4b492acfd135421d8dca4b1aa80a7bfc26e702ef3af710e0752684df5372"
-
-[[package]]
-name = "validator_node"
-version = "0.1.0"
-dependencies = [
- "arbitrary",
- "arbitrary-wrappers",
- "ark-serialize",
- "ark-std",
- "async-std",
- "async-trait",
- "bincode",
- "bitvec 0.20.1",
- "commit",
- "espresso-availability-api",
- "espresso-catchup-api",
- "espresso-core",
- "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git)",
- "espresso-metastate-api",
- "espresso-status-api",
- "futures",
- "hotshot",
- "hotshot-types",
- "itertools 0.10.3",
- "jf-cap",
- "jf-primitives",
- "jf-utils 0.1.1",
- "lazy_static",
- "net",
- "proptest",
- "quickcheck",
- "quickcheck_macros",
- "rand 0.7.3",
- "rand_chacha 0.3.1",
- "reef",
- "seahorse",
- "serde",
- "serde_json",
- "snafu",
- "surf",
- "tempdir",
- "tide",
- "tracing",
-]
 
 [[package]]
 name = "valuable"
