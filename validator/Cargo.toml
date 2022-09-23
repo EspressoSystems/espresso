@@ -39,6 +39,7 @@ espresso-status-api = { path = "../apis/status", optional = true }
 futures = "0.3.0"
 futures-util = "0.3.8"
 hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.3" }
+hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.1.3" }
 human_bytes = "0.3"
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
@@ -59,6 +60,7 @@ seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", optional =
 serde = { version = "1.0.139", features = ["derive", "rc"] }
 serde_derive = "1.0.118"
 serde_json = "1.0.61"
+sha3 = "^0.10.4"
 shellexpand = "2.0"
 snafu = { version = "0.7", features = ["backtraces"] }
 strum = "0.24"
