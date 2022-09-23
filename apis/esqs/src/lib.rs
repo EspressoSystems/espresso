@@ -42,6 +42,7 @@ pub enum ApiError {
         source: validator::Error,
     },
     #[from(ignore)]
+    #[snafu(display("error {}: {}", status, reason))]
     Internal {
         status: StatusCode,
         reason: String,
