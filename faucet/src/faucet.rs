@@ -949,6 +949,7 @@ mod test {
     use std::process::Child;
     use std::time::Duration;
     use tempdir::TempDir;
+    use tide::StatusCode;
     use tracing_test::traced_test;
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
