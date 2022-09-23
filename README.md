@@ -193,7 +193,7 @@ all look like `http://localhost:$SERVICE_PORT`.
 
 Once you have built the system and found the URLs of the services you are connecting to, run:
 
-    target/release/random_wallet --address-book-url $ADDRESS_BOOK_URL --esqs-url $ESQS_URL -f $FAUCET_URL -v $VALIDATOR_URL
+    target/release/random-wallet --address-book-url $ADDRESS_BOOK_URL --esqs-url $ESQS_URL -f $FAUCET_URL -v $VALIDATOR_URL
 
 This will start the random wallet test, which will run for as long as you want and output logging
 information to the console. When you want to stop the test, just hit Ctrl+C in the terminal.

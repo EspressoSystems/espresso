@@ -88,4 +88,4 @@ jobs:
             target/release/address-book
             target/release/espresso-validator
             target/release/faucet
-            target/release/random_wallet
+            target/release/random-wallet
