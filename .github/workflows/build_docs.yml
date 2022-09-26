@@ -26,6 +26,8 @@ on:
 jobs:
   doc-generation:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/espressosystems/devops-rust:1.63
     steps:
       - uses: styfle/cancel-workflow-action@0.10.0
         name: Cancel Outdated Builds

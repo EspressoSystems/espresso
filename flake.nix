@@ -228,7 +228,7 @@
             OPENSSL_LIB_DIR = "${opensslMusl.dev}/lib/";
             CARGO_BUILD_TARGET = "${arch}-unknown-${os}-musl";
             buildInputs = with pkgs;
-              [ stableMuslRustToolchain fd cmake ];
+              [ protobuf stableMuslRustToolchain fd cmake ];
             meta.broken = if "${os}" == "darwin" then true else false;
 
             RUST_LOG = "info,libp2p=off";
