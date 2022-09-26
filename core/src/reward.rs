@@ -299,7 +299,9 @@ pub struct RewardNoteProofs {
     /// Proof for stake_amount for staking key under above stake table commitment
     stake_amount_proof: KVMerkleProof<StakeTableHash>,
     /// Proof that reward hasn't been collected
-    pub uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+    uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+    /// Index of relevant stake table commitment in MerkleTree
+    leaf_proof_pos: u64,
 }
 
 impl RewardNoteProofs {
@@ -314,10 +316,14 @@ impl RewardNoteProofs {
             Self::get_stake_commitment_total_stake_and_proof(validator_state)?;
         let uncollected_reward_proof =
             Self::proof_uncollected_rewards(validator_state, stake_key, view_number)?;
+        let leaf_proof_pos = validator_state
+            .stake_table_commitments_commitment
+            .num_leaves;
         Ok(Self {
             stake_table_commitment_leaf_proof,
             stake_amount_proof,
             uncollected_reward_proof,
+            leaf_proof_pos,
         })
     }
 
@@ -384,7 +390,7 @@ impl RewardNoteProofs {
             validator_state
                 .stake_table_commitments_commitment
                 .root_value,
-            txn.body.vrf_witness.view_number.0,
+            self.leaf_proof_pos,
             &self.stake_table_commitment_leaf_proof,
         )
         .map_err(|_| RewardError::BadStakeTableCommitmentProof {})?;
@@ -392,7 +398,7 @@ impl RewardNoteProofs {
         //check stake amount proof
         let stake_amount_check = self.stake_amount_proof.check(
             txn.body.vrf_witness.staking_key.clone(),
-            validator_state.stake_table.hash(),
+            self.stake_table_commitment_leaf_proof.leaf.0 .0 .0,
         );
         match stake_amount_check {
             //check that stored view_number->commitment matches provided commtiment
