@@ -180,12 +180,12 @@ where
     State: AvailabilityDataSource,
 {
     for id in (block_id - count + 1..block_id + 1).rev() {
-        let block_data = get_block(state,block_id)?;
-        let state_data = get_state(state,block_id)?;
-        let qcert_data = get_qcert(state,block_id)?;
+        let block_data = get_block(state, block_id)?;
+        let state_data = get_state(state, block_id)?;
+        let qcert_data = get_qcert(state, block_id)?;
         // let size
         let txn_count = block_data.txn_hashes.len();
-        // let proposer = 
+        // let proposer =
         let time = state_data.state.prev_commit_time;
         let records_from = block_data.records_from;
         let record_count = block_data.record_count;
