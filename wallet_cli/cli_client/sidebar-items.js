@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["cargo_run",""],["cli_test","Set up and run a test of the keystore CLI."],["err",""],["wait_for_connect",""]],"struct":[["CliClient",""],["Keystore",""],["OpenKeystore",""],["Validator",""]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Error",""]],"fn":[["define_api",""]],"struct":[["InvalidBlockIdSnafu","SNAFU context selector for the `Error::InvalidBlockId` variant"],["NullifierCheck",""],["Options",""],["RequestSnafu","SNAFU context selector for the `Error::Request` variant"]]};

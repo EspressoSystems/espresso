@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["minimal_test_network","Create a minimal network of validators for testing."]],"struct":[["AddressBook",""],["TestNetwork",""],["TestNode",""]]};

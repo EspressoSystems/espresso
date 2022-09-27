@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["H_256",""]],"trait":[["AvailabilityDataSource","Trait to be implemented on &’a DataSource for lifetime management purposes"],["UpdateAvailabilityData",""]],"type":[["BlockAndAssociated",""]]};

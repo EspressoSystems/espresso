@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["launch_updates",""]],"struct":[["UpdateQueryDataSource",""]],"trait":[["EventProcessedHandler",""],["UpdateQueryDataSourceTypes",""]],"type":[["HotShotEvent",""]]};

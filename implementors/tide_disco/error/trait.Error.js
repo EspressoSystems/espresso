@@ -1,0 +1,5 @@
+(function() {var implementors = {};
+implementors["address_book"] = [{"text":"impl Error for <a class=\"enum\" href=\"address_book/error/enum.AddressBookError.html\" title=\"enum address_book::error::AddressBookError\">AddressBookError</a>","synthetic":false,"types":["address_book::error::AddressBookError"]}];
+implementors["espresso_esqs"] = [{"text":"impl Error for <a class=\"enum\" href=\"espresso_esqs/enum.ApiError.html\" title=\"enum espresso_esqs::ApiError\">ApiError</a>","synthetic":false,"types":["espresso_esqs::ApiError"]}];
+implementors["faucet_types"] = [{"text":"impl Error for <a class=\"enum\" href=\"faucet_types/enum.FaucetError.html\" title=\"enum faucet_types::FaucetError\">FaucetError</a>","synthetic":false,"types":["faucet_types::FaucetError"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

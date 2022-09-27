@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["espresso_client"] = [{"text":"impl&lt;'a&gt; <a class=\"trait\" href=\"espresso_client/trait.KeystoreBackend.html\" title=\"trait espresso_client::KeystoreBackend\">KeystoreBackend</a>&lt;'a, <a class=\"struct\" href=\"espresso_core/ledger/struct.EspressoLedger.html\" title=\"struct espresso_core::ledger::EspressoLedger\">EspressoLedger</a>&gt; for <a class=\"struct\" href=\"espresso_client/network/struct.NetworkBackend.html\" title=\"struct espresso_client::network::NetworkBackend\">NetworkBackend</a>&lt;'a&gt;","synthetic":false,"types":["espresso_client::network::NetworkBackend"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

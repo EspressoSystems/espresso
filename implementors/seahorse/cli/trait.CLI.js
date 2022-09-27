@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["wallet_cli"] = [{"text":"impl&lt;'a&gt; CLI&lt;'a&gt; for <a class=\"struct\" href=\"wallet_cli/struct.EspressoCli.html\" title=\"struct wallet_cli::EspressoCli\">EspressoCli</a>","synthetic":false,"types":["wallet_cli::EspressoCli"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

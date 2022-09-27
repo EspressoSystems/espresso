@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["FreezeParamsBuilder","Struct containing the parameters needed to build a Freeze note"],["MintParamsBuilder","Struct containing the parameters needed to build a Mint note"],["TransferParamsBuilder","Struct that allows to build Transfer notes parameters"],["TxnsParams","Parameters for testing only!"]]};

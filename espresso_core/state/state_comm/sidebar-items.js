@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["LedgerCommitmentOpening","The essential state of the ledger"],["LedgerStateCommitment",""]]};

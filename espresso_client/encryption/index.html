@@ -1,0 +1,62 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Symmetric encryption for locally persistent keystore data."><meta name="keywords" content="rust, rustlang, rust-lang, encryption"><title>espresso_client::encryption - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../espresso_client/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../espresso_client/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"><a href="#">Module encryption</a></h2><div class="sidebar-elems"><section><div class="block"><ul><li><a href="#structs">Structs</a></li><li><a href="#enums">Enums</a></li><li><a href="#functions">Functions</a></li><li><a href="#types">Type Definitions</a></li></ul></div></section></div></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../espresso_client/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="main-heading"><h1 class="fqn"><span class="in-band">Module <a href="../index.html">espresso_client</a>::<wbr><a class="mod" href="#">encryption</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../../clipboard.svg" width="19" height="18" alt="Copy item path"></button></span></h1><span class="out-of-band"><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Symmetric encryption for locally persistent keystore data.</p>
+<p>All secret data that the keystore stores on the file system is encrypted using this module. The
+encryption scheme is an encrypt-then-MAC implementation using ChaCha20 as a stream cipher and
+SHA3-256 as an HMAC.</p>
+<p>The choice of stream cipher merits some discussion. Other stream ciphers which were considered
+include AES-GCM-SIV and AES-CTR. Briefly, the advantages of each:</p>
+<ul>
+<li>AES-GCM-SIV is natively authenticating and would not require the use of a separate MAC
+function. It is also somewhat resistant to nonce reuse, a common class of security bugs in
+cryptography implementations.</li>
+<li>AES-CTR is widely used and thoroughly analyzed, and common consumer hardware includes
+instructions designed to accelerate this algorithm.</li>
+</ul>
+<p>Now, the reasons why we prefer ChaCha20:</p>
+<ul>
+<li>
+<p>AES-GCM-SIV uses a polynomial hash function which is subject to sharding attacks that reduce
+the security of the cipher to about 90 bits. This figure is extrapolated from table 1 of
+<a href="https://eprint.iacr.org/2017/708.pdf">https://eprint.iacr.org/2017/708.pdf</a> (page 14). Note
+that the 90 bits figure is based <em>specifically</em> on chosen plaintext attacks, and potentially
+underestimates the security, since CPA attacks are milder than other attacks (like key
+recovery) and are usually easiest to carry out anyways. In particular, the length of the
+longest encrypted plaintext (<code>k</code> in the table indicates the longest message is <code>~2^k</code> AES
+blocks long) significantly reduces the additional amount of work required to carry out the
+attack, but the keystore only encrypts relatively small amounts of data with any one key.
+Nevertheless, we can avoid this attack entirely by using a hash-based MAC instead of a
+polynomial MAC.</p>
+</li>
+<li>
+<p>AES-CTR has security against a plaintext-distinguishing attack which decreases with the length
+of the message being encrypted, and so it is recommended to rekey after encrypting a certain
+number of blocks. Detailed recommendations vary from <a href="https://support.xilinx.com/s/article/65528?language=en_US">every 1024 blocks
+(16kb)</a> to every <a href="https://datatracker.ietf.org/doc/html/rfc4344#page-3">2^32 blocks
+(69gb)</a>. The lack of a consistent,
+standardized recommendation coupled with the performance implications of adopting the more
+conservative recommendation makes this a less attractive choice than ChaCha20.</p>
+<p>The root of AES-CTR’s plaintext distinguishing vulnerability is the fact that it is based on a
+pseudo-random permutation. ChaCha20 is based on a pseudo-random function which is not
+invertible, and so it is immune to the particular attack that succeeds against AES-CTR.
+Moreover, even if ChaCha20’s PRF turned out to be invertible, its security parameters
+(specifically the 512-bit block size) are much better than AES to begin with, and it would
+take a message of 2^128 blocks being encrypted with the same key to have a 2^-256 probability
+of distinguishing plaintexts.</p>
+</li>
+</ul>
+<p>The keystore uses this library to encrypt data at a small granularity. For the log-structured
+data, each log entry is encrypted separately. Matching the encryption granularity to the
+structure of the data is advantageous for a few reasons. First, it allows us to recover most of
+the data if a single entry becomes corrupted on disk. More relevantly for this module, it allows
+us to use a different key for each encrypted message, which is an easy way to avoid nonce reuse
+misuse vulnerabilities, and works well with procedural key generation.</p>
+<p>This module uses the <a href="../hd/index.html" title="hd">hd</a> module for procedural key generation. A <a href="struct.Cipher.html" title="Cipher">Cipher</a> wraps an entire
+<a href="../hd/struct.KeyTree.html" title="hd::KeyTree">hd::KeyTree</a> and uses the tree to deterministically generate a new key for each message it
+encrypts. This reduces are vulnerability to nonce reuse misuse bugs and increases our defense in
+depth.</p>
+</div></details><h2 id="structs" class="small-section-header"><a href="#structs">Structs</a></h2><div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.Cipher.html" title="espresso_client::encryption::Cipher struct">Cipher</a></div><div class="item-right docblock-short"><p>An authenticating stream cipher.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.CipherText.html" title="espresso_client::encryption::CipherText struct">CipherText</a></div><div class="item-right docblock-short"><p>Encrypted and authenticated data.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.Decrypter.html" title="espresso_client::encryption::Decrypter struct">Decrypter</a></div><div class="item-right docblock-short"><p>A decrypter for an authenticated stream cipher.</p>
+</div></div></div><h2 id="enums" class="small-section-header"><a href="#enums">Enums</a></h2><div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="enum" href="enum.Error.html" title="espresso_client::encryption::Error enum">Error</a></div><div class="item-right docblock-short"></div></div></div><h2 id="functions" class="small-section-header"><a href="#functions">Functions</a></h2><div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="fn" href="fn.decrypt.html" title="espresso_client::encryption::decrypt fn">decrypt</a></div><div class="item-right docblock-short"><p>Decrypt an encrypted message using a given key.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="fn" href="fn.encrypt.html" title="espresso_client::encryption::encrypt fn">encrypt</a></div><div class="item-right docblock-short"><p>Encrypt a message using a given key.</p>
+</div></div></div><h2 id="types" class="small-section-header"><a href="#types">Type Definitions</a></h2><div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="type" href="type.Nonce.html" title="espresso_client::encryption::Nonce type">Nonce</a></div><div class="item-right docblock-short"></div></div><div class="item-row"><div class="item-left module-item"><a class="type" href="type.Result.html" title="espresso_client::encryption::Result type">Result</a></div><div class="item-right docblock-short"></div></div><div class="item-row"><div class="item-left module-item"><a class="type" href="type.Salt.html" title="espresso_client::encryption::Salt type">Salt</a></div><div class="item-right docblock-short"><p>Salt used when deriving keys from passwords.</p>
+</div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="espresso_client" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>

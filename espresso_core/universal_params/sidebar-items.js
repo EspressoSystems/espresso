@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["MERKLE_HEIGHT","Height of the records Merkle tree"],["SUPPORTED_FREEZE_SIZES",""],["SUPPORTED_TRANSFER_SIZES",""]],"struct":[["PROVER_CRS",""],["UNIVERSAL_PARAM",""],["VERIF_CRS",""]]};

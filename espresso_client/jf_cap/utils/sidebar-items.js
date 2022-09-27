@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["compute_universal_param_size","Computes the size of the universal parameters given the type and the parameters of a note"]],"mod":[["params_builder","Utilities used for tests and benchmarks."]],"struct":[["TxnsParams","Parameters for testing only!"]]};

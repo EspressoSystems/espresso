@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["EventSource","The event streams that the keystore can subscribe to."],["LedgerEvent","A ledger state change."]],"struct":[["EventIndex","An index into the [LedgerEvent] stream."]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["Key","A 32-byte pseudo-random key."],["KeyTree","A virtual tree of keys."],["Mnemonic","A mnemonic representation."],["Secret","A wrapper around a secret which cannot be copied."]],"type":[["Salt","Salt used when deriving keys from passwords."]]};

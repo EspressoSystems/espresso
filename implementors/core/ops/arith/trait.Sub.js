@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["measure_throughput"] = [{"text":"impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.64.0/core/ops/arith/trait.Sub.html\" title=\"trait core::ops::arith::Sub\">Sub</a>&lt;&amp;<a class=\"struct\" href=\"measure_throughput/struct.Snapshot.html\" title=\"struct measure_throughput::Snapshot\">Snapshot</a>&gt; for &amp;<a class=\"struct\" href=\"measure_throughput/struct.Snapshot.html\" title=\"struct measure_throughput::Snapshot\">Snapshot</a>","synthetic":false,"types":["measure_throughput::Snapshot"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

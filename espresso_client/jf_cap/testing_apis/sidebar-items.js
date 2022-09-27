@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["TransferPublicInput","Public inputs of a transfer transaction Struct for the public input of a transfer witness"]]};
