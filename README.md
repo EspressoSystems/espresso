@@ -79,18 +79,18 @@ A formal specification of the Configurable Asset Policy protocol can be found at
 ## Rust docs
 
 Documentation of Rust interfaces is available for all of the Rust crates:
-- [espresso-core](espresso.docs.espressosys.com/espresso_core)
-- [espresso-validator](espresso.docs.espressosys.com/espresso_validator)
-- [espresso-client](espresso.docs.espressosys.com/espresso_client)
-- [espresso-esqs](espresso.docs.espressosys.com/espresso_esqs)
-- [espresso-availability-api](espresso.docs.espressosys.com/espresso_availability_api)
-- [espresso-catchup-api](espresso.docs.espressosys.com/espresso_catchup_api)
-- [espresso-metastate-api](espresso.docs.espressosys.com/espresso_metastate_api)
-- [espresso-status-api](espresso.docs.espressosys.com/espresso_status_api)
-- [espresso-validator-api](espresso.docs.espressosys.com/espresso_validator_api)
-- [faucet](espresso.docs.espressosys.com/faucet)
-- [faucet-types](espresso.docs.espressosys.com/faucet_types)
-- [address-book](espresso.docs.espressosys.com/address_book)
+- [espresso-core](https://espresso.docs.espressosys.com/espresso_core)
+- [espresso-validator](https://espresso.docs.espressosys.com/espresso_validator)
+- [espresso-client](https://espresso.docs.espressosys.com/espresso_client)
+- [espresso-esqs](https://espresso.docs.espressosys.com/espresso_esqs)
+- [espresso-availability-api](https://espresso.docs.espressosys.com/espresso_availability_api)
+- [espresso-catchup-api](https://espresso.docs.espressosys.com/espresso_catchup_api)
+- [espresso-metastate-api](https://espresso.docs.espressosys.com/espresso_metastate_api)
+- [espresso-status-api](https://espresso.docs.espressosys.com/espresso_status_api)
+- [espresso-validator-api](https://espresso.docs.espressosys.com/espresso_validator_api)
+- [faucet](https://espresso.docs.espressosys.com/faucet)
+- [faucet-types](https://espresso.docs.espressosys.com/faucet_types)
+- [address-book](https://espresso.docs.espressosys.com/address_book)
 
 # Environment
 
