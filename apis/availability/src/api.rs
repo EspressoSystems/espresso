@@ -18,6 +18,7 @@ use clap::Args;
 use derive_more::From;
 use espresso_core::state::{BlockCommitment, TransactionCommitment};
 use futures::FutureExt;
+use hotshot_types::data::QuorumCertificate;
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, Snafu};
 use std::path::PathBuf;
@@ -159,6 +160,39 @@ where
         .context(MissingStateSnafu { block_id })
 }
 
+fn get_qcert<State>(state: State, block_id: u64) -> Result<QuorumCertificate, Error>
+where
+    State: AvailabilityDataSource,
+{
+    state
+        .get_nth_qcert_iter(block_id as usize)
+        .next()
+        .context(InvalidBlockIdSnafu { block_id })?
+        .context(MissingStateSnafu { block_id })
+}
+
+fn get_blocks_summary<State>(
+    state: State,
+    block_id: u64,
+    count: u64,
+) -> Result<BlockQueryData, Error>
+where
+    State: AvailabilityDataSource,
+{
+    for id in (block_id - count + 1..block_id + 1).rev() {
+        let block_data = get_block(state,block_id)?;
+        let state_data = get_state(state,block_id)?;
+        let qcert_data = get_qcert(state,block_id)?;
+        // let size
+        let txn_count = block_data.txn_hashes.len();
+        // let proposer = 
+        let time = state_data.state.prev_commit_time;
+        let records_from = block_data.records_from;
+        let record_count = block_data.record_count;
+        let view_number = get_qcert.view_number;
+    }
+}
+
 pub fn define_api<State>(options: &Options) -> Result<Api<State, Error>, ApiError>
 where
     State: 'static + Send + Sync + ReadState,
@@ -249,6 +283,14 @@ where
                     txn_id,
                     output_index,
                 })
+            }
+            .boxed()
+        })?
+        .get("getblockssummary", |req, state| {
+            async move {
+                let (block_id, count) =
+                    (req.integer_param("block_id")?, req.integer_param("count")?);
+                get_blocks_summary(state, block_id, count)
             }
             .boxed()
         })?;
