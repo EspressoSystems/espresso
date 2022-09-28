@@ -177,6 +177,26 @@ async fn test(opt: &Args) {
         validate_committed_block(opt, &block, *ix, num_blocks).await;
     }
 
+    // Check the block summaries.
+    let block_summaries: Vec<BlockSummaryQueryData> = get(
+        opt,
+        format!(
+            "/availability/getblocksummary/{}/{}",
+            num_blocks - 1,
+            num_blocks
+        ),
+    )
+    .await;
+    assert_eq!(block_summaries.len(), 2);
+    assert_eq!(block_summaries[0].txn_count, 1);
+    assert_eq!(block_summaries[0].records_from, 1);
+    assert_eq!(block_summaries[0].record_count, 2);
+    assert_eq!(block_summaries[0].view_number, 1);
+    assert_eq!(block_summaries[1].txn_count, 1);
+    assert_eq!(block_summaries[1].records_from, 0);
+    assert_eq!(block_summaries[1].record_count, 1);
+    assert_eq!(block_summaries[1].view_number, 0);
+
     // Check the event stream. The event stream is technically never-ending; once we have received
     // all the events that have been generated, the stream will block until a new event is
     // generated, which may never happen. So, we will pull events out of the stream until we hit a 5

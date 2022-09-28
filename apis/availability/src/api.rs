@@ -22,7 +22,7 @@ use futures::FutureExt;
 use hotshot_types::data::QuorumCertificate;
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, Snafu};
-use std::path::PathBuf;
+use std::{ops::Deref, path::PathBuf};
 use tide_disco::{
     api::{Api, ApiError},
     method::ReadState,
@@ -188,7 +188,7 @@ where
         let txn_count = block_data.txn_hashes.len();
         let records_from = block_data.records_from;
         let record_count = block_data.record_count;
-        let view_number = qcert_data.view_number;
+        let view_number = *qcert_data.view_number.deref();
         summaries.push(BlockSummaryQueryData {
             size,
             txn_count,

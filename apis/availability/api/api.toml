@@ -110,20 +110,18 @@ Get a binding commitment to the state after applying block `block_id`.
 [route.getblocksummary]
 PATH = ["getblocksummary/:block_id/:count"]
 ":block_id" = "Integer"
-":count" = "TaggedBase64"
+":count" = "Integer"
 DOC = """
 Get the summaries of `count` blocks, starting backwards from block `block_id`.
 
-Returns
+Returns a list of
 ```
 {
-    [
-        "size": integer,
-        "txn_count": integer,
-        "records_from": integer, // The UID of the first output of this block
-        "record_count": integer, // The total number of outputs in this block
-        "view_number": integer,
-    ]
+    "size": integer,
+    "txn_count": integer,
+    "records_from": integer, // The UID of the first output of this block
+    "record_count": integer, // The total number of outputs in this block
+    "view_number": integer,
 }
 ```
 """

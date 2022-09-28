@@ -14,7 +14,6 @@ use espresso_core::state::{
     state_comm::LedgerStateCommitment, BlockCommitment, ElaboratedBlock, ElaboratedTransaction,
     TransactionCommitment, ValidatorState,
 };
-use hotshot_types::data::ViewNumber;
 use jf_cap::structs::RecordCommitment;
 use serde::{Deserialize, Serialize};
 
@@ -90,5 +89,5 @@ pub struct BlockSummaryQueryData {
     pub records_from: u64,
     /// The total number of outputs in this block.
     pub record_count: u64,
-    pub view_number: ViewNumber,
+    pub view_number: u64,
 }
