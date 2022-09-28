@@ -14,6 +14,7 @@ use espresso_core::state::{
     state_comm::LedgerStateCommitment, BlockCommitment, ElaboratedBlock, ElaboratedTransaction,
     TransactionCommitment, ValidatorState,
 };
+use hotshot_types::data::ViewNumber;
 use jf_cap::structs::RecordCommitment;
 use serde::{Deserialize, Serialize};
 
@@ -77,4 +78,17 @@ pub struct StateQueryData {
     pub block_id: u64,
     /// Event index to subscribe to to follow chain events built on top of this state.
     pub continuation_event_index: u64,
+}
+
+// TODO !keyao Add proposer ID and timestamp to the block summary data.
+// Issue: https://github.com/EspressoSystems/espresso/issues/624.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockSummaryQueryData {
+    pub size: usize,
+    pub txn_count: usize,
+    /// The UID of the first output of this block.
+    pub records_from: u64,
+    /// The total number of outputs in this block.
+    pub record_count: u64,
+    pub view_number: ViewNumber,
 }

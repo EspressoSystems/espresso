@@ -11,9 +11,10 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    data_source::AvailabilityDataSource,
-    query_data::{BlockQueryData, RecordQueryData, StateQueryData},
+    data_source::{AvailabilityDataSource, H_256},
+    query_data::{BlockQueryData, BlockSummaryQueryData, RecordQueryData, StateQueryData},
 };
+use ark_serialize::CanonicalSerialize;
 use clap::Args;
 use derive_more::From;
 use espresso_core::state::{BlockCommitment, TransactionCommitment};
@@ -160,7 +161,7 @@ where
         .context(MissingStateSnafu { block_id })
 }
 
-fn get_qcert<State>(state: State, block_id: u64) -> Result<QuorumCertificate, Error>
+fn get_qcert<State>(state: State, block_id: u64) -> Result<QuorumCertificate<H_256>, Error>
 where
     State: AvailabilityDataSource,
 {
@@ -171,26 +172,32 @@ where
         .context(MissingStateSnafu { block_id })
 }
 
-fn get_blocks_summary<State>(
+fn get_block_summary<State: Clone>(
     state: State,
     block_id: u64,
     count: u64,
-) -> Result<BlockQueryData, Error>
+) -> Result<Vec<BlockSummaryQueryData>, Error>
 where
     State: AvailabilityDataSource,
 {
+    let mut summaries = Vec::new();
     for id in (block_id - count + 1..block_id + 1).rev() {
-        let block_data = get_block(state, block_id)?;
-        let state_data = get_state(state, block_id)?;
-        let qcert_data = get_qcert(state, block_id)?;
-        // let size
+        let block_data = get_block(state.clone(), id)?;
+        let qcert_data = get_qcert(state.clone(), id)?;
+        let size = block_data.raw_block.serialized_size();
         let txn_count = block_data.txn_hashes.len();
-        // let proposer =
-        let time = state_data.state.prev_commit_time;
         let records_from = block_data.records_from;
         let record_count = block_data.record_count;
-        let view_number = get_qcert.view_number;
+        let view_number = qcert_data.view_number;
+        summaries.push(BlockSummaryQueryData {
+            size,
+            txn_count,
+            records_from,
+            record_count,
+            view_number,
+        });
     }
+    Ok(summaries)
 }
 
 pub fn define_api<State>(options: &Options) -> Result<Api<State, Error>, ApiError>
@@ -286,11 +293,11 @@ where
             }
             .boxed()
         })?
-        .get("getblockssummary", |req, state| {
+        .get("getblocksummary", |req, state| {
             async move {
                 let (block_id, count) =
                     (req.integer_param("block_id")?, req.integer_param("count")?);
-                get_blocks_summary(state, block_id, count)
+                get_block_summary(state, block_id, count)
             }
             .boxed()
         })?;

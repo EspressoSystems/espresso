@@ -107,12 +107,12 @@ DOC = """
 Get a binding commitment to the state after applying block `block_id`.
 """
 
-[route.getblockssummary]
-PATH = ["getblockssummary/:block_id/:count"]
+[route.getblocksummary]
+PATH = ["getblocksummary/:block_id/:count"]
 ":block_id" = "Integer"
 ":count" = "TaggedBase64"
 DOC = """
-Get the summary of `count` blocks, starting backwards from block `block_id`.
+Get the summaries of `count` blocks, starting backwards from block `block_id`.
 
 Returns
 ```
@@ -120,8 +120,6 @@ Returns
     [
         "size": integer,
         "txn_count": integer,
-        "proposer": TaggedBase64,
-        "time": integer, // The timestamp when the replica sees the proposal
         "records_from": integer, // The UID of the first output of this block
         "record_count": integer, // The total number of outputs in this block
         "view_number": integer,
