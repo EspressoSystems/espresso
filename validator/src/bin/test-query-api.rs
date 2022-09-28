@@ -73,7 +73,13 @@ async fn get<T: for<'de> Deserialize<'de>, S: Display>(opt: &Args, route: S) -> 
         .unwrap()
 }
 
-async fn validate_committed_block(opt: &Args, block: &BlockQueryData, ix: u64, num_blocks: u64) {
+async fn validate_committed_block(
+    opt: &Args,
+    block: &BlockQueryData,
+    summary: &BlockSummaryQueryData,
+    ix: u64,
+    num_blocks: u64,
+) {
     // Check well-formedness of the data.
     assert_eq!(ix, block.block_id);
     assert!(ix < num_blocks);
@@ -145,6 +151,12 @@ async fn validate_committed_block(opt: &Args, block: &BlockQueryData, ix: u64, n
         uid += txn.raw_transaction.output_len() as u64;
     }
     assert_eq!(uid, block.records_from + block.record_count);
+
+    // Check the block summary.
+    assert_eq!(summary.txn_count, 1);
+    assert_eq!(summary.records_from, ix);
+    assert_eq!(summary.record_count, ix + 1);
+    assert_eq!(summary.view_number, ix);
 }
 
 struct UnencryptedKeystoreLoader {
@@ -171,13 +183,7 @@ impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
 async fn test(opt: &Args) {
     let num_blocks = get::<u64, _>(opt, "/status/latest_block_id").await + 1;
 
-    // Check that we can query the 0th block and the last block.
-    for ix in [0, num_blocks - 1].iter() {
-        let block = get(opt, format!("/availability/getblock/{}", *ix)).await;
-        validate_committed_block(opt, &block, *ix, num_blocks).await;
-    }
-
-    // Check the block summaries.
+    // Get the block summaries.
     let block_summaries: Vec<BlockSummaryQueryData> = get(
         opt,
         format!(
@@ -187,15 +193,20 @@ async fn test(opt: &Args) {
         ),
     )
     .await;
-    assert_eq!(block_summaries.len(), 2);
-    assert_eq!(block_summaries[0].txn_count, 1);
-    assert_eq!(block_summaries[0].records_from, 1);
-    assert_eq!(block_summaries[0].record_count, 2);
-    assert_eq!(block_summaries[0].view_number, 1);
-    assert_eq!(block_summaries[1].txn_count, 1);
-    assert_eq!(block_summaries[1].records_from, 0);
-    assert_eq!(block_summaries[1].record_count, 1);
-    assert_eq!(block_summaries[1].view_number, 0);
+    assert_eq!(block_summaries.len() as u64, num_blocks);
+
+    // Check that we can query the 0th block and the last block.
+    for ix in [0, num_blocks - 1].iter() {
+        let block = get(opt, format!("/availability/getblock/{}", *ix)).await;
+        validate_committed_block(
+            opt,
+            &block,
+            &block_summaries[(num_blocks - 1 - *ix) as usize],
+            *ix,
+            num_blocks,
+        )
+        .await;
+    }
 
     // Check the event stream. The event stream is technically never-ending; once we have received
     // all the events that have been generated, the stream will block until a new event is

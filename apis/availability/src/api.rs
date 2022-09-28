@@ -22,7 +22,7 @@ use futures::FutureExt;
 use hotshot_types::data::QuorumCertificate;
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, Snafu};
-use std::{ops::Deref, path::PathBuf};
+use std::{cmp::min, ops::Deref, path::PathBuf};
 use tide_disco::{
     api::{Api, ApiError},
     method::ReadState,
@@ -181,6 +181,7 @@ where
     State: AvailabilityDataSource,
 {
     let mut summaries = Vec::new();
+    let count = min(count, block_id + 1);
     for id in (block_id - count + 1..block_id + 1).rev() {
         let block_data = get_block(state.clone(), id)?;
         let qcert_data = get_qcert(state.clone(), id)?;
@@ -295,8 +296,8 @@ where
         })?
         .get("getblocksummary", |req, state| {
             async move {
-                let (block_id, count) =
-                    (req.integer_param("block_id")?, req.integer_param("count")?);
+                let block_id = req.integer_param("block_id")?;
+                let count = req.integer_param("count")?;
                 get_block_summary(state, block_id, count)
             }
             .boxed()

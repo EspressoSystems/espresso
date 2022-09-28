@@ -112,7 +112,8 @@ PATH = ["getblocksummary/:block_id/:count"]
 ":block_id" = "Integer"
 ":count" = "Integer"
 DOC = """
-Get the summaries of `count` blocks, starting backwards from block `block_id`.
+Get the summaries of `count` (or `block_id + 1`, if `count` > `block_id`) blocks, starting
+backwards from block `block_id`.
 
 Returns a list of
 ```
