@@ -24,8 +24,7 @@ use espresso_availability_api::{
 };
 use espresso_catchup_api::data_source::UpdateCatchUpData;
 use espresso_core::state::{
-    ElaboratedBlock, EspressoTransaction, EspressoTxnHelperProofs, TransactionCommitment,
-    ValidatorState,
+    EspressoTransaction, EspressoTxnHelperProofs, TransactionCommitment, ValidatorState,
 };
 use espresso_metastate_api::data_source::UpdateMetaStateData;
 use espresso_status_api::data_source::UpdateStatusData;
@@ -34,7 +33,6 @@ use futures::{
     task::{SpawnError, SpawnExt},
     Stream, StreamExt,
 };
-use hotshot::data::Leaf;
 use itertools::izip;
 use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
@@ -76,9 +74,8 @@ where
         meta_state_store: Arc<RwLock<TYPES::MS>>,
         status_store: Arc<RwLock<TYPES::ST>>,
         event_handler: Arc<RwLock<TYPES::EH>>,
-        genesis: ElaboratedBlock,
     ) -> Arc<RwLock<Self>> {
-        let mut instance = Self {
+        let instance = Arc::new(RwLock::new(Self {
             catchup_store,
             availability_store,
             meta_state_store,
@@ -86,16 +83,7 @@ where
             event_handler,
             validator_state: Default::default(),
             _event_task: None,
-        };
-
-        // HotShot does not currently support genesis nicely. It should automatically commit and
-        // broadcast a `Decide` event for the genesis block, but it doesn't. For now, we broadcast a
-        // `Commit` event for the genesis block ourselves.
-        block_on(instance.update(HotShotEvent::Decide {
-            leaf_chain: Arc::new(vec![Leaf::genesis(genesis)]),
         }));
-
-        let instance = Arc::new(RwLock::new(instance));
         if let Ok(task_handle) = launch_updates(event_source, instance.clone()) {
             let mut edit_handle = block_on(instance.write());
             edit_handle._event_task = Some(task_handle);

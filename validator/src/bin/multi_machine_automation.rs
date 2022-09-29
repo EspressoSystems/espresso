@@ -359,6 +359,17 @@ mod test {
             num_fail_nodes,
             "--fail-after-txn",
             fail_after_txn,
+            // Set fairly short rounds. Since we only propose one transaction at a time in this
+            // test, and therefore require 2 empty blocks to be committed for every transaction,
+            // the test can take a very long time if rounds are too long.
+            "--min-propose-time",
+            "10s",
+            "--max-propose-time",
+            "10s",
+            // Make the view timeout only slightly longer than the propose time. Since some of the
+            // tests involve killing nodes, we may have views that fail.
+            "--next-view-timeout",
+            "15s",
             "--reset-store-state",
             "--verbose",
         ];

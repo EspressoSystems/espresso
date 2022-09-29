@@ -26,8 +26,8 @@ use espresso_core::{
     genesis::GenesisNote,
     stake_table::{StakeTableHash, StakingPrivKey},
     state::{
-        ChainVariables, ElaboratedBlock, ElaboratedTransaction, LWPersistence, NullifierHistory,
-        SetMerkleTree, ValidatorState,
+        ChainVariables, ElaboratedBlock, ElaboratedTransaction, LWPersistence, SetMerkleTree,
+        ValidatorState,
     },
     testing::{MultiXfrRecordSpec, MultiXfrTestState},
     universal_params::VERIF_CRS,
@@ -36,7 +36,7 @@ use espresso_core::{
 use espresso_esqs::full_node_data_source::QueryData;
 use futures::{select, Future, FutureExt};
 use hotshot::traits::implementations::Libp2pNetwork;
-use hotshot::traits::{NetworkError, StateContents};
+use hotshot::traits::NetworkError;
 use hotshot::types::{
     ed25519::{Ed25519Priv, Ed25519Pub},
     EventType,
@@ -44,7 +44,7 @@ use hotshot::types::{
 use hotshot::{
     traits::implementations::MemoryStorage,
     types::{HotShotHandle, Message, SignatureKey},
-    HotShot,
+    HotShot, HotShotInitializer,
 };
 use hotshot_types::{ExecutionType, HotShotConfig};
 use jf_cap::{
@@ -190,7 +190,7 @@ pub struct NodeOpt {
     #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
-        default_value = "0s",
+        default_value = "10s",
         parse(try_from_str = parse_duration)
     )]
     pub min_propose_time: Duration,
@@ -202,7 +202,7 @@ pub struct NodeOpt {
     #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME",
-        default_value = "10s",
+        default_value = "60s",
         parse(try_from_str = parse_duration)
     )]
     pub max_propose_time: Duration,
@@ -500,12 +500,11 @@ pub fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
     // our test state. This effectively "unspends" the records which were used to set up the initial
     // state. This is fine for testing purposes.
     state.nullifiers = SetMerkleTree::default();
-    state.validator.past_nullifiers = NullifierHistory::default();
-
     let genesis = GenesisNote::new(
         ChainVariables::new(42, VERIF_CRS.clone()),
         Arc::new(state.records().collect()),
     );
+    state.validator = ValidatorState::genesis(genesis.clone());
     (genesis, state)
 }
 
@@ -549,15 +548,16 @@ async fn init_hotshot(
         debug!("Restoring from persisted session");
         LWPersistence::load(storage_path, "validator").unwrap()
     };
-    let genesis = ElaboratedBlock::genesis(genesis);
-    let state = lw_persistence.load_latest_state().unwrap_or_else(|_| {
-        // HotShot does not currently support genesis nicely. It should take a genesis block and
-        // apply it to the default state. However, it currently takes the genesis block _and_ the
-        // resulting state. This means we must apply the genesis block to the default state
-        // ourselves.
-        ValidatorState::default().append(&genesis).unwrap()
-    });
-
+    let initializer = match lw_persistence.load_latest_state() {
+        Ok(_) => {
+            unimplemented!("joining an existing network after genesis")
+        }
+        Err(_) => {
+            // If we have reset the store state, or if there are no past leaves in storage, restart
+            // from genesis.
+            HotShotInitializer::from_genesis(ElaboratedBlock::genesis(genesis)).unwrap()
+        }
+    };
     let hotshot = HotShot::init(
         config.known_nodes.clone(),
         pub_key,
@@ -565,9 +565,10 @@ async fn init_hotshot(
         node_id as u64,
         config,
         networking,
-        MemoryStorage::new(genesis, state),
+        MemoryStorage::new(),
         lw_persistence,
         Committee::new(stake_table),
+        initializer,
     )
     .await
     .unwrap();

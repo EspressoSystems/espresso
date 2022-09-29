@@ -61,6 +61,12 @@ pub enum EspressoTransaction {
     Reward(Box<CollectRewardNote>),
 }
 
+impl EspressoTransaction {
+    pub fn is_genesis(&self) -> bool {
+        matches!(self, Self::Genesis(_))
+    }
+}
+
 impl CanonicalSerialize for EspressoTransaction {
     fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
         match self {
@@ -203,6 +209,10 @@ pub struct ElaboratedTransaction {
 }
 
 impl ElaboratedTransaction {
+    pub fn is_genesis(&self) -> bool {
+        self.txn.is_genesis()
+    }
+
     fn build_commitment(
         txn: &EspressoTransaction,
         proofs: &EspressoTxnHelperProofs,
@@ -1240,6 +1250,12 @@ impl ValidatorState {
             stake_table_commitments_commitment: stake_table_commitments_mt.commitment(),
             collected_rewards: KVMerkleTree::<CollectedRewardsHash>::EmptySubtree,
         }
+    }
+
+    pub fn genesis(txn: GenesisNote) -> Self {
+        Self::default()
+            .append(&ElaboratedBlock::genesis(txn))
+            .unwrap()
     }
 
     /// Cryptographic commitment to the validator state

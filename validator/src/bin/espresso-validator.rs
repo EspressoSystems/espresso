@@ -14,11 +14,7 @@
 
 use async_std::task::{sleep, spawn_blocking};
 use clap::Parser;
-use espresso_core::testing::MultiXfrRecordSpecTransaction;
-use espresso_core::{
-    state::ElaboratedBlock,
-    testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo},
-};
+use espresso_core::testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo};
 use espresso_esqs::full_node::{self, EsQS};
 use espresso_validator::*;
 use futures::future::pending;
@@ -107,74 +103,55 @@ async fn generate_transactions(
         fence();
     };
 
+    hotshot.start().await;
+
     // Start consensus for each transaction
-    let mut round = 0;
-    let mut succeeded_round = 0;
-    let mut txn: Option<MultiXfrRecordSpecTransaction> = None;
-    let mut txn_proposed_round = 0;
     let mut final_commitment = None;
-    while succeeded_round < num_txn {
+    for round in 0..num_txn {
         info!("Starting round {}", round + 1);
         report_mem();
         info!("Commitment: {}", hotshot.get_state().await.commit());
 
-        // Generate a transaction if the node ID is 0 and if there isn't a keystore to generate it.
         if own_id == 0 {
-            if let Some(tx) = txn.as_ref() {
-                info!("  - Reproposing a transaction");
-                if txn_proposed_round + 5 < round {
-                    hotshot
-                        .submit_transaction(tx.transaction.clone())
-                        .await
-                        .unwrap();
-                    txn_proposed_round = round;
-                }
-            } else {
-                info!("  - Proposing a transaction");
-                let (new_state, mut transactions) = spawn_blocking(move || {
-                    let txs = state
-                        .generate_transactions(
-                            vec![(
-                                TestTxSpec::TwoInput {
-                                    rec0: 0,
-                                    rec1: 0,
-                                    key0: 0,
-                                    key1: 0,
-                                    diff: -2,
-                                },
-                                false,
-                            )],
-                            TxnPrintInfo::new_no_time(round as usize, 1),
-                        )
-                        .unwrap();
-                    (state, txs)
-                })
-                .await;
-                state = new_state;
-                let transaction = transactions.remove(0);
-                hotshot
-                    .submit_transaction(transaction.transaction.clone())
-                    .await
+            // If we're the proposer, propose a transaction and wait for it to complete.
+            info!("  - Proposing a transaction");
+            let (new_state, mut transactions) = spawn_blocking(move || {
+                let txs = state
+                    .generate_transactions(
+                        vec![(
+                            TestTxSpec::TwoInput {
+                                rec0: 0,
+                                rec1: 0,
+                                key0: 0,
+                                key1: 0,
+                                diff: -2,
+                            },
+                            false,
+                        )],
+                        TxnPrintInfo::new_no_time(round as usize, 1),
+                    )
                     .unwrap();
-                txn = Some(transaction);
-                txn_proposed_round = round;
-            }
-        }
-
-        hotshot.start().await;
-        loop {
-            info!("Waiting for HotShot event");
-            let event = hotshot
-                .next_event()
+                (state, txs)
+            })
+            .await;
+            state = new_state;
+            let txn = transactions.remove(0);
+            hotshot
+                .submit_transaction(txn.transaction.clone())
                 .await
-                .expect("HotShot unexpectedly closed");
+                .unwrap();
+            loop {
+                info!("Waiting for HotShot event");
+                let event = hotshot
+                    .next_event()
+                    .await
+                    .expect("HotShot unexpectedly closed");
 
-            match event.event {
-                EventType::Decide { leaf_chain } => {
-                    for leaf in leaf_chain.iter().rev() {
-                        // Add the block if the node ID is 0 (i.e., the transaction is proposed by
-                        // the current node).
-                        if own_id == 0 {
+                match event.event {
+                    EventType::Decide { leaf_chain } => {
+                        let mut success = false;
+                        for leaf in leaf_chain.iter().rev() {
+                            // Add the block.
                             if leaf.deltas.is_empty() {
                                 state
                                     .validate_and_apply(
@@ -183,18 +160,19 @@ async fn generate_transactions(
                                         TxnPrintInfo::new_no_time(round as usize, 1),
                                     )
                                     .unwrap();
+                            } else if leaf.deltas.block.0[0].is_genesis() {
+                                // Nothing to do, the genesis transaction is already accounted for
+                                // in our mock state.
                             } else {
-                                // In this demo, the only blocks should be empty blocks and the
-                                // singleton block that we submitted.
-                                let txn = core::mem::take(&mut txn).unwrap();
+                                // In this demo, the only (non-genesis) blocks should be empty
+                                // blocks and the singleton block that we submitted.
                                 assert_eq!(txn.transaction.txn, leaf.deltas.block.0[0]);
                                 let mut blk = state.validator.next_block();
-                                let kixs =
-                                    txn.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
+                                let kixs = txn.keys_and_memos.iter().map(|(kix, _)| *kix).collect();
                                 state
                                     .try_add_transaction(
                                         &mut blk,
-                                        txn.transaction,
+                                        txn.transaction.clone(),
                                         txn.index,
                                         kixs,
                                         TxnPrintInfo::new_no_time(round as usize, 1),
@@ -207,36 +185,51 @@ async fn generate_transactions(
                                         TxnPrintInfo::new_no_time(round as usize, 1),
                                     )
                                     .unwrap();
+
+                                success = true;
+                                println!(
+                                    "  - Round {} completed. Commitment: {}",
+                                    round + 1,
+                                    leaf.state.commit()
+                                );
+                                final_commitment = Some(leaf.state.commit());
                             }
                         }
+                        if success {
+                            break;
+                        }
                     }
+                    _ => {
+                        info!("EVENT: {:?}", event);
+                    }
+                }
+            }
+        } else {
+            // If we're a replica, just wait until we see a non-empty, non-genesis block.
+            loop {
+                info!("Waiting for HotShot event");
+                let event = hotshot
+                    .next_event()
+                    .await
+                    .expect("HotShot unexpectedly closed");
 
-                    if let Some(leaf) = leaf_chain.last() {
-                        succeeded_round += 1;
-                        println!(
-                            "  - Round {} completed. Commitment: {}",
-                            succeeded_round,
-                            leaf.state.commit()
-                        );
-                        final_commitment = Some(leaf.state.commit());
-                        break;
+                match event.event {
+                    EventType::Decide { leaf_chain } => {
+                        if leaf_chain.iter().any(|leaf| {
+                            !leaf.deltas.is_empty() && !leaf.deltas.block.0[0].is_genesis()
+                        }) {
+                            let commit = leaf_chain.last().unwrap().state.commit();
+                            println!("  - Round {} completed. Commitment: {}", round, commit);
+                            final_commitment = Some(commit);
+                            break;
+                        }
                     }
-                }
-                EventType::ReplicaViewTimeout { .. } | EventType::NextLeaderViewTimeout { .. } => {
-                    info!("  - Round {} timed out.", round + 1);
-                    break;
-                }
-                EventType::Error { error } => {
-                    info!("  - Round {} error: {}", round + 1, error);
-                    break;
-                }
-                _ => {
-                    info!("EVENT: {:?}", event);
+                    _ => {
+                        info!("EVENT: {:?}", event);
+                    }
                 }
             }
         }
-
-        round += 1;
     }
 
     info!("All rounds completed.");
@@ -291,7 +284,7 @@ async fn main() -> Result<(), std::io::Error> {
         &options.consensus_opt,
         priv_key,
         known_nodes,
-        genesis.clone(),
+        genesis,
         own_id,
     )
     .await;
@@ -299,12 +292,7 @@ async fn main() -> Result<(), std::io::Error> {
 
     // Start an EsQS server if requested.
     if let Some(esqs) = &options.esqs {
-        Some(EsQS::new(
-            esqs,
-            data_source,
-            hotshot.clone(),
-            ElaboratedBlock::genesis(genesis),
-        )?)
+        Some(EsQS::new(esqs, data_source, hotshot.clone())?)
     } else {
         None
     };

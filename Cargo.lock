@@ -2050,9 +2050,9 @@ dependencies = [
 
 [[package]]
 name = "ed25519-compact"
-version = "1.0.11"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24e1f30f0312ac83726c1197abeacd91c9557f8a623e904a009ae6bc529ae8d8"
+checksum = "bee9df587982575886a8682edcee11877894349a805f25629c27f63abe3e9ae8"
 dependencies = [
  "getrandom 0.2.7",
 ]
@@ -3128,7 +3128,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#18fd718dc7e60e5bc3a5fbf93cc3887a128df113"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
 dependencies = [
  "async-lock",
  "async-std",
@@ -3149,6 +3149,7 @@ dependencies = [
  "hotshot-consensus",
  "hotshot-types",
  "hotshot-utils",
+ "itertools 0.10.3",
  "libp2p",
  "libp2p-networking",
  "rand 0.8.5",
@@ -3163,9 +3164,10 @@ dependencies = [
 [[package]]
 name = "hotshot-centralized-server"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#18fd718dc7e60e5bc3a5fbf93cc3887a128df113"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
 dependencies = [
  "async-std",
+ "async-trait",
  "bincode",
  "cfg-if 1.0.0",
  "commit",
@@ -3183,7 +3185,7 @@ dependencies = [
 [[package]]
 name = "hotshot-consensus"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#18fd718dc7e60e5bc3a5fbf93cc3887a128df113"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
 dependencies = [
  "async-lock",
  "async-std",
@@ -3202,7 +3204,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#18fd718dc7e60e5bc3a5fbf93cc3887a128df113"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
 dependencies = [
  "arbitrary",
  "async-std",
@@ -3230,7 +3232,7 @@ dependencies = [
 [[package]]
 name = "hotshot-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#18fd718dc7e60e5bc3a5fbf93cc3887a128df113"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
 dependencies = [
  "async-lock",
  "async-std",
@@ -4095,7 +4097,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#18fd718dc7e60e5bc3a5fbf93cc3887a128df113"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
 dependencies = [
  "async-lock",
  "async-std",
@@ -6303,9 +6305,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.144"
+version = "1.0.145"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f747710de3dcd43b88c9168773254e809d8ddbdf9653b84e2554ab219f17860"
+checksum = "728eb6351430bccb993660dfffc5a72f91ccc1295abaa8ce19b27ebe4f75568b"
 dependencies = [
  "serde_derive",
 ]
@@ -6340,9 +6342,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.144"
+version = "1.0.145"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94ed3a816fb1d101812f83e789f888322c34e291f894f19590dc310963e87a00"
+checksum = "81fa1584d3d1bcacd84c277a0dfe21f5b0f6accf4a23d04d4c6d61f1af522b4c"
 dependencies = [
  "proc-macro2",
  "quote",

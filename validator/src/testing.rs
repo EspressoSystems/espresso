@@ -16,7 +16,6 @@ use crate::{
 };
 use address_book::store::FileStore;
 use async_std::task::{block_on, spawn, JoinHandle};
-use espresso_core::state::ElaboratedBlock;
 use espresso_esqs::full_node::{self, EsQS};
 use futures::{channel::oneshot, future::join_all};
 use jf_cap::keys::UserPubKey;
@@ -172,20 +171,13 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             let node_opt = NodeOpt {
                 store_path: Some(store_path),
                 nonbootstrap_base_port: pick_unused_port().unwrap() as usize,
-                next_view_timeout: Duration::from_secs(10),
-                min_propose_time: Duration::from_secs(1),
-                max_propose_time: Duration::from_secs(10),
+                next_view_timeout: Duration::from_secs(30),
+                min_propose_time: Duration::from_secs(10),
+                max_propose_time: Duration::from_secs(30),
                 ..NodeOpt::default()
             };
-            let consensus = init_validator(
-                &node_opt,
-                &consensus_opt,
-                priv_key,
-                pub_keys,
-                genesis.clone(),
-                i,
-            )
-            .await;
+            let consensus =
+                init_validator(&node_opt, &consensus_opt, priv_key, pub_keys, genesis, i).await;
             let data_source = open_data_source(&node_opt, i, consensus.clone());
 
             // If applicable, run a query service.
@@ -197,7 +189,6 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                         &full_node::Command::with_port(port),
                         data_source,
                         consensus.clone(),
-                        ElaboratedBlock::genesis(genesis),
                     )
                     .unwrap(),
                 )

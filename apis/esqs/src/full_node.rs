@@ -33,7 +33,6 @@ use async_std::{
 use clap::{Args, Subcommand};
 use espresso_availability_api::api as availability;
 use espresso_catchup_api::api as catchup;
-use espresso_core::state::ElaboratedBlock;
 use espresso_metastate_api::api as metastate;
 use espresso_status_api::api as status;
 use espresso_validator_api::{api as validator, data_source::ValidatorDataSource};
@@ -107,7 +106,6 @@ impl EsQS {
         command: &Command,
         data_source: Arc<RwLock<QueryData>>,
         consensus: impl ValidatorDataSource + Send + Sync + 'static,
-        genesis: ElaboratedBlock,
     ) -> io::Result<Self> {
         let Command::Esqs(opt) = command;
         let availability_api = availability::define_api(&opt.availability).map_err(io_error)?;
@@ -146,7 +144,6 @@ impl EsQS {
             data_source.clone(),
             data_source.clone(),
             data_source,
-            genesis,
         );
         Ok(Self {
             port,
