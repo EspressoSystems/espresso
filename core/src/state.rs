@@ -14,6 +14,7 @@
 use espresso_macros::*;
 use jf_cap::structs::{Amount, ReceiverMemo};
 use jf_cap::Signature;
+use reef::traits::Validator;
 
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
@@ -418,15 +419,6 @@ pub enum ValidationError {
     /// Reward in transaction has already been collected
     PreviouslyCollectedReward,
 
-    /// Incorrect collected rewards noninclusion proof
-    BadCollectedRewardProof,
-
-    /// Incorrect stake table commitment proof
-    BadStakeTableCommitmentProof,
-
-    /// Incorrect stake table proof
-    BadStakeTableProof,
-
     /// Stake amount in transaction does not match amount in stake table
     RewardAmountTooLarge,
 }
@@ -484,9 +476,6 @@ impl Clone for ValidationError {
             InconsistentHelperProofs => InconsistentHelperProofs,
             UnexpectedGenesis => UnexpectedGenesis,
             PreviouslyCollectedReward => PreviouslyCollectedReward,
-            BadCollectedRewardProof => BadCollectedRewardProof,
-            BadStakeTableCommitmentProof => BadStakeTableCommitmentProof,
-            BadStakeTableProof => BadStakeTableProof,
             RewardAmountTooLarge => RewardAmountTooLarge,
         }
     }
@@ -1243,9 +1232,6 @@ impl ValidatorState {
     /// - [ValidationError::UnsupportedFreezeSize]
     /// - [ValidationError::UnsupportedTransferSize]
     /// - [ValidationError::PreviouslyCollectedReward]
-    /// - [ValidationError::BadCollectedRewardProof]
-    /// - [ValidationError::BadStakeTableCommitmentProof]
-    /// - [ValidationError::BadStakeTableProof]
     /// - [ValidationError::RewardAmountTooLarge]
     ///
     pub fn validate_block_check(
@@ -1359,19 +1345,48 @@ impl ValidatorState {
                     .map_err(|err| CryptoError { err: Ok(err) })?;
             }
         }
-        let mut verified_rewards = vec![];
 
+        let mut verified_rewards = vec![];
         {
             //verify rewards collection transactions
             for (pfs, txn) in rewards_proofs
                 .into_iter()
                 .zip(reward_txns.clone().into_iter())
             {
-                let collected_reward = pfs
-                    .verify(self, *txn)
-                    .expect("Failed to verify reward proofs");
+                //verify reward txn (CollectRewardNote)
+                txn.verify().expect("Failed to verify CollectRewardNote");
 
-                verified_rewards.push(collected_reward);
+                //check helper proofs (RewardNoteProofs)
+                pfs.verify(
+                    self,
+                    txn.body.vrf_witness.staking_key.clone(),
+                    txn.body.vrf_witness.view_number,
+                )
+                .expect("Failed to verify auxillary proofs");
+
+                //check vrf witness (EligibilityWitness)
+                txn.body
+                    .vrf_witness
+                    .verify()
+                    .expect("Failed to verify VRF Witness");
+
+                //check reward amount
+                let max_reward =
+                    crate::reward::compute_reward_amount(self, self.now(), self.total_stake);
+                if txn.body.reward_amount > max_reward {
+                    return Err(ValidationError::RewardAmountTooLarge);
+                }
+                let latest_reward = CollectedRewards {
+                    staking_key: txn.body.vrf_witness.staking_key,
+                    view_number: txn.body.vrf_witness.view_number,
+                };
+
+                //check for duplicate reward in current block
+                if verified_rewards.contains(&latest_reward) {
+                    return Err(ValidationError::PreviouslyCollectedReward);
+                }
+
+                verified_rewards.push(latest_reward);
             }
         }
         // assemble Block

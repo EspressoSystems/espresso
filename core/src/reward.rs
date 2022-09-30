@@ -178,7 +178,7 @@ pub struct CollectRewardBody {
     /// Reward amount
     pub reward_amount: Amount,
     /// Staking `pub_key`, `view` number and a proof that staking key was selected for committee election on `view`
-    vrf_witness: EligibilityWitness,
+    pub vrf_witness: EligibilityWitness,
 }
 
 impl CollectRewardBody {
@@ -251,7 +251,7 @@ impl CollectRewardBody {
     Serialize,
     Deserialize,
 )]
-struct EligibilityWitness {
+pub struct EligibilityWitness {
     /// Staking public key
     pub staking_key: StakingKey,
     /// View number for which the key was elected
@@ -318,7 +318,8 @@ impl RewardNoteProofs {
             Self::proof_uncollected_rewards(validator_state, stake_key, view_number)?;
         let leaf_proof_pos = validator_state
             .stake_table_commitments_commitment
-            .num_leaves;
+            .num_leaves
+            - 1;
         Ok(Self {
             stake_table_commitment_leaf_proof,
             stake_amount_proof,
@@ -366,13 +367,14 @@ impl RewardNoteProofs {
     pub fn verify(
         &self,
         validator_state: &ValidatorState,
-        txn: CollectRewardNote,
-    ) -> Result<CollectedRewards, RewardError> {
+        staking_key: StakingKey,
+        view_number: ViewNumber,
+    ) -> Result<(), RewardError> {
         //check collected reward non-inclusion proof
         let collected_reward_check = self.uncollected_reward_proof.check(
             CollectedRewards {
-                staking_key: txn.body.vrf_witness.staking_key.clone(),
-                view_number: txn.body.vrf_witness.view_number,
+                staking_key: staking_key.clone(),
+                view_number,
             },
             validator_state.collected_rewards.hash(),
         );
@@ -397,34 +399,16 @@ impl RewardNoteProofs {
 
         //check stake amount proof
         let stake_amount_check = self.stake_amount_proof.check(
-            txn.body.vrf_witness.staking_key.clone(),
+            staking_key,
             self.stake_table_commitment_leaf_proof.leaf.0 .0 .0,
         );
         match stake_amount_check {
-            //check that stored view_number->commitment matches provided commtiment
-            Some((Some(amt), _)) => {
-                if txn.body.reward_amount
-                    > compute_reward_amount(validator_state, validator_state.block_height, amt)
-                {
-                    return Err(RewardError::RewardAmountTooLarge {});
-                }
-            }
+            Some((Some(_), _)) => {}
             _ => {
                 return Err(RewardError::BadStakeTableProof {});
             }
         }
-
-        match txn.body.vrf_witness.verify() {
-            Ok(()) => {}
-            Err(err) => {
-                return Err(err);
-            }
-        }
-
-        Ok(CollectedRewards {
-            staking_key: txn.body.vrf_witness.staking_key,
-            view_number: txn.body.vrf_witness.view_number,
-        })
+        Ok(())
     }
 }
 
