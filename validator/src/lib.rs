@@ -19,6 +19,7 @@ use async_std::sync::{Arc, RwLock};
 use clap::{Args, Parser};
 use cld::ClDuration;
 use dirs::data_local_dir;
+use espresso_core::reward::types::UncollectedRewardProof;
 use espresso_core::reward::{mock_eligibility, CollectRewardNote};
 use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof};
 use espresso_core::{
@@ -829,6 +830,7 @@ pub fn open_data_source(
 async fn collect_reward_daemon<R: CryptoRng + RngCore>(
     rng: &mut R,
     stake_proof: KVMerkleProof<StakeTableHash>,
+    uncollected_reward_proof: UncollectedRewardProof,
     stake_amount: Amount,
     staking_priv_key: &StakingPrivKey,
     cap_address: &UserAddress,
@@ -861,6 +863,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                         cap_address.clone(),
                         stake_amount,
                         stake_proof.clone(),
+                        uncollected_reward_proof.clone(),
                         vrf_proof,
                     )
                     .expect("Failed to create Collect Reward Note");
