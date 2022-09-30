@@ -26,7 +26,7 @@ pub use crate::util::canonical;
 pub use crate::{PrivKey, PubKey};
 
 use crate::genesis::GenesisNote;
-use crate::reward::CollectedRewardsHash;
+use crate::reward::types::{CollectedRewardsFrontier, CollectedRewardsMT};
 use crate::stake_table::{StakeTableCommitment, StakeTableHash};
 use crate::universal_params::{MERKLE_HEIGHT, VERIF_CRS};
 use arbitrary::{Arbitrary, Unstructured};
@@ -1064,7 +1064,7 @@ pub type StakeTableCommMT = crate::merkle_tree::MerkleTree<(StakeTableCommitment
 pub type StakeTableCommFrontier =
     crate::merkle_tree::MerkleFrontier<(StakeTableCommitment, Amount)>;
 
-/// Merkle Frontier for Stake table commitments
+/// Merkle Root for Stake table commitments
 pub type StakeTableCommCommitment = crate::merkle_tree::MerkleCommitment;
 
 /// The working state of the ledger
@@ -1105,8 +1105,10 @@ pub struct ValidatorState {
     pub stake_table_commitments: StakeTableCommFrontier,
     /// Commitment to stake table commitments set
     pub stake_table_commitments_commitment: StakeTableCommCommitment,
-    /// Track already-collected rewards via (staking_key, block number) tuples
-    pub collected_rewards: KVMerkleTree<CollectedRewardsHash>,
+    /// Track already-collected rewards via staking keys collected for each view
+    pub collected_rewards: CollectedRewardsFrontier,
+    /// Commitmet to CollectedReward set
+    pub collected_rewards_commitment: crate::merkle_tree::MerkleCommitment,
 }
 
 /// Nullifier proofs, organized by the root hash for which they are valid.
@@ -1119,6 +1121,7 @@ impl Default for ValidatorState {
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
             StakeTableMap::EmptySubtree,
             StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+            CollectedRewardsMT::new(MERKLE_HEIGHT).unwrap(),
         )
     }
 }
@@ -1136,6 +1139,7 @@ impl ValidatorState {
         record_merkle_frontier: MerkleTree,
         stake_table_map: StakeTableMap,
         stake_table_commitments_mt: StakeTableCommMT,
+        collected_rewards_mt: CollectedRewardsMT,
     ) -> Self {
         Self {
             chain,
@@ -1153,7 +1157,8 @@ impl ValidatorState {
             stake_table: stake_table_map,
             stake_table_commitments: stake_table_commitments_mt.frontier(),
             stake_table_commitments_commitment: stake_table_commitments_mt.commitment(),
-            collected_rewards: KVMerkleTree::<CollectedRewardsHash>::EmptySubtree,
+            collected_rewards: collected_rewards_mt.frontier(),
+            collected_rewards_commitment: collected_rewards_mt.commitment(),
         }
     }
 

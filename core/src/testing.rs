@@ -11,6 +11,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+use crate::reward::types::CollectedRewardsMT;
 use crate::state::*;
 use crate::universal_params::{MERKLE_HEIGHT, PROVER_CRS, UNIVERSAL_PARAM, VERIF_CRS};
 use arbitrary::Arbitrary;
@@ -319,6 +320,7 @@ impl MultiXfrTestState {
                 t,
                 StakeTableMap::EmptySubtree,
                 StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+                CollectedRewardsMT::new(MERKLE_HEIGHT).unwrap(),
             ),
             outer_timer: timer,
             inner_timer: Instant::now(),

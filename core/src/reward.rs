@@ -11,12 +11,16 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::kv_merkle_tree::KVMerkleProof;
-use crate::merkle_tree::MerkleFrontier;
+use crate::merkle_tree::{MerkleFrontier, MerkleLeafProof};
+use crate::reward::types::{
+    CollectedRewardsFrontier, CollectedRewardsKeysHash, UncollectedRewardProof, VrfProof,
+};
 use crate::stake_table::{
     StakeTableCommitment, StakeTableHash, StakingKey, StakingKeySignature, StakingPrivKey,
     ViewNumber,
 };
-use crate::state::{CommitableHash, CommitableHashTag, ValidatorState};
+use crate::state::{StakeTableCommFrontier, ValidatorState};
+use crate::tree_hash::KVTreeHash;
 use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
 use core::hash::Hash;
@@ -24,12 +28,48 @@ use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::structs::{
     Amount, AssetDefinition, BlindFactor, FreezeFlag, RecordCommitment, RecordOpening,
 };
-use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
+use std::fmt::Debug;
 
-/// Proof for Vrf output
-pub type VrfProof = StakingKeySignature;
+pub mod types {
+    use crate::kv_merkle_tree::KVMerkleProof;
+    use crate::merkle_tree::{MerkleCommitment, MerkleFrontier, MerkleTree};
+    use crate::stake_table::{StakeTableHash, StakeTableTag, StakingKey, StakingKeySignature};
+    use crate::state::{CommitableHash, CommitableHashTag};
+    use crate::tree_hash::KVTreeHash;
+    use serde::{Deserialize, Serialize};
+
+    /// Proof for Vrf output
+    pub type VrfProof = StakingKeySignature;
+
+    /// Merkle tree for collected rewards
+    pub type CollectedRewardsMT = MerkleTree<<CollectedRewardsKeysHash as KVTreeHash>::Digest>;
+
+    /// Merkle Frontier for Collected Rewards
+    pub type CollectedRewardsFrontier =
+        MerkleFrontier<<CollectedRewardsKeysHash as KVTreeHash>::Digest>;
+
+    /// Merkle Root for CollectedRewards
+    pub type CollectedRewardsCommitment = MerkleCommitment;
+
+    pub type UncollectedRewardProof = KVMerkleProof<CollectedRewardsKeysHash>;
+
+    /// Identifying tag for a Collected Rewards Keys Set Merkle tree
+    #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
+    pub struct CollectedRewardsKeysTag();
+    impl CommitableHashTag for CollectedRewardsKeysTag {
+        fn commitment_diversifier() -> &'static str {
+            "Collected Rewards Keys"
+        }
+    }
+
+    /// Stake table commitment type
+    pub type CollectedRewardsKeysCommitment = <StakeTableHash as KVTreeHash>::Digest;
+
+    /// Hash function for the Collected Rewards Keys SetMerkleTree
+    pub type CollectedRewardsKeysHash = CommitableHash<StakingKey, (), StakeTableTag>;
+}
 
 /// Compute the allowed stake amount given current state (e.g. circulating supply), view_number and stake amount
 /// Hard-coded to 0 for FST
@@ -41,12 +81,13 @@ pub fn compute_reward_amount(
     Amount::from(0u64)
 }
 
+/*
 /// Previously collected rewards are recorded in (StakingKey, view_number) pairs
 #[tagged_blob("COLLECTED-REWARD")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 pub struct CollectedRewards((StakingKey, ViewNumber));
 
-/// Identifying tag for CollectedReward
+ /// Identifying tag for CollectedReward
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct CollectedRewardsTag();
 impl CommitableHashTag for CollectedRewardsTag {
@@ -57,6 +98,8 @@ impl CommitableHashTag for CollectedRewardsTag {
 
 /// Hash for set Merkle tree for all of the previously-collected rewards
 pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
+
+*/
 
 /// Reward Collection Transaction Note
 #[derive(
@@ -88,6 +131,7 @@ impl CollectRewardNote {
         cap_address: UserAddress,
         stake_amount: Amount,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: UncollectedRewardProof,
         vrf_proof: VrfProof,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
         let staking_key = StakingKey::from_priv_key(staking_priv_key);
@@ -100,6 +144,7 @@ impl CollectRewardNote {
             cap_address,
             stake_amount,
             stake_amount_proof,
+            uncollected_reward_proof,
             vrf_proof,
         )?;
         let size = CanonicalSerialize::serialized_size(&body);
@@ -178,15 +223,16 @@ impl CollectRewardBody {
         cap_address: UserAddress,
         stake_amount: Amount,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: UncollectedRewardProof,
         vrf_proof: VrfProof,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
         let reward_amount = compute_reward_amount(validator_state, block_height, stake_amount);
         let blind_factor = BlindFactor::rand(rng);
         let rewards_proofs = RewardNoteProofs::generate(
-            validator_state,
-            view_number,
-            &staking_key,
+            validator_state.stake_table_commitments.clone(),
+            validator_state.collected_rewards.clone(),
             stake_amount_proof,
+            uncollected_reward_proof,
         )?;
         let vrf_witness = EligibilityWitness {
             staking_key,
@@ -278,62 +324,46 @@ impl EligibilityWitness {
 )]
 pub struct RewardNoteProofs {
     /// Proof for stake table commitment and total stake for view number
-    stake_table_commitment_leaf_proof:
-        crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount)>,
+    stake_table_commitment_leaf_proof: MerkleLeafProof<(StakeTableCommitment, Amount)>,
     /// Proof for stake_amount for staking key under above stake table commitment
     stake_amount_proof: KVMerkleProof<StakeTableHash>,
+    /// Proof for collected rewards set for view number
+    collected_rewards_sets_leaf_proof:
+        MerkleLeafProof<<CollectedRewardsKeysHash as KVTreeHash>::Digest>,
     /// Proof that reward hasn't been collected
-    uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+    uncollected_reward_proof: UncollectedRewardProof,
 }
 
 impl RewardNoteProofs {
     /// Return RewardNoteHelperProofs if view_number is valid and staking_key was elected for it, otherwise return RewardError.
     pub(crate) fn generate(
-        validator_state: &ValidatorState,
-        view_number: hotshot_types::data::ViewNumber,
-        stake_key: &StakingKey,
+        current_stake_table_commitments_frontier: StakeTableCommFrontier,
+        current_collected_rewards_sets_frontier: CollectedRewardsFrontier,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: KVMerkleProof<CollectedRewardsKeysHash>,
     ) -> Result<Self, RewardError> {
         let stake_table_commitment_leaf_proof =
-            Self::get_stake_commitment_total_stake_and_proof(validator_state)?;
-        let uncollected_reward_proof =
-            Self::proof_uncollected_rewards(validator_state, stake_key, view_number)?;
+            Self::get_leaf_proof(current_stake_table_commitments_frontier)?;
+        let collected_rewards_sets_leaf_proof =
+            Self::get_leaf_proof(current_collected_rewards_sets_frontier)?;
         Ok(Self {
             stake_table_commitment_leaf_proof,
             stake_amount_proof,
+            collected_rewards_sets_leaf_proof,
             uncollected_reward_proof,
         })
     }
 
     /// Returns StakeTable commitment for view number, if view number is valid, otherwise return RewardError::InvalidViewNumber
-    fn get_stake_commitment_total_stake_and_proof(
-        validator_state: &ValidatorState,
-    ) -> Result<crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount)>, RewardError>
+    fn get_leaf_proof<T>(
+        stake_table_commitments: MerkleFrontier<T>,
+    ) -> Result<MerkleLeafProof<T>, RewardError>
+    where
+        T: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
     {
-        match validator_state.stake_table_commitments.clone() {
+        match stake_table_commitments {
             MerkleFrontier::Empty { .. } => Err(RewardError::EmptyStakeTableCommitmentSet {}),
             MerkleFrontier::Proof(merkle_proof) => Ok(merkle_proof),
-        }
-    }
-
-    /// Returns proof if reward hasn't been collected, otherwise RewardError::RewardAlreadyCollected
-    fn proof_uncollected_rewards(
-        validator_state: &ValidatorState,
-        staking_key: &StakingKey,
-        view_number: hotshot_types::data::ViewNumber,
-    ) -> Result<KVMerkleProof<CollectedRewardsHash>, RewardError> {
-        let key = CollectedRewards((staking_key.clone(), view_number.into()));
-        // if (key, proof) not found, then key is present but not in memory. Hence, reward was collected.
-        // if value is found, then reward was also collected
-        // if value not found, return proof for it
-        let (found, proof) = validator_state
-            .collected_rewards
-            .lookup(key)
-            .ok_or(RewardError::RewardAlreadyCollected {})?;
-        if found.is_none() {
-            Ok(proof)
-        } else {
-            Err(RewardError::RewardAlreadyCollected {})
         }
     }
 }
@@ -356,6 +386,9 @@ pub enum RewardError {
 
     /// No Stake table commitment
     EmptyStakeTableCommitmentSet {},
+
+    /// No Collected Rewards Set
+    EmptyCollectedRewardsSet {},
 
     /// Proof not in memory
     ProofNotInMemory {},

@@ -298,7 +298,17 @@ pub mod committable_hash {
         fn commitment_diversifier() -> &'static str;
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    #[derive(
+        Clone,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+        Serialize,
+        Deserialize,
+        CanonicalSerialize,
+        CanonicalDeserialize,
+    )]
     pub struct CommitableHash<K, V, T>
     where
         K: Clone + PartialEq + Eq + CanonicalSerialize + CanonicalDeserialize,
