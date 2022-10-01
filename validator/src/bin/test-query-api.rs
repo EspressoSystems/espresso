@@ -25,6 +25,7 @@
 // state and serves a query API. Be sure to use the `esqs` command to at least one of the nodes, and
 // then run this test, pointing it at the URL of one of the full nodes.
 
+use ark_serialize::CanonicalSerialize;
 use async_std::future::timeout;
 use async_tungstenite::async_std::connect_async;
 use clap::Parser;
@@ -33,6 +34,7 @@ use espresso_availability_api::query_data::*;
 use espresso_core::{ledger::EspressoLedger, state::BlockCommitment};
 use espresso_metastate_api::api::NullifierCheck;
 use futures::prelude::*;
+use hotshot_types::data::ViewNumber;
 use itertools::izip;
 use net::client::*;
 use reef::traits::Transaction;
@@ -40,6 +42,7 @@ use seahorse::{events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnaf
 use serde::Deserialize;
 use snafu::ResultExt;
 use std::fmt::Display;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::time::Duration;
 use surf::Url;
@@ -153,10 +156,12 @@ async fn validate_committed_block(
     assert_eq!(uid, block.records_from + block.record_count);
 
     // Check the block summary.
-    assert_eq!(summary.txn_count, 1);
-    assert_eq!(summary.records_from, ix);
-    assert_eq!(summary.record_count, ix + 1);
-    assert_eq!(summary.view_number, ix);
+    assert_eq!(summary.size, block.raw_block.serialized_size());
+    assert_eq!(summary.txn_count, block.txn_hashes.len());
+    assert_eq!(summary.records_from, block.records_from);
+    assert_eq!(summary.record_count, block.record_count);
+    let view_number: ViewNumber = get(opt, format!("/availability/getviewnumber/{}", ix)).await;
+    assert_eq!(summary.view_number, *view_number.deref());
 }
 
 struct UnencryptedKeystoreLoader {

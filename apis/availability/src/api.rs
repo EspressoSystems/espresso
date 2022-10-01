@@ -182,7 +182,7 @@ where
 {
     let mut summaries = Vec::new();
     let count = min(count, block_id + 1);
-    for id in (block_id - count + 1..block_id + 1).rev() {
+    for id in (block_id + 1 - count..block_id + 1).rev() {
         let block_data = get_block(state.clone(), id)?;
         let qcert_data = get_qcert(state.clone(), id)?;
         let size = block_data.raw_block.serialized_size();
@@ -291,6 +291,14 @@ where
                     txn_id,
                     output_index,
                 })
+            }
+            .boxed()
+        })?
+        .get("getviewnumber", |req, state| {
+            async move {
+                let block_id = req.integer_param("block_id")?;
+                let view_number = get_qcert(state, block_id)?.view_number;
+                Ok(view_number)
             }
             .boxed()
         })?

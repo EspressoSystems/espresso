@@ -107,6 +107,20 @@ DOC = """
 Get a binding commitment to the state after applying block `block_id`.
 """
 
+[route.getviewnumber]
+PATH = ["getviewnumber/:block_id"]
+":block_id" = "Integer"
+DOC = """
+Get the view number of block `block_id`.
+
+Returns
+```
+{
+    "view_number": integer,
+}
+```
+"""
+
 [route.getblocksummary]
 PATH = ["getblocksummary/:block_id/:count"]
 ":block_id" = "Integer"
