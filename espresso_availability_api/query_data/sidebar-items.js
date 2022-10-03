@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":[["BlockQueryData",""],["RecordQueryData",""],["StateQueryData",""],["TransactionQueryData",""]]};
+window.SIDEBAR_ITEMS = {"struct":[["BlockQueryData",""],["BlockSummaryQueryData",""],["RecordQueryData",""],["StateQueryData",""],["TransactionQueryData",""]]};

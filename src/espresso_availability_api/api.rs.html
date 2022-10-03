@@ -254,6 +254,64 @@
 <span id="254">254</span>
 <span id="255">255</span>
 <span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -267,16 +325,18 @@
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">data_source::AvailabilityDataSource</span>,
-    <span class="ident">query_data</span>::{<span class="ident">BlockQueryData</span>, <span class="ident">RecordQueryData</span>, <span class="ident">StateQueryData</span>},
+    <span class="ident">data_source</span>::{<span class="ident">AvailabilityDataSource</span>, <span class="ident">H_256</span>},
+    <span class="ident">query_data</span>::{<span class="ident">BlockQueryData</span>, <span class="ident">BlockSummaryQueryData</span>, <span class="ident">RecordQueryData</span>, <span class="ident">StateQueryData</span>},
 };
+<span class="kw">use</span> <span class="ident">ark_serialize::CanonicalSerialize</span>;
 <span class="kw">use</span> <span class="ident">clap::Args</span>;
 <span class="kw">use</span> <span class="ident">derive_more::From</span>;
 <span class="kw">use</span> <span class="ident">espresso_core::state</span>::{<span class="ident">BlockCommitment</span>, <span class="ident">TransactionCommitment</span>};
 <span class="kw">use</span> <span class="ident">futures::FutureExt</span>;
+<span class="kw">use</span> <span class="ident">hotshot_types::data::QuorumCertificate</span>;
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
 <span class="kw">use</span> <span class="ident">snafu</span>::{<span class="ident">OptionExt</span>, <span class="ident">Snafu</span>};
-<span class="kw">use</span> <span class="ident">std::path::PathBuf</span>;
+<span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">cmp::min</span>, <span class="ident">ops::Deref</span>, <span class="ident">path::PathBuf</span>};
 <span class="kw">use</span> <span class="ident">tide_disco</span>::{
     <span class="ident">api</span>::{<span class="ident">Api</span>, <span class="ident">ApiError</span>},
     <span class="ident">method::ReadState</span>,
@@ -415,6 +475,46 @@
         .<span class="ident">context</span>(<span class="ident">MissingStateSnafu</span> { <span class="ident">block_id</span> })
 }
 
+<span class="kw">fn</span> <span class="ident">get_qcert</span><span class="op">&lt;</span><span class="ident">State</span><span class="op">&gt;</span>(<span class="ident">state</span>: <span class="ident">State</span>, <span class="ident">block_id</span>: <span class="ident">u64</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span>
+<span class="kw">where</span>
+    <span class="ident">State</span>: <span class="ident">AvailabilityDataSource</span>,
+{
+    <span class="ident">state</span>
+        .<span class="ident">get_nth_qcert_iter</span>(<span class="ident">block_id</span> <span class="kw">as</span> <span class="ident">usize</span>)
+        .<span class="ident">next</span>()
+        .<span class="ident">context</span>(<span class="ident">InvalidBlockIdSnafu</span> { <span class="ident">block_id</span> })<span class="question-mark">?</span>
+        .<span class="ident">context</span>(<span class="ident">MissingStateSnafu</span> { <span class="ident">block_id</span> })
+}
+
+<span class="kw">fn</span> <span class="ident">get_block_summary</span><span class="op">&lt;</span><span class="ident">State</span>: <span class="ident">Clone</span><span class="op">&gt;</span>(
+    <span class="ident">state</span>: <span class="ident">State</span>,
+    <span class="ident">block_id</span>: <span class="ident">u64</span>,
+    <span class="ident">count</span>: <span class="ident">u64</span>,
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">BlockSummaryQueryData</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span>
+<span class="kw">where</span>
+    <span class="ident">State</span>: <span class="ident">AvailabilityDataSource</span>,
+{
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">summaries</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
+    <span class="kw">let</span> <span class="ident">count</span> <span class="op">=</span> <span class="ident">min</span>(<span class="ident">count</span>, <span class="ident">block_id</span> <span class="op">+</span> <span class="number">1</span>);
+    <span class="kw">for</span> <span class="ident">id</span> <span class="kw">in</span> (<span class="ident">block_id</span> <span class="op">+</span> <span class="number">1</span> <span class="op">-</span> <span class="ident">count</span>..<span class="ident">block_id</span> <span class="op">+</span> <span class="number">1</span>).<span class="ident">rev</span>() {
+        <span class="kw">let</span> <span class="ident">block_data</span> <span class="op">=</span> <span class="ident">get_block</span>(<span class="ident">state</span>.<span class="ident">clone</span>(), <span class="ident">id</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">qcert_data</span> <span class="op">=</span> <span class="ident">get_qcert</span>(<span class="ident">state</span>.<span class="ident">clone</span>(), <span class="ident">id</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">size</span> <span class="op">=</span> <span class="ident">block_data</span>.<span class="ident">raw_block</span>.<span class="ident">serialized_size</span>();
+        <span class="kw">let</span> <span class="ident">txn_count</span> <span class="op">=</span> <span class="ident">block_data</span>.<span class="ident">txn_hashes</span>.<span class="ident">len</span>();
+        <span class="kw">let</span> <span class="ident">records_from</span> <span class="op">=</span> <span class="ident">block_data</span>.<span class="ident">records_from</span>;
+        <span class="kw">let</span> <span class="ident">record_count</span> <span class="op">=</span> <span class="ident">block_data</span>.<span class="ident">record_count</span>;
+        <span class="kw">let</span> <span class="ident">view_number</span> <span class="op">=</span> <span class="kw-2">*</span><span class="ident">qcert_data</span>.<span class="ident">view_number</span>.<span class="ident">deref</span>();
+        <span class="ident">summaries</span>.<span class="ident">push</span>(<span class="ident">BlockSummaryQueryData</span> {
+            <span class="ident">size</span>,
+            <span class="ident">txn_count</span>,
+            <span class="ident">records_from</span>,
+            <span class="ident">record_count</span>,
+            <span class="ident">view_number</span>,
+        });
+    }
+    <span class="prelude-val">Ok</span>(<span class="ident">summaries</span>)
+}
+
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">define_api</span><span class="op">&lt;</span><span class="ident">State</span><span class="op">&gt;</span>(<span class="ident">options</span>: <span class="kw-2">&amp;</span><span class="ident">Options</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Api</span><span class="op">&lt;</span><span class="ident">State</span>, <span class="ident">Error</span><span class="op">&gt;</span>, <span class="ident">ApiError</span><span class="op">&gt;</span>
 <span class="kw">where</span>
     <span class="ident">State</span>: <span class="lifetime">&#39;static</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span> <span class="op">+</span> <span class="ident">ReadState</span>,
@@ -505,6 +605,22 @@
                     <span class="ident">txn_id</span>,
                     <span class="ident">output_index</span>,
                 })
+            }
+            .<span class="ident">boxed</span>()
+        })<span class="question-mark">?</span>
+        .<span class="ident">get</span>(<span class="string">&quot;getviewnumber&quot;</span>, <span class="op">|</span><span class="ident">req</span>, <span class="ident">state</span><span class="op">|</span> {
+            <span class="kw">async</span> <span class="kw">move</span> {
+                <span class="kw">let</span> <span class="ident">block_id</span> <span class="op">=</span> <span class="ident">req</span>.<span class="ident">integer_param</span>(<span class="string">&quot;block_id&quot;</span>)<span class="question-mark">?</span>;
+                <span class="kw">let</span> <span class="ident">view_number</span> <span class="op">=</span> <span class="ident">get_qcert</span>(<span class="ident">state</span>, <span class="ident">block_id</span>)<span class="question-mark">?</span>.<span class="ident">view_number</span>;
+                <span class="prelude-val">Ok</span>(<span class="ident">view_number</span>)
+            }
+            .<span class="ident">boxed</span>()
+        })<span class="question-mark">?</span>
+        .<span class="ident">get</span>(<span class="string">&quot;getblocksummary&quot;</span>, <span class="op">|</span><span class="ident">req</span>, <span class="ident">state</span><span class="op">|</span> {
+            <span class="kw">async</span> <span class="kw">move</span> {
+                <span class="kw">let</span> <span class="ident">block_id</span> <span class="op">=</span> <span class="ident">req</span>.<span class="ident">integer_param</span>(<span class="string">&quot;block_id&quot;</span>)<span class="question-mark">?</span>;
+                <span class="kw">let</span> <span class="ident">count</span> <span class="op">=</span> <span class="ident">req</span>.<span class="ident">integer_param</span>(<span class="string">&quot;count&quot;</span>)<span class="question-mark">?</span>;
+                <span class="ident">get_block_summary</span>(<span class="ident">state</span>, <span class="ident">block_id</span>, <span class="ident">count</span>)
             }
             .<span class="ident">boxed</span>()
         })<span class="question-mark">?</span>;
