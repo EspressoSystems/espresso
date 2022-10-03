@@ -24,6 +24,7 @@ pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
 pub use crate::util::canonical;
 pub use crate::{PrivKey, PubKey};
+pub use hotshot_types::data::ViewNumber as ConsensusTime;
 pub use state_comm::LedgerStateCommitment;
 
 use crate::genesis::GenesisNote;
@@ -481,6 +482,9 @@ pub enum ValidationError {
 
     /// Attempted to apply a block to a state which was not its intended parent state
     IncorrectParent,
+
+    /// Attempted to apply a block with a time in the past
+    InvalidTime,
 }
 
 pub(crate) mod ser_display {
@@ -536,6 +540,7 @@ impl Clone for ValidationError {
             InconsistentHelperProofs => InconsistentHelperProofs,
             UnexpectedGenesis => UnexpectedGenesis,
             IncorrectParent => IncorrectParent,
+            InvalidTime => InvalidTime,
         }
     }
 }
@@ -944,7 +949,7 @@ pub mod state_comm {
     #[derive(Debug)]
     pub struct LedgerCommitmentOpening {
         pub chain: Commitment<ChainVariables>,
-        pub prev_commit_time: u64,
+        pub prev_commit_time: ConsensusTime,
         pub block_height: u64,
         pub prev_state: Option<LedgerStateCommitment>,
         pub record_merkle_commitment: Commitment<RecordMerkleCommitment>,
@@ -979,7 +984,7 @@ pub mod state_comm {
         pub fn commit(&self) -> LedgerStateCommitment {
             commit::RawCommitmentBuilder::new("Ledger Comm")
                 .field("chain", self.chain)
-                .u64_field("prev_commit_time", self.prev_commit_time)
+                .u64_field("prev_commit_time", *self.prev_commit_time)
                 .u64_field("block_height", self.block_height)
                 .array_field(
                     "prev_state",
@@ -1155,7 +1160,7 @@ pub struct ValidatorState {
     /// "Consensus time" is an opaque notion of time which is meaningful in the consensus layer.
     /// From outside the consensus protocol, it can be treated as a monotonically (but possibly
     /// non-consecutively) increasing counter.
-    pub prev_commit_time: u64,
+    pub prev_commit_time: ConsensusTime,
     /// The number of blocks in the chain which led to this state.
     ///
     /// This field can also be used to determine the index of the block which created this state or
@@ -1234,7 +1239,7 @@ impl ValidatorState {
     ) -> Self {
         Self {
             chain,
-            prev_commit_time: 0u64,
+            prev_commit_time: ConsensusTime::genesis(),
             block_height: 0u64,
             prev_state: None,
             record_merkle_commitment: record_merkle_frontier.commitment(),
@@ -1254,7 +1259,7 @@ impl ValidatorState {
 
     pub fn genesis(txn: GenesisNote) -> Self {
         Self::default()
-            .append(&ElaboratedBlock::genesis(txn))
+            .append(&ElaboratedBlock::genesis(txn), &ConsensusTime::genesis())
             .unwrap()
     }
 
@@ -1289,7 +1294,7 @@ impl ValidatorState {
     /// - [ValidationError::UnsupportedTransferSize]
     pub fn validate_block_check(
         &self,
-        now: u64,
+        now: &ConsensusTime,
         parent_state: LedgerStateCommitment,
         txns: Block,
         txns_helper_proofs: Vec<EspressoTxnHelperProofs>,
@@ -1297,6 +1302,10 @@ impl ValidatorState {
         // The block must be intended for this state.
         if parent_state != self.commit() {
             return Err(ValidationError::IncorrectParent);
+        }
+        // Time must be monotonic.
+        if *now < self.prev_commit_time {
+            return Err(ValidationError::InvalidTime);
         }
 
         // Check if this is a genesis block. If it is, validation is trivial and we can skip the
@@ -1400,7 +1409,7 @@ impl ValidatorState {
             }
             // cap transactions validates first
             if !cap_txns.is_empty() {
-                txn_batch_verify(&cap_txns[..], &merkle_roots, now, &verif_keys)
+                txn_batch_verify(&cap_txns[..], &merkle_roots, self.block_height, &verif_keys)
                     .map_err(|err| CryptoError { err: Ok(err) })?;
             }
         }
@@ -1432,7 +1441,7 @@ impl ValidatorState {
     /// Panics if the record Merkle commitment is inconsistent with the record Merkle frontier.
     pub fn validate_and_apply(
         &mut self,
-        now: u64,
+        now: &ConsensusTime,
         parent_state: LedgerStateCommitment,
         txns: Block,
         proofs: Vec<EspressoTxnHelperProofs>,
@@ -1443,7 +1452,7 @@ impl ValidatorState {
         // state. No operations after the first assignement to a member of self have a possible
         // error; this must remain true if code changes.
         let comm = self.commit();
-        self.prev_commit_time = now;
+        self.prev_commit_time = *now;
         self.block_height += 1;
         self.prev_block = txns.commit();
         let null_pfs = self
@@ -1566,14 +1575,16 @@ impl StateContents for ValidatorState {
 
     type Block = ElaboratedBlock;
 
+    type Time = ConsensusTime;
+
     fn next_block(&self) -> Self::Block {
         Self::Block::new(self.commit())
     }
 
     /// Validate a block for consensus
-    fn validate_block(&self, block: &Self::Block) -> bool {
+    fn validate_block(&self, block: &Self::Block, time: &Self::Time) -> bool {
         self.validate_block_check(
-            self.prev_commit_time + 1,
+            time,
             block.parent_state,
             block.block.clone(),
             block.proofs.clone(),
@@ -1585,10 +1596,10 @@ impl StateContents for ValidatorState {
     ///
     /// # Errors
     /// See validate_and_apply.
-    fn append(&self, block: &Self::Block) -> Result<Self, Self::Error> {
+    fn append(&self, block: &Self::Block, time: &Self::Time) -> Result<Self, Self::Error> {
         let mut state = self.clone();
         state.validate_and_apply(
-            state.prev_commit_time + 1,
+            time,
             block.parent_state,
             block.block.clone(),
             block.proofs.clone(),

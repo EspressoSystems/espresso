@@ -10,19 +10,24 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::state::{ElaboratedBlock, ValidatorState};
+use crate::state::ValidatorState;
 use atomic_store::{
-    load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader, PersistenceError,
+    load_store::BincodeLoadStore, AtomicStore, AtomicStoreLoader, PersistenceError, RollingLog,
 };
-use hotshot::traits::StatefulHandler;
+use hotshot::{data::Leaf, types::EventType};
 
+use async_std::task::{spawn, JoinHandle};
 use core::fmt::Debug;
+use futures::stream::{Stream, StreamExt};
 use std::path::{Path, PathBuf};
 
+#[must_use]
 pub struct LWPersistence {
     atomic_store: AtomicStore,
-    state_snapshot: AppendLog<BincodeLoadStore<ValidatorState>>,
+    leaf_snapshot: RollingLog<BincodeLoadStore<Leaf<ValidatorState>>>,
 }
+
+const LEAF_STORAGE_COUNT: u32 = 1;
 
 impl LWPersistence {
     pub fn new(store_path: &Path, key_tag: &str) -> Result<LWPersistence, PersistenceError> {
@@ -30,12 +35,13 @@ impl LWPersistence {
         lw_store_path.push("lw_validator");
         let mut loader = AtomicStoreLoader::create(&lw_store_path, key_tag)?;
         let snapshot_tag = format!("{}_state", key_tag);
-        let state_snapshot =
-            AppendLog::create(&mut loader, Default::default(), &snapshot_tag, 1024)?;
+        let mut leaf_snapshot =
+            RollingLog::create(&mut loader, Default::default(), &snapshot_tag, 1024)?;
+        leaf_snapshot.set_retained_entries(LEAF_STORAGE_COUNT);
         let atomic_store = AtomicStore::open(loader)?;
         Ok(LWPersistence {
             atomic_store,
-            state_snapshot,
+            leaf_snapshot,
         })
     }
 
@@ -44,39 +50,52 @@ impl LWPersistence {
         lw_store_path.push("lw_validator");
         let mut loader = AtomicStoreLoader::load(&lw_store_path, key_tag)?;
         let snapshot_tag = format!("{}_state", key_tag);
-        let state_snapshot = AppendLog::load(&mut loader, Default::default(), &snapshot_tag, 1024)?;
+        let mut leaf_snapshot =
+            RollingLog::load(&mut loader, Default::default(), &snapshot_tag, 1024)?;
+        leaf_snapshot.set_retained_entries(LEAF_STORAGE_COUNT);
         let atomic_store = AtomicStore::open(loader)?;
         Ok(LWPersistence {
             atomic_store,
-            state_snapshot,
+            leaf_snapshot,
         })
     }
 
-    pub fn store_latest_state(&mut self, _block: &ElaboratedBlock, state: &ValidatorState) {
-        self.state_snapshot.store_resource(state).unwrap();
-        self.state_snapshot.commit_version().unwrap();
-        self.atomic_store.commit_version().unwrap();
+    pub fn load_latest_leaf(&self) -> Result<Leaf<ValidatorState>, PersistenceError> {
+        self.leaf_snapshot.load_latest()
     }
 
-    pub fn load_latest_state(&self) -> Result<ValidatorState, PersistenceError> {
-        self.state_snapshot.load_latest()
+    fn store_latest_leaf(&mut self, leaf: &Leaf<ValidatorState>) -> Result<(), PersistenceError> {
+        self.leaf_snapshot.store_resource(leaf)?;
+        self.leaf_snapshot.commit_version()?;
+        if let Err(err) = self.leaf_snapshot.prune_file_entries() {
+            // Pruning the file entries is an optimization, not a failure that should stop us from
+            // committing. Log the error and move along.
+            tracing::warn!("failed to prune file entries: {}", err);
+        }
+        self.atomic_store.commit_version()
+    }
+
+    pub fn launch(
+        mut self,
+        mut events: impl Stream<Item = EventType<ValidatorState>> + Unpin + Send + 'static,
+    ) -> JoinHandle<()> {
+        spawn(async move {
+            while let Some(event) = events.next().await {
+                if let EventType::Decide { leaf_chain } = event {
+                    // Store the most recent leaf.
+                    if let Some(leaf) = leaf_chain.last() {
+                        if let Err(err) = self.store_latest_leaf(leaf) {
+                            tracing::error!("failed to store latest leaf: {}", err);
+                        }
+                    }
+                }
+            }
+        })
     }
 }
 
 impl Debug for LWPersistence {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("LWPersistence").finish()
-    }
-}
-
-impl StatefulHandler for LWPersistence {
-    type Block = ElaboratedBlock;
-    type State = ValidatorState;
-
-    fn notify(&mut self, blocks: Vec<Self::Block>, states: Vec<Self::State>) {
-        if blocks.is_empty() || states.is_empty() {
-            return;
-        }
-        self.store_latest_state(&blocks[0], &states[0]);
     }
 }

@@ -602,7 +602,7 @@ async fn spendable_records(
     keystore: &EspressoKeystore<'static, NetworkBackend<'static>, MnemonicPasswordLogin>,
     grant_size: RecordAmount,
 ) -> impl Iterator<Item = Record> {
-    let now = keystore.read().await.state().validator.now();
+    let now = keystore.read().await.state().validator.block_height();
     keystore.records().await.into_iter().filter(move |record| {
         record.asset_code() == AssetCode::native()
             && record.amount() >= grant_size
@@ -1211,12 +1211,8 @@ mod test {
     }
 
     #[async_std::test]
-    // #[traced_test]
+    #[traced_test]
     async fn test_faucet_transfer() {
-        tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-            .init();
         parallel_request(1, false).await;
     }
 

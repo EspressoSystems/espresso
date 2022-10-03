@@ -156,6 +156,7 @@ async fn generate_transactions(
                                 state
                                     .validate_and_apply(
                                         leaf.deltas.clone(),
+                                        &leaf.view_number,
                                         0.0,
                                         TxnPrintInfo::new_no_time(round as usize, 1),
                                     )
@@ -181,6 +182,7 @@ async fn generate_transactions(
                                 state
                                     .validate_and_apply(
                                         blk,
+                                        &leaf.view_number,
                                         0.0,
                                         TxnPrintInfo::new_no_time(round as usize, 1),
                                     )

@@ -142,6 +142,7 @@ where
                         block: block.clone(),
                         block_id: block_index as u64,
                         state_comm: self.validator_state.commit(),
+                        proof: leaf.view_number,
                     })];
 
                     // Construct the Memos events for this block.

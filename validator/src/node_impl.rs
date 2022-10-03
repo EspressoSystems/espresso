@@ -12,11 +12,7 @@
 
 use core::fmt::Debug;
 use core::marker::PhantomData;
-use espresso_core::{
-    committee::Committee,
-    state::{LWPersistence, ValidatorState},
-    PubKey,
-};
+use espresso_core::{committee::Committee, state::ValidatorState, PubKey};
 use hotshot::{
     traits::{NetworkingImplementation, NodeImplementation, Storage},
     types::Message,
@@ -56,8 +52,6 @@ impl<NET: PLNet, STORE: PLStore> NodeImplementation for ValidatorNodeImpl<NET, S
     type Storage = STORE;
 
     type Networking = NET;
-
-    type StatefulHandler = LWPersistence;
 
     type Election = Committee<ValidatorState>;
 

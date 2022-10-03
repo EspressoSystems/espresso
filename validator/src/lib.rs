@@ -34,6 +34,7 @@ use espresso_core::{
     PrivKey, PubKey,
 };
 use espresso_esqs::full_node_data_source::QueryData;
+use espresso_validator_api::data_source::ValidatorDataSource;
 use futures::{select, Future, FutureExt};
 use hotshot::traits::implementations::Libp2pNetwork;
 use hotshot::traits::NetworkError;
@@ -548,10 +549,8 @@ async fn init_hotshot(
         debug!("Restoring from persisted session");
         LWPersistence::load(storage_path, "validator").unwrap()
     };
-    let initializer = match lw_persistence.load_latest_state() {
-        Ok(_) => {
-            unimplemented!("joining an existing network after genesis")
-        }
+    let initializer = match lw_persistence.load_latest_leaf() {
+        Ok(leaf) => HotShotInitializer::from_reload(leaf),
         Err(_) => {
             // If we have reset the store state, or if there are no past leaves in storage, restart
             // from genesis.
@@ -566,12 +565,12 @@ async fn init_hotshot(
         config,
         networking,
         MemoryStorage::new(),
-        lw_persistence,
         Committee::new(stake_table),
         initializer,
     )
     .await
     .unwrap();
+    lw_persistence.launch(hotshot.clone().into_stream());
 
     debug!("Hotshot online!");
     hotshot

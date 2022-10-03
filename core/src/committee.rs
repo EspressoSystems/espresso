@@ -17,6 +17,7 @@ use hotshot::H_256;
 use hotshot_types::data::ViewNumber;
 use hotshot_types::traits::election::Election;
 use hotshot_types::traits::signature_key::EncodedSignature;
+use hotshot_types::traits::state::ConsensusTime;
 use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 
@@ -45,7 +46,9 @@ impl<S> Committee<S> {
     }
 }
 
-impl<S: Send + Sync + Default + Committable + StateContents> Election<PubKey> for Committee<S> {
+impl<S: Send + Sync + Default + Committable + StateContents, T: ConsensusTime> Election<PubKey, T>
+    for Committee<S>
+{
     /// A table mapping public keys with their associated stake.
     type StakeTable = BTreeMap<PubKey, u64>;
 

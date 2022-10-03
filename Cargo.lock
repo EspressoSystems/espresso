@@ -2452,6 +2452,7 @@ dependencies = [
  "espresso-esqs",
  "espresso-metastate-api",
  "espresso-status-api",
+ "espresso-validator-api",
  "futures",
  "futures-util",
  "hotshot",
@@ -3128,7 +3129,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
 dependencies = [
  "async-lock",
  "async-std",
@@ -3157,6 +3158,7 @@ dependencies = [
  "serde",
  "snafu",
  "tempfile",
+ "time 0.3.14",
  "tracing",
  "tracing-unwrap",
 ]
@@ -3164,7 +3166,7 @@ dependencies = [
 [[package]]
 name = "hotshot-centralized-server"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3185,7 +3187,7 @@ dependencies = [
 [[package]]
 name = "hotshot-consensus"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
 dependencies = [
  "async-lock",
  "async-std",
@@ -3198,13 +3200,14 @@ dependencies = [
  "hotshot-types",
  "hotshot-utils",
  "snafu",
+ "time 0.3.14",
  "tracing",
 ]
 
 [[package]]
 name = "hotshot-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
 dependencies = [
  "arbitrary",
  "async-std",
@@ -3216,6 +3219,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "commit",
  "custom_debug",
+ "derivative",
  "ed25519-compact",
  "espresso-systems-common 0.2.0 (git+https://github.com/espressosystems/espresso-systems-common?tag=0.2.0)",
  "futures",
@@ -3226,13 +3230,14 @@ dependencies = [
  "serde_bytes",
  "snafu",
  "tagged-base64",
+ "time 0.3.14",
  "tracing",
 ]
 
 [[package]]
 name = "hotshot-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
 dependencies = [
  "async-lock",
  "async-std",
@@ -4097,7 +4102,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#8e5e0f7cc531e1f9529d18acfa3f7e5182210dde"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
 dependencies = [
  "async-lock",
  "async-std",
@@ -4934,6 +4939,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19e64526ebdee182341572e50e9ad03965aa510cd94427a4549448f285e957a1"
 dependencies = [
  "hermit-abi",
+ "libc",
+]
+
+[[package]]
+name = "num_threads"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2819ce041d2ee131036f4fc9d6ae7ae125a3a40e97ba64d04fe799ad9dabbb44"
+dependencies = [
  "libc",
 ]
 
@@ -5847,7 +5861,7 @@ dependencies = [
 [[package]]
 name = "reef"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/reef.git#6be89f0a03c010d84c45f46f24094b6ae16b3fc1"
+source = "git+https://github.com/EspressoSystems/reef.git#3fe725049f845f72daa05e9e2f0dde7a57618ded"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -6210,7 +6224,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#8ba3041d73e2792f7c0a05db526a8c27bc32a083"
+source = "git+https://github.com/EspressoSystems/seahorse.git#4d7dc87e025368918dff866cf1a8e020928c6206"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -7187,6 +7201,16 @@ dependencies = [
  "time-macros",
  "version_check",
  "winapi",
+]
+
+[[package]]
+name = "time"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c3f9a28b618c3a6b9251b6908e9c99e04b9e5c02e6581ccbb67d59c34ef7f9b"
+dependencies = [
+ "libc",
+ "num_threads",
 ]
 
 [[package]]

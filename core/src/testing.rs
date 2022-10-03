@@ -200,6 +200,10 @@ impl MultiXfrTestState {
         *now = Instant::now();
     }
 
+    pub fn next_view(&self) -> ConsensusTime {
+        self.validator.prev_commit_time + 1
+    }
+
     /// Creates test state with initial records.
     ///
     /// Notes: `initial_records` must have at least one record, which is the first element of the tuple, `MultiXfrRecordSpec`.
@@ -480,14 +484,24 @@ impl MultiXfrTestState {
             }
 
             keys_in_block.clear();
-            ret.validate_and_apply(setup_block, 0.0, TxnPrintInfo::new_no_time(0, 0))
-                .unwrap();
+            ret.validate_and_apply(
+                setup_block,
+                &(ret.validator.prev_commit_time + 1),
+                0.0,
+                TxnPrintInfo::new_no_time(0, 0),
+            )
+            .unwrap();
 
             setup_block = ret.validator.next_block();
         }
 
-        ret.validate_and_apply(setup_block, 0.0, TxnPrintInfo::new_no_time(0, 0))
-            .unwrap();
+        ret.validate_and_apply(
+            setup_block,
+            &(ret.validator.prev_commit_time + 1),
+            0.0,
+            TxnPrintInfo::new_no_time(0, 0),
+        )
+        .unwrap();
 
         Ok(ret)
     }
@@ -863,7 +877,7 @@ impl MultiXfrTestState {
                     &[out_rec1, out_rec2],
                     fee_info,
                     if expire {
-                        self.validator.prev_commit_time + 1
+                        self.validator.block_height + 1
                     } else {
                         2u64.pow(jf_cap::constants::MAX_TIMESTAMP_LEN as u32) - 1
                     },
@@ -1024,7 +1038,7 @@ impl MultiXfrTestState {
             &[out_rec1],
             fee_info,
             if expire {
-                self.validator.prev_commit_time + 1
+                self.validator.block_height + 1
             } else {
                 2u64.pow(jf_cap::constants::MAX_TIMESTAMP_LEN as u32) - 1
             },
@@ -1118,18 +1132,19 @@ impl MultiXfrTestState {
     pub fn validate_and_apply(
         &mut self,
         blk: ElaboratedBlock,
+        now: &ConsensusTime,
         generation_time: f32,
         print_info: TxnPrintInfo,
     ) -> Result<(), ValidationError> {
         Self::update_timer(&mut self.inner_timer, |_| ());
 
         self.validator.validate_block_check(
-            self.validator.prev_commit_time + 1,
+            now,
             blk.parent_state,
             blk.block.clone(),
             blk.proofs.clone(),
         )?;
-        let new_state = self.validator.append(&blk).unwrap();
+        let new_state = self.validator.append(&blk, now).unwrap();
 
         for n in blk
             .block
@@ -1354,7 +1369,12 @@ mod tests {
             }
 
             state
-                .validate_and_apply(blk, generation_time, TxnPrintInfo::new_no_time(i, num_txs))
+                .validate_and_apply(
+                    blk,
+                    &state.next_view(),
+                    generation_time,
+                    TxnPrintInfo::new_no_time(i, num_txs),
+                )
                 .unwrap();
         }
     }
@@ -1532,7 +1552,12 @@ mod tests {
                 kixs,
                 TxnPrintInfo::new_no_time(i, 2),
             );
-            let res = state.validate_and_apply(blk, 0.0, TxnPrintInfo::new_no_time(i, 2));
+            let res = state.validate_and_apply(
+                blk,
+                &state.next_view(),
+                0.0,
+                TxnPrintInfo::new_no_time(i, 2),
+            );
             if i == 0 || !double_spend {
                 res.unwrap();
             } else {
@@ -1698,7 +1723,7 @@ mod tests {
 
         let new_uids = validator
             .validate_and_apply(
-                1,
+                &(validator.prev_commit_time + 1),
                 validator.commit(),
                 Block(vec![EspressoTransaction::CAP(TransactionNote::Transfer(
                     Box::new(txn1),
