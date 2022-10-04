@@ -14,6 +14,7 @@ use crate::data_source::StatusDataSource;
 use clap::Args;
 use derive_more::From;
 use futures::FutureExt;
+use local_ip_address::local_ip;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::path::PathBuf;
@@ -105,6 +106,19 @@ where
                     bytes_finalized: status.cumulative_size,
                     time_operational: status.time_operational,
                 })
+            }
+            .boxed()
+        })?
+        .get("location", |_, state| {
+            async move {
+                let location = match state.get_location() {
+                    Some(location) => location.to_string(),
+                    None => match local_ip() {
+                        Ok(ip) => ip.to_string(),
+                        _ => "Unknown".to_string(),
+                    },
+                };
+                Ok(location)
             }
             .boxed()
         })?;

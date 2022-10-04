@@ -23,7 +23,7 @@ use tide_disco::{
     RequestError, StatusCode,
 };
 
-#[derive(Args, Default)]
+#[derive(Args, Clone, Default)]
 pub struct Options {
     #[clap(long = "catchup-api-path", env = "ESPRESSO_CATCHUP_API_PATH")]
     pub api_path: Option<PathBuf>,

@@ -72,3 +72,16 @@ Returns
 }
 ```
 """
+
+[route.location]
+PATH = ["/location"]
+DOC = """
+Get the location of this node.
+
+Returns
+```
+{
+	"location": "String"
+}
+```
+"""

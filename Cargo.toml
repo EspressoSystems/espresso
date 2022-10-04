@@ -31,4 +31,4 @@ members = [
 opt-level = 1
 [profile.release]
 debug = true
-lto = "thin"
+# lto = "thin"

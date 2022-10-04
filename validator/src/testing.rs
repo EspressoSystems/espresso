@@ -183,7 +183,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 i,
             )
             .await;
-            let data_source = open_data_source(&node_opt, i, consensus.clone());
+            let data_source = open_data_source(&node_opt, i, None, consensus.clone());
 
             // If applicable, run a query service.
             let esqs = if i == 0 {
