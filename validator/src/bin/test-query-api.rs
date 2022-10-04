@@ -25,6 +25,7 @@
 // state and serves a query API. Be sure to use the `esqs` command to at least one of the nodes, and
 // then run this test, pointing it at the URL of one of the full nodes.
 
+use ark_serialize::CanonicalSerialize;
 use async_std::future::timeout;
 use async_tungstenite::async_std::connect_async;
 use clap::Parser;
@@ -33,6 +34,7 @@ use espresso_availability_api::query_data::*;
 use espresso_core::ledger::EspressoLedger;
 use espresso_metastate_api::api::NullifierCheck;
 use futures::prelude::*;
+use hotshot_types::data::ViewNumber;
 use itertools::izip;
 use net::client::*;
 use reef::traits::Transaction;
@@ -40,6 +42,7 @@ use seahorse::{events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnaf
 use serde::Deserialize;
 use snafu::ResultExt;
 use std::fmt::Display;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::time::Duration;
 use surf::Url;
@@ -78,7 +81,13 @@ async fn get<T: for<'de> Deserialize<'de>, S: Display>(opt: &Args, route: S) -> 
         .unwrap()
 }
 
-async fn validate_committed_block(opt: &Args, block: &BlockQueryData, ix: u64, num_blocks: u64) {
+async fn validate_committed_block(
+    opt: &Args,
+    block: &BlockQueryData,
+    summary: &BlockSummaryQueryData,
+    ix: u64,
+    num_blocks: u64,
+) {
     // Check well-formedness of the data.
     assert_eq!(ix, block.block_id);
     assert!(ix < num_blocks);
@@ -147,6 +156,14 @@ async fn validate_committed_block(opt: &Args, block: &BlockQueryData, ix: u64, n
         uid += txn.raw_transaction.output_len() as u64;
     }
     assert_eq!(uid, block.records_from + block.record_count);
+
+    // Check the block summary.
+    assert_eq!(summary.size, block.raw_block.serialized_size());
+    assert_eq!(summary.txn_count, block.txn_hashes.len());
+    assert_eq!(summary.records_from, block.records_from);
+    assert_eq!(summary.record_count, block.record_count);
+    let view_number: ViewNumber = get(opt, format!("/availability/getviewnumber/{}", ix)).await;
+    assert_eq!(summary.view_number, *view_number.deref());
 }
 
 struct UnencryptedKeystoreLoader {
@@ -173,15 +190,36 @@ impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
 async fn test(opt: &Args) {
     let num_blocks = get::<u64, _>(opt, "/status/latest_block_id").await + 1;
 
+    // Get the block summaries.
+    let block_summaries: Vec<BlockSummaryQueryData> = get(
+        opt,
+        format!(
+            "/availability/getblocksummary/{}/{}",
+            num_blocks - 1,
+            num_blocks
+        ),
+    )
+    .await;
+    assert_eq!(block_summaries.len() as u64, num_blocks);
+
     let test_indices = if opt.all {
         (0..num_blocks).into_iter().collect()
     } else {
         // Check that we can query the 0th block and the last block.
         vec![0, num_blocks - 1]
     };
+
+    // Check that we can query the 0th block and the last block.
     for ix in test_indices {
         let block = get(opt, format!("/availability/getblock/{}", ix)).await;
-        validate_committed_block(opt, &block, ix, num_blocks).await;
+        validate_committed_block(
+            opt,
+            &block,
+            &block_summaries[(num_blocks - 1 - ix) as usize],
+            ix,
+            num_blocks,
+        )
+        .await;
     }
 
     // Check the event stream. The event stream is technically never-ending; once we have received

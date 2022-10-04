@@ -28,8 +28,10 @@ Use at your own risk.
 
 - [Espresso](#espresso)
   - [Obtaining the source code](#obtaining-the-source-code)
+  - [Project structure](#project-structure)
 - [Documentation](#documentation)
   - [CAP protocol specification](#cap-protocol-specification)
+  - [Rust docs](#rust-docs)
 - [Environment](#environment)
   - [Nix](#nix)
     - [1. Install nix](#1-install-nix)
@@ -52,11 +54,43 @@ Use at your own risk.
 
     git clone git@github.com:EspressoSystems/espresso.git
 
+## Project structure
+
+This is a Rust project consisting of a number of crates:
+- [espresso-core](core/README.md): the definition of the Espresso ledger, including data types and transaction validation
+- [espresso-validator](validator/README.md): integration of the Espresso ledger with [HotShot](hotshot.docs.espressosys.com) consensus, and the `espresso-validator` executable
+- [espresso-client](client/README.md): integration of the Espresso ledger with the [Seahorse](https://seahorse.docs.espressosys.com/) keystore library, and the `wallet-cli` executable
+- [espresso-esqs](apis/esqs): the Espresso Query Service
+- [espresso-availability-api](apis/availability): the availability module of the EsQS
+- [espresso-catchup-api](apis/catchup): the catchup module of the EsQS
+- [espresso-metastate-api](apis/metastate): the metastate module of the EsQS
+- [espresso-status-api](apis/status): the status module of the EsQS
+- [espresso-validator-api](apis/validator): the validator API for transaction submission
+- [faucet](faucet/README.md): the Espresso testnet faucet executable
+- [faucet-types](faucet/types): types used in the REST interface to the faucet
+- [address-book](address-book/README.md): server for posting and exchanging CAP addresses
+
 # Documentation
 
 ## CAP protocol specification
 
 A formal specification of the Configurable Asset Policy protocol can be found at [our CAP github repo](https://github.com/EspressoSystems/cap/blob/main/cap-specification.pdf)
+
+## Rust docs
+
+Documentation of Rust interfaces is available for all of the Rust crates:
+- [espresso-core](https://espresso.docs.espressosys.com/espresso_core)
+- [espresso-validator](https://espresso.docs.espressosys.com/espresso_validator)
+- [espresso-client](https://espresso.docs.espressosys.com/espresso_client)
+- [espresso-esqs](https://espresso.docs.espressosys.com/espresso_esqs)
+- [espresso-availability-api](https://espresso.docs.espressosys.com/espresso_availability_api)
+- [espresso-catchup-api](https://espresso.docs.espressosys.com/espresso_catchup_api)
+- [espresso-metastate-api](https://espresso.docs.espressosys.com/espresso_metastate_api)
+- [espresso-status-api](https://espresso.docs.espressosys.com/espresso_status_api)
+- [espresso-validator-api](https://espresso.docs.espressosys.com/espresso_validator_api)
+- [faucet](https://espresso.docs.espressosys.com/faucet)
+- [faucet-types](https://espresso.docs.espressosys.com/faucet_types)
+- [address-book](https://espresso.docs.espressosys.com/address_book)
 
 # Environment
 

@@ -2188,6 +2188,7 @@ dependencies = [
 name = "espresso-availability-api"
 version = "0.1.0"
 dependencies = [
+ "ark-serialize",
  "clap 3.2.17",
  "commit",
  "derive_more",
