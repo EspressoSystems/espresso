@@ -189,15 +189,12 @@ async fn generate_transactions(
                                     .unwrap();
 
                                 success = true;
-                                println!(
-                                    "  - Round {} completed. Commitment: {}",
-                                    round + 1,
-                                    leaf.state.commit()
-                                );
-                                final_commitment = Some(leaf.state.commit());
                             }
                         }
                         if success {
+                            let commit = leaf_chain.last().unwrap().state.commit();
+                            println!("  - Round {} completed. Commitment: {}", round + 1, commit);
+                            final_commitment = Some(commit);
                             break;
                         }
                     }
@@ -221,7 +218,7 @@ async fn generate_transactions(
                             !leaf.deltas.is_empty() && !leaf.deltas.block.0[0].is_genesis()
                         }) {
                             let commit = leaf_chain.last().unwrap().state.commit();
-                            println!("  - Round {} completed. Commitment: {}", round, commit);
+                            println!("  - Round {} completed. Commitment: {}", round + 1, commit);
                             final_commitment = Some(commit);
                             break;
                         }
