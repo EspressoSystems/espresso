@@ -1480,10 +1480,16 @@ impl ValidatorState {
         self.record_merkle_frontier = record_merkle_frontier.frontier();
         self.stake_table_commitments_commitment = stc_mt.commitment();
         self.stake_table_commitments = stc_mt.frontier();
-        for r in rewards {
+
+        //insert rewards transactions from this block
+        for r in rewards.clone() {
             self.collected_rewards
                 .insert(r, ())
                 .expect("failed to add collected rewards");
+        }
+        //prune tree by forgetting rewards
+        for r in rewards {
+            self.collected_rewards.forget(r);
         }
         self.prev_state = Some(comm);
         Ok(ValidationOutputs {
