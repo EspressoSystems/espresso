@@ -1,0 +1,54 @@
+@startuml
+
+component Client
+
+component "Validator CLI" as CLI
+
+package EsQS {
+    package "API Modules" as API {
+        component "Availability" as Avail
+        component "Catchup"
+        component "Metastate" as Meta
+        component "Status"
+        interface "Dispatch Request" as dispatch
+    }
+
+    package "Web App" {
+        component "Tide Disco App" as App {
+            portin "HTTP Request" as req
+            interface "init" as init_app
+        }
+        component "Persistence" {
+            interface "init" as init_persistence
+            interface "Retrieve Data" as query
+        }
+    }
+
+    interface "init"
+}
+
+component Main as "Validator Executable" {
+    portin "CLI Args" as cli_args
+}
+
+component HotShot {
+    interface "next_event" as ev
+}
+
+Client --down-> req : 4
+CLI --> cli_args : 1
+Main -> init : 2
+init -> init_app
+init -> init_persistence
+
+App --> dispatch : 5
+API --> query : 6
+dispatch --> Avail
+dispatch --> Catchup
+dispatch --> Meta
+dispatch --> Status
+
+Persistence --> ev : 3
+
+@enduml
+
