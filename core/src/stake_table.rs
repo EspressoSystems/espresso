@@ -13,7 +13,9 @@
 use crate::merkle_tree::NodeValue;
 use crate::state::{CommitableHash, CommitableHashTag};
 use crate::tree_hash::KVTreeHash;
+use crate::util::canonical;
 use crate::{PrivKey, PubKey};
+
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use commit::Committable;
 use espresso_macros::*;
@@ -94,6 +96,14 @@ impl CanonicalDeserialize for StakingKey {
     }
 }
 
+impl commit::Committable for StakingKey {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Staking Key")
+            .var_size_bytes(&canonical::serialize(self).unwrap())
+            .finalize()
+    }
+}
+
 // cannot derive CanonicalSerialize because PubKey does not implement it
 impl CanonicalSerialize for StakingKeySignature {
     fn serialize<W: ark_serialize::Write>(
@@ -150,17 +160,29 @@ impl CommitableHashTag for StakeTableTag {
 /// Hash function for the Stake Table
 pub type StakeTableHash = CommitableHash<StakingKey, Amount, StakeTableTag>;
 
-/// Identifying tag for a StakeTableCommitment
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub struct StakeTableCommitmentTag();
-impl CommitableHashTag for StakeTableCommitmentTag {
-    fn commitment_diversifier() -> &'static str {
-        "Stake Table Commitment"
+/// Stake table commitment type
+#[tagged_blob("STAKETABLE")]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash, CanonicalDeserialize, CanonicalSerialize)]
+pub struct StakeTableCommitment(pub <StakeTableHash as KVTreeHash>::Digest);
+
+impl commit::Committable for StakeTableCommitment {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Stake Table Commitment")
+            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
+            .finalize()
     }
 }
 
-/// Stake table commitment type
-pub type StakeTableCommitment = <StakeTableHash as KVTreeHash>::Digest;
+/// Hash for tree which stores commitment hash of previous rounds' stake tables and their total amount
+pub struct StakeTableCommitmentsCommitment(pub NodeValue);
+
+impl commit::Committable for StakeTableCommitmentsCommitment {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Stake Table Commitments Commitments")
+            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
+            .finalize()
+    }
+}
 
 /// Sliding window Stake Table checks
 ///

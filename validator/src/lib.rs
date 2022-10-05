@@ -19,9 +19,8 @@ use async_std::sync::{Arc, RwLock};
 use clap::{Args, Parser};
 use cld::ClDuration;
 use dirs::data_local_dir;
-use espresso_core::kv_merkle_tree::KVMerkleTree;
 use espresso_core::reward::{
-    mock_eligibility, CollectRewardNote, CollectedRewards, CollectedRewardsHash,
+    mock_eligibility, CollectRewardNote, CollectedRewards, CollectedRewardsSet,
 };
 use espresso_core::stake_table::StakingKey;
 use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof};
@@ -839,7 +838,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
     cap_address: &UserAddress,
     mut hotshot: Consensus,
 ) {
-    let mut collected_rewards = KVMerkleTree::<CollectedRewardsHash>::EmptySubtree;
+    let mut collected_rewards = CollectedRewardsSet::EmptySubtree;
     let staking_key = StakingKey::from_priv_key(staking_priv_key);
     loop {
         let event = hotshot
@@ -847,14 +846,18 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
             .await
             .expect("HotShot unexpectedly closed");
         if let EventType::Decide { block, state, qcs } = event.event {
-            for (blk, validator_state, qc) in izip!(block.iter(), state.iter(), qcs.iter()) {
+            for (blk, validator_state, qc) in
+                izip!(block.iter().rev(), state.iter().rev(), qcs.iter().rev())
+            {
                 let view_number = qc.view_number;
                 // 0. check if I'm elected
                 if let Some(vrf_proof) =
                     mock_eligibility::prove_eligibility(view_number.into(), staking_priv_key)
                 {
-                    let claimed_reward =
-                        CollectedRewards((staking_key.clone(), view_number.into()));
+                    let claimed_reward = CollectedRewards {
+                        staking_key: staking_key.clone(),
+                        view_number: view_number.into(),
+                    };
                     let uncollected_reward_proof =
                         collected_rewards.lookup(claimed_reward).unwrap().1;
                     // 1. generate collect reward transaction
@@ -867,6 +870,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                         cap_address.clone(),
                         stake_amount,
                         stake_proof.clone(),
+                        0, // TODO (fernando & Kaley) get leaf position from state
                         uncollected_reward_proof,
                         vrf_proof,
                     )
@@ -887,9 +891,12 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                     for txn in blk.block.0.iter() {
                         if let EspressoTransaction::Reward(note) = txn {
                             let staking_key = note.staking_key();
-                            let collected_reward =
-                                CollectedRewards((staking_key, view_number.into()));
+                            let collected_reward = CollectedRewards {
+                                staking_key,
+                                view_number: view_number.into(),
+                            };
                             collected_rewards.insert(collected_reward, ());
+                            // TODO we could forget rewards others rewards
                         }
                     }
 

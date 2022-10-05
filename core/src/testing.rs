@@ -318,6 +318,7 @@ impl MultiXfrTestState {
                 ChainVariables::new(42, VERIF_CRS.clone()),
                 t,
                 StakeTableMap::EmptySubtree,
+                Amount::from(0u64),
                 StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
             ),
             outer_timer: timer,
@@ -1441,6 +1442,7 @@ mod tests {
                 ),
                 record_merkle_tree,
                 stake_table_map,
+                Amount::from(0u64),
                 stake_table_commitments_mt,
             )
         };
@@ -1471,6 +1473,7 @@ mod tests {
             ChainVariables::new(42, VERIF_CRS.clone()),
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
             StakeTableMap::EmptySubtree,
+            Amount::from(0u64),
             StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
         );
         let mut v2 = v1.clone();
@@ -1625,6 +1628,7 @@ mod tests {
             ChainVariables::new(42, VERIF_CRS.clone()),
             t,
             StakeTableMap::EmptySubtree,
+            Amount::from(0u64),
             StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
         );
 
