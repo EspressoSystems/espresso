@@ -967,6 +967,8 @@
 <span id="967">967</span>
 <span id="968">968</span>
 <span id="969">969</span>
+<span id="970">970</span>
+<span id="971">971</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -1392,8 +1394,10 @@
         }
     }
 
-    <span class="doccomment">/// Returns the value and proof for a queried key. If the key exists in a forgotten subtree,</span>
-    <span class="doccomment">/// returns None.</span>
+    <span class="doccomment">/// Returns the value and proof for a queried key.</span>
+    <span class="doccomment">/// If the path inclusion (or non inclusion) proof is in a ForgottenSubTree, return None</span>
+    <span class="doccomment">/// If the key is not present, returns Some(None, pf) where pf is the non-inclusion proof.</span>
+    <span class="doccomment">/// If the key is present, returns Some(Some(value), pf) where `value` is the corresponding value and pf is the inclusion proof.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">lookup</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">key</span>: <span class="ident">KVHash::Key</span>,

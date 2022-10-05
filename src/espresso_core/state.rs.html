@@ -1502,6 +1502,108 @@
 <span id="1502">1502</span>
 <span id="1503">1503</span>
 <span id="1504">1504</span>
+<span id="1505">1505</span>
+<span id="1506">1506</span>
+<span id="1507">1507</span>
+<span id="1508">1508</span>
+<span id="1509">1509</span>
+<span id="1510">1510</span>
+<span id="1511">1511</span>
+<span id="1512">1512</span>
+<span id="1513">1513</span>
+<span id="1514">1514</span>
+<span id="1515">1515</span>
+<span id="1516">1516</span>
+<span id="1517">1517</span>
+<span id="1518">1518</span>
+<span id="1519">1519</span>
+<span id="1520">1520</span>
+<span id="1521">1521</span>
+<span id="1522">1522</span>
+<span id="1523">1523</span>
+<span id="1524">1524</span>
+<span id="1525">1525</span>
+<span id="1526">1526</span>
+<span id="1527">1527</span>
+<span id="1528">1528</span>
+<span id="1529">1529</span>
+<span id="1530">1530</span>
+<span id="1531">1531</span>
+<span id="1532">1532</span>
+<span id="1533">1533</span>
+<span id="1534">1534</span>
+<span id="1535">1535</span>
+<span id="1536">1536</span>
+<span id="1537">1537</span>
+<span id="1538">1538</span>
+<span id="1539">1539</span>
+<span id="1540">1540</span>
+<span id="1541">1541</span>
+<span id="1542">1542</span>
+<span id="1543">1543</span>
+<span id="1544">1544</span>
+<span id="1545">1545</span>
+<span id="1546">1546</span>
+<span id="1547">1547</span>
+<span id="1548">1548</span>
+<span id="1549">1549</span>
+<span id="1550">1550</span>
+<span id="1551">1551</span>
+<span id="1552">1552</span>
+<span id="1553">1553</span>
+<span id="1554">1554</span>
+<span id="1555">1555</span>
+<span id="1556">1556</span>
+<span id="1557">1557</span>
+<span id="1558">1558</span>
+<span id="1559">1559</span>
+<span id="1560">1560</span>
+<span id="1561">1561</span>
+<span id="1562">1562</span>
+<span id="1563">1563</span>
+<span id="1564">1564</span>
+<span id="1565">1565</span>
+<span id="1566">1566</span>
+<span id="1567">1567</span>
+<span id="1568">1568</span>
+<span id="1569">1569</span>
+<span id="1570">1570</span>
+<span id="1571">1571</span>
+<span id="1572">1572</span>
+<span id="1573">1573</span>
+<span id="1574">1574</span>
+<span id="1575">1575</span>
+<span id="1576">1576</span>
+<span id="1577">1577</span>
+<span id="1578">1578</span>
+<span id="1579">1579</span>
+<span id="1580">1580</span>
+<span id="1581">1581</span>
+<span id="1582">1582</span>
+<span id="1583">1583</span>
+<span id="1584">1584</span>
+<span id="1585">1585</span>
+<span id="1586">1586</span>
+<span id="1587">1587</span>
+<span id="1588">1588</span>
+<span id="1589">1589</span>
+<span id="1590">1590</span>
+<span id="1591">1591</span>
+<span id="1592">1592</span>
+<span id="1593">1593</span>
+<span id="1594">1594</span>
+<span id="1595">1595</span>
+<span id="1596">1596</span>
+<span id="1597">1597</span>
+<span id="1598">1598</span>
+<span id="1599">1599</span>
+<span id="1600">1600</span>
+<span id="1601">1601</span>
+<span id="1602">1602</span>
+<span id="1603">1603</span>
+<span id="1604">1604</span>
+<span id="1605">1605</span>
+<span id="1606">1606</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">deny</span>(<span class="ident">warnings</span>)]</span>
 <span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
@@ -1518,11 +1620,12 @@
 <span class="kw">use</span> <span class="ident">espresso_macros</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">jf_cap::structs</span>::{<span class="ident">Amount</span>, <span class="ident">ReceiverMemo</span>};
 <span class="kw">use</span> <span class="ident">jf_cap::Signature</span>;
+<span class="kw">use</span> <span class="ident">reef::traits::Validator</span>;
 
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::full_persistence::FullPersistence</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::kv_merkle_tree</span>::<span class="kw-2">*</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::lw_persistence::LWPersistence</span>;
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::reward</span>::{<span class="ident">CollectRewardNote</span>, <span class="ident">RewardNoteProofs</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::reward</span>::{<span class="ident">CollectRewardNote</span>, <span class="ident">CollectedRewards</span>, <span class="ident">RewardNoteProofs</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::set_merkle_tree</span>::<span class="kw-2">*</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::tree_hash::committable_hash</span>::<span class="kw-2">*</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::tree_hash</span>::<span class="kw-2">*</span>;
@@ -1530,8 +1633,9 @@
 <span class="kw">pub</span> <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">PrivKey</span>, <span class="ident">PubKey</span>};
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::genesis::GenesisNote</span>;
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::reward::CollectedRewardsHash</span>;
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table</span>::{<span class="ident">StakeTableCommitment</span>, <span class="ident">StakeTableHash</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::reward</span>::{<span class="ident">CollectedRewardsCommitment</span>, <span class="ident">CollectedRewardsHash</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table</span>::{<span class="ident">StakeTableCommitment</span>, <span class="ident">StakeTableCommitmentsCommitment</span>, <span class="ident">StakeTableHash</span>};
+
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::universal_params</span>::{<span class="ident">MERKLE_HEIGHT</span>, <span class="ident">VERIF_CRS</span>};
 <span class="kw">use</span> <span class="ident">arbitrary</span>::{<span class="ident">Arbitrary</span>, <span class="ident">Unstructured</span>};
 <span class="kw">use</span> <span class="ident">ark_serialize</span>::<span class="kw-2">*</span>;
@@ -1917,6 +2021,12 @@
 
     <span class="doccomment">/// A genesis transaction was included in a non-genesis block</span>
     <span class="ident">UnexpectedGenesis</span>,
+
+    <span class="doccomment">/// Reward in transaction has already been collected</span>
+    <span class="ident">PreviouslyCollectedReward</span>,
+
+    <span class="doccomment">/// Stake amount in transaction does not match amount in stake table</span>
+    <span class="ident">RewardAmountTooLarge</span>,
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod</span> <span class="ident">ser_display</span> {
@@ -1971,6 +2081,8 @@
             },
             <span class="ident">InconsistentHelperProofs</span> =&gt; <span class="ident">InconsistentHelperProofs</span>,
             <span class="ident">UnexpectedGenesis</span> =&gt; <span class="ident">UnexpectedGenesis</span>,
+            <span class="ident">PreviouslyCollectedReward</span> =&gt; <span class="ident">PreviouslyCollectedReward</span>,
+            <span class="ident">RewardAmountTooLarge</span> =&gt; <span class="ident">RewardAmountTooLarge</span>,
         }
     }
 }
@@ -2348,6 +2460,8 @@
 <span class="doccomment">/// the validators, so that all agree. Any discrepency in the history</span>
 <span class="doccomment">/// would produce a disagreement.</span>
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">state_comm</span> {
+    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table</span>::{<span class="ident">StakeTableCommitment</span>, <span class="ident">StakeTableCommitmentsCommitment</span>};
+
     <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
     <span class="kw">use</span> <span class="ident">jf_utils::tagged_blob</span>;
     <span class="kw">use</span> <span class="ident">net::Hash</span>;
@@ -2419,6 +2533,10 @@
         <span class="kw">pub</span> <span class="ident">past_record_merkle_roots</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">RecordMerkleHistory</span><span class="op">&gt;</span>,
         <span class="kw">pub</span> <span class="ident">past_nullifiers</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">NullifierHistory</span><span class="op">&gt;</span>,
         <span class="kw">pub</span> <span class="ident">prev_block</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">Block</span><span class="op">&gt;</span>,
+        <span class="kw">pub</span> <span class="ident">stake_table</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">StakeTableCommitment</span><span class="op">&gt;</span>,
+        <span class="kw">pub</span> <span class="ident">total_stake</span>: <span class="ident">Amount</span>,
+        <span class="kw">pub</span> <span class="ident">stake_table_commitments</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">StakeTableCommitmentsCommitment</span><span class="op">&gt;</span>,
+        <span class="kw">pub</span> <span class="ident">collected_rewards</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">CollectedRewardsCommitment</span><span class="op">&gt;</span>,
     }
 
     <span class="kw">impl</span> <span class="ident">Committable</span> <span class="kw">for</span> <span class="ident">LedgerCommitmentOpening</span> {
@@ -2454,7 +2572,7 @@
     <span class="doccomment">/// Sparse [SetMerkleTree] containing up-to-date non-membership proofs for every nullifier in</span>
     <span class="doccomment">/// this block, relative to the nullifier set root hash just before applying this block.</span>
     <span class="kw">pub</span> <span class="ident">nullifier_proofs</span>: <span class="ident">SetMerkleTree</span>,
-    <span class="doccomment">/// Sparse [MerkleTree] containing membership profos for each new record created by this block,</span>
+    <span class="doccomment">/// Sparse [MerkleTree] containing membership proofs for each new record created by this block,</span>
     <span class="doccomment">/// relative to the record set root hash after applying this block.</span>
     <span class="kw">pub</span> <span class="ident">record_proofs</span>: <span class="ident">MerkleTree</span>,
 }
@@ -2605,6 +2723,9 @@
     <span class="kw">pub</span> <span class="ident">prev_block</span>: <span class="ident">BlockCommitment</span>,
     <span class="doccomment">/// Staking table. For fixed-stake, this will be the same each round</span>
     <span class="kw">pub</span> <span class="ident">stake_table</span>: <span class="ident">StakeTableMap</span>,
+    <span class="doccomment">/// Total amount staked for the current table</span>
+    <span class="comment">// TODO: this type should match the type of stake</span>
+    <span class="kw">pub</span> <span class="ident">total_stake</span>: <span class="ident">Amount</span>,
     <span class="doccomment">/// Keeps track of previous stake tables and their total stake</span>
     <span class="kw">pub</span> <span class="ident">stake_table_commitments</span>: <span class="ident">StakeTableCommFrontier</span>,
     <span class="doccomment">/// Commitment to stake table commitments set</span>
@@ -2616,12 +2737,16 @@
 <span class="doccomment">/// Nullifier proofs, organized by the root hash for which they are valid.</span>
 <span class="kw">pub</span> <span class="kw">type</span> <span class="ident">NullifierProofs</span> <span class="op">=</span> <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Nullifier</span>, <span class="ident">SetMerkleProof</span>, <span class="ident">set_hash::Hash</span>)<span class="op">&gt;</span>;
 
+<span class="doccomment">/// Information to mint CAP records for reward collectors</span>
+<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">VerifiedRewards</span> <span class="op">=</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">CollectedRewards</span><span class="op">&gt;</span>;
+
 <span class="kw">impl</span> <span class="ident">Default</span> <span class="kw">for</span> <span class="ident">ValidatorState</span> {
     <span class="kw">fn</span> <span class="ident">default</span>() -&gt; <span class="self">Self</span> {
         <span class="ident"><span class="self">Self</span>::new</span>(
             <span class="ident">ChainVariables::default</span>(),
             <span class="ident">MerkleTree::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
             <span class="ident">StakeTableMap::EmptySubtree</span>,
+            <span class="ident">Amount::from</span>(<span class="number">0u64</span>),
             <span class="ident">StakeTableCommMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
         )
     }
@@ -2639,6 +2764,7 @@
         <span class="ident">chain</span>: <span class="ident">ChainVariables</span>,
         <span class="ident">record_merkle_frontier</span>: <span class="ident">MerkleTree</span>,
         <span class="ident">stake_table_map</span>: <span class="ident">StakeTableMap</span>,
+        <span class="ident">total_stake</span>: <span class="ident">Amount</span>,
         <span class="ident">stake_table_commitments_mt</span>: <span class="ident">StakeTableCommMT</span>,
     ) -&gt; <span class="self">Self</span> {
         <span class="self">Self</span> {
@@ -2653,8 +2779,8 @@
             )),
             <span class="ident">past_nullifiers</span>: <span class="ident">NullifierHistory::default</span>(),
             <span class="ident">prev_block</span>: <span class="ident">BlockCommitment</span>(<span class="ident">Block::default</span>().<span class="ident">commit</span>()),
-            <span class="comment">//KALEY: ask about stake table initialization</span>
             <span class="ident">stake_table</span>: <span class="ident">stake_table_map</span>,
+            <span class="ident">total_stake</span>,
             <span class="ident">stake_table_commitments</span>: <span class="ident">stake_table_commitments_mt</span>.<span class="ident">frontier</span>(),
             <span class="ident">stake_table_commitments_commitment</span>: <span class="ident">stake_table_commitments_mt</span>.<span class="ident">commitment</span>(),
             <span class="ident">collected_rewards</span>: <span class="ident">KVMerkleTree</span>::<span class="op">&lt;</span><span class="ident">CollectedRewardsHash</span><span class="op">&gt;</span><span class="ident">::EmptySubtree</span>,
@@ -2676,6 +2802,13 @@
 
             <span class="ident">past_nullifiers</span>: <span class="self">self</span>.<span class="ident">past_nullifiers</span>.<span class="ident">commit</span>(),
             <span class="ident">prev_block</span>: <span class="self">self</span>.<span class="ident">prev_block</span>.<span class="number">0</span>,
+            <span class="ident">stake_table</span>: <span class="ident">StakeTableCommitment</span>(<span class="self">self</span>.<span class="ident">stake_table</span>.<span class="ident">hash</span>()).<span class="ident">commit</span>(),
+            <span class="ident">total_stake</span>: <span class="self">self</span>.<span class="ident">total_stake</span>,
+            <span class="ident">stake_table_commitments</span>: <span class="ident">StakeTableCommitmentsCommitment</span>(
+                <span class="self">self</span>.<span class="ident">stake_table_commitments_commitment</span>.<span class="ident">root_value</span>,
+            )
+            .<span class="ident">commit</span>(),
+            <span class="ident">collected_rewards</span>: <span class="ident">CollectedRewardsCommitment</span>(<span class="self">self</span>.<span class="ident">collected_rewards</span>.<span class="ident">hash</span>()).<span class="ident">commit</span>(),
         };
         <span class="ident">inputs</span>.<span class="ident">commit</span>().<span class="ident">into</span>()
     }
@@ -2704,12 +2837,15 @@
     <span class="doccomment">/// - [ValidationError::NullifierAlreadyExists]</span>
     <span class="doccomment">/// - [ValidationError::UnsupportedFreezeSize]</span>
     <span class="doccomment">/// - [ValidationError::UnsupportedTransferSize]</span>
+    <span class="doccomment">/// - [ValidationError::PreviouslyCollectedReward]</span>
+    <span class="doccomment">/// - [ValidationError::RewardAmountTooLarge]</span>
+    <span class="doccomment">///</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">validate_block_check</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">now</span>: <span class="ident">u64</span>,
         <span class="ident">txns</span>: <span class="ident">Block</span>,
         <span class="ident">txns_helper_proofs</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">EspressoTxnHelperProofs</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Block</span>, <span class="ident">NullifierProofs</span>), <span class="ident">ValidationError</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Block</span>, <span class="ident">NullifierProofs</span>, <span class="ident">VerifiedRewards</span>), <span class="ident">ValidationError</span><span class="op">&gt;</span> {
         <span class="comment">// Check if this is a genesis block. If it is, validation is trivial and we can skip the</span>
         <span class="comment">// rest of this. If it is not, then we will reject the block later if it contains any</span>
         <span class="comment">// genesis transactions.</span>
@@ -2721,7 +2857,7 @@
             }
             <span class="comment">// An acceptable genesis block is always valid, regardless of the contents, and it has</span>
             <span class="comment">// no nullifier proofs.</span>
-            <span class="kw">return</span> <span class="prelude-val">Ok</span>((<span class="ident">txns</span>, <span class="macro">vec!</span>[]));
+            <span class="kw">return</span> <span class="prelude-val">Ok</span>((<span class="ident">txns</span>, <span class="macro">vec!</span>[], <span class="macro">vec!</span>[]));
         }
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cap_txns</span> <span class="op">=</span> <span class="macro">vec!</span>[];
@@ -2815,8 +2951,49 @@
                     .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">err</span><span class="op">|</span> <span class="ident">CryptoError</span> { <span class="ident">err</span>: <span class="prelude-val">Ok</span>(<span class="ident">err</span>) })<span class="question-mark">?</span>;
             }
         }
+
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">verified_rewards</span> <span class="op">=</span> <span class="macro">vec!</span>[];
         {
-            <span class="comment">//TODO (fernando) verify CollectRewards</span>
+            <span class="comment">//verify rewards collection transactions</span>
+            <span class="kw">for</span> (<span class="ident">pfs</span>, <span class="ident">txn</span>) <span class="kw">in</span> <span class="ident">rewards_proofs</span>
+                .<span class="ident">into_iter</span>()
+                .<span class="ident">zip</span>(<span class="ident">reward_txns</span>.<span class="ident">clone</span>().<span class="ident">into_iter</span>())
+            {
+                <span class="comment">//verify reward txn (CollectRewardNote)</span>
+                <span class="ident">txn</span>.<span class="ident">verify</span>().<span class="ident">expect</span>(<span class="string">&quot;Failed to verify CollectRewardNote&quot;</span>);
+
+                <span class="comment">//check helper proofs (RewardNoteProofs)</span>
+                <span class="ident">pfs</span>.<span class="ident">verify</span>(
+                    <span class="self">self</span>,
+                    <span class="ident">txn</span>.<span class="ident">body</span>.<span class="ident">vrf_witness</span>.<span class="ident">staking_key</span>.<span class="ident">clone</span>(),
+                    <span class="ident">txn</span>.<span class="ident">body</span>.<span class="ident">vrf_witness</span>.<span class="ident">view_number</span>,
+                )
+                .<span class="ident">expect</span>(<span class="string">&quot;Failed to verify auxillary proofs&quot;</span>);
+
+                <span class="comment">//check vrf witness (EligibilityWitness)</span>
+                <span class="ident">txn</span>.<span class="ident">body</span>
+                    .<span class="ident">vrf_witness</span>
+                    .<span class="ident">verify</span>()
+                    .<span class="ident">expect</span>(<span class="string">&quot;Failed to verify VRF Witness&quot;</span>);
+
+                <span class="comment">//check reward amount</span>
+                <span class="kw">let</span> <span class="ident">max_reward</span> <span class="op">=</span>
+                    <span class="ident"><span class="kw">crate</span>::reward::compute_reward_amount</span>(<span class="self">self</span>, <span class="self">self</span>.<span class="ident">now</span>(), <span class="self">self</span>.<span class="ident">total_stake</span>);
+                <span class="kw">if</span> <span class="ident">txn</span>.<span class="ident">body</span>.<span class="ident">reward_amount</span> <span class="op">&gt;</span> <span class="ident">max_reward</span> {
+                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ValidationError::RewardAmountTooLarge</span>);
+                }
+                <span class="kw">let</span> <span class="ident">latest_reward</span> <span class="op">=</span> <span class="ident">CollectedRewards</span> {
+                    <span class="ident">staking_key</span>: <span class="ident">txn</span>.<span class="ident">body</span>.<span class="ident">vrf_witness</span>.<span class="ident">staking_key</span>,
+                    <span class="ident">view_number</span>: <span class="ident">txn</span>.<span class="ident">body</span>.<span class="ident">vrf_witness</span>.<span class="ident">view_number</span>,
+                };
+
+                <span class="comment">//check for duplicate reward in current block</span>
+                <span class="kw">if</span> <span class="ident">verified_rewards</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">latest_reward</span>) {
+                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ValidationError::PreviouslyCollectedReward</span>);
+                }
+
+                <span class="ident">verified_rewards</span>.<span class="ident">push</span>(<span class="ident">latest_reward</span>);
+            }
         }
         <span class="comment">// assemble Block</span>
         <span class="kw">let</span> <span class="ident">txns</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">cap_txns</span>
@@ -2825,7 +3002,7 @@
             .<span class="ident">chain</span>(<span class="ident">reward_txns</span>.<span class="ident">into_iter</span>().<span class="ident">map</span>(<span class="ident">EspressoTransaction::Reward</span>))
             .<span class="ident">collect</span>();
 
-        <span class="prelude-val">Ok</span>((<span class="ident">Block</span>(<span class="ident">txns</span>), <span class="ident">nullifiers_proofs</span>))
+        <span class="prelude-val">Ok</span>((<span class="ident">Block</span>(<span class="ident">txns</span>), <span class="ident">nullifiers_proofs</span>, <span class="ident">verified_rewards</span>))
     }
 
     <span class="doccomment">/// Performs validation for a block, updating the ValidatorState.</span>
@@ -2847,7 +3024,7 @@
         <span class="ident">txns</span>: <span class="ident">Block</span>,
         <span class="ident">proofs</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">EspressoTxnHelperProofs</span><span class="op">&gt;</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ValidationOutputs</span>, <span class="ident">ValidationError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> (<span class="ident">txns</span>, <span class="ident">null_pfs</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">validate_block_check</span>(<span class="ident">now</span>, <span class="ident">txns</span>, <span class="ident">proofs</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> (<span class="ident">txns</span>, <span class="ident">null_pfs</span>, <span class="ident">rewards</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">validate_block_check</span>(<span class="ident">now</span>, <span class="ident">txns</span>, <span class="ident">proofs</span>)<span class="question-mark">?</span>;
         <span class="comment">// If the block successfully validates, and the nullifier proofs apply correctly, the</span>
         <span class="comment">// remaining (mutating) operations cannot fail, as this would result in an inconsistent</span>
         <span class="comment">// state. No operations after the first assignement to a member of self have a possible</span>
@@ -2862,6 +3039,7 @@
             .<span class="ident">expect</span>(<span class="string">&quot;failed to append nullifiers after validation&quot;</span>);
 
         <span class="comment">// If this is a genesis block, apply system parameter updates.</span>
+        <span class="comment">// TODO: update total_stake when stake table is added to genesis note</span>
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">EspressoTransaction::Genesis</span>(<span class="ident">txn</span>)) <span class="op">=</span> <span class="ident">txns</span>.<span class="number">0</span>.<span class="ident">get</span>(<span class="number">0</span>) {
             <span class="self">self</span>.<span class="ident">chain</span> <span class="op">=</span> <span class="ident">txn</span>.<span class="ident">chain</span>.<span class="ident">clone</span>()
         }
@@ -2885,6 +3063,19 @@
         <span class="kw">let</span> <span class="ident">record_merkle_frontier</span> <span class="op">=</span> <span class="ident">record_merkle_builder</span>.<span class="ident">build</span>();
         <span class="macro">assert_eq!</span>(<span class="ident">uid</span>, <span class="ident">record_merkle_frontier</span>.<span class="ident">num_leaves</span>());
 
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">stc_builder</span> <span class="op">=</span> <span class="ident"><span class="kw">crate</span>::merkle_tree::FilledMTBuilder::from_frontier</span>(
+            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">stake_table_commitments_commitment</span>,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">stake_table_commitments</span>,
+        )
+        .<span class="ident">expect</span>(<span class="string">&quot;failed to restore stake table commitments merkle tree from frontier&quot;</span>);
+
+        <span class="ident">stc_builder</span>.<span class="ident">push</span>((
+            <span class="ident">StakeTableCommitment</span>(<span class="self">self</span>.<span class="ident">stake_table</span>.<span class="ident">hash</span>()),
+            <span class="self">self</span>.<span class="ident">total_stake</span>,
+        ));
+        <span class="kw">let</span> <span class="ident">stc_mt</span> <span class="op">=</span> <span class="ident">stc_builder</span>.<span class="ident">build</span>();
+        <span class="macro">assert_eq!</span>(<span class="ident">now</span>, <span class="ident">stc_mt</span>.<span class="ident">num_leaves</span>());
+
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">past_record_merkle_roots</span>.<span class="number">0</span>.<span class="ident">len</span>() <span class="op">&gt;</span><span class="op">=</span> <span class="ident"><span class="self">Self</span>::HISTORY_SIZE</span> {
             <span class="self">self</span>.<span class="ident">past_record_merkle_roots</span>.<span class="number">0</span>.<span class="ident">pop_back</span>();
         }
@@ -2893,6 +3084,19 @@
             .<span class="ident">push_front</span>(<span class="self">self</span>.<span class="ident">record_merkle_commitment</span>.<span class="ident">root_value</span>);
         <span class="self">self</span>.<span class="ident">record_merkle_commitment</span> <span class="op">=</span> <span class="ident">record_merkle_frontier</span>.<span class="ident">commitment</span>();
         <span class="self">self</span>.<span class="ident">record_merkle_frontier</span> <span class="op">=</span> <span class="ident">record_merkle_frontier</span>.<span class="ident">frontier</span>();
+        <span class="self">self</span>.<span class="ident">stake_table_commitments_commitment</span> <span class="op">=</span> <span class="ident">stc_mt</span>.<span class="ident">commitment</span>();
+        <span class="self">self</span>.<span class="ident">stake_table_commitments</span> <span class="op">=</span> <span class="ident">stc_mt</span>.<span class="ident">frontier</span>();
+
+        <span class="comment">//insert rewards transactions from this block</span>
+        <span class="kw">for</span> <span class="ident">r</span> <span class="kw">in</span> <span class="ident">rewards</span>.<span class="ident">clone</span>() {
+            <span class="self">self</span>.<span class="ident">collected_rewards</span>
+                .<span class="ident">insert</span>(<span class="ident">r</span>, ())
+                .<span class="ident">expect</span>(<span class="string">&quot;failed to add collected rewards&quot;</span>);
+        }
+        <span class="comment">//prune tree by forgetting rewards</span>
+        <span class="kw">for</span> <span class="ident">r</span> <span class="kw">in</span> <span class="ident">rewards</span> {
+            <span class="self">self</span>.<span class="ident">collected_rewards</span>.<span class="ident">forget</span>(<span class="ident">r</span>);
+        }
         <span class="self">self</span>.<span class="ident">prev_state</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">comm</span>);
         <span class="prelude-val">Ok</span>(<span class="ident">ValidationOutputs</span> {
             <span class="ident">uids</span>,

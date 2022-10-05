@@ -451,6 +451,89 @@
 <span id="451">451</span>
 <span id="452">452</span>
 <span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -470,6 +553,8 @@
     <span class="ident">ViewNumber</span>,
 };
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::state</span>::{<span class="ident">CommitableHash</span>, <span class="ident">CommitableHashTag</span>, <span class="ident">ValidatorState</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::tree_hash::KVTreeHash</span>;
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::util::canonical</span>;
 <span class="kw">use</span> <span class="ident">ark_serialize</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">ark_std::rand</span>::{<span class="ident">CryptoRng</span>, <span class="ident">RngCore</span>};
 <span class="kw">use</span> <span class="ident">core::hash::Hash</span>;
@@ -497,7 +582,10 @@
 <span class="doccomment">/// Previously collected rewards are recorded in (StakingKey, view_number) pairs</span>
 <span class="attribute">#[<span class="ident">tagged_blob</span>(<span class="string">&quot;COLLECTED-REWARD&quot;</span>)]</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>, <span class="ident">CanonicalSerialize</span>, <span class="ident">CanonicalDeserialize</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">CollectedRewards</span>((<span class="ident">StakingKey</span>, <span class="ident">ViewNumber</span>));
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">CollectedRewards</span> {
+    <span class="kw">pub</span> <span class="ident">staking_key</span>: <span class="ident">StakingKey</span>,
+    <span class="kw">pub</span> <span class="ident">view_number</span>: <span class="ident">ViewNumber</span>,
+}
 
 <span class="doccomment">/// Identifying tag for CollectedReward</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">Copy</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Serialize</span>, <span class="ident">Deserialize</span>, <span class="ident">Hash</span>)]</span>
@@ -510,6 +598,17 @@
 
 <span class="doccomment">/// Hash for set Merkle tree for all of the previously-collected rewards</span>
 <span class="kw">pub</span> <span class="kw">type</span> <span class="ident">CollectedRewardsHash</span> <span class="op">=</span> <span class="ident">CommitableHash</span><span class="op">&lt;</span><span class="ident">CollectedRewards</span>, (), <span class="ident">CollectedRewardsTag</span><span class="op">&gt;</span>;
+
+<span class="doccomment">/// Committable type for CollectedRewards</span>
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">CollectedRewardsCommitment</span>(<span class="kw">pub</span> <span class="op">&lt;</span><span class="ident">CollectedRewardsHash</span> <span class="kw">as</span> <span class="ident">KVTreeHash</span><span class="op">&gt;</span><span class="ident">::Digest</span>);
+
+<span class="kw">impl</span> <span class="ident">commit::Committable</span> <span class="kw">for</span> <span class="ident">CollectedRewardsCommitment</span> {
+    <span class="kw">fn</span> <span class="ident">commit</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">commit::Commitment</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+        <span class="ident">commit::RawCommitmentBuilder::new</span>(<span class="string">&quot;Collected Reward&quot;</span>)
+            .<span class="ident">var_size_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">canonical::serialize</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>).<span class="ident">unwrap</span>())
+            .<span class="ident">finalize</span>()
+    }
+}
 
 <span class="doccomment">/// Reward Collection Transaction Note</span>
 <span class="attribute">#[<span class="ident">derive</span>(
@@ -524,7 +623,7 @@
     <span class="ident">Deserialize</span>,
 )]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">CollectRewardNote</span> {
-    <span class="ident">body</span>: <span class="ident">CollectRewardBody</span>,
+    <span class="kw">pub</span> <span class="ident">body</span>: <span class="ident">CollectRewardBody</span>,
     <span class="ident">signature</span>: <span class="ident">StakingKeySignature</span>,
 }
 
@@ -613,9 +712,9 @@
     <span class="doccomment">/// Address that owns the reward</span>
     <span class="ident">cap_address</span>: <span class="ident">UserAddress</span>,
     <span class="doccomment">/// Reward amount</span>
-    <span class="ident">reward_amount</span>: <span class="ident">Amount</span>,
+    <span class="kw">pub</span> <span class="ident">reward_amount</span>: <span class="ident">Amount</span>,
     <span class="doccomment">/// Staking `pub_key`, `view` number and a proof that staking key was selected for committee election on `view`</span>
-    <span class="ident">vrf_witness</span>: <span class="ident">EligibilityWitness</span>,
+    <span class="kw">pub</span> <span class="ident">vrf_witness</span>: <span class="ident">EligibilityWitness</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">CollectRewardBody</span> {
@@ -688,11 +787,11 @@
     <span class="ident">Serialize</span>,
     <span class="ident">Deserialize</span>,
 )]</span>
-<span class="kw">struct</span> <span class="ident">EligibilityWitness</span> {
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">EligibilityWitness</span> {
     <span class="doccomment">/// Staking public key</span>
-    <span class="ident">staking_key</span>: <span class="ident">StakingKey</span>,
+    <span class="kw">pub</span> <span class="ident">staking_key</span>: <span class="ident">StakingKey</span>,
     <span class="doccomment">/// View number for which the key was elected</span>
-    <span class="ident">view_number</span>: <span class="ident">ViewNumber</span>,
+    <span class="kw">pub</span> <span class="ident">view_number</span>: <span class="ident">ViewNumber</span>,
     <span class="doccomment">/// amount of stake on `view_number`</span>
     <span class="ident">stake_amount</span>: <span class="ident">Amount</span>,
     <span class="doccomment">/// Cryptographic proof</span>
@@ -737,6 +836,8 @@
     <span class="ident">stake_amount_proof</span>: <span class="ident">KVMerkleProof</span><span class="op">&lt;</span><span class="ident">StakeTableHash</span><span class="op">&gt;</span>,
     <span class="doccomment">/// Proof that reward hasn&#39;t been collected</span>
     <span class="ident">uncollected_reward_proof</span>: <span class="ident">KVMerkleProof</span><span class="op">&lt;</span><span class="ident">CollectedRewardsHash</span><span class="op">&gt;</span>,
+    <span class="doccomment">/// Index of relevant stake table commitment in MerkleTree</span>
+    <span class="ident">leaf_proof_pos</span>: <span class="ident">u64</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">RewardNoteProofs</span> {
@@ -751,10 +852,15 @@
             <span class="ident"><span class="self">Self</span>::get_stake_commitment_total_stake_and_proof</span>(<span class="ident">validator_state</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">uncollected_reward_proof</span> <span class="op">=</span>
             <span class="ident"><span class="self">Self</span>::proof_uncollected_rewards</span>(<span class="ident">validator_state</span>, <span class="ident">stake_key</span>, <span class="ident">view_number</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">leaf_proof_pos</span> <span class="op">=</span> <span class="ident">validator_state</span>
+            .<span class="ident">stake_table_commitments_commitment</span>
+            .<span class="ident">num_leaves</span>
+            <span class="op">-</span> <span class="number">1</span>;
         <span class="prelude-val">Ok</span>(<span class="self">Self</span> {
             <span class="ident">stake_table_commitment_leaf_proof</span>,
             <span class="ident">stake_amount_proof</span>,
             <span class="ident">uncollected_reward_proof</span>,
+            <span class="ident">leaf_proof_pos</span>,
         })
     }
 
@@ -775,7 +881,10 @@
         <span class="ident">staking_key</span>: <span class="kw-2">&amp;</span><span class="ident">StakingKey</span>,
         <span class="ident">view_number</span>: <span class="ident">hotshot_types::data::ViewNumber</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">KVMerkleProof</span><span class="op">&lt;</span><span class="ident">CollectedRewardsHash</span><span class="op">&gt;</span>, <span class="ident">RewardError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">CollectedRewards</span>((<span class="ident">staking_key</span>.<span class="ident">clone</span>(), <span class="ident">view_number</span>.<span class="ident">into</span>()));
+        <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">CollectedRewards</span> {
+            <span class="ident">staking_key</span>: <span class="ident">staking_key</span>.<span class="ident">clone</span>(),
+            <span class="ident">view_number</span>: <span class="ident">view_number</span>.<span class="ident">into</span>(),
+        };
         <span class="comment">// if (key, proof) not found, then key is present but not in memory. Hence, reward was collected.</span>
         <span class="comment">// if value is found, then reward was also collected</span>
         <span class="comment">// if value not found, return proof for it</span>
@@ -788,6 +897,54 @@
         } <span class="kw">else</span> {
             <span class="prelude-val">Err</span>(<span class="ident">RewardError::RewardAlreadyCollected</span> {})
         }
+    }
+
+    <span class="doccomment">///Checks proofs in RewardNoteProofs against ValidatorState</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">verify</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">validator_state</span>: <span class="kw-2">&amp;</span><span class="ident">ValidatorState</span>,
+        <span class="ident">staking_key</span>: <span class="ident">StakingKey</span>,
+        <span class="ident">view_number</span>: <span class="ident">ViewNumber</span>,
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">RewardError</span><span class="op">&gt;</span> {
+        <span class="comment">//check collected reward non-inclusion proof</span>
+        <span class="kw">let</span> <span class="ident">collected_reward_check</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">uncollected_reward_proof</span>.<span class="ident">check</span>(
+            <span class="ident">CollectedRewards</span> {
+                <span class="ident">staking_key</span>: <span class="ident">staking_key</span>.<span class="ident">clone</span>(),
+                <span class="ident">view_number</span>,
+            },
+            <span class="ident">validator_state</span>.<span class="ident">collected_rewards</span>.<span class="ident">hash</span>(),
+        );
+        <span class="kw">match</span> <span class="ident">collected_reward_check</span> {
+            <span class="prelude-val">None</span> =&gt; <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">RewardError::ProofNotInMemory</span> {}),
+            <span class="prelude-val">Some</span>((<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="kw">_</span>)) =&gt; {
+                <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">RewardError::RewardAlreadyCollected</span> {});
+            }
+            <span class="comment">//Non-inclusion proof is valid and proof check returns no value for given key</span>
+            <span class="prelude-val">Some</span>((<span class="prelude-val">None</span>, <span class="kw">_</span>)) =&gt; {}
+        }
+
+        <span class="comment">//check stake_table_commitment_proof</span>
+        <span class="ident"><span class="kw">crate</span>::merkle_tree::MerkleTree::check_proof</span>(
+            <span class="ident">validator_state</span>
+                .<span class="ident">stake_table_commitments_commitment</span>
+                .<span class="ident">root_value</span>,
+            <span class="self">self</span>.<span class="ident">leaf_proof_pos</span>,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">stake_table_commitment_leaf_proof</span>,
+        )
+        .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">RewardError::BadStakeTableCommitmentProof</span> {})<span class="question-mark">?</span>;
+
+        <span class="comment">//check stake amount proof</span>
+        <span class="kw">let</span> <span class="ident">stake_amount_check</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">stake_amount_proof</span>.<span class="ident">check</span>(
+            <span class="ident">staking_key</span>,
+            <span class="self">self</span>.<span class="ident">stake_table_commitment_leaf_proof</span>.<span class="ident">leaf</span>.<span class="number">0</span> .<span class="number">0</span> .<span class="number">0</span>,
+        );
+        <span class="kw">match</span> <span class="ident">stake_amount_check</span> {
+            <span class="prelude-val">Some</span>((<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="kw">_</span>)) =&gt; {}
+            <span class="kw">_</span> =&gt; {
+                <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">RewardError::BadStakeTableProof</span> {});
+            }
+        }
+        <span class="prelude-val">Ok</span>(())
     }
 }
 
@@ -821,6 +978,15 @@
 
     <span class="doccomment">/// RewardNote failed signature</span>
     <span class="ident">SignatureError</span> {},
+
+    <span class="doccomment">/// StakeTableCommitmentProof check failed</span>
+    <span class="ident">BadStakeTableCommitmentProof</span> {},
+
+    <span class="doccomment">/// Request reward too large</span>
+    <span class="ident">RewardAmountTooLarge</span> {},
+
+    <span class="doccomment">/// Stake table proof check failed</span>
+    <span class="ident">BadStakeTableProof</span> {},
 }
 
 <span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ark_serialize::SerializationError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">RewardError</span> {
