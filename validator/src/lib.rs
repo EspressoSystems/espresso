@@ -54,6 +54,7 @@ use libp2p::identity::ed25519::SecretKey;
 use libp2p::identity::Keypair;
 use libp2p::{multiaddr, Multiaddr, PeerId};
 use libp2p_networking::network::{MeshParams, NetworkNodeConfigBuilder, NetworkNodeType};
+use node_impl::ValidatorNodeImpl;
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
 use snafu::Snafu;
 use std::collections::HashSet;
@@ -67,8 +68,8 @@ use std::str::FromStr;
 use std::time::Duration;
 use surf::Url;
 use tracing::{debug, event, Level};
-use validator_node::validator_node::ValidatorNodeImpl;
 
+mod node_impl;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 

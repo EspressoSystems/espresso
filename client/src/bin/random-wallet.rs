@@ -310,7 +310,7 @@ async fn main() {
                 .await
                 .unwrap();
             keystore
-                .generate_viewing_account("freeze key".to_string())
+                .generate_freezing_account("freeze key".to_string())
                 .await
                 .unwrap();
             keystore
