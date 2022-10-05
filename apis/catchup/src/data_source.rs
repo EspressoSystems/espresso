@@ -23,7 +23,7 @@ pub trait CatchUpDataSource {
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;
     fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType;
-    fn subscribe(&self) -> Receiver<(usize, LedgerEvent<EspressoLedger>)>;
+    fn subscribe(&self) -> Receiver<(usize, Option<LedgerEvent<EspressoLedger>>)>;
 }
 
 #[async_trait]
