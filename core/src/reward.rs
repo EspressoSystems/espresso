@@ -31,7 +31,7 @@ use jf_cap::structs::{
 use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter::once;
 
 /// Proof for Vrf output
@@ -440,31 +440,42 @@ pub mod mock_eligibility {
     }
 }
 
+pub type CollectedRewardsSet = KVMerkleTree<CollectedRewardsHash>;
+pub type CollectedRewardsDigest = <CollectedRewardsHash as KVTreeHash>::Digest;
+pub type CollectedRewardsProof = KVMerkleProof<CollectedRewardsHash>;
+
+/// CollectedRewards proofs, organized by the root hash for which they are valid.
+pub type CollectedRewardsProofs = Vec<(
+    CollectedRewards,
+    CollectedRewardsProof,
+    CollectedRewardsDigest,
+)>;
+
 /// Sliding window for reward collection
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CollectedRewardsHistory {
-    current: <CollectedRewardsHash as KVTreeHash>::Digest,
-    history: VecDeque<(KVMerkleTree<CollectedRewardsHash>, Vec<CollectedRewards>)>,
+    current: CollectedRewardsDigest,
+    history: VecDeque<(CollectedRewardsSet, Vec<CollectedRewards>)>,
 }
 
 impl Default for CollectedRewardsHistory {
     fn default() -> Self {
         Self {
-            current: KVMerkleTree::<CollectedRewardsHash>::EmptySubtree.hash(),
+            current: CollectedRewardsSet::EmptySubtree.hash(),
             history: VecDeque::with_capacity(ValidatorState::HISTORY_SIZE),
         }
     }
 }
 
 impl CollectedRewardsHistory {
-    pub fn current_root(&self) -> <CollectedRewardsHash as KVTreeHash>::Digest {
+    pub fn current_root(&self) -> CollectedRewardsDigest {
         self.current
     }
 
-    pub fn recent_nullifiers(&self) -> HashSet<CollectedRewards> {
+    pub fn recent_collected_rewards(&self) -> HashSet<CollectedRewards> {
         self.history
             .iter()
-            .flat_map(|(_, nulls)| nulls)
+            .flat_map(|(_, collected_rewards)| collected_rewards)
             .cloned()
             .collect()
     }
@@ -486,13 +497,13 @@ impl CollectedRewardsHistory {
     /// Fails if `proof` is not valid relative to any recent collected reward set, if `proof` proves that
     /// `claimed_reward` _was_ in the set at the time `proof` was generated, or if `claimed_reward` has been
     /// collected since `proof` was generated.
-    pub fn check_unspent(
+    pub fn check_uncollected_rewards(
         &self,
         recent_collected_rewards: &HashSet<CollectedRewards>,
-        proof: &KVMerkleProof<CollectedRewardsHash>,
+        proof: &CollectedRewardsProof,
         claimed_reward: CollectedRewards,
-    ) -> Result<<CollectedRewardsHash as KVTreeHash>::Digest, ValidationError> {
-        // Make sure the nullifier has not been spent during the sliding window of historical
+    ) -> Result<CollectedRewardsDigest, ValidationError> {
+        // Make sure the claimed reward has not been spent during the sliding window of historical
         // snapshots. If it hasn't, then it must be unspent as long as `proof` proves it unspent
         // relative to any of our historical snapshots.
         if recent_collected_rewards.contains(&claimed_reward) {
@@ -501,7 +512,7 @@ impl CollectedRewardsHistory {
             });
         }
 
-        // Find a historical nullifier set root hash which validates the proof.
+        // Find a historical collected_reward set root hash which validates the proof.
         for root in once(self.current).chain(self.history.iter().map(|(tree, _)| tree.hash())) {
             let (option_value, computed_root) = proof.check(claimed_reward.clone(), root).unwrap();
             if computed_root == root {
@@ -521,85 +532,95 @@ impl CollectedRewardsHistory {
         // The collected_reward proof didn't check against any of the past root hashes.
         Err(ValidationError::BadCollectedRewardProof {})
     }
-    /*
-    /// Append a block of new nullifiers to the set.
+
+    /// Append a block with new collected rewards to the set.
     ///
-    /// `inserts` is a list of nullifiers to insert, in order, along with their proofs and the
+    /// `inserts` is a list of collected_rewards to insert, in order, along with their proofs and the
     /// historical root hash which their proof should be validated against. Note that inserting
-    /// nullifiers in different orders may yield different [NullifierHistory]s, so `inserts` must be
-    /// given in a canonical order -- the order in which the nullifiers appear in the block. Each
-    /// nullifier and proof in `inserts` should be labeled with the [Hash](set_hash::Hash) that was
-    /// returned from [check_unspent](Self::check_unspent) when validating that proof. In addition,
+    /// rewards in different orders may yield different [CollectedRewardsHistory]s, so `inserts` must be
+    /// given in a canonical order -- the order in which the claimed rewards appear in the block. Each
+    /// collected reward and proof in `inserts` should be labeled with the [Hash](CollectedRewardsHash::Digest) that was
+    /// returned from [check_uncollected_rewards](Self::check_uncollected_rewards) when validating that proof. In addition,
     /// [append_block](Self::append_block) must not have been called since any of the relevant calls
-    /// to [check_unspent](Self::check_unspent).
+    /// to [check_uncollected_rewards](Self::check_uncollected_rewards).
     ///
-    /// This method uses the historical sparse [SetMerkleTree] snapshots to update each of the given
-    /// proofs to a proof relative to the current nullifiers set, constructing a sparse view of the
-    /// current set which includes paths to leaves for each of the nullifiers to be inserted. From
-    /// there, the new nullifiers can be directly inserted into the sparse [SetMerkleTree], which
+    /// This method uses the historical sparse [KVMerkleTree] snapshots to update each of the given
+    /// proofs to a proof relative to the current collected rewards set, constructing a sparse view of the
+    /// current set which includes paths to leaves for each of the collected_rewards to be inserted. From
+    /// there, the new claimed rewards can be directly inserted into the sparse [KVMerkleTree], which
     /// can then be used to derive a new root hash.
     ///
-    /// If the nullifier proofs are successfully updated, this function may remove the oldest entry
+    /// If the collected rewards proofs are successfully updated, this function may remove the oldest entry
     /// from the history in order to keep the size of the history below
     /// [HISTORY_SIZE](ValidatorState::HISTORY_SIZE).
     ///
-    /// If successful, returns updated non-membership proofs for each nullifier in `inserts`, in the
-    /// form of a sparse representation of a [SetMerkleTree].
+    /// If successful, returns updated non-membership proofs for each claimed rewards in `inserts`, in the
+    /// form of a sparse representation of a [KVMerkleTree].
     ///
     /// # Errors
     ///
     /// This function fails if any of the proofs in `inserts` are invalid relative to the
-    /// corresponding [Hash](set_hash::Hash).
+    /// corresponding [Hash](CollectedRewardsHash::Digest).
     pub fn append_block(
         &mut self,
-        inserts: NullifierProofs,
-    ) -> Result<SetMerkleTree, ValidationError> {
-        let (snapshot, new_hash, nulls) = self.apply_block(inserts)?;
+        inserts: CollectedRewardsProofs,
+    ) -> Result<CollectedRewardsSet, ValidationError> {
+        let (snapshot, new_hash, rewards) = self.apply_block(inserts)?;
 
         // Update the state: append the new historical snapshot, prune an old snapshot if necessary,
         // and update the current hash.
         if self.history.len() >= ValidatorState::HISTORY_SIZE {
             self.history.pop_back();
         }
-        self.history.push_front((snapshot.clone(), nulls));
+        self.history.push_front((snapshot.clone(), rewards));
         self.current = new_hash;
 
         Ok(snapshot)
     }
 
-    /// Update a set of historical nullifier non-membership proofs.
+    /// Update a set of historical collected rewards non-membership proofs.
     ///
-    /// `inserts` is a list of new nullifiers along with their proofs and the historical root hash
+    /// `inserts` is a list of new collected rewards along with their proofs and the historical root hash
     /// which their proof should be validated against. [update_proofs](Self::update_proofs) will
-    /// compute a sparse [SetMerkleTree] containing non-membership proofs for each nullifier in
+    /// compute a sparse [KVMerkleTree] containing non-membership proofs for each collected reward in
     /// `inserts`, updated so that the root hash of each new proof is the latest root hash in
     /// `self`.
     ///
-    /// Each nullifier and proof in `inserts` should be labeled with the [Hash](set_hash::Hash) that
-    /// was returned from [check_unspent](Self::check_unspent) when validating that proof. In
+    /// Each collected reward and proof in `inserts` should be labeled with the [Hash](CollectedRewardsHash::Digest) that
+    /// was returned from [check_uncollected_rewards](Self::check_uncollected_rewards) when validating that proof. In
     /// addition, [append_block](Self::append_block) must not have been called since any of the
-    /// relevant calls to [check_unspent](Self::check_unspent).
+    /// relevant calls to [check_uncollected_rewards](Self::check_uncollected_rewards).
     ///
     /// # Errors
     ///
     /// This function fails if any of the proofs in `inserts` are invalid relative to the
-    /// corresponding [Hash](set_hash::Hash).
+    /// corresponding [Hash](CollectedRewardsHash::Digest).
     pub fn update_proofs(
         &self,
-        inserts: NullifierProofs,
-    ) -> Result<SetMerkleTree, ValidationError> {
+        inserts: CollectedRewardsProofs,
+    ) -> Result<CollectedRewardsSet, ValidationError> {
         Ok(self.apply_block(inserts)?.0)
     }
 
     fn apply_block(
         &self,
-        inserts: NullifierProofs,
-    ) -> Result<(SetMerkleTree, set_hash::Hash, Vec<Nullifier>), ValidationError> {
-        let nulls = inserts.iter().map(|(n, _, _)| *n).collect::<Vec<_>>();
+        inserts: CollectedRewardsProofs,
+    ) -> Result<
+        (
+            CollectedRewardsSet,
+            CollectedRewardsDigest,
+            Vec<CollectedRewards>,
+        ),
+        ValidationError,
+    > {
+        let collected_rewards = inserts
+            .iter()
+            .map(|(n, _, _)| n.clone())
+            .collect::<Vec<_>>();
 
         // A map from a historical root hash to the proofs which are to be validated against that
         // hash
-        let mut proofs_by_root = HashMap::<set_hash::Hash, Vec<_>>::new();
+        let mut proofs_by_root = HashMap::<CollectedRewardsDigest, Vec<_>>::new();
         for (n, proof, root) in inserts {
             proofs_by_root.entry(root).or_default().push((n, proof));
         }
@@ -610,63 +631,68 @@ impl CollectedRewardsHistory {
         let mut accum = if let Some((oldest_tree, _)) = self.history.back() {
             oldest_tree.clone()
         } else {
-            SetMerkleTree::sparse(self.current)
+            CollectedRewardsSet::sparse(self.current)
         };
 
-        // For each snapshot in the history, add the paths for each nullifier in the delta to
-        // `accum`, add the paths for each nullifier in `inserts` whose proof is relative to this
+        // For each snapshot in the history, add the paths for each collected reward in the delta to
+        // `accum`, add the paths for each collected reward in `inserts` whose proof is relative to this
         // snapshot, and then advance `accum` to the next historical state by inserting the
-        // nullifiers from the delta.
+        // collected rewards from the delta.
         for (tree, delta) in self.history.iter().rev() {
             assert_eq!(accum.hash(), tree.hash());
-            // Add Merkle paths for new nullifiers whose proofs correspond to this snapshot.
+            // Add Merkle paths for new collected reward whose proofs correspond to this snapshot.
             for (n, proof) in proofs_by_root.remove(&tree.hash()).unwrap_or_default() {
                 accum
                     .remember(n, proof)
-                    .map_err(|_| ValidationError::BadNullifierProof {})?;
+                    .map_err(|_| ValidationError::BadCollectedRewardProof {})?;
             }
-            // Insert nullifiers from `delta`, advancing `accum` to the next historical state while
+            // Insert collected reward from `delta`, advancing `accum` to the next historical state while
             // updating all of the Merkle paths it currently contains.
             accum
-                .multi_insert(delta.iter().map(|n| (*n, tree.contains(*n).unwrap().1)))
+                .multi_insert(
+                    delta
+                        .iter()
+                        .map(|n| (n.clone(), (), tree.lookup(n.clone()).unwrap().1)),
+                )
                 .unwrap();
         }
 
-        // Finally, add Merkle paths for any nullifiers whose proofs were already current.
+        // Finally, add Merkle paths for any collected reward whose proofs were already current.
         for (n, proof) in proofs_by_root.remove(&accum.hash()).unwrap_or_default() {
             accum
                 .remember(n, proof)
-                .map_err(|_| ValidationError::BadNullifierProof {})?;
+                .map_err(|_| ValidationError::BadCollectedRewardProof {})?;
         }
 
-        // At this point, `accum` contains Merkle paths for each of the new nullifiers in `nulls`
-        // as well as all of the historical nullifiers. We want to do two different things with this
+        // At this point, `accum` contains Merkle paths for each of the new collected rewards
+        // as well as all of the historical collected rewards. We want to do two different things with this
         // tree:
-        //  * Insert the new nullifiers to derive the next nullifier set commitment. We can do this
+        //  * Insert the new collected rewards to derive the next collected rewards set commitment. We can do this
         //    directly.
-        //  * Create a sparse representation that _only_ contains paths for the new nullifiers.
+        //  * Create a sparse representation that _only_ contains paths for the new collected rewards.
         //    Unfortunately, this is more complicated. We cannot simply `forget` the historical
-        //    nullifiers, because the new nullifiers are not actually in the set, which means they
+        //    collected rewards, because the new ones are not actually in the set, which means they
         //    don't necessarily correspond to unique leaves, and therefore forgetting other
-        //    nullifiers may inadvertently cause us to forget part of a path corresponding to a new
-        //    nullifier. Instead, we will create a new sparse representation of the current set by
-        //    starting with the current commitment and remembering paths only for the nullifiers we
+        //    collected rewards may inadvertently cause us to forget part of a path corresponding to a new
+        //    rewards. Instead, we will create a new sparse representation of the current set by
+        //    starting with the current commitment and remembering paths only for the rewards we
         //    care about. We can get the paths from `accum`.
         assert_eq!(accum.hash(), self.current);
-        let mut current = SetMerkleTree::sparse(self.current);
-        for n in &nulls {
-            current.remember(*n, accum.contains(*n).unwrap().1).unwrap();
+        let mut current = CollectedRewardsSet::sparse(self.current);
+        for n in &collected_rewards {
+            current
+                .remember(n.clone(), accum.lookup(n.clone()).unwrap().1)
+                .unwrap();
         }
 
-        // Now that we have created a sparse snapshot of the current nullifiers set, we can insert
-        // the new nullifiers into `accum` to derive the new commitment.
-        for n in &nulls {
-            accum.insert(*n).unwrap();
+        // Now that we have created a sparse snapshot of the current collected rewards set, we can insert
+        // the new ones into `accum` to derive the new commitment.
+        for n in &collected_rewards {
+            accum.insert(n.clone(), ()).unwrap();
         }
 
-        Ok((current, accum.hash(), nulls))
+        Ok((current, accum.hash(), collected_rewards))
     }
-     */
 }
 
 impl Committable for CollectedRewardsHistory {
