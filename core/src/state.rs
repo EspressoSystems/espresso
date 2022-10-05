@@ -421,6 +421,9 @@ pub enum ValidationError {
     /// A genesis transaction was included in a non-genesis block
     UnexpectedGenesis,
 
+    /// Bad CollectRewardNote
+    BadCollectRewardNote,
+
     /// A record was already spent.
     RewardAlreadyCollected {
         reward: CollectedRewards,
@@ -491,6 +494,7 @@ impl Clone for ValidationError {
             },
             InconsistentHelperProofs => InconsistentHelperProofs,
             UnexpectedGenesis => UnexpectedGenesis,
+            BadCollectRewardNote => BadCollectRewardNote,
             RewardAlreadyCollected { reward } => RewardAlreadyCollected {
                 reward: reward.clone(),
             },
@@ -1397,7 +1401,8 @@ impl ValidatorState {
                 };
 
                 //verify reward txn (CollectRewardNote)
-                txn.verify().map_err(|_e| ValidationError::Failed {})?; // TODO add proper error
+                txn.verify()
+                    .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
 
                 //check helper proofs (RewardNoteProofs)
                 let root = pfs.verify(self, latest_reward.clone())?;
