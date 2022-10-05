@@ -19,7 +19,11 @@ use async_std::sync::{Arc, RwLock};
 use clap::{Args, Parser};
 use cld::ClDuration;
 use dirs::data_local_dir;
-use espresso_core::reward::{mock_eligibility, CollectRewardNote};
+use espresso_core::kv_merkle_tree::KVMerkleTree;
+use espresso_core::reward::{
+    mock_eligibility, CollectRewardNote, CollectedRewards, CollectedRewardsHash,
+};
+use espresso_core::stake_table::StakingKey;
 use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof};
 use espresso_core::{
     committee::Committee,
@@ -44,6 +48,7 @@ use hotshot::{
     types::{HotShotHandle, Message, SignatureKey},
     HotShot, HotShotConfig, H_256,
 };
+use itertools::izip;
 use jf_cap::keys::UserAddress;
 use jf_cap::{
     keys::UserPubKey,
@@ -834,23 +839,24 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
     cap_address: &UserAddress,
     mut hotshot: Consensus,
 ) {
+    let mut collected_rewards = KVMerkleTree::<CollectedRewardsHash>::EmptySubtree;
+    let staking_key = StakingKey::from_priv_key(staking_priv_key);
     loop {
         let event = hotshot
             .next_event()
             .await
             .expect("HotShot unexpectedly closed");
-        if let EventType::Decide {
-            block: _,
-            state,
-            qcs,
-        } = event.event
-        {
-            for (validator_state, qc) in state.iter().rev().zip(qcs.iter().rev()) {
+        if let EventType::Decide { block, state, qcs } = event.event {
+            for (blk, validator_state, qc) in izip!(block.iter(), state.iter(), qcs.iter()) {
                 let view_number = qc.view_number;
                 // 0. check if I'm elected
                 if let Some(vrf_proof) =
                     mock_eligibility::prove_eligibility(view_number.into(), staking_priv_key)
                 {
+                    let claimed_reward =
+                        CollectedRewards((staking_key.clone(), view_number.into()));
+                    let uncollected_reward_proof =
+                        collected_rewards.lookup(claimed_reward).unwrap().1;
                     // 1. generate collect reward transaction
                     let (note, proof) = CollectRewardNote::generate(
                         rng,
@@ -861,6 +867,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                         cap_address.clone(),
                         stake_amount,
                         stake_proof.clone(),
+                        uncollected_reward_proof,
                         vrf_proof,
                     )
                     .expect("Failed to create Collect Reward Note");
@@ -874,9 +881,19 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                     hotshot
                         .submit_transaction(elaborated_tx)
                         .await
-                        .expect("Failed to submit reward transaction")
+                        .expect("Failed to submit reward transaction");
 
-                    // 3. Check block if contain stake transfer transaction and update stake proof
+                    // 3. update collected_reward_set
+                    for txn in blk.block.0.iter() {
+                        if let EspressoTransaction::Reward(note) = txn {
+                            let staking_key = note.staking_key();
+                            let collected_reward =
+                                CollectedRewards((staking_key, view_number.into()));
+                            collected_rewards.insert(collected_reward, ());
+                        }
+                    }
+
+                    // 4. Check block if contain stake transfer transaction and update stake proof
                     // TODO we haven't implemented stake transfer yet
                 }
             }

@@ -18,7 +18,9 @@ use jf_cap::Signature;
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
 pub use crate::lw_persistence::LWPersistence;
-use crate::reward::{CollectRewardNote, RewardNoteProofs};
+use crate::reward::{
+    CollectRewardNote, CollectedRewards, CollectedRewardsHistory, RewardNoteProofs,
+};
 pub use crate::set_merkle_tree::*;
 pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
@@ -26,7 +28,6 @@ pub use crate::util::canonical;
 pub use crate::{PrivKey, PubKey};
 
 use crate::genesis::GenesisNote;
-use crate::reward::CollectedRewardsHash;
 use crate::stake_table::{StakeTableCommitment, StakeTableHash};
 use crate::universal_params::{MERKLE_HEIGHT, VERIF_CRS};
 use arbitrary::{Arbitrary, Unstructured};
@@ -413,6 +414,14 @@ pub enum ValidationError {
 
     /// A genesis transaction was included in a non-genesis block
     UnexpectedGenesis,
+
+    /// A record was already spent.
+    RewardAlreadyCollected {
+        reward: CollectedRewards,
+    },
+
+    /// An invalid Collected Reward proof.
+    BadCollectedRewardProof {},
 }
 
 pub(crate) mod ser_display {
@@ -467,6 +476,10 @@ impl Clone for ValidationError {
             },
             InconsistentHelperProofs => InconsistentHelperProofs,
             UnexpectedGenesis => UnexpectedGenesis,
+            RewardAlreadyCollected { reward } => RewardAlreadyCollected {
+                reward: reward.clone(),
+            },
+            BadCollectedRewardProof {} => BadCollectedRewardProof {},
         }
     }
 }
@@ -1105,8 +1118,8 @@ pub struct ValidatorState {
     pub stake_table_commitments: StakeTableCommFrontier,
     /// Commitment to stake table commitments set
     pub stake_table_commitments_commitment: StakeTableCommCommitment,
-    /// Track already-collected rewards via (staking_key, block number) tuples
-    pub collected_rewards: KVMerkleTree<CollectedRewardsHash>,
+    /// CollectedRewards form recent blocks, allows validating slightly out-of-date-transactions
+    pub collected_rewards: CollectedRewardsHistory,
 }
 
 /// Nullifier proofs, organized by the root hash for which they are valid.
@@ -1153,7 +1166,7 @@ impl ValidatorState {
             stake_table: stake_table_map,
             stake_table_commitments: stake_table_commitments_mt.frontier(),
             stake_table_commitments_commitment: stake_table_commitments_mt.commitment(),
-            collected_rewards: KVMerkleTree::<CollectedRewardsHash>::EmptySubtree,
+            collected_rewards: CollectedRewardsHistory::default(),
         }
     }
 
