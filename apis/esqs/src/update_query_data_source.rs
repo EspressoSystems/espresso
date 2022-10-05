@@ -120,6 +120,8 @@ where
     async fn update(&mut self, event: HotShotEvent) {
         if let HotShotEvent::Decide { block, state, qcs } = event {
             let mut num_txns = 0usize;
+            let mut num_records = 0usize;
+            let mut num_nullifiers = 0usize;
             let mut cumulative_size = 0usize;
 
             for (mut block, state, qcert) in
@@ -201,6 +203,15 @@ where
 
                     first_uid - records_from
                 };
+
+                num_records += record_count as usize;
+                num_nullifiers += block
+                    .block
+                    .0
+                    .iter()
+                    .map(|txn| txn.input_len())
+                    .sum::<usize>();
+
                 {
                     let qcert_block_hash: [u8; H_256] =
                         qcert.block_hash.try_into().unwrap_or([0u8; H_256]);
@@ -249,6 +260,8 @@ where
                     vs.decided_block_count += block.len() as u64;
                     vs.cumulative_txn_count += num_txns as u64;
                     vs.cumulative_size += cumulative_size as u64;
+                    vs.total_records += num_records as u64;
+                    vs.total_nullifiers += num_nullifiers as u64;
                     Ok(())
                 })
                 .unwrap();

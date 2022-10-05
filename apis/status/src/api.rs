@@ -10,14 +10,13 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::data_source::StatusDataSource;
+use crate::{data_source::StatusDataSource, query_data::*};
 use clap::Args;
 use derive_more::From;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::path::PathBuf;
-use std::time::Duration;
 use tide_disco::{
     api::{Api, ApiError},
     method::ReadState,
@@ -41,14 +40,6 @@ impl Error {
             Self::Request { .. } => StatusCode::BadRequest,
         }
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Throughput {
-    pub blocks_finalized: u64,
-    pub transactions_finalized: u64,
-    pub bytes_finalized: u64,
-    pub time_operational: Duration,
 }
 
 pub fn define_api<State>(options: &Options) -> Result<Api<State, Error>, ApiError>
@@ -104,6 +95,17 @@ where
                     transactions_finalized: status.cumulative_txn_count,
                     bytes_finalized: status.cumulative_size,
                     time_operational: status.time_operational,
+                })
+            }
+            .boxed()
+        })?
+        .get("records", |_, state| {
+            async move {
+                let status = state.get_validator_status();
+                Ok(RecordSetInfo {
+                    total: status.total_records,
+                    spent: status.total_nullifiers,
+                    unspent: status.total_records - status.total_nullifiers,
                 })
             }
             .boxed()
