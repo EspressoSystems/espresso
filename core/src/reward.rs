@@ -17,6 +17,8 @@ use crate::stake_table::{
     ViewNumber,
 };
 use crate::state::{CommitableHash, CommitableHashTag, ValidatorState};
+use crate::tree_hash::KVTreeHash;
+pub use crate::util::canonical;
 use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
 use core::hash::Hash;
@@ -44,7 +46,10 @@ pub fn compute_reward_amount(
 /// Previously collected rewards are recorded in (StakingKey, view_number) pairs
 #[tagged_blob("COLLECTED-REWARD")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
-pub struct CollectedRewards((StakingKey, ViewNumber));
+pub struct CollectedRewards {
+    pub staking_key: StakingKey,
+    pub view_number: ViewNumber,
+}
 
 /// Identifying tag for CollectedReward
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -57,6 +62,17 @@ impl CommitableHashTag for CollectedRewardsTag {
 
 /// Hash for set Merkle tree for all of the previously-collected rewards
 pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
+
+/// Committable type for CollectedRewards
+pub struct CollectedRewardsCommitment(pub <CollectedRewardsHash as KVTreeHash>::Digest);
+
+impl commit::Committable for CollectedRewardsCommitment {
+    fn commit(&self) -> commit::Commitment<Self> {
+        commit::RawCommitmentBuilder::new("Collected Reward")
+            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
+            .finalize()
+    }
+}
 
 /// Reward Collection Transaction Note
 #[derive(
@@ -71,7 +87,7 @@ pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRe
     Deserialize,
 )]
 pub struct CollectRewardNote {
-    body: CollectRewardBody,
+    pub body: CollectRewardBody,
     signature: StakingKeySignature,
 }
 
@@ -160,9 +176,9 @@ pub struct CollectRewardBody {
     /// Address that owns the reward
     cap_address: UserAddress,
     /// Reward amount
-    reward_amount: Amount,
+    pub reward_amount: Amount,
     /// Staking `pub_key`, `view` number and a proof that staking key was selected for committee election on `view`
-    vrf_witness: EligibilityWitness,
+    pub vrf_witness: EligibilityWitness,
 }
 
 impl CollectRewardBody {
@@ -235,11 +251,11 @@ impl CollectRewardBody {
     Serialize,
     Deserialize,
 )]
-struct EligibilityWitness {
+pub struct EligibilityWitness {
     /// Staking public key
-    staking_key: StakingKey,
+    pub staking_key: StakingKey,
     /// View number for which the key was elected
-    view_number: ViewNumber,
+    pub view_number: ViewNumber,
     /// amount of stake on `view_number`
     stake_amount: Amount,
     /// Cryptographic proof
@@ -284,6 +300,8 @@ pub struct RewardNoteProofs {
     stake_amount_proof: KVMerkleProof<StakeTableHash>,
     /// Proof that reward hasn't been collected
     uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+    /// Index of relevant stake table commitment in MerkleTree
+    leaf_proof_pos: u64,
 }
 
 impl RewardNoteProofs {
@@ -298,10 +316,15 @@ impl RewardNoteProofs {
             Self::get_stake_commitment_total_stake_and_proof(validator_state)?;
         let uncollected_reward_proof =
             Self::proof_uncollected_rewards(validator_state, stake_key, view_number)?;
+        let leaf_proof_pos = validator_state
+            .stake_table_commitments_commitment
+            .num_leaves
+            - 1;
         Ok(Self {
             stake_table_commitment_leaf_proof,
             stake_amount_proof,
             uncollected_reward_proof,
+            leaf_proof_pos,
         })
     }
 
@@ -322,7 +345,10 @@ impl RewardNoteProofs {
         staking_key: &StakingKey,
         view_number: hotshot_types::data::ViewNumber,
     ) -> Result<KVMerkleProof<CollectedRewardsHash>, RewardError> {
-        let key = CollectedRewards((staking_key.clone(), view_number.into()));
+        let key = CollectedRewards {
+            staking_key: staking_key.clone(),
+            view_number: view_number.into(),
+        };
         // if (key, proof) not found, then key is present but not in memory. Hence, reward was collected.
         // if value is found, then reward was also collected
         // if value not found, return proof for it
@@ -335,6 +361,54 @@ impl RewardNoteProofs {
         } else {
             Err(RewardError::RewardAlreadyCollected {})
         }
+    }
+
+    ///Checks proofs in RewardNoteProofs against ValidatorState
+    pub fn verify(
+        &self,
+        validator_state: &ValidatorState,
+        staking_key: StakingKey,
+        view_number: ViewNumber,
+    ) -> Result<(), RewardError> {
+        //check collected reward non-inclusion proof
+        let collected_reward_check = self.uncollected_reward_proof.check(
+            CollectedRewards {
+                staking_key: staking_key.clone(),
+                view_number,
+            },
+            validator_state.collected_rewards.hash(),
+        );
+        match collected_reward_check {
+            None => return Err(RewardError::ProofNotInMemory {}),
+            Some((Some(_), _)) => {
+                return Err(RewardError::RewardAlreadyCollected {});
+            }
+            //Non-inclusion proof is valid and proof check returns no value for given key
+            Some((None, _)) => {}
+        }
+
+        //check stake_table_commitment_proof
+        crate::merkle_tree::MerkleTree::check_proof(
+            validator_state
+                .stake_table_commitments_commitment
+                .root_value,
+            self.leaf_proof_pos,
+            &self.stake_table_commitment_leaf_proof,
+        )
+        .map_err(|_| RewardError::BadStakeTableCommitmentProof {})?;
+
+        //check stake amount proof
+        let stake_amount_check = self.stake_amount_proof.check(
+            staking_key,
+            self.stake_table_commitment_leaf_proof.leaf.0 .0 .0,
+        );
+        match stake_amount_check {
+            Some((Some(_), _)) => {}
+            _ => {
+                return Err(RewardError::BadStakeTableProof {});
+            }
+        }
+        Ok(())
     }
 }
 
@@ -368,6 +442,15 @@ pub enum RewardError {
 
     /// RewardNote failed signature
     SignatureError {},
+
+    /// StakeTableCommitmentProof check failed
+    BadStakeTableCommitmentProof {},
+
+    /// Request reward too large
+    RewardAmountTooLarge {},
+
+    /// Stake table proof check failed
+    BadStakeTableProof {},
 }
 
 impl From<ark_serialize::SerializationError> for RewardError {
