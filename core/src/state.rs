@@ -28,7 +28,7 @@ pub use crate::util::canonical;
 pub use crate::{PrivKey, PubKey};
 
 use crate::genesis::GenesisNote;
-use crate::stake_table::{StakeTableCommitment, StakeTableHash};
+use crate::stake_table::{StakeTableCommitment, StakeTableCommitmentsHistory, StakeTableHash};
 use crate::universal_params::{MERKLE_HEIGHT, VERIF_CRS};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
@@ -928,6 +928,7 @@ pub mod state_comm {
         pub past_record_merkle_roots: Commitment<RecordMerkleHistory>,
         pub past_nullifiers: Commitment<NullifierHistory>,
         pub prev_block: Commitment<Block>,
+        pub past_stc_merkle_roots: Commitment<StakeTableCommitmentsHistory>,
         pub collected_rewards: Commitment<CollectedRewardsHistory>,
     }
 
@@ -951,6 +952,7 @@ pub mod state_comm {
                 .field("past_record_merkle_roots", self.past_record_merkle_roots)
                 .field("past_nullifiers", self.past_nullifiers)
                 .field("prev_block", self.prev_block)
+                .field("past_stc_merkle_roots", self.past_stc_merkle_roots)
                 .field("collected_rewards", self.collected_rewards)
                 .finalize()
         }
@@ -1118,6 +1120,8 @@ pub struct ValidatorState {
     pub stake_table: StakeTableMap,
     /// Keeps track of previous stake tables and their total stake
     pub stake_table_commitments: StakeTableCommFrontier,
+    /// A list of recent stake table Merkle root hashes for validating slightly out-of-date transactions
+    pub past_stc_merkle_roots: StakeTableCommitmentsHistory,
     /// Commitment to stake table commitments set
     pub stake_table_commitments_commitment: StakeTableCommCommitment,
     /// CollectedRewards form recent blocks, allows validating slightly out-of-date-transactions
@@ -1167,6 +1171,9 @@ impl ValidatorState {
             //KALEY: ask about stake table initialization
             stake_table: stake_table_map,
             stake_table_commitments: stake_table_commitments_mt.frontier(),
+            past_stc_merkle_roots: StakeTableCommitmentsHistory(VecDeque::with_capacity(
+                Self::HISTORY_SIZE,
+            )),
             stake_table_commitments_commitment: stake_table_commitments_mt.commitment(),
             collected_rewards: CollectedRewardsHistory::default(),
         }
@@ -1187,6 +1194,7 @@ impl ValidatorState {
 
             past_nullifiers: self.past_nullifiers.commit(),
             prev_block: self.prev_block.0,
+            past_stc_merkle_roots: self.past_stc_merkle_roots.commit(),
             collected_rewards: self.collected_rewards.commit(),
         };
         inputs.commit().into()

@@ -10,15 +10,18 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+use crate::merkle_tree::NodeValue;
 use crate::state::{CommitableHash, CommitableHashTag};
 use crate::tree_hash::KVTreeHash;
 use crate::{PrivKey, PubKey};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
+use commit::Committable;
 use espresso_macros::*;
 use hotshot_types::traits::signature_key::{EncodedSignature, SignatureKey};
 use jf_cap::structs::Amount;
 use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::ops::Deref;
 
 /// PubKey used for stake table key
@@ -158,3 +161,34 @@ impl CommitableHashTag for StakeTableCommitmentTag {
 
 /// Stake table commitment type
 pub type StakeTableCommitment = <StakeTableHash as KVTreeHash>::Digest;
+
+/// Sliding window Stake Table checks
+///
+/// We keep a fixed number of recent Merkle root hashes here to allow
+/// validation of transactions built against recent but not most
+/// recent ledger state commitments.
+///
+/// The Merkle root hash that a transaction was built against is
+/// listed in the transaction, so that validators can compare it with
+/// the current root hash. Since the Ctake Table Commitment Merkle tree is append
+/// only, a proof that a record is included remains valid for any
+/// state after the one for which the proof was
+/// constructed. Therefore, validators only need to check that the
+/// transaction was built against some past Merkle root. By
+/// remembering a fixed number of recent Merkle roots, validators can
+/// validate slightly old transactions while maintaining constant
+/// space requirements for validation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StakeTableCommitmentsHistory(pub VecDeque<NodeValue>);
+
+impl Committable for StakeTableCommitmentsHistory {
+    fn commit(&self) -> commit::Commitment<Self> {
+        let mut ret = commit::RawCommitmentBuilder::new("STC Hist Comm")
+            .constant_str("roots")
+            .u64(self.0.len() as u64);
+        for n in self.0.iter() {
+            ret = ret.var_size_bytes(&crate::util::canonical::serialize(n).unwrap())
+        }
+        ret.finalize()
+    }
+}
