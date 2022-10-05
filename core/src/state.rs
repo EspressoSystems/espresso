@@ -1497,6 +1497,16 @@ impl ValidatorState {
         let record_merkle_frontier = record_merkle_builder.build();
         assert_eq!(uid, record_merkle_frontier.num_leaves());
 
+        if self.past_record_merkle_roots.0.len() >= Self::HISTORY_SIZE {
+            self.past_record_merkle_roots.0.pop_back();
+        }
+        self.past_record_merkle_roots
+            .0
+            .push_front(self.record_merkle_commitment.root_value);
+        self.record_merkle_commitment = record_merkle_frontier.commitment();
+        self.record_merkle_frontier = record_merkle_frontier.frontier();
+
+        // Build stake table commitments frontier, history and new commitment
         let mut stc_builder = crate::merkle_tree::FilledMTBuilder::from_frontier(
             &self.stake_table_commitments_commitment,
             &self.stake_table_commitments,
@@ -1508,16 +1518,14 @@ impl ValidatorState {
             self.total_stake,
         ));
         let stc_mt = stc_builder.build();
-        assert_eq!(now, stc_mt.num_leaves());
+        assert_eq!(now, stc_mt.num_leaves()); // TODO why now??
 
-        if self.past_record_merkle_roots.0.len() >= Self::HISTORY_SIZE {
-            self.past_record_merkle_roots.0.pop_back();
+        if self.past_stc_merkle_roots.0.len() >= Self::HISTORY_SIZE {
+            self.past_stc_merkle_roots.0.pop_back();
         }
-        self.past_record_merkle_roots
+        self.past_stc_merkle_roots
             .0
-            .push_front(self.record_merkle_commitment.root_value);
-        self.record_merkle_commitment = record_merkle_frontier.commitment();
-        self.record_merkle_frontier = record_merkle_frontier.frontier();
+            .push_front(self.stake_table_commitments_commitment.root_value);
         self.stake_table_commitments_commitment = stc_mt.commitment();
         self.stake_table_commitments = stc_mt.frontier();
 

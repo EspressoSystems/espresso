@@ -366,40 +366,57 @@ impl RewardNoteProofs {
         validator_state: &ValidatorState,
         claimed_reward: CollectedRewards,
     ) -> Result<CollectedRewardsDigest, ValidationError> {
-        let recently_collected_rewards =
-            validator_state.collected_rewards.recent_collected_rewards();
-        let root = validator_state
-            .collected_rewards
-            .check_uncollected_rewards(
-                &recently_collected_rewards,
-                &self.uncollected_reward_proof,
-                claimed_reward.clone(),
-            )?;
-
-        //check stake_table_commitment_proof
-        crate::merkle_tree::MerkleTree::check_proof(
+        // 1. Check reward hasn't been collected, retrieve merkle root of collected reward set that checked
+        let root = {
+            let recently_collected_rewards =
+                validator_state.collected_rewards.recent_collected_rewards();
             validator_state
-                .stake_table_commitments_commitment
-                .root_value,
-            self.leaf_proof_pos,
-            &self.stake_table_commitment_leaf_proof,
-        )
-        .map_err(|_| ValidationError::BadStakeTableCommitmentsProof {})?;
+                .collected_rewards
+                .check_uncollected_rewards(
+                    &recently_collected_rewards,
+                    &self.uncollected_reward_proof,
+                    claimed_reward.clone(),
+                )?
+        };
 
-        //check stake amount proof
-        let (option_value, _derived_stake_amount_root) = self
-            .stake_amount_proof
-            .check(
-                claimed_reward.staking_key,
-                self.stake_table_commitment_leaf_proof.leaf.0 .0 .0,
+        // 2. Validate stake table commitments inclusion proof
+        {
+            let mut found = false;
+            for root_value in once(
+                validator_state
+                    .stake_table_commitments_commitment
+                    .root_value,
             )
-            .unwrap(); // safe unwrap, check never returns None
-        match option_value {
-            Some(_) => {}
-            _ => {
-                return Err(ValidationError::BadStakeTableProof {});
+            .chain(validator_state.past_stc_merkle_roots.0.iter().copied())
+            {
+                if crate::merkle_tree::MerkleTree::check_proof(
+                    root_value,
+                    self.leaf_proof_pos,
+                    &self.stake_table_commitment_leaf_proof,
+                )
+                .is_ok()
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return Err(ValidationError::BadStakeTableCommitmentsProof {});
             }
         }
+
+        // 3. Check stake amount proof
+        {
+            let (option_value, _derived_stake_amount_root) = self
+                .stake_amount_proof
+                .check(
+                    claimed_reward.staking_key,
+                    self.stake_table_commitment_leaf_proof.leaf.0 .0 .0,
+                )
+                .unwrap(); // safe unwrap, check never returns None
+            option_value.ok_or(ValidationError::BadStakeTableProof {})?;
+        }
+
         Ok(root)
     }
 

@@ -870,7 +870,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                         cap_address.clone(),
                         stake_amount,
                         stake_proof.clone(),
-                        0, // TODO (fernando & Kaley) get leaf position from state
+                        validator_state.block_height - 1,
                         uncollected_reward_proof,
                         vrf_proof,
                     )
@@ -896,7 +896,6 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                                 view_number: view_number.into(),
                             };
                             collected_rewards.insert(collected_reward, ());
-                            // TODO we could forget rewards others rewards
                         }
                     }
 
