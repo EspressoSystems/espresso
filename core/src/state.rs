@@ -928,6 +928,7 @@ pub mod state_comm {
         pub past_record_merkle_roots: Commitment<RecordMerkleHistory>,
         pub past_nullifiers: Commitment<NullifierHistory>,
         pub prev_block: Commitment<Block>,
+        pub collected_rewards: Commitment<CollectedRewardsHistory>,
     }
 
     impl Committable for LedgerCommitmentOpening {
@@ -950,6 +951,7 @@ pub mod state_comm {
                 .field("past_record_merkle_roots", self.past_record_merkle_roots)
                 .field("past_nullifiers", self.past_nullifiers)
                 .field("prev_block", self.prev_block)
+                .field("collected_rewards", self.collected_rewards)
                 .finalize()
         }
     }
@@ -1185,6 +1187,7 @@ impl ValidatorState {
 
             past_nullifiers: self.past_nullifiers.commit(),
             prev_block: self.prev_block.0,
+            collected_rewards: self.collected_rewards.commit(),
         };
         inputs.commit().into()
     }

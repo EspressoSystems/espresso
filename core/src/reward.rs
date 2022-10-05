@@ -22,6 +22,7 @@ use crate::state::{
 use crate::tree_hash::KVTreeHash;
 use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
+use commit::Committable;
 use core::hash::Hash;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::structs::{
@@ -668,19 +669,17 @@ impl CollectedRewardsHistory {
      */
 }
 
-/*
-impl Committable for NullifierHistory {
+impl Committable for CollectedRewardsHistory {
     fn commit(&self) -> commit::Commitment<Self> {
-        let mut ret = commit::RawCommitmentBuilder::new("Nullifier Hist Comm")
-            .field("current", self.current.into())
+        let mut ret = commit::RawCommitmentBuilder::new("Collected Rewards Hist Comm")
+            .field("current", self.current)
             .constant_str("history")
             .u64(self.history.len() as u64);
         for (tree, delta) in self.history.iter() {
             ret = ret
-                .field("root", tree.hash().into())
-                .var_size_bytes(&canonical::serialize(delta).unwrap())
+                .field("root", tree.hash())
+                .var_size_bytes(&crate::util::canonical::serialize(delta).unwrap())
         }
         ret.finalize()
     }
 }
- */
