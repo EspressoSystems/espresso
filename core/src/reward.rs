@@ -66,20 +66,6 @@ impl CommitableHashTag for CollectedRewardsTag {
 /// Hash for set Merkle tree for all of the previously-collected rewards
 pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
 
-/*
-/// Committable type for CollectedRewards
-pub struct CollectedRewardsCommitment(pub <CollectedRewardsHash as KVTreeHash>::Digest);
-
-impl commit::Committable for CollectedRewardsCommitment {
-    fn commit(&self) -> commit::Commitment<Self> {
-        commit::RawCommitmentBuilder::new("Collected Reward")
-            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
-            .finalize()
-    }
-}
-
-*/
-
 /// Reward Collection Transaction Note
 #[derive(
     Clone,
@@ -354,7 +340,7 @@ impl RewardNoteProofs {
         validator_state: &ValidatorState,
     ) -> Result<crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount)>, RewardError>
     {
-        match validator_state.stake_table_commitments.clone() {
+        match validator_state.historical_stake_tables.clone() {
             MerkleFrontier::Empty { .. } => Err(RewardError::EmptyStakeTableCommitmentSet {}),
             MerkleFrontier::Proof(merkle_proof) => Ok(merkle_proof),
         }
@@ -384,11 +370,16 @@ impl RewardNoteProofs {
             let mut found = false;
             for root_value in once(
                 validator_state
-                    .stake_table_commitments_commitment
+                    .historical_stake_tables_commitment
                     .root_value,
             )
-            .chain(validator_state.past_stc_merkle_roots.0.iter().copied())
-            {
+            .chain(
+                validator_state
+                    .past_historial_stake_table_merkle_roots
+                    .0
+                    .iter()
+                    .copied(),
+            ) {
                 if crate::merkle_tree::MerkleTree::check_proof(
                     root_value,
                     self.leaf_proof_pos,

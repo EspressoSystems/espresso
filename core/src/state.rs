@@ -31,10 +31,12 @@ pub use crate::{PrivKey, PubKey};
 
 use crate::genesis::GenesisNote;
 use crate::stake_table::{
-    StakeTableCommitment, StakeTableCommitmentsCommitment, StakeTableCommitmentsHistory,
-    StakeTableHash,
+    CommittableStakeTableSetCommitment, CommittableStakeTableSetFrontier, StakeTableCommitment,
+    StakeTableMap, StakeTableSetCommitment, StakeTableSetFrontier, StakeTableSetHistory,
+    StakeTableSetMT,
 };
 
+use crate::state::state_comm::CommittableAmount;
 use crate::universal_params::{MERKLE_HEIGHT, VERIF_CRS};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
@@ -880,7 +882,8 @@ impl Committable for NullifierHistory {
 /// would produce a disagreement.
 pub mod state_comm {
     use crate::stake_table::{
-        StakeTableCommitment, StakeTableCommitmentsCommitment, StakeTableCommitmentsHistory,
+        CommittableStakeTableSetCommitment, CommittableStakeTableSetFrontier, StakeTableCommitment,
+        StakeTableSetHistory,
     };
 
     use super::*;
@@ -919,6 +922,35 @@ pub mod state_comm {
         }
     }
 
+    /// Wrapper around amount to make it committable
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Default,
+        Hash,
+        Eq,
+        Serialize,
+        Deserialize,
+        CanonicalSerialize,
+        CanonicalDeserialize,
+    )]
+    pub struct CommittableAmount(Amount);
+
+    impl From<Amount> for CommittableAmount {
+        fn from(amount: Amount) -> Self {
+            CommittableAmount(amount)
+        }
+    }
+
+    impl Committable for CommittableAmount {
+        fn commit(&self) -> Commitment<Self> {
+            commit::RawCommitmentBuilder::new("Amount")
+                .var_size_bytes(&canonical::serialize(self).unwrap())
+                .finalize()
+        }
+    }
     /// The essential state of the ledger
     ///
     /// Note that many elements of the state are represented
@@ -956,10 +988,10 @@ pub mod state_comm {
         pub past_nullifiers: Commitment<NullifierHistory>,
         pub prev_block: Commitment<Block>,
         pub stake_table: Commitment<StakeTableCommitment>,
-        // pub total_stake: Commitment<Amount>, TODO (fernando) implement Committable for Amount
-        // TODO: is this field necessary, we have a commitment to previous block
-        pub stake_table_commitments: Commitment<StakeTableCommitmentsCommitment>,
-        pub past_stc_merkle_roots: Commitment<StakeTableCommitmentsHistory>,
+        pub total_stake: Commitment<CommittableAmount>,
+        pub historical_stake_tables: Commitment<CommittableStakeTableSetFrontier>,
+        pub past_stc_merkle_roots: Commitment<StakeTableSetHistory>,
+        pub historial_stake_tables_commitment: Commitment<CommittableStakeTableSetCommitment>,
         pub collected_rewards: Commitment<CollectedRewardsHistory>,
     }
 
@@ -984,9 +1016,13 @@ pub mod state_comm {
                 .field("past_nullifiers", self.past_nullifiers)
                 .field("prev_block", self.prev_block)
                 .field("stake_table", self.stake_table)
-                // .field("total_stake", self.total_stake)
-                .field("stake_table_commitments", self.stake_table_commitments)
+                .field("total_stake", self.total_stake)
+                .field("stake_table_commitments", self.historical_stake_tables)
                 .field("past_stc_merkle_roots", self.past_stc_merkle_roots)
+                .field(
+                    "stake_table_commitments_commitment",
+                    self.historial_stake_tables_commitment,
+                )
                 .field("collected_rewards", self.collected_rewards)
                 .finalize()
         }
@@ -1105,19 +1141,6 @@ impl ChainVariables {
     }
 }
 
-/// KeyValue Merkle tree alias for StakeTable
-pub type StakeTableMap = KVMerkleTree<StakeTableHash>;
-
-/// Merkle Tree for Stake table commitments merkle tree
-pub type StakeTableCommMT = crate::merkle_tree::MerkleTree<(StakeTableCommitment, Amount)>;
-
-/// Merkle Frontier for Stake table commitments
-pub type StakeTableCommFrontier =
-    crate::merkle_tree::MerkleFrontier<(StakeTableCommitment, Amount)>;
-
-/// Merkle Frontier for Stake table commitments
-pub type StakeTableCommCommitment = crate::merkle_tree::MerkleCommitment;
-
 /// The working state of the ledger
 ///
 /// Only the previous state is represented as a commitment. Other
@@ -1153,14 +1176,13 @@ pub struct ValidatorState {
     /// Staking table. For fixed-stake, this will be the same each round
     pub stake_table: StakeTableMap,
     /// Total amount staked for the current table
-    // TODO: this type should match the type of stake
     pub total_stake: Amount,
     /// Keeps track of previous stake tables and their total stake
-    pub stake_table_commitments: StakeTableCommFrontier,
-    /// A list of recent stake table Merkle root hashes for validating slightly out-of-date transactions
-    pub past_stc_merkle_roots: StakeTableCommitmentsHistory,
-    /// Commitment to stake table commitments set
-    pub stake_table_commitments_commitment: StakeTableCommCommitment,
+    pub historical_stake_tables: StakeTableSetFrontier,
+    /// A list of recent historial stake table merkle root hashes for validating slightly out-of-date transactions
+    pub past_historial_stake_table_merkle_roots: StakeTableSetHistory,
+    /// Commitment to historical stake tables
+    pub historical_stake_tables_commitment: StakeTableSetCommitment,
     /// CollectedRewards form recent blocks, allows validating slightly out-of-date-transactions
     pub collected_rewards: CollectedRewardsHistory,
 }
@@ -1178,7 +1200,7 @@ impl Default for ValidatorState {
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
             StakeTableMap::EmptySubtree,
             Amount::from(0u64),
-            StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+            StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
         )
     }
 }
@@ -1196,7 +1218,7 @@ impl ValidatorState {
         record_merkle_frontier: MerkleTree,
         stake_table_map: StakeTableMap,
         total_stake: Amount,
-        stake_table_commitments_mt: StakeTableCommMT,
+        stake_table_commitments_mt: StakeTableSetMT,
     ) -> Self {
         Self {
             chain,
@@ -1212,11 +1234,11 @@ impl ValidatorState {
             prev_block: BlockCommitment(Block::default().commit()),
             stake_table: stake_table_map,
             total_stake,
-            stake_table_commitments: stake_table_commitments_mt.frontier(),
-            past_stc_merkle_roots: StakeTableCommitmentsHistory(VecDeque::with_capacity(
+            historical_stake_tables: stake_table_commitments_mt.frontier(),
+            past_historial_stake_table_merkle_roots: StakeTableSetHistory(VecDeque::with_capacity(
                 Self::HISTORY_SIZE,
             )),
-            stake_table_commitments_commitment: stake_table_commitments_mt.commitment(),
+            historical_stake_tables_commitment: stake_table_commitments_mt.commitment(),
             collected_rewards: CollectedRewardsHistory::default(),
         }
     }
@@ -1233,14 +1255,17 @@ impl ValidatorState {
             record_merkle_frontier: RecordMerkleFrontier(self.record_merkle_frontier.clone())
                 .commit(),
             past_record_merkle_roots: self.past_record_merkle_roots.commit(),
-
             past_nullifiers: self.past_nullifiers.commit(),
             prev_block: self.prev_block.0,
             stake_table: StakeTableCommitment(self.stake_table.hash()).commit(),
-            // total_stake: self.total_stake,
-            past_stc_merkle_roots: self.past_stc_merkle_roots.commit(),
-            stake_table_commitments: StakeTableCommitmentsCommitment(
-                self.stake_table_commitments_commitment.root_value,
+            total_stake: CommittableAmount::from(self.total_stake).commit(),
+            historical_stake_tables: CommittableStakeTableSetFrontier(
+                self.historical_stake_tables.clone(),
+            )
+            .commit(),
+            past_stc_merkle_roots: self.past_historial_stake_table_merkle_roots.commit(),
+            historial_stake_tables_commitment: CommittableStakeTableSetCommitment(
+                self.historical_stake_tables_commitment,
             )
             .commit(),
             collected_rewards: self.collected_rewards.commit(),
@@ -1508,8 +1533,8 @@ impl ValidatorState {
 
         // Build stake table commitments frontier, history and new commitment
         let mut stc_builder = crate::merkle_tree::FilledMTBuilder::from_frontier(
-            &self.stake_table_commitments_commitment,
-            &self.stake_table_commitments,
+            &self.historical_stake_tables_commitment,
+            &self.historical_stake_tables,
         )
         .expect("failed to restore stake table commitments merkle tree from frontier");
 
@@ -1520,14 +1545,14 @@ impl ValidatorState {
         let stc_mt = stc_builder.build();
         assert_eq!(now, stc_mt.num_leaves()); // TODO why now??
 
-        if self.past_stc_merkle_roots.0.len() >= Self::HISTORY_SIZE {
-            self.past_stc_merkle_roots.0.pop_back();
+        if self.past_historial_stake_table_merkle_roots.0.len() >= Self::HISTORY_SIZE {
+            self.past_historial_stake_table_merkle_roots.0.pop_back();
         }
-        self.past_stc_merkle_roots
+        self.past_historial_stake_table_merkle_roots
             .0
-            .push_front(self.stake_table_commitments_commitment.root_value);
-        self.stake_table_commitments_commitment = stc_mt.commitment();
-        self.stake_table_commitments = stc_mt.frontier();
+            .push_front(self.historical_stake_tables_commitment.root_value);
+        self.historical_stake_tables_commitment = stc_mt.commitment();
+        self.historical_stake_tables = stc_mt.frontier();
 
         //insert rewards transactions from this block
         let _collected_rewards = self
