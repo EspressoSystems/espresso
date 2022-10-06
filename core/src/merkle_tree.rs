@@ -1136,7 +1136,7 @@ where
 
 pub struct FilledMTBuilder<E>
 where
-    E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
+    E: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
 {
     peaks: Vec<(MerkleNode<E>, MerkleNode<E>)>,
     filled_root: Option<MerkleNode<E>>,
@@ -1147,7 +1147,7 @@ where
 
 impl<E> FilledMTBuilder<E>
 where
-    E: Clone + Debug + PartialEq + Eq + Hash + Default + CanonicalSerialize + CanonicalDeserialize,
+    E: Clone + Debug + PartialEq + Eq + Hash + CanonicalSerialize + CanonicalDeserialize,
 {
     pub fn new(height: u8) -> Option<Self> {
         let capacity = (3_u64).checked_pow(height as u32)?;

@@ -81,7 +81,22 @@ Get the location of this node.
 Returns
 ```
 {
-	"location": "String"
+	"location": "string"
+}
+```
+"""
+
+[route.records]
+PATH = ["/records"]
+DOC = """
+Get statistics about the record set.
+
+Returns
+```
+{
+	"total": "integer",
+	"spent": "integer",
+	"unspent": "integer",
 }
 ```
 """
