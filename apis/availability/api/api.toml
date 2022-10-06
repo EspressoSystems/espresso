@@ -137,13 +137,15 @@ Returns a list of
     "records_from": integer, // The UID of the first output of this block
     "record_count": integer, // The total number of outputs in this block
     "view_number": integer,
+    "timestamp": Integer,
+    "proposer_id": TaggedBase64
 }
 ```
 """
 
 [route.countproposals]
 PATH = ["countproposals/:propser_id"]
-":propser_id" = "Vec<u8>"
+":propser_id" = "TaggedBase64"
 ":count" = "Integer"
 DOC = """
 Get the number of commited blocks propsered by `proposer_id`
@@ -159,7 +161,7 @@ Returns
 
 [route.getproposals]
 PATH = ["getproposals/:propser_id", "getproposals/:propser_id/:count"]
-":propser_id" = "Vec<u8>"
+":propser_id" = "TaggedBase64"
 ":count" = "Integer"
 DOC = """
 Get the block_ids of `count` blocks from the proposer with `proposer_id`, starting
@@ -170,6 +172,30 @@ Returns a list of
 ```
 {
     "block_id": Integer,
+}
+```
+
+"""
+
+[route.getproposalssummary]
+PATH = ["getproposals/summary:propser_id", "getproposals/:propser_id/:count"]
+":propser_id" = "TaggedBase64"
+":count" = "Integer"
+DOC = """
+Get the block into of `count` blocks from the proposer with `proposer_id`, starting
+backwards from the most recent block from this proposer. If the propser has proposed less
+blocks than count, return all the block ids.
+
+Returns a list of 
+```
+{
+    "size": integer,
+    "txn_count": integer,
+    "records_from": integer, // The UID of the first output of this block
+    "record_count": integer, // The total number of outputs in this block
+    "view_number": integer,
+    "timestamp": Integer,
+    "proposer_id": TaggedBase64
 }
 ```
 

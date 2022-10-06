@@ -150,6 +150,37 @@ where
         .context(MissingBlockSnafu { block_id })
 }
 
+fn get_block_summaries<State: Clone>(
+    state: State,
+    ids: Vec<u64>,
+) -> Result<Vec<BlockSummaryQueryData>, Error>
+where
+    State: AvailabilityDataSource,
+{
+    let mut summaries = Vec::new();
+    for id in ids {
+        let block_data = get_block(state.clone(), id)?;
+        let qcert_data = get_qcert(state.clone(), id)?;
+        let size = block_data.raw_block.serialized_size();
+        let txn_count = block_data.txn_hashes.len();
+        let records_from = block_data.records_from;
+        let record_count = block_data.record_count;
+        let view_number = *qcert_data.view_number.deref();
+        let timestamp = block_data.timestamp;
+        let proposer_id = block_data.proposer_id.0;
+        summaries.push(BlockSummaryQueryData {
+            size,
+            txn_count,
+            records_from,
+            record_count,
+            timestamp,
+            view_number,
+            proposer_id,
+        });
+    }
+    Ok(summaries)
+}
+
 fn get_state<State>(state: State, block_id: u64) -> Result<StateQueryData, Error>
 where
     State: AvailabilityDataSource,
@@ -190,12 +221,16 @@ where
         let records_from = block_data.records_from;
         let record_count = block_data.record_count;
         let view_number = *qcert_data.view_number.deref();
+        let timestamp = block_data.timestamp;
+        let proposer_id = block_data.proposer_id.0;
         summaries.push(BlockSummaryQueryData {
             size,
             txn_count,
             records_from,
             record_count,
             view_number,
+            timestamp,
+            proposer_id,
         });
     }
     Ok(summaries)
@@ -319,6 +354,20 @@ where
                     return Ok(block_ids.into_iter().rev().take(count).collect());
                 }
                 Ok(block_ids)
+            }
+            .boxed()
+        })?
+        .get("getproposalssummary", |req, state| {
+            async move {
+                let proposer_id = req.blob_param("proposer")?;
+                let block_ids = state.get_block_ids_by_proposer_id(proposer_id);
+
+                let take = if let Some(count) = req.opt_integer_param("count")? {
+                    count
+                } else {
+                    block_ids.len()
+                };
+                get_block_summaries(state, block_ids.into_iter().rev().take(take).collect())
             }
             .boxed()
         })?;

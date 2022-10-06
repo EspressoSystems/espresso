@@ -87,8 +87,6 @@ pub struct StateQueryData {
     pub continuation_event_index: u64,
 }
 
-// TODO !keyao Add proposer ID and timestamp to the block summary data.
-// Issue: https://github.com/EspressoSystems/espresso/issues/624.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockSummaryQueryData {
     pub size: usize,
@@ -98,4 +96,6 @@ pub struct BlockSummaryQueryData {
     /// The total number of outputs in this block.
     pub record_count: u64,
     pub view_number: u64,
+    pub timestamp: i128,
+    pub proposer_id: Vec<u8>,
 }
