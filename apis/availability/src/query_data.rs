@@ -10,12 +10,18 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+use ark_serialize::*;
 use espresso_core::state::{
     state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedBlockCommitment,
     ElaboratedTransaction, TransactionCommitment, ValidatorState,
 };
 use jf_cap::structs::RecordCommitment;
+use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
+
+#[tagged_blob("EncodedPubKey")]
+#[derive(Debug, Clone, CanonicalDeserialize, CanonicalSerialize, Hash, PartialEq, Eq)]
+pub struct EncodedPublicKey(pub Vec<u8>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockQueryData {
@@ -25,6 +31,8 @@ pub struct BlockQueryData {
     pub records_from: u64,
     pub record_count: u64,
     pub txn_hashes: Vec<TransactionCommitment>,
+    pub timestamp: i128,
+    pub proposer_id: EncodedPublicKey,
 }
 
 impl BlockQueryData {

@@ -2189,6 +2189,7 @@ name = "espresso-availability-api"
 version = "0.1.0"
 dependencies = [
  "ark-serialize",
+ "ark-std",
  "clap 3.2.17",
  "commit",
  "derive_more",
@@ -2196,6 +2197,7 @@ dependencies = [
  "futures",
  "hotshot-types",
  "jf-cap",
+ "jf-utils 0.1.1",
  "serde",
  "snafu",
  "tide-disco",

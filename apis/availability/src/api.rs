@@ -309,6 +309,18 @@ where
                 get_block_summary(state, block_id, count)
             }
             .boxed()
+        })?
+        .get("getproposals", |req, state| {
+            async move {
+                let proposer_id = req.blob_param("proposer")?;
+                let block_ids = state.get_block_ids_by_proposer_id(proposer_id);
+
+                if let Some(count) = req.opt_integer_param("count")? {
+                    return Ok(block_ids.into_iter().rev().take(count).collect());
+                }
+                Ok(block_ids)
+            }
+            .boxed()
         })?;
     Ok(api)
 }
