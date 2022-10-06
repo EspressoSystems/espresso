@@ -15,3 +15,4 @@ pub mod data_source;
 pub mod query_data;
 
 pub use api::*;
+pub use query_data::*;
