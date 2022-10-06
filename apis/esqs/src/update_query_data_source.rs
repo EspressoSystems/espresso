@@ -260,8 +260,8 @@ where
                     vs.decided_block_count += block.len() as u64;
                     vs.cumulative_txn_count += num_txns as u64;
                     vs.cumulative_size += cumulative_size as u64;
-                    vs.total_records += num_records as u64;
-                    vs.total_nullifiers += num_nullifiers as u64;
+                    vs.record_count += num_records as u64;
+                    vs.nullifier_count += num_nullifiers as u64;
                     Ok(())
                 })
                 .unwrap();

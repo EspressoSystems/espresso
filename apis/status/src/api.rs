@@ -103,9 +103,9 @@ where
             async move {
                 let status = state.get_validator_status();
                 Ok(RecordSetInfo {
-                    total: status.total_records,
-                    spent: status.total_nullifiers,
-                    unspent: status.total_records - status.total_nullifiers,
+                    total: status.record_count,
+                    spent: status.nullifier_count,
+                    unspent: status.record_count - status.nullifier_count,
                 })
             }
             .boxed()

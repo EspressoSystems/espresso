@@ -59,7 +59,7 @@ pub struct ValidatorStatus {
     pub abandoned_block_count: u64,
     pub cumulative_txn_count: u64,
     pub cumulative_size: u64,
-    pub total_records: u64,
-    pub total_nullifiers: u64,
+    pub record_count: u64,
+    pub nullifier_count: u64,
     pub time_operational: Duration,
 }
