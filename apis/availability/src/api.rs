@@ -370,6 +370,13 @@ where
                 get_block_summaries(state, block_ids.into_iter().rev().take(take).collect())
             }
             .boxed()
+        })?
+        .get("countproposals", |req, state| {
+            async move {
+                let proposer_id = req.blob_param("proposer")?;
+                Ok(state.get_block_ids_by_proposer_id(proposer_id).len())
+            }
+            .boxed()
         })?;
     Ok(api)
 }
