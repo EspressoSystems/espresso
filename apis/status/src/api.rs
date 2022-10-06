@@ -101,11 +101,8 @@ where
         })?
         .get("location", |_, state| {
             async move {
-                let location = state
-                    .get_location()
-                    .as_ref()
-                    .map(|location| location.to_string());
-                Ok(location)
+                let location = state.get_location();
+                Ok(location.clone())
             }
             .boxed()
         })?
