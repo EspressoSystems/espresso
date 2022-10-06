@@ -112,6 +112,13 @@
 <span id="112">112</span>
 <span id="113">113</span>
 <span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -210,6 +217,13 @@
                     <span class="ident">bytes_finalized</span>: <span class="ident">status</span>.<span class="ident">cumulative_size</span>,
                     <span class="ident">time_operational</span>: <span class="ident">status</span>.<span class="ident">time_operational</span>,
                 })
+            }
+            .<span class="ident">boxed</span>()
+        })<span class="question-mark">?</span>
+        .<span class="ident">get</span>(<span class="string">&quot;location&quot;</span>, <span class="op">|</span><span class="kw">_</span>, <span class="ident">state</span><span class="op">|</span> {
+            <span class="kw">async</span> <span class="kw">move</span> {
+                <span class="kw">let</span> <span class="ident">location</span> <span class="op">=</span> <span class="ident">state</span>.<span class="ident">get_location</span>();
+                <span class="prelude-val">Ok</span>(<span class="ident">location</span>.<span class="ident">clone</span>())
             }
             .<span class="ident">boxed</span>()
         })<span class="question-mark">?</span>

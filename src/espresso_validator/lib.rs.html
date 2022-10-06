@@ -883,6 +883,7 @@
 <span id="883">883</span>
 <span id="884">884</span>
 <span id="885">885</span>
+<span id="886">886</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -1700,13 +1701,14 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">open_data_source</span>(
     <span class="ident">options</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>,
     <span class="ident">id</span>: <span class="ident">usize</span>,
+    <span class="ident">location</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
     <span class="ident">consensus</span>: <span class="ident">Consensus</span>,
 ) -&gt; <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">RwLock</span><span class="op">&lt;</span><span class="ident">QueryData</span><span class="op">&gt;</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">storage</span> <span class="op">=</span> <span class="ident">get_store_dir</span>(<span class="ident">options</span>, <span class="ident">id</span>);
     <span class="ident">Arc::new</span>(<span class="ident">RwLock::new</span>(<span class="kw">if</span> <span class="ident">options</span>.<span class="ident">reset_store_state</span> {
-        <span class="ident">QueryData::new</span>(<span class="kw-2">&amp;</span><span class="ident">storage</span>, <span class="ident">Box::new</span>(<span class="ident">consensus</span>)).<span class="ident">unwrap</span>()
+        <span class="ident">QueryData::new</span>(<span class="kw-2">&amp;</span><span class="ident">storage</span>, <span class="ident">Box::new</span>(<span class="ident">consensus</span>), <span class="ident">location</span>).<span class="ident">unwrap</span>()
     } <span class="kw">else</span> {
-        <span class="ident">QueryData::load</span>(<span class="kw-2">&amp;</span><span class="ident">storage</span>, <span class="ident">Box::new</span>(<span class="ident">consensus</span>)).<span class="ident">unwrap</span>()
+        <span class="ident">QueryData::load</span>(<span class="kw-2">&amp;</span><span class="ident">storage</span>, <span class="ident">Box::new</span>(<span class="ident">consensus</span>), <span class="ident">location</span>).<span class="ident">unwrap</span>()
     }))
 }
 
