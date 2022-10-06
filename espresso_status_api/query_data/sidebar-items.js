@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":[["MempoolInfo",""],["PeerInfo",""],["ValidatorStatus",""]]};
+window.SIDEBAR_ITEMS = {"struct":[["MempoolInfo",""],["PeerInfo",""],["RecordSetInfo",""],["Throughput",""],["ValidatorStatus",""]]};

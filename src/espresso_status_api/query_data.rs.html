@@ -46,6 +46,23 @@
 <span id="46">46</span>
 <span id="47">47</span>
 <span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -79,6 +96,21 @@
     <span class="kw">pub</span> <span class="ident">memory_footprint</span>: <span class="ident">u64</span>,
 }
 
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">Default</span>, <span class="ident">Deserialize</span>, <span class="ident">Serialize</span>)]</span>
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">RecordSetInfo</span> {
+    <span class="kw">pub</span> <span class="ident">total</span>: <span class="ident">u64</span>,
+    <span class="kw">pub</span> <span class="ident">spent</span>: <span class="ident">u64</span>,
+    <span class="kw">pub</span> <span class="ident">unspent</span>: <span class="ident">u64</span>,
+}
+
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">Deserialize</span>, <span class="ident">Serialize</span>)]</span>
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Throughput</span> {
+    <span class="kw">pub</span> <span class="ident">blocks_finalized</span>: <span class="ident">u64</span>,
+    <span class="kw">pub</span> <span class="ident">transactions_finalized</span>: <span class="ident">u64</span>,
+    <span class="kw">pub</span> <span class="ident">bytes_finalized</span>: <span class="ident">u64</span>,
+    <span class="kw">pub</span> <span class="ident">time_operational</span>: <span class="ident">Duration</span>,
+}
+
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Default</span>, <span class="ident">Deserialize</span>, <span class="ident">Serialize</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ValidatorStatus</span> {
     <span class="kw">pub</span> <span class="ident">peer_list</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">PeerInfo</span><span class="op">&gt;</span>,
@@ -92,6 +124,8 @@
     <span class="kw">pub</span> <span class="ident">abandoned_block_count</span>: <span class="ident">u64</span>,
     <span class="kw">pub</span> <span class="ident">cumulative_txn_count</span>: <span class="ident">u64</span>,
     <span class="kw">pub</span> <span class="ident">cumulative_size</span>: <span class="ident">u64</span>,
+    <span class="kw">pub</span> <span class="ident">record_count</span>: <span class="ident">u64</span>,
+    <span class="kw">pub</span> <span class="ident">nullifier_count</span>: <span class="ident">u64</span>,
     <span class="kw">pub</span> <span class="ident">time_operational</span>: <span class="ident">Duration</span>,
 }
 </code></pre></div>
