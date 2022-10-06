@@ -456,9 +456,9 @@ dependencies = [
 
 [[package]]
 name = "async-channel"
-version = "1.6.1"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2114d64672151c0c5eaa5e131ec84a74f06e1e559830dabba01ca30605d66319"
+checksum = "e14485364214912d3b19cc3435dde4df66065127f05fa0d75c712f36f12c2f28"
 dependencies = [
  "concurrent-queue",
  "event-listener",
@@ -3130,7 +3130,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#ba3b87d3b5dc83dfb086c10944ede6dd425351d3"
 dependencies = [
  "async-lock",
  "async-std",
@@ -3145,7 +3145,6 @@ dependencies = [
  "custom_debug",
  "dashmap",
  "embed-doc-image",
- "flume 0.10.14",
  "futures",
  "hotshot-centralized-server",
  "hotshot-consensus",
@@ -3167,14 +3166,13 @@ dependencies = [
 [[package]]
 name = "hotshot-centralized-server"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#ba3b87d3b5dc83dfb086c10944ede6dd425351d3"
 dependencies = [
  "async-std",
  "async-trait",
  "bincode",
  "cfg-if 1.0.0",
  "commit",
- "flume 0.10.14",
  "futures",
  "hotshot-types",
  "hotshot-utils",
@@ -3188,7 +3186,7 @@ dependencies = [
 [[package]]
 name = "hotshot-consensus"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#ba3b87d3b5dc83dfb086c10944ede6dd425351d3"
 dependencies = [
  "async-lock",
  "async-std",
@@ -3196,7 +3194,6 @@ dependencies = [
  "cfg-if 1.0.0",
  "commit",
  "custom_debug",
- "flume 0.10.14",
  "futures",
  "hotshot-types",
  "hotshot-utils",
@@ -3208,7 +3205,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#ba3b87d3b5dc83dfb086c10944ede6dd425351d3"
 dependencies = [
  "arbitrary",
  "async-std",
@@ -3238,15 +3235,15 @@ dependencies = [
 [[package]]
 name = "hotshot-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#ba3b87d3b5dc83dfb086c10944ede6dd425351d3"
 dependencies = [
+ "async-channel",
  "async-lock",
  "async-std",
  "async-trait",
  "bincode",
  "cfg-if 1.0.0",
  "color-eyre",
- "flume 0.10.14",
  "futures",
  "tracing",
  "tracing-error",
@@ -4103,7 +4100,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.0#57db501f0822b1b94b2386a47539cb0e0ec3df70"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#ba3b87d3b5dc83dfb086c10944ede6dd425351d3"
 dependencies = [
  "async-lock",
  "async-std",
@@ -4115,7 +4112,6 @@ dependencies = [
  "custom_debug",
  "derive_builder",
  "either",
- "flume 0.10.14",
  "futures",
  "hotshot-types",
  "hotshot-utils",

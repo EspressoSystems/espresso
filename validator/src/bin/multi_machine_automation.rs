@@ -359,11 +359,14 @@ mod test {
             num_fail_nodes,
             "--fail-after-txn",
             fail_after_txn,
-            // Set fairly short rounds. Since we only propose one transaction at a time in this
-            // test, and therefore require 2 empty blocks to be committed for every transaction,
-            // the test can take a very long time if rounds are too long.
+            // Set the shortest possible rounds. Since we only propose one transaction at a time in
+            // this test, we want the leader to propose a block as soon as they get a transaction.
             "--min-propose-time",
-            "10s",
+            "0s",
+            "--min-transactions",
+            "1",
+            // Set a fairly short timeout for proposing empty blocks. Each transaction we propose
+            // requires 2 empty blocks to be committed.
             "--max-propose-time",
             "10s",
             // Make the view timeout only slightly longer than the propose time. Since some of the

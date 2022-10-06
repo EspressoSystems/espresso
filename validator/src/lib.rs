@@ -188,31 +188,54 @@ pub struct NodeOpt {
     /// Increasing this trades off latency for throughput: the rate of new block proposals gets
     /// slower, but each block is proportionally larger. Because of batch verification, larger
     /// blocks should lead to increased throughput.
+    ///
+    /// `min-propose-time` is set to 0s by default, since minimum block size can be controlled using
+    /// `min-transactions`, which is a more intentional, declarative setting. You may still wish to
+    /// set a non-zero `min-propose-time` to allow for larger blocks in higher volumes while setting
+    /// `min-transactions` to something small to handle low-volume conditions.
     #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
-        default_value = "10s",
+        default_value = "0s",
         parse(try_from_str = parse_duration)
     )]
     pub min_propose_time: Duration,
 
     /// Maximum time to wait for submitted transactions before proposing a block.
     ///
-    /// If a validator has not received any transactions after `min-propose-time`, it will wait up
-    /// to `max-propose-time` before giving up and submitting an empty block.
+    /// If a validator has not received `min-transactions` after `min-propose-time`, it will wait up
+    /// to `max-propose-time` before giving up and submitting a block with whatever transactions it
+    /// does have.
     #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME",
-        default_value = "60s",
+        default_value = "30s",
         parse(try_from_str = parse_duration)
     )]
     pub max_propose_time: Duration,
+
+    /// Minimum number of transactions to include in a block, if possible.
+    ///
+    /// After `min-propose-time`, a leader will propose a block as soon as it has at least
+    /// `min-transactions`. Note that a block with fewer than `min-transactions` may still be
+    /// proposed, if `min-transactions` are not submitted before `max-propose-time`.
+    ///
+    /// The default is 1, because a non-zero value of `min-transactions` is required in order for
+    /// `max-propose-time` to have any effect -- if `min-transactions = 0`, then an empty block will
+    /// be proposed each view after `min-propose-time`. Setting `min-transactions` to 1 limits the
+    /// number of empty blocks proposed while still allowing a block to be proposed as soon as any
+    /// transaction has been received. In a setting where high volume is expected most of the time,
+    /// you might set this greater than 1 to encourage larger blocks and better throughput, while
+    /// setting `max-propose-time` very large to handle low-volume conditions without affecting
+    /// latency in high-volume conditions.
+    #[clap(long, env = "ESPRESSO_VALIDATOR_MIN_TRANSACTIONS", default_value = "1")]
+    pub min_transactions: usize,
 
     /// Base duration for next-view timeout.
     #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT",
-        default_value = "100s",
+        default_value = "40s",
         parse(try_from_str = parse_duration)
     )]
     pub next_view_timeout: Duration,
@@ -535,6 +558,7 @@ async fn init_hotshot(
         start_delay: options.start_delay.as_millis() as u64,
         propose_min_round_time: options.min_propose_time,
         propose_max_round_time: options.max_propose_time,
+        min_transactions: options.min_transactions,
         num_bootstrap,
         execution_type: ExecutionType::Continuous,
     };
