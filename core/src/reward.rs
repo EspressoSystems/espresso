@@ -806,3 +806,127 @@ impl Committable for CollectedRewardsHistory {
         ret.finalize()
     }
 }
+
+#[cfg(test)]
+mod rewards_testing {
+    use super::*;
+    use crate::reward::mock_eligibility::{is_eligible, prove_eligibility};
+    use crate::universal_params::MERKLE_HEIGHT;
+    use std::ops::Add;
+
+    fn get_vrf_proof_and_view_number(
+        priv_key: &StakingPrivKey,
+        pub_key: &StakingKey,
+    ) -> (VrfProof, hotshot_types::data::ViewNumber) {
+        let mut view_number = hotshot_types::data::ViewNumber::genesis();
+        // with 600 runs we get ~2^{-100} failure pbb
+        let mut counter = 0;
+        let vrf_proof = loop {
+            if let Some(proof) = prove_eligibility(view_number.into(), priv_key) {
+                assert!(is_eligible(view_number.into(), pub_key, &proof));
+                break proof;
+            }
+            view_number = view_number.add(1);
+            counter += 1;
+            if counter > 600 {
+                assert!(false, "test error: loop never returned");
+            }
+        };
+        (vrf_proof, view_number)
+    }
+
+    #[test]
+    fn test_eligibility_witness() {
+        let priv_key = StakingPrivKey::generate();
+        let pub_key = StakingKey::from_priv_key(&priv_key);
+        let bad_priv_key = StakingPrivKey::generate();
+        let bad_pub_key = StakingKey::from_priv_key(&bad_priv_key);
+
+        let (proof, view_number) = get_vrf_proof_and_view_number(&priv_key, &pub_key);
+
+        let mut witness = EligibilityWitness {
+            /// Staking public key
+            staking_key: pub_key.clone(),
+            /// View number for which the key was elected
+            time: view_number.into(),
+            /// Cryptographic proof
+            vrf_proof: proof,
+        };
+        assert!(witness.verify().is_ok());
+
+        witness.staking_key = bad_pub_key;
+        assert!(witness.verify().is_err());
+
+        witness.staking_key = pub_key;
+        witness.time = view_number.add(1).into();
+        assert!(witness.verify().is_err());
+        //with current mock_eligibility, we cannot change/test stake amount
+        //but we should be able to later
+    }
+
+    #[test]
+    fn test_collect_reward_note() {
+        let mut rng = rand::thread_rng();
+        let priv_key = StakingPrivKey::generate();
+        let pub_key = StakingKey::from_priv_key(&priv_key);
+        let (vrf_proof, time) = get_vrf_proof_and_view_number(&priv_key, &pub_key);
+
+        let time = time.into();
+        let amount = Amount::from(100u64);
+
+        // Build stake table commitments frontier, history and new commitment
+        let mut stc_builder = crate::merkle_tree::FilledMTBuilder::<(
+            StakeTableCommitment,
+            Amount,
+            ConsensusTime,
+        )>::new(MERKLE_HEIGHT)
+        .unwrap();
+        let mut stake_table_mt =
+            crate::kv_merkle_tree::KVMerkleTree::<StakeTableHash>::EmptySubtree;
+        stake_table_mt.insert(pub_key.clone(), amount);
+        let stake_amount_proof = stake_table_mt.lookup(pub_key.clone()).unwrap().1;
+        let stake_table_commitment = stake_table_mt.hash();
+        stc_builder.push((StakeTableCommitment(stake_table_commitment), amount, time));
+        let stc_mt = stc_builder.build();
+
+        //Build collected rewards mt
+        let collected_reward = CollectedRewards {
+            staking_key: pub_key,
+            time,
+        };
+        let collected_rewards_mt =
+            crate::kv_merkle_tree::KVMerkleTree::<CollectedRewardsHash>::EmptySubtree;
+        let uncollected_reward_proof = collected_rewards_mt
+            .lookup(collected_reward.clone())
+            .unwrap()
+            .1;
+
+        let cap_address = UserPubKey::default().address();
+
+        let mut validator_state = ValidatorState::default();
+        validator_state.historical_stake_tables = stc_mt.frontier();
+        validator_state.block_height = 1;
+        validator_state.historical_stake_tables_commitment = stc_mt.commitment();
+
+        let (reward_note, aux_proofs) = CollectRewardNote::generate(
+            &mut rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            &priv_key,
+            cap_address,
+            Amount::from(100u64),
+            stake_amount_proof,
+            uncollected_reward_proof,
+            vrf_proof,
+        )
+        .unwrap();
+
+        assert!(reward_note.verify().is_ok());
+        assert!(aux_proofs
+            .verify(&validator_state, collected_reward)
+            .is_ok());
+    }
+}
