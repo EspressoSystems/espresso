@@ -167,6 +167,7 @@ where
                         block: block.clone(),
                         block_id: block_index as u64,
                         state_comm: self.validator_state.commit(),
+                        proof: (),
                     })];
 
                     // Construct the Memos events for this block.

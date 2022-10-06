@@ -1371,8 +1371,11 @@ impl ValidatorState {
                     .expect("Failed to verify VRF Witness");
 
                 //check reward amount
-                let max_reward =
-                    crate::reward::compute_reward_amount(self, self.now(), self.total_stake);
+                let max_reward = crate::reward::compute_reward_amount(
+                    self,
+                    self.block_height(),
+                    self.total_stake,
+                );
                 if txn.body.reward_amount > max_reward {
                     return Err(ValidationError::RewardAmountTooLarge);
                 }
