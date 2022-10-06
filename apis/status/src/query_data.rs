@@ -31,6 +31,21 @@ pub struct MempoolInfo {
     pub memory_footprint: u64,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct RecordSetInfo {
+    pub total: u64,
+    pub spent: u64,
+    pub unspent: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Throughput {
+    pub blocks_finalized: u64,
+    pub transactions_finalized: u64,
+    pub bytes_finalized: u64,
+    pub time_operational: Duration,
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ValidatorStatus {
     pub peer_list: Vec<PeerInfo>,
@@ -51,5 +66,7 @@ pub struct ValidatorStatus {
     pub abandoned_block_count: u64,
     pub cumulative_txn_count: u64,
     pub cumulative_size: u64,
+    pub record_count: u64,
+    pub nullifier_count: u64,
     pub time_operational: Duration,
 }

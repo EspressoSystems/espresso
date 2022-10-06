@@ -46,6 +46,12 @@ struct Options {
     #[clap(requires("num-nodes"))]
     pub id: usize,
 
+    /// Location of the current node.
+    ///
+    /// If not provided, the IP address will be used for dashboard display.
+    #[clap(long, env = "ESPRESSO_VALIDATOR_LOCATION")]
+    pub location: Option<String>,
+
     /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
     /// bootstrap nodes.
     #[clap(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
@@ -320,7 +326,8 @@ async fn main() -> Result<(), std::io::Error> {
         own_id,
     )
     .await;
-    let data_source = open_data_source(&options.node_opt, own_id, hotshot.clone());
+    let data_source =
+        open_data_source(&options.node_opt, own_id, options.location, hotshot.clone());
 
     // Start an EsQS server if requested.
     if let Some(esqs) = &options.esqs {

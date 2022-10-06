@@ -164,6 +164,11 @@ impl EspressoTransaction {
             Self::Reward(_) => vec![],
         }
     }
+
+    /// Get the number of inputs to the transaction.
+    pub fn input_len(&self) -> usize {
+        self.input_nullifiers().len()
+    }
 }
 
 impl commit::Committable for EspressoTransaction {

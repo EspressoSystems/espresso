@@ -93,7 +93,32 @@ where
 
     async fn update(&mut self, event: HotShotEvent) {
         if let HotShotEvent::Decide { leaf_chain } = event {
+            if let Some(leaf) = leaf_chain.last() {
+                // HotShot can give us a leaf chain that does not follow immediately from our last
+                // saved state, if it skipped ahead for liveness reasons. Insert missing blocks as
+                // placeholders for each missing leaf between our last saved state and the oldest
+                // leaf in the new chain. These could potentially be filled in asynchronously by
+                // querying another full node.
+                let expected_block_height = self.validator_state.block_height + 1;
+                if leaf.state.block_height > expected_block_height {
+                    let num_placeholders =
+                        (leaf.state.block_height - expected_block_height) as usize;
+                    tracing::warn!(
+                        "HotShot event stream skipped blocks, appending {} placeholders",
+                        num_placeholders
+                    );
+                    let mut availability_store = self.availability_store.write().await;
+                    if let Err(e) =
+                        availability_store.append_blocks(vec![(None, None, None); num_placeholders])
+                    {
+                        tracing::warn!("failed to append placeholder blocks: {}", e);
+                    }
+                }
+            }
+
             let mut num_txns = 0usize;
+            let mut num_records = 0usize;
+            let mut num_nullifiers = 0usize;
             let mut cumulative_size = 0usize;
             for leaf in leaf_chain.iter().rev() {
                 let mut block = leaf.deltas.clone();
@@ -177,6 +202,15 @@ where
 
                     first_uid - records_from
                 };
+
+                num_records += record_count as usize;
+                num_nullifiers += block
+                    .block
+                    .0
+                    .iter()
+                    .map(|txn| txn.input_len())
+                    .sum::<usize>();
+
                 {
                     let mut availability_store = self.availability_store.write().await;
                     if let Err(e) = availability_store.append_blocks(vec![(
@@ -215,6 +249,8 @@ where
                     vs.decided_block_count += leaf_chain.len() as u64;
                     vs.cumulative_txn_count += num_txns as u64;
                     vs.cumulative_size += cumulative_size as u64;
+                    vs.record_count += num_records as u64;
+                    vs.nullifier_count += num_nullifiers as u64;
                     Ok(())
                 })
                 .unwrap();
