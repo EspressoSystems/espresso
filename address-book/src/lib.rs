@@ -53,11 +53,11 @@ pub type Result<T> = std::result::Result<T, AddressBookError>;
 
 /// Command line arguments
 #[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
 pub struct Args {
-    #[clap(flatten)]
+    #[command(flatten)]
     pub disco_args: DiscoArgs,
-    #[clap(long)]
+    #[arg(long)]
     /// Storage path
     pub store_path: Option<PathBuf>,
 }

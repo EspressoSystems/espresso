@@ -18,7 +18,7 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1.56"
-clap = { version = "3.2.17", features = ["derive", "env"] }
+clap = { version = "4.0", features = ["derive", "env"] }
 derive_more = "0.99"
 espresso-core = { path = "../../core/" }
 futures = "0.3.21"
@@ -26,6 +26,6 @@ postage = { version = "0.5", features = ["futures-traits"] }
 seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
 serde = { version = "1.0.139", features = ["derive", "rc"] }
 snafu = { version = "0.7", features = ["backtraces"] }
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main" }
+tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.0" }
 toml = "0.5"
 tracing = "0.1.35"
