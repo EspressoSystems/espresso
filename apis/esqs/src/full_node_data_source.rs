@@ -59,15 +59,15 @@ pub struct QueryData {
     index_by_last_record_id: BTreeMap<u64, u64>,
     cached_events_start: usize,
     events: Vec<Option<LedgerEvent<EspressoLedger>>>,
-    event_sender: broadcast::Sender<(usize, LedgerEvent<EspressoLedger>)>,
-    event_receiver: broadcast::Receiver<(usize, LedgerEvent<EspressoLedger>)>,
+    event_sender: broadcast::Sender<(usize, Option<LedgerEvent<EspressoLedger>>)>,
+    event_receiver: broadcast::Receiver<(usize, Option<LedgerEvent<EspressoLedger>>)>,
     cached_nullifier_sets: BTreeMap<u64, SetMerkleTree>,
     node_status: ValidatorStatus,
     query_storage: AtomicStore,
-    block_storage: AppendLog<BincodeLoadStore<BlockQueryData>>,
-    state_storage: AppendLog<BincodeLoadStore<StateQueryData>>,
-    qcert_storage: AppendLog<BincodeLoadStore<QuorumCertificate<H_256>>>,
-    event_storage: AppendLog<BincodeLoadStore<LedgerEvent<EspressoLedger>>>,
+    block_storage: AppendLog<BincodeLoadStore<Option<BlockQueryData>>>,
+    state_storage: AppendLog<BincodeLoadStore<Option<StateQueryData>>>,
+    qcert_storage: AppendLog<BincodeLoadStore<Option<QuorumCertificate<H_256>>>>,
+    event_storage: AppendLog<BincodeLoadStore<Option<LedgerEvent<EspressoLedger>>>>,
     status_storage: RollingLog<BincodeLoadStore<ValidatorStatus>>,
     consensus: Consensus,
 }
@@ -94,7 +94,7 @@ impl Extract<QuorumCertificate<H_256>> for BlockAndAssociated {
 
 pub struct DynamicPersistenceIterator<'a, T, X, LogIter>
 where
-    LogIter: Iterator<Item = Result<T, PersistenceError>>,
+    LogIter: Iterator<Item = Result<Option<T>, PersistenceError>>,
     X: Extract<T>,
 {
     index: usize,
@@ -105,7 +105,7 @@ where
 
 impl<'a, T, X, LogIter> DynamicPersistenceIterator<'a, T, X, LogIter>
 where
-    LogIter: Iterator<Item = Result<T, PersistenceError>> + ExactSizeIterator,
+    LogIter: Iterator<Item = Result<Option<T>, PersistenceError>> + ExactSizeIterator,
     T: Clone,
     X: Extract<T>,
 {
@@ -125,7 +125,11 @@ where
                 if let Err(e) = &res {
                     warn!("failed to load field at position {}: error {}", n, e);
                 }
-                res.ok()
+                // Both a failed load and a successful load of `None` are
+                // treated the same: as missing data, so we yield `None`. The
+                // latter case can happen if there was a previous failed load
+                // and we marked this entry as explicitly missing.
+                res.ok().flatten()
             })
         };
 
@@ -137,7 +141,7 @@ where
 
 impl<'a, T, X, LogIter> Iterator for DynamicPersistenceIterator<'a, T, X, LogIter>
 where
-    LogIter: Iterator<Item = Result<T, PersistenceError>> + ExactSizeIterator,
+    LogIter: Iterator<Item = Result<Option<T>, PersistenceError>> + ExactSizeIterator,
     T: Clone,
     X: Extract<T>,
 {
@@ -168,7 +172,7 @@ fn dynamic_persistence_iter<T, X, LogIter>(
     from_fs: LogIter,
 ) -> DynamicPersistenceIterator<T, X, LogIter>
 where
-    LogIter: Iterator<Item = Result<T, PersistenceError>> + ExactSizeIterator,
+    LogIter: Iterator<Item = Result<Option<T>, PersistenceError>> + ExactSizeIterator,
     X: Extract<T>,
 {
     DynamicPersistenceIterator {
@@ -190,20 +194,20 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
         'a,
         BlockQueryData,
         BlockAndAssociated,
-        ALIter<'a, BincodeLoadStore<BlockQueryData>>,
+        ALIter<'a, BincodeLoadStore<Option<BlockQueryData>>>,
     >;
     type StateIterType = DynamicPersistenceIterator<
         'a,
         StateQueryData,
         BlockAndAssociated,
-        ALIter<'a, BincodeLoadStore<StateQueryData>>,
+        ALIter<'a, BincodeLoadStore<Option<StateQueryData>>>,
     >;
 
     type QCertIterType = DynamicPersistenceIterator<
         'a,
         QuorumCertificate<H_256>,
         BlockAndAssociated,
-        ALIter<'a, BincodeLoadStore<QuorumCertificate<H_256>>>,
+        ALIter<'a, BincodeLoadStore<Option<QuorumCertificate<H_256>>>>,
     >;
 
     fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType {
@@ -277,7 +281,8 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
                         warn!("{}", err);
                         err
                     })
-                    .ok()?;
+                    .ok()
+                    .flatten()?;
                 apply(&qd)
             }
         } else {
@@ -311,7 +316,8 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
                     warn!("{}", err);
                     err
                 })
-                .ok()?;
+                .ok()
+                .flatten()?;
             apply(&qd)
         }
     }
@@ -322,7 +328,9 @@ impl UpdateAvailabilityData for QueryData {
 
     fn append_blocks(&mut self, blocks: Vec<BlockAndAssociated>) -> Result<(), Self::Error> {
         blocks.iter().for_each(|block_and_associated| {
-            if let Some(block) = &block_and_associated.0 {
+            let (opt_block, opt_state, opt_qcert) = &block_and_associated;
+
+            if let Some(block) = opt_block {
                 self.index_by_block_hash
                     .insert(block.block_hash, block.block_id);
                 if block.record_count > 0 {
@@ -333,22 +341,18 @@ impl UpdateAvailabilityData for QueryData {
                     self.index_by_txn_hash
                         .insert(*txn_hash, (block.block_id, index as u64));
                 }
-                if let Err(e) = self.block_storage.store_resource(block) {
-                    warn!("Failed to store block {:?}: Error: {}", block, e);
-                }
             }
-            if let Some(state) = &block_and_associated.1 {
-                if let Err(e) = self.state_storage.store_resource(state) {
-                    warn!("Failed to store state {:?}: Error: {}", state, e);
-                }
+            if let Err(e) = self.block_storage.store_resource(opt_block) {
+                warn!("Failed to store block {:?}: Error: {}", opt_block, e);
             }
-            if let Some(qcert) = &block_and_associated.2 {
-                if let Err(e) = self.qcert_storage.store_resource(qcert) {
-                    warn!(
-                        "Failed to store QuorumCertificate {:?}: Error: {}",
-                        qcert, e
-                    );
-                }
+            if let Err(e) = self.state_storage.store_resource(opt_state) {
+                warn!("Failed to store state {:?}: Error: {}", opt_state, e);
+            }
+            if let Err(e) = self.qcert_storage.store_resource(opt_qcert) {
+                warn!(
+                    "Failed to store QuorumCertificate {:?}: Error: {}",
+                    opt_qcert, e
+                );
             }
         });
         let mut blocks = blocks;
@@ -380,7 +384,7 @@ impl<'a> CatchUpDataSource for &'a QueryData {
         'a,
         LedgerEvent<EspressoLedger>,
         Option<LedgerEvent<EspressoLedger>>,
-        ALIter<'a, BincodeLoadStore<LedgerEvent<EspressoLedger>>>,
+        ALIter<'a, BincodeLoadStore<Option<LedgerEvent<EspressoLedger>>>>,
     >;
     fn get_nth_event_iter(&self, n: usize) -> Self::EventIterType {
         let mut iter = self.event_storage.iter();
@@ -395,7 +399,7 @@ impl<'a> CatchUpDataSource for &'a QueryData {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn subscribe(&self) -> broadcast::Receiver<(usize, LedgerEvent<EspressoLedger>)> {
+    fn subscribe(&self) -> broadcast::Receiver<(usize, Option<LedgerEvent<EspressoLedger>>)> {
         self.event_receiver.clone()
     }
 }
@@ -409,18 +413,15 @@ impl UpdateCatchUpData for QueryData {
         events: Vec<Option<LedgerEvent<EspressoLedger>>>,
     ) -> Result<(), Self::Error> {
         for e in events {
-            if let Some(e) = &e {
-                if let Err(err) = self.event_storage.store_resource(e) {
-                    warn!("Failed to store event {:?}, Error: {}", e, err);
-                }
-
-                // `send` fails if the channel is full or closed. The channel cannot be full because
-                // it is unbounded, and cannot be closed because `self` owns copies of both ends.
-                self.event_sender
-                    .send((self.event_count(), e.clone()))
-                    .await
-                    .expect("unexpected failure when broadcasting event");
+            if let Err(err) = self.event_storage.store_resource(&e) {
+                warn!("Failed to store event {:?}, Error: {}", e, err);
             }
+            // `send` fails if the channel is full or closed. The channel cannot be full because
+            // it is unbounded, and cannot be closed because `self` owns copies of both ends.
+            self.event_sender
+                .send((self.event_count(), e.clone()))
+                .await
+                .expect("unexpected failure when broadcasting event");
             self.events.push(e);
         }
         if self.events.len() > CACHED_EVENTS_COUNT {
@@ -658,19 +659,21 @@ impl QueryData {
                 if let Err(e) = &r {
                     warn!("failed to load block. Error: {}", e);
                 }
-                r.ok()
+                // We treat missing blocks and failed-to-load blocks the same:
+                // if we failed to load a block, it is now missing!
+                r.ok().flatten()
             }),
             state_storage.iter().skip(cached_blocks_start).map(|r| {
                 if let Err(e) = &r {
                     warn!("failed to load state. Error: {}", e);
                 }
-                r.ok()
+                r.ok().flatten()
             }),
             qcert_storage.iter().skip(cached_blocks_start).map(|r| {
                 if let Err(e) = &r {
                     warn!("failed to load QC. Error: {}", e);
                 }
-                r.ok()
+                r.ok().flatten()
             }),
         );
         let cached_blocks: Vec<BlockAndAssociated> = zipped_iters.collect();
@@ -680,12 +683,16 @@ impl QueryData {
         let mut running_nullifier_set = SetMerkleTree::default();
         let index_by_block_hash = block_storage
             .iter()
-            .filter_map(|res: Result<BlockQueryData, PersistenceError>| match res {
+            .filter_map(|res: Result<Option<BlockQueryData>, _>| match res {
                 Err(e) => {
                     warn!("failed to load block. Error: {}", e);
                     None
                 }
-                Ok(block) => {
+                Ok(None) => {
+                    // If a block is missing, we can't add it to the index.
+                    None
+                }
+                Ok(Some(block)) => {
                     block
                         .txn_hashes
                         .iter()
@@ -727,7 +734,9 @@ impl QueryData {
                 if let Err(e) = &ev {
                     warn!("Failed to load event. Error: {}", e);
                 }
-                ev.ok()
+                // We treat missing events and failed-to-load events the same:
+                // if we failed to load a event, it is now missing!
+                ev.ok().flatten()
             })
             .collect();
         // Load the last persisted validator status. If there is no existing status (e.g. the user
