@@ -287,6 +287,27 @@
 <span id="287">287</span>
 <span id="288">288</span>
 <span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -412,6 +433,27 @@
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">num_records</span> <span class="op">=</span> <span class="number">0usize</span>;
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">num_nullifiers</span> <span class="op">=</span> <span class="number">0usize</span>;
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cumulative_size</span> <span class="op">=</span> <span class="number">0usize</span>;
+
+            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">state</span>) <span class="op">=</span> <span class="ident">state</span>.<span class="ident">first</span>() {
+                <span class="comment">// HotShot can give us a leaf chain that does not follow immediately from our last</span>
+                <span class="comment">// saved state, if it skipped ahead for liveness reasons. Insert missing blocks as</span>
+                <span class="comment">// placeholders for each missing leaf. These could potentially be filled in</span>
+                <span class="comment">// asynchronously by querying another full node.</span>
+                <span class="kw">let</span> <span class="ident">expected_block_height</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">validator_state</span>.<span class="ident">block_height</span> <span class="op">+</span> <span class="number">1</span>;
+                <span class="kw">if</span> <span class="ident">state</span>.<span class="ident">block_height</span> <span class="op">&gt;</span> <span class="ident">expected_block_height</span> {
+                    <span class="kw">let</span> <span class="ident">num_placeholders</span> <span class="op">=</span> (<span class="ident">state</span>.<span class="ident">block_height</span> <span class="op">-</span> <span class="ident">expected_block_height</span>) <span class="kw">as</span> <span class="ident">usize</span>;
+                    <span class="macro">tracing::warn!</span>(
+                        <span class="string">&quot;HotShot event stream skipped blocks, appending {} placeholders&quot;</span>,
+                        <span class="ident">num_placeholders</span>
+                    );
+                    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">availability_store</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">availability_store</span>.<span class="ident">write</span>().<span class="kw">await</span>;
+                    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span>
+                        <span class="ident">availability_store</span>.<span class="ident">append_blocks</span>(<span class="macro">vec!</span>[(<span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>); <span class="ident">num_placeholders</span>])
+                    {
+                        <span class="macro">tracing::warn!</span>(<span class="string">&quot;failed to append placeholder blocks: {}&quot;</span>, <span class="ident">e</span>);
+                    }
+                }
+            }
 
             <span class="kw">for</span> (<span class="kw-2">mut</span> <span class="ident">block</span>, <span class="ident">state</span>, <span class="ident">qcert</span>) <span class="kw">in</span>
                 <span class="macro">izip!</span>(<span class="ident">block</span>.<span class="ident">iter</span>().<span class="ident">cloned</span>(), <span class="ident">state</span>.<span class="ident">iter</span>(), <span class="ident">qcs</span>.<span class="ident">iter</span>().<span class="ident">cloned</span>()).<span class="ident">rev</span>()

@@ -792,6 +792,15 @@
 <span id="792">792</span>
 <span id="793">793</span>
 <span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -853,15 +862,15 @@
     <span class="ident">index_by_last_record_id</span>: <span class="ident">BTreeMap</span><span class="op">&lt;</span><span class="ident">u64</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
     <span class="ident">cached_events_start</span>: <span class="ident">usize</span>,
     <span class="ident">events</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">event_sender</span>: <span class="ident">broadcast::Sender</span><span class="op">&lt;</span>(<span class="ident">usize</span>, <span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span>)<span class="op">&gt;</span>,
-    <span class="ident">event_receiver</span>: <span class="ident">broadcast::Receiver</span><span class="op">&lt;</span>(<span class="ident">usize</span>, <span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span>)<span class="op">&gt;</span>,
+    <span class="ident">event_sender</span>: <span class="ident">broadcast::Sender</span><span class="op">&lt;</span>(<span class="ident">usize</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span>)<span class="op">&gt;</span>,
+    <span class="ident">event_receiver</span>: <span class="ident">broadcast::Receiver</span><span class="op">&lt;</span>(<span class="ident">usize</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span>)<span class="op">&gt;</span>,
     <span class="ident">cached_nullifier_sets</span>: <span class="ident">BTreeMap</span><span class="op">&lt;</span><span class="ident">u64</span>, <span class="ident">SetMerkleTree</span><span class="op">&gt;</span>,
     <span class="ident">node_status</span>: <span class="ident">ValidatorStatus</span>,
     <span class="ident">query_storage</span>: <span class="ident">AtomicStore</span>,
-    <span class="ident">block_storage</span>: <span class="ident">AppendLog</span><span class="op">&lt;</span><span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="ident">BlockQueryData</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">state_storage</span>: <span class="ident">AppendLog</span><span class="op">&lt;</span><span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="ident">StateQueryData</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">qcert_storage</span>: <span class="ident">AppendLog</span><span class="op">&lt;</span><span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">event_storage</span>: <span class="ident">AppendLog</span><span class="op">&lt;</span><span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">block_storage</span>: <span class="ident">AppendLog</span><span class="op">&lt;</span><span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockQueryData</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">state_storage</span>: <span class="ident">AppendLog</span><span class="op">&lt;</span><span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">StateQueryData</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">qcert_storage</span>: <span class="ident">AppendLog</span><span class="op">&lt;</span><span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">event_storage</span>: <span class="ident">AppendLog</span><span class="op">&lt;</span><span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">status_storage</span>: <span class="ident">RollingLog</span><span class="op">&lt;</span><span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="ident">ValidatorStatus</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">consensus</span>: <span class="ident">Consensus</span>,
 }
@@ -888,7 +897,7 @@
 
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">DynamicPersistenceIterator</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span>, <span class="ident">X</span>, <span class="ident">LogIter</span><span class="op">&gt;</span>
 <span class="kw">where</span>
-    <span class="ident">LogIter</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">PersistenceError</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">LogIter</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>, <span class="ident">PersistenceError</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">X</span>: <span class="ident">Extract</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>,
 {
     <span class="ident">index</span>: <span class="ident">usize</span>,
@@ -899,7 +908,7 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span>, <span class="ident">X</span>, <span class="ident">LogIter</span><span class="op">&gt;</span> <span class="ident">DynamicPersistenceIterator</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span>, <span class="ident">X</span>, <span class="ident">LogIter</span><span class="op">&gt;</span>
 <span class="kw">where</span>
-    <span class="ident">LogIter</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">PersistenceError</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>,
+    <span class="ident">LogIter</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>, <span class="ident">PersistenceError</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>,
     <span class="ident">T</span>: <span class="ident">Clone</span>,
     <span class="ident">X</span>: <span class="ident">Extract</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>,
 {
@@ -919,7 +928,11 @@
                 <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">res</span> {
                     <span class="macro">warn!</span>(<span class="string">&quot;failed to load field at position {}: error {}&quot;</span>, <span class="ident">n</span>, <span class="ident">e</span>);
                 }
-                <span class="ident">res</span>.<span class="ident">ok</span>()
+                <span class="comment">// Both a failed load and a successful load of `None` are</span>
+                <span class="comment">// treated the same: as missing data, so we yield `None`. The</span>
+                <span class="comment">// latter case can happen if there was a previous failed load</span>
+                <span class="comment">// and we marked this entry as explicitly missing.</span>
+                <span class="ident">res</span>.<span class="ident">ok</span>().<span class="ident">flatten</span>()
             })
         };
 
@@ -931,7 +944,7 @@
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span>, <span class="ident">X</span>, <span class="ident">LogIter</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">DynamicPersistenceIterator</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span>, <span class="ident">X</span>, <span class="ident">LogIter</span><span class="op">&gt;</span>
 <span class="kw">where</span>
-    <span class="ident">LogIter</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">PersistenceError</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>,
+    <span class="ident">LogIter</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>, <span class="ident">PersistenceError</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>,
     <span class="ident">T</span>: <span class="ident">Clone</span>,
     <span class="ident">X</span>: <span class="ident">Extract</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>,
 {
@@ -962,7 +975,7 @@
     <span class="ident">from_fs</span>: <span class="ident">LogIter</span>,
 ) -&gt; <span class="ident">DynamicPersistenceIterator</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">X</span>, <span class="ident">LogIter</span><span class="op">&gt;</span>
 <span class="kw">where</span>
-    <span class="ident">LogIter</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">PersistenceError</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>,
+    <span class="ident">LogIter</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>, <span class="ident">PersistenceError</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>,
     <span class="ident">X</span>: <span class="ident">Extract</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>,
 {
     <span class="ident">DynamicPersistenceIterator</span> {
@@ -984,20 +997,20 @@
         <span class="lifetime">&#39;a</span>,
         <span class="ident">BlockQueryData</span>,
         <span class="ident">BlockAndAssociated</span>,
-        <span class="ident">ALIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="ident">BlockQueryData</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        <span class="ident">ALIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockQueryData</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="op">&gt;</span>;
     <span class="kw">type</span> <span class="ident">StateIterType</span> <span class="op">=</span> <span class="ident">DynamicPersistenceIterator</span><span class="op">&lt;</span>
         <span class="lifetime">&#39;a</span>,
         <span class="ident">StateQueryData</span>,
         <span class="ident">BlockAndAssociated</span>,
-        <span class="ident">ALIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="ident">StateQueryData</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        <span class="ident">ALIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">StateQueryData</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="op">&gt;</span>;
 
     <span class="kw">type</span> <span class="ident">QCertIterType</span> <span class="op">=</span> <span class="ident">DynamicPersistenceIterator</span><span class="op">&lt;</span>
         <span class="lifetime">&#39;a</span>,
         <span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span>,
         <span class="ident">BlockAndAssociated</span>,
-        <span class="ident">ALIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        <span class="ident">ALIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="op">&gt;</span>;
 
     <span class="kw">fn</span> <span class="ident">get_nth_block_iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">n</span>: <span class="ident">usize</span>) -&gt; <span class="ident"><span class="self">Self</span>::BlockIterType</span> {
@@ -1071,7 +1084,8 @@
                         <span class="macro">warn!</span>(<span class="string">&quot;{}&quot;</span>, <span class="ident">err</span>);
                         <span class="ident">err</span>
                     })
-                    .<span class="ident">ok</span>()<span class="question-mark">?</span>;
+                    .<span class="ident">ok</span>()
+                    .<span class="ident">flatten</span>()<span class="question-mark">?</span>;
                 <span class="ident">apply</span>(<span class="kw-2">&amp;</span><span class="ident">qd</span>)
             }
         } <span class="kw">else</span> {
@@ -1105,7 +1119,8 @@
                     <span class="macro">warn!</span>(<span class="string">&quot;{}&quot;</span>, <span class="ident">err</span>);
                     <span class="ident">err</span>
                 })
-                .<span class="ident">ok</span>()<span class="question-mark">?</span>;
+                .<span class="ident">ok</span>()
+                .<span class="ident">flatten</span>()<span class="question-mark">?</span>;
             <span class="ident">apply</span>(<span class="kw-2">&amp;</span><span class="ident">qd</span>)
         }
     }
@@ -1116,7 +1131,9 @@
 
     <span class="kw">fn</span> <span class="ident">append_blocks</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">blocks</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">BlockAndAssociated</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="ident">blocks</span>.<span class="ident">iter</span>().<span class="ident">for_each</span>(<span class="op">|</span><span class="ident">block_and_associated</span><span class="op">|</span> {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">block</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">block_and_associated</span>.<span class="number">0</span> {
+            <span class="kw">let</span> (<span class="ident">opt_block</span>, <span class="ident">opt_state</span>, <span class="ident">opt_qcert</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">block_and_associated</span>;
+
+            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">block</span>) <span class="op">=</span> <span class="ident">opt_block</span> {
                 <span class="self">self</span>.<span class="ident">index_by_block_hash</span>
                     .<span class="ident">insert</span>(<span class="ident">block</span>.<span class="ident">block_hash</span>, <span class="ident">block</span>.<span class="ident">block_id</span>);
                 <span class="kw">if</span> <span class="ident">block</span>.<span class="ident">record_count</span> <span class="op">&gt;</span> <span class="number">0</span> {
@@ -1127,22 +1144,18 @@
                     <span class="self">self</span>.<span class="ident">index_by_txn_hash</span>
                         .<span class="ident">insert</span>(<span class="kw-2">*</span><span class="ident">txn_hash</span>, (<span class="ident">block</span>.<span class="ident">block_id</span>, <span class="ident">index</span> <span class="kw">as</span> <span class="ident">u64</span>));
                 }
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">block_storage</span>.<span class="ident">store_resource</span>(<span class="ident">block</span>) {
-                    <span class="macro">warn!</span>(<span class="string">&quot;Failed to store block {:?}: Error: {}&quot;</span>, <span class="ident">block</span>, <span class="ident">e</span>);
-                }
             }
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">state</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">block_and_associated</span>.<span class="number">1</span> {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">state_storage</span>.<span class="ident">store_resource</span>(<span class="ident">state</span>) {
-                    <span class="macro">warn!</span>(<span class="string">&quot;Failed to store state {:?}: Error: {}&quot;</span>, <span class="ident">state</span>, <span class="ident">e</span>);
-                }
+            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">block_storage</span>.<span class="ident">store_resource</span>(<span class="ident">opt_block</span>) {
+                <span class="macro">warn!</span>(<span class="string">&quot;Failed to store block {:?}: Error: {}&quot;</span>, <span class="ident">opt_block</span>, <span class="ident">e</span>);
             }
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">qcert</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">block_and_associated</span>.<span class="number">2</span> {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">qcert_storage</span>.<span class="ident">store_resource</span>(<span class="ident">qcert</span>) {
-                    <span class="macro">warn!</span>(
-                        <span class="string">&quot;Failed to store QuorumCertificate {:?}: Error: {}&quot;</span>,
-                        <span class="ident">qcert</span>, <span class="ident">e</span>
-                    );
-                }
+            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">state_storage</span>.<span class="ident">store_resource</span>(<span class="ident">opt_state</span>) {
+                <span class="macro">warn!</span>(<span class="string">&quot;Failed to store state {:?}: Error: {}&quot;</span>, <span class="ident">opt_state</span>, <span class="ident">e</span>);
+            }
+            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">qcert_storage</span>.<span class="ident">store_resource</span>(<span class="ident">opt_qcert</span>) {
+                <span class="macro">warn!</span>(
+                    <span class="string">&quot;Failed to store QuorumCertificate {:?}: Error: {}&quot;</span>,
+                    <span class="ident">opt_qcert</span>, <span class="ident">e</span>
+                );
             }
         });
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">blocks</span> <span class="op">=</span> <span class="ident">blocks</span>;
@@ -1174,7 +1187,7 @@
         <span class="lifetime">&#39;a</span>,
         <span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span>,
         <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-        <span class="ident">ALIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        <span class="ident">ALIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">BincodeLoadStore</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="op">&gt;</span>;
     <span class="kw">fn</span> <span class="ident">get_nth_event_iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">n</span>: <span class="ident">usize</span>) -&gt; <span class="ident"><span class="self">Self</span>::EventIterType</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">iter</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">event_storage</span>.<span class="ident">iter</span>();
@@ -1189,7 +1202,7 @@
     <span class="kw">fn</span> <span class="ident">is_empty</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="self">self</span>.<span class="ident">len</span>() <span class="op">==</span> <span class="number">0</span>
     }
-    <span class="kw">fn</span> <span class="ident">subscribe</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">broadcast::Receiver</span><span class="op">&lt;</span>(<span class="ident">usize</span>, <span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span>)<span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">subscribe</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">broadcast::Receiver</span><span class="op">&lt;</span>(<span class="ident">usize</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span>)<span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">event_receiver</span>.<span class="ident">clone</span>()
     }
 }
@@ -1203,18 +1216,15 @@
         <span class="ident">events</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">LedgerEvent</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
         <span class="kw">for</span> <span class="ident">e</span> <span class="kw">in</span> <span class="ident">events</span> {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">e</span> {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">err</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">event_storage</span>.<span class="ident">store_resource</span>(<span class="ident">e</span>) {
-                    <span class="macro">warn!</span>(<span class="string">&quot;Failed to store event {:?}, Error: {}&quot;</span>, <span class="ident">e</span>, <span class="ident">err</span>);
-                }
-
-                <span class="comment">// `send` fails if the channel is full or closed. The channel cannot be full because</span>
-                <span class="comment">// it is unbounded, and cannot be closed because `self` owns copies of both ends.</span>
-                <span class="self">self</span>.<span class="ident">event_sender</span>
-                    .<span class="ident">send</span>((<span class="self">self</span>.<span class="ident">event_count</span>(), <span class="ident">e</span>.<span class="ident">clone</span>()))
-                    .<span class="kw">await</span>
-                    .<span class="ident">expect</span>(<span class="string">&quot;unexpected failure when broadcasting event&quot;</span>);
+            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">err</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">event_storage</span>.<span class="ident">store_resource</span>(<span class="kw-2">&amp;</span><span class="ident">e</span>) {
+                <span class="macro">warn!</span>(<span class="string">&quot;Failed to store event {:?}, Error: {}&quot;</span>, <span class="ident">e</span>, <span class="ident">err</span>);
             }
+            <span class="comment">// `send` fails if the channel is full or closed. The channel cannot be full because</span>
+            <span class="comment">// it is unbounded, and cannot be closed because `self` owns copies of both ends.</span>
+            <span class="self">self</span>.<span class="ident">event_sender</span>
+                .<span class="ident">send</span>((<span class="self">self</span>.<span class="ident">event_count</span>(), <span class="ident">e</span>.<span class="ident">clone</span>()))
+                .<span class="kw">await</span>
+                .<span class="ident">expect</span>(<span class="string">&quot;unexpected failure when broadcasting event&quot;</span>);
             <span class="self">self</span>.<span class="ident">events</span>.<span class="ident">push</span>(<span class="ident">e</span>);
         }
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">events</span>.<span class="ident">len</span>() <span class="op">&gt;</span> <span class="ident">CACHED_EVENTS_COUNT</span> {
@@ -1452,19 +1462,21 @@
                 <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">r</span> {
                     <span class="macro">warn!</span>(<span class="string">&quot;failed to load block. Error: {}&quot;</span>, <span class="ident">e</span>);
                 }
-                <span class="ident">r</span>.<span class="ident">ok</span>()
+                <span class="comment">// We treat missing blocks and failed-to-load blocks the same:</span>
+                <span class="comment">// if we failed to load a block, it is now missing!</span>
+                <span class="ident">r</span>.<span class="ident">ok</span>().<span class="ident">flatten</span>()
             }),
             <span class="ident">state_storage</span>.<span class="ident">iter</span>().<span class="ident">skip</span>(<span class="ident">cached_blocks_start</span>).<span class="ident">map</span>(<span class="op">|</span><span class="ident">r</span><span class="op">|</span> {
                 <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">r</span> {
                     <span class="macro">warn!</span>(<span class="string">&quot;failed to load state. Error: {}&quot;</span>, <span class="ident">e</span>);
                 }
-                <span class="ident">r</span>.<span class="ident">ok</span>()
+                <span class="ident">r</span>.<span class="ident">ok</span>().<span class="ident">flatten</span>()
             }),
             <span class="ident">qcert_storage</span>.<span class="ident">iter</span>().<span class="ident">skip</span>(<span class="ident">cached_blocks_start</span>).<span class="ident">map</span>(<span class="op">|</span><span class="ident">r</span><span class="op">|</span> {
                 <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">r</span> {
                     <span class="macro">warn!</span>(<span class="string">&quot;failed to load QC. Error: {}&quot;</span>, <span class="ident">e</span>);
                 }
-                <span class="ident">r</span>.<span class="ident">ok</span>()
+                <span class="ident">r</span>.<span class="ident">ok</span>().<span class="ident">flatten</span>()
             }),
         );
         <span class="kw">let</span> <span class="ident">cached_blocks</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">BlockAndAssociated</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">zipped_iters</span>.<span class="ident">collect</span>();
@@ -1474,12 +1486,16 @@
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">running_nullifier_set</span> <span class="op">=</span> <span class="ident">SetMerkleTree::default</span>();
         <span class="kw">let</span> <span class="ident">index_by_block_hash</span> <span class="op">=</span> <span class="ident">block_storage</span>
             .<span class="ident">iter</span>()
-            .<span class="ident">filter_map</span>(<span class="op">|</span><span class="ident">res</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">BlockQueryData</span>, <span class="ident">PersistenceError</span><span class="op">&gt;</span><span class="op">|</span> <span class="kw">match</span> <span class="ident">res</span> {
+            .<span class="ident">filter_map</span>(<span class="op">|</span><span class="ident">res</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockQueryData</span><span class="op">&gt;</span>, <span class="kw">_</span><span class="op">&gt;</span><span class="op">|</span> <span class="kw">match</span> <span class="ident">res</span> {
                 <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; {
                     <span class="macro">warn!</span>(<span class="string">&quot;failed to load block. Error: {}&quot;</span>, <span class="ident">e</span>);
                     <span class="prelude-val">None</span>
                 }
-                <span class="prelude-val">Ok</span>(<span class="ident">block</span>) =&gt; {
+                <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>) =&gt; {
+                    <span class="comment">// If a block is missing, we can&#39;t add it to the index.</span>
+                    <span class="prelude-val">None</span>
+                }
+                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">block</span>)) =&gt; {
                     <span class="ident">block</span>
                         .<span class="ident">txn_hashes</span>
                         .<span class="ident">iter</span>()
@@ -1521,7 +1537,9 @@
                 <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">ev</span> {
                     <span class="macro">warn!</span>(<span class="string">&quot;Failed to load event. Error: {}&quot;</span>, <span class="ident">e</span>);
                 }
-                <span class="ident">ev</span>.<span class="ident">ok</span>()
+                <span class="comment">// We treat missing events and failed-to-load events the same:</span>
+                <span class="comment">// if we failed to load a event, it is now missing!</span>
+                <span class="ident">ev</span>.<span class="ident">ok</span>().<span class="ident">flatten</span>()
             })
             .<span class="ident">collect</span>();
         <span class="comment">// Load the last persisted validator status. If there is no existing status (e.g. the user</span>

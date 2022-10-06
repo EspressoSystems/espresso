@@ -207,7 +207,7 @@
                     .<span class="ident">map</span>(<span class="prelude-val">Ok</span>)
                     .<span class="ident">chain</span>(<span class="ident">receiver</span>.<span class="ident">filter_map</span>(<span class="kw">move</span> <span class="op">|</span>(<span class="ident">i</span>, <span class="ident">e</span>)<span class="op">|</span> <span class="kw">async</span> <span class="kw">move</span> {
                         <span class="kw">if</span> <span class="ident">i</span> <span class="op">&gt;</span><span class="op">=</span> <span class="ident">first</span> {
-                            <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">e</span>)))
+                            <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="ident">e</span>))
                         } <span class="kw">else</span> {
                             <span class="prelude-val">None</span>
                         }
