@@ -14,7 +14,10 @@
 
 use async_std::task::{sleep, spawn_blocking};
 use clap::Parser;
-use espresso_core::testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo};
+use espresso_core::{
+    state::ValidatorState,
+    testing::{MultiXfrRecordSpecTransaction, MultiXfrTestState, TestTxSpec, TxnPrintInfo},
+};
 use espresso_esqs::full_node::{self, EsQS};
 use espresso_validator::*;
 use futures::future::pending;
@@ -76,6 +79,31 @@ struct Options {
     pub esqs: Option<full_node::Command>,
 }
 
+async fn generate_transaction(
+    mut state: MultiXfrTestState,
+    round: u64,
+) -> (MultiXfrTestState, MultiXfrRecordSpecTransaction) {
+    spawn_blocking(move || {
+        let mut txs = state
+            .generate_transactions(
+                vec![(
+                    TestTxSpec::TwoInput {
+                        rec0: 0,
+                        rec1: 0,
+                        key0: 0,
+                        key1: 0,
+                        diff: -2,
+                    },
+                    false,
+                )],
+                TxnPrintInfo::new_no_time(round as usize, 1),
+            )
+            .unwrap();
+        (state, txs.remove(0))
+    })
+    .await
+}
+
 async fn generate_transactions(
     num_txn: u64,
     own_id: usize,
@@ -115,31 +143,13 @@ async fn generate_transactions(
         if own_id == 0 {
             // If we're the proposer, propose a transaction and wait for it to complete.
             info!("  - Proposing a transaction");
-            let (new_state, mut transactions) = spawn_blocking(move || {
-                let txs = state
-                    .generate_transactions(
-                        vec![(
-                            TestTxSpec::TwoInput {
-                                rec0: 0,
-                                rec1: 0,
-                                key0: 0,
-                                key1: 0,
-                                diff: -2,
-                            },
-                            false,
-                        )],
-                        TxnPrintInfo::new_no_time(round as usize, 1),
-                    )
-                    .unwrap();
-                (state, txs)
-            })
-            .await;
+            let (new_state, mut txn) = generate_transaction(state, round).await;
             state = new_state;
-            let txn = transactions.remove(0);
             hotshot
                 .submit_transaction(txn.transaction.clone())
                 .await
                 .unwrap();
+            let mut empty_blocks = 0;
             loop {
                 info!("Waiting for HotShot event");
                 let event = hotshot
@@ -150,6 +160,7 @@ async fn generate_transactions(
                 match event.event {
                     EventType::Decide { leaf_chain } => {
                         let mut success = false;
+                        info!("decide with {} leaves", leaf_chain.len());
                         for leaf in leaf_chain.iter().rev() {
                             // Add the block.
                             if leaf.deltas.is_empty() {
@@ -161,12 +172,28 @@ async fn generate_transactions(
                                         TxnPrintInfo::new_no_time(round as usize, 1),
                                     )
                                     .unwrap();
+                                empty_blocks += 1;
+                                info!("got empty block ({} since last commit)", empty_blocks);
+                                if empty_blocks >= ValidatorState::HISTORY_SIZE {
+                                    // If the transaction has expired due to empty blocks, propose
+                                    // a new one. We could update the same one and fix all its
+                                    // nullifier proofs, but for testing it doesn't matter and its
+                                    // simpler to just build a new transaction.
+                                    info!("transaction expired, proposing a new one");
+                                    (state, txn) = generate_transaction(state, round).await;
+                                    hotshot
+                                        .submit_transaction(txn.transaction.clone())
+                                        .await
+                                        .unwrap();
+                                    empty_blocks = 0;
+                                }
                             } else if leaf.deltas.block.0[0].is_genesis() {
                                 // Nothing to do, the genesis transaction is already accounted for
                                 // in our mock state.
                             } else {
                                 // In this demo, the only (non-genesis) blocks should be empty
                                 // blocks and the singleton block that we submitted.
+                                assert_eq!(leaf.deltas.block.0.len(), 1);
                                 assert_eq!(txn.transaction.txn, leaf.deltas.block.0[0]);
                                 let mut blk = state.validator.next_block();
                                 let kixs = txn.keys_and_memos.iter().map(|(kix, _)| *kix).collect();
@@ -214,6 +241,12 @@ async fn generate_transactions(
 
                 match event.event {
                     EventType::Decide { leaf_chain } => {
+                        if let Some(leaf) = leaf_chain.last() {
+                            info!(
+                                "replica got block (block height {})",
+                                leaf.state.block_height
+                            );
+                        }
                         if leaf_chain.iter().any(|leaf| {
                             !leaf.deltas.is_empty() && !leaf.deltas.block.0[0].is_genesis()
                         }) {
