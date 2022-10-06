@@ -13,8 +13,8 @@
 use crate::kv_merkle_tree::{KVMerkleProof, KVMerkleTree};
 use crate::merkle_tree::MerkleFrontier;
 use crate::stake_table::{
-    StakeTableCommitment, StakeTableHash, StakingKey, StakingKeySignature, StakingPrivKey,
-    ViewNumber,
+    ConsensusTime, StakeTableCommitment, StakeTableHash, StakeTableSetFrontier, StakingKey,
+    StakingKeySignature, StakingPrivKey,
 };
 use crate::state::{CommitableHash, CommitableHashTag, ValidationError, ValidatorState};
 use crate::tree_hash::KVTreeHash;
@@ -39,9 +39,9 @@ pub type VrfProof = StakingKeySignature;
 /// Compute the allowed stake amount given current state (e.g. circulating supply), view_number and stake amount
 /// Hard-coded to 0 for FST
 pub fn compute_reward_amount(
-    _validator_state: &ValidatorState,
     _block_height: u64,
     _stake: Amount,
+    _total_staked_amount: Amount,
 ) -> Amount {
     Amount::from(0u64)
 }
@@ -50,8 +50,10 @@ pub fn compute_reward_amount(
 #[tagged_blob("COLLECTED-REWARD")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 pub struct CollectedRewards {
+    /// Staking key eligible for reward
     pub staking_key: StakingKey,
-    pub view_number: ViewNumber,
+    /// Time at which `staking key` was eligible for reward
+    pub time: ConsensusTime,
 }
 
 /// Identifying tag for CollectedReward
@@ -89,28 +91,30 @@ impl CollectRewardNote {
     #[allow(clippy::too_many_arguments)]
     pub fn generate<R: CryptoRng + RngCore>(
         rng: &mut R,
-        validator_state: &ValidatorState,
-        view_number: hotshot_types::data::ViewNumber,
+        historical_stake_tables_frontier: &StakeTableSetFrontier,
+        historical_stake_tables_num_leaves: u64,
+        total_staked_amount: Amount,
+        time: ConsensusTime,
         block_height: u64,
         staking_priv_key: &StakingPrivKey,
         cap_address: UserAddress,
         stake_amount: Amount,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
-        stake_amount_leaf_proof_pos: u64,
         uncollected_reward_proof: CollectedRewardsProof,
         vrf_proof: VrfProof,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
         let staking_key = StakingKey::from_priv_key(staking_priv_key);
         let (body, proofs) = CollectRewardBody::generate(
             rng,
-            validator_state,
-            view_number,
+            historical_stake_tables_frontier,
+            historical_stake_tables_num_leaves,
+            total_staked_amount,
+            time,
             block_height,
             staking_key,
             cap_address,
             stake_amount,
             stake_amount_proof,
-            stake_amount_leaf_proof_pos,
             uncollected_reward_proof,
             vrf_proof,
         )?;
@@ -148,14 +152,24 @@ impl CollectRewardNote {
         self.body.vrf_witness.staking_key.clone()
     }
 
-    /// returns view number for which reward is being claimed
-    pub fn view_number(&self) -> ViewNumber {
-        self.body.vrf_witness.view_number
+    /// returns time for which reward is being claimed
+    pub fn time(&self) -> ConsensusTime {
+        self.body.vrf_witness.time
     }
 
     /// returns amount claimed for reward
     pub fn reward_amount(&self) -> Amount {
         self.body.reward_amount
+    }
+
+    /// returns staked amount at time of eligibility
+    pub fn staked_amount(&self) -> Amount {
+        self.body.vrf_witness.stake_amount
+    }
+
+    /// returns total staked amount in the ledger at time of eligibility
+    pub fn total_staked_amount(&self) -> Amount {
+        self.body.vrf_witness.total_staked_amount
     }
 }
 
@@ -198,35 +212,45 @@ impl CollectRewardBody {
     #[allow(clippy::too_many_arguments)]
     pub fn generate<R: RngCore + CryptoRng>(
         rng: &mut R,
-        validator_state: &ValidatorState,
-        view_number: hotshot_types::data::ViewNumber,
+        historical_stake_tables_frontier: &StakeTableSetFrontier,
+        historical_stake_tables_num_leaves: u64,
+        total_staked_amount: Amount,
+        time: ConsensusTime,
         block_height: u64,
         staking_key: StakingKey,
         cap_address: UserAddress,
         stake_amount: Amount,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
-        stake_amount_leaf_proof_pos: u64,
         uncollected_reward_proof: CollectedRewardsProof,
         vrf_proof: VrfProof,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
-        let reward_amount = compute_reward_amount(validator_state, block_height, stake_amount);
+        let allowed_reward = compute_reward_amount(block_height, stake_amount, total_staked_amount);
         let blind_factor = BlindFactor::rand(rng);
-        let rewards_proofs = RewardNoteProofs::generate(
-            validator_state,
-            stake_amount_proof,
-            uncollected_reward_proof,
-            stake_amount_leaf_proof_pos,
-        )?;
+        let rewards_proofs = {
+            // assemble reward proofs
+            match &historical_stake_tables_frontier {
+                MerkleFrontier::Proof(merkle_proof) => RewardNoteProofs {
+                    stake_tables_set_leaf_proof: merkle_proof.clone(),
+                    stake_amount_proof,
+                    uncollected_reward_proof,
+                    leaf_proof_pos: historical_stake_tables_num_leaves - 1,
+                },
+                MerkleFrontier::Empty { .. } => {
+                    return Err(RewardError::EmptyStakeTableCommitmentSet {});
+                }
+            }
+        };
         let vrf_witness = EligibilityWitness {
             staking_key,
-            view_number: view_number.into(),
+            time,
             stake_amount,
+            total_staked_amount,
             vrf_proof,
         };
         let body = CollectRewardBody {
             blind_factor,
             cap_address,
-            reward_amount,
+            reward_amount: allowed_reward, // TODO allow fees, need to subtract fee from reward_amouint
             vrf_witness,
         };
         Ok((body, rewards_proofs))
@@ -268,20 +292,22 @@ struct EligibilityWitness {
     /// Staking public key
     staking_key: StakingKey,
     /// View number for which the key was elected
-    view_number: ViewNumber,
-    /// amount of stake on `view_number`
+    time: ConsensusTime,
+    /// amount of stake owned at time `time`
     stake_amount: Amount,
+    /// total ledger staked at time
+    total_staked_amount: Amount,
     /// Cryptographic proof
     vrf_proof: VrfProof,
 }
 
 impl EligibilityWitness {
     pub fn verify(&self) -> Result<(), RewardError> {
-        if mock_eligibility::is_eligible(self.view_number, &self.staking_key, &self.vrf_proof) {
+        if mock_eligibility::is_eligible(self.time, &self.staking_key, &self.vrf_proof) {
             Ok(())
         } else {
             Err(RewardError::KeyNotEligible {
-                view: self.view_number,
+                view: self.time,
                 staking_key: self.staking_key.clone(),
             })
         }
@@ -307,8 +333,8 @@ impl EligibilityWitness {
 )]
 pub struct RewardNoteProofs {
     /// Proof for stake table commitment and total stake for view number
-    stake_table_commitment_leaf_proof:
-        crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount)>,
+    stake_tables_set_leaf_proof:
+        crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount, ConsensusTime)>,
     /// Proof for stake_amount for staking key under above stake table commitment
     stake_amount_proof: KVMerkleProof<StakeTableHash>,
     /// Proof that reward hasn't been collected
@@ -318,40 +344,34 @@ pub struct RewardNoteProofs {
 }
 
 impl RewardNoteProofs {
-    /// Return RewardNoteHelperProofs if view_number is valid and staking_key was elected for it, otherwise return RewardError.
-    pub(crate) fn generate(
-        validator_state: &ValidatorState,
-        stake_amount_proof: KVMerkleProof<StakeTableHash>,
-        uncollected_reward_proof: CollectedRewardsProof,
-        stake_amount_leaf_proof_pos: u64,
-    ) -> Result<Self, RewardError> {
-        let stake_table_commitment_leaf_proof =
-            Self::get_stake_commitment_total_stake_and_proof(validator_state)?;
-        Ok(Self {
-            stake_table_commitment_leaf_proof,
-            stake_amount_proof,
-            uncollected_reward_proof,
-            leaf_proof_pos: stake_amount_leaf_proof_pos,
-        })
-    }
-
-    /// Returns StakeTable commitment for view number, if view number is valid, otherwise return RewardError::InvalidViewNumber
-    fn get_stake_commitment_total_stake_and_proof(
-        validator_state: &ValidatorState,
-    ) -> Result<crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount)>, RewardError>
-    {
-        match validator_state.historical_stake_tables.clone() {
-            MerkleFrontier::Empty { .. } => Err(RewardError::EmptyStakeTableCommitmentSet {}),
-            MerkleFrontier::Proof(merkle_proof) => Ok(merkle_proof),
-        }
-    }
-
     ///Checks proofs in RewardNoteProofs against ValidatorState
     pub fn verify(
         &self,
         validator_state: &ValidatorState,
-        claimed_reward: CollectedRewards,
+        claimed_reward: CollectedRewards, // staking key and time t
+        key_stake: Amount,                // amount staked my staking key at time t,
+        total_staked: Amount,             // total staked amount on stake table at time t
     ) -> Result<CollectedRewardsDigest, ValidationError> {
+        // 0. check public input matched proof data
+        // 0.i) stake table proof leaf should contain correct total staked and time.
+        // But no need to check stake table commitment in leaf.0,
+        // we use this value to check stake amount proof below
+        if total_staked != self.stake_tables_set_leaf_proof.leaf.0 .1 {
+            return Err(ValidationError::BadCollectedRewardProof {});
+        }
+        if claimed_reward.time != self.stake_tables_set_leaf_proof.leaf.0 .2 {
+            return Err(ValidationError::BadCollectedRewardProof {});
+        }
+
+        // 0.ii) staking key and its stake must match stake amount proof data
+        let (pf_key, pf_value) = self
+            .stake_amount_proof
+            .get_leaf()
+            .ok_or(ValidationError::BadCollectedRewardProof {})?;
+        if pf_key != claimed_reward.staking_key || pf_value != key_stake {
+            return Err(ValidationError::BadCollectedRewardProof {});
+        }
+
         // 1. Check reward hasn't been collected, retrieve merkle root of collected reward set that checked
         let root = {
             let recently_collected_rewards =
@@ -383,7 +403,7 @@ impl RewardNoteProofs {
                 if crate::merkle_tree::MerkleTree::check_proof(
                     root_value,
                     self.leaf_proof_pos,
-                    &self.stake_table_commitment_leaf_proof,
+                    &self.stake_tables_set_leaf_proof,
                 )
                 .is_ok()
                 {
@@ -402,7 +422,7 @@ impl RewardNoteProofs {
                 .stake_amount_proof
                 .check(
                     claimed_reward.staking_key,
-                    self.stake_table_commitment_leaf_proof.leaf.0 .0 .0,
+                    self.stake_tables_set_leaf_proof.leaf.0 .0 .0, // this is stake table commitment in stake table set inclusion proof
                 )
                 .unwrap(); // safe unwrap, check never returns None
             option_value.ok_or(ValidationError::BadStakeTableProof {})?;
@@ -422,7 +442,7 @@ impl RewardNoteProofs {
 #[snafu(visibility(pub(crate)))]
 pub enum RewardError {
     /// An invalid view number
-    InvalidViewNumber { view_number: ViewNumber },
+    InvalidViewNumber { view_number: ConsensusTime },
 
     /// Serialization error
     SerializationError { reason: String },
@@ -441,7 +461,7 @@ pub enum RewardError {
 
     /// Staking key not eligible for reward
     KeyNotEligible {
-        view: ViewNumber,
+        view: ConsensusTime,
         staking_key: StakingKey,
     },
 
@@ -465,7 +485,7 @@ pub mod mock_eligibility {
 
     /// check weather a staking key is elegible for rewards
     pub fn is_eligible(
-        view_number: ViewNumber,
+        view_number: ConsensusTime,
         staking_key: &StakingKey,
         proof: &VrfProof,
     ) -> bool {
@@ -484,7 +504,7 @@ pub mod mock_eligibility {
 
     /// Prove that staking key is eligible for reward on view number. Return None if key is not eligible
     pub fn prove_eligibility(
-        view_number: ViewNumber,
+        view_number: ConsensusTime,
         staking_priv_key: &StakingPrivKey,
     ) -> Option<VrfProof> {
         // 1. compute vrf proof

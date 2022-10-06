@@ -399,6 +399,14 @@ where
             Some((None, running_hash))
         }
     }
+
+    /// Get leaf key, value pair. Return None if terminal node is an empty subtree
+    pub fn get_leaf(&self) -> Option<(KVHash::Key, KVHash::Value)> {
+        match &self.terminal_node {
+            KVMerkleTerminalNode::EmptySubtree => None,
+            KVMerkleTerminalNode::Leaf { key, value, .. } => Some((key.clone(), value.clone())),
+        }
+    }
 }
 
 impl<KVHash> KVMerkleTree<KVHash>

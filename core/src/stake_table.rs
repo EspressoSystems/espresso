@@ -141,11 +141,11 @@ impl CanonicalDeserialize for StakingKeySignature {
     Serialize,
     Deserialize,
 )]
-pub struct ViewNumber(pub(crate) u64);
+pub struct ConsensusTime(pub(crate) u64);
 
-impl From<hotshot_types::data::ViewNumber> for ViewNumber {
+impl From<hotshot_types::data::ViewNumber> for ConsensusTime {
     fn from(number: hotshot_types::data::ViewNumber) -> Self {
-        ViewNumber(*number.deref())
+        ConsensusTime(*number.deref())
     }
 }
 
@@ -177,11 +177,11 @@ impl Committable for StakeTableCommitment {
 /// KeyValue Merkle tree alias for Stake Table
 pub type StakeTableMap = KVMerkleTree<StakeTableHash>;
 
-/// Alias for Merkle Tree of set of historical Stake tables, holding commitment to each stake table and the total staked amount
-pub type StakeTableSetMT = MerkleTree<(StakeTableCommitment, Amount)>;
+/// Alias for Merkle Tree of set of historical Stake tables, holding commitment stake table, its the total staked amount, and the time at which it was valid.
+pub type StakeTableSetMT = MerkleTree<(StakeTableCommitment, Amount, ConsensusTime)>;
 
 /// Alias Merkle Frontier for historical stake tables
-pub type StakeTableSetFrontier = MerkleFrontier<(StakeTableCommitment, Amount)>;
+pub type StakeTableSetFrontier = MerkleFrontier<(StakeTableCommitment, Amount, ConsensusTime)>;
 
 /// Alias for commitment to historical stake tables set
 pub type StakeTableSetCommitment = crate::merkle_tree::MerkleCommitment;

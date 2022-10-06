@@ -31,9 +31,9 @@ pub use crate::{PrivKey, PubKey};
 
 use crate::genesis::GenesisNote;
 use crate::stake_table::{
-    CommittableStakeTableSetCommitment, CommittableStakeTableSetFrontier, StakeTableCommitment,
-    StakeTableMap, StakeTableSetCommitment, StakeTableSetFrontier, StakeTableSetHistory,
-    StakeTableSetMT,
+    CommittableStakeTableSetCommitment, CommittableStakeTableSetFrontier, ConsensusTime,
+    StakeTableCommitment, StakeTableMap, StakeTableSetCommitment, StakeTableSetFrontier,
+    StakeTableSetHistory, StakeTableSetMT,
 };
 
 use crate::state::state_comm::CommittableAmount;
@@ -1415,26 +1415,34 @@ impl ValidatorState {
         let mut verified_rewards = vec![];
         let mut verified_rewards_proofs = vec![];
         {
-            //verify rewards collection transactions
+            // verify rewards collection transactions
             for (pfs, txn) in rewards_proofs
                 .into_iter()
                 .zip(reward_txns.clone().into_iter())
             {
                 let latest_reward = CollectedRewards {
                     staking_key: txn.staking_key(),
-                    view_number: txn.view_number(),
+                    time: txn.time(),
                 };
 
-                //verify reward txn (CollectRewardNote)
+                // verify eligibility reward txn (CollectRewardNote)
                 txn.verify()
                     .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
 
-                //check helper proofs (RewardNoteProofs)
-                let root = pfs.verify(self, latest_reward.clone())?;
+                // check helper proofs (RewardNoteProofs)
+                let root = pfs.verify(
+                    self,
+                    latest_reward.clone(),
+                    txn.staked_amount(),
+                    txn.total_staked_amount(),
+                )?;
 
                 //check reward amount
-                let max_reward =
-                    crate::reward::compute_reward_amount(self, self.now(), self.total_stake);
+                let max_reward = crate::reward::compute_reward_amount(
+                    self.now(),
+                    txn.staked_amount(),
+                    txn.total_staked_amount(),
+                );
                 if txn.reward_amount() > max_reward {
                     return Err(ValidationError::RewardAmountTooLarge);
                 }
@@ -1541,6 +1549,7 @@ impl ValidatorState {
         stc_builder.push((
             StakeTableCommitment(self.stake_table.hash()),
             self.total_stake,
+            ConsensusTime(now),
         ));
         let stc_mt = stc_builder.build();
         assert_eq!(now, stc_mt.num_leaves()); // TODO why now??

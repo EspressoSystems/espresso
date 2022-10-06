@@ -856,21 +856,22 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                 {
                     let claimed_reward = CollectedRewards {
                         staking_key: staking_key.clone(),
-                        view_number: view_number.into(),
+                        time: view_number.into(),
                     };
                     let uncollected_reward_proof =
                         collected_rewards.lookup(claimed_reward).unwrap().1;
                     // 1. generate collect reward transaction
                     let (note, proof) = CollectRewardNote::generate(
                         rng,
-                        validator_state,
-                        view_number,
+                        &validator_state.historical_stake_tables,
+                        validator_state.block_height - 1,
+                        validator_state.total_stake,
+                        view_number.into(),
                         validator_state.block_height,
                         staking_priv_key,
                         cap_address.clone(),
                         stake_amount,
                         stake_proof.clone(),
-                        validator_state.block_height - 1,
                         uncollected_reward_proof,
                         vrf_proof,
                     )
@@ -893,7 +894,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                             let staking_key = note.staking_key();
                             let collected_reward = CollectedRewards {
                                 staking_key,
-                                view_number: view_number.into(),
+                                time: view_number.into(),
                             };
                             collected_rewards.insert(collected_reward, ());
                         }
