@@ -1430,19 +1430,11 @@ impl ValidatorState {
                     .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
 
                 // check helper proofs (RewardNoteProofs)
-                let root = pfs.verify(
-                    self,
-                    latest_reward.clone(),
-                    txn.staked_amount(),
-                    txn.total_staked_amount(),
-                )?;
+                let (root, key_stake, total_staked) = pfs.verify(self, latest_reward.clone())?;
 
                 //check reward amount
-                let max_reward = crate::reward::compute_reward_amount(
-                    self.now(),
-                    txn.staked_amount(),
-                    txn.total_staked_amount(),
-                );
+                let max_reward =
+                    crate::reward::compute_reward_amount(self.now(), key_stake, total_staked);
                 if txn.reward_amount() > max_reward {
                     return Err(ValidationError::RewardAmountTooLarge);
                 }

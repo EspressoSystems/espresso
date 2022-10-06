@@ -161,16 +161,6 @@ impl CollectRewardNote {
     pub fn reward_amount(&self) -> Amount {
         self.body.reward_amount
     }
-
-    /// returns staked amount at time of eligibility
-    pub fn staked_amount(&self) -> Amount {
-        self.body.vrf_witness.stake_amount
-    }
-
-    /// returns total staked amount in the ledger at time of eligibility
-    pub fn total_staked_amount(&self) -> Amount {
-        self.body.vrf_witness.total_staked_amount
-    }
 }
 
 impl CollectRewardNote {
@@ -243,8 +233,6 @@ impl CollectRewardBody {
         let vrf_witness = EligibilityWitness {
             staking_key,
             time,
-            stake_amount,
-            total_staked_amount,
             vrf_proof,
         };
         let body = CollectRewardBody {
@@ -291,12 +279,8 @@ impl CollectRewardBody {
 struct EligibilityWitness {
     /// Staking public key
     staking_key: StakingKey,
-    /// View number for which the key was elected
+    /// View number for which the key was elected for reward
     time: ConsensusTime,
-    /// amount of stake owned at time `time`
-    stake_amount: Amount,
-    /// total ledger staked at time
-    total_staked_amount: Amount,
     /// Cryptographic proof
     vrf_proof: VrfProof,
 }
@@ -344,31 +328,33 @@ pub struct RewardNoteProofs {
 }
 
 impl RewardNoteProofs {
-    ///Checks proofs in RewardNoteProofs against ValidatorState
+    /// Checks proofs in RewardNoteProofs against ValidatorState
+    /// If success, return
+    ///  i) collected reward merkle root for which proof was validated agains
+    ///  ii) staking key amount on stake table at elegibility time
+    ///  iii) total staked amount on stake table at eligibility time
     pub fn verify(
         &self,
         validator_state: &ValidatorState,
         claimed_reward: CollectedRewards, // staking key and time t
-        key_stake: Amount,                // amount staked my staking key at time t,
-        total_staked: Amount,             // total staked amount on stake table at time t
-    ) -> Result<CollectedRewardsDigest, ValidationError> {
+    ) -> Result<(CollectedRewardsDigest, Amount, Amount), ValidationError> {
+        let stake_table_commitment = self.stake_tables_set_leaf_proof.leaf.0 .0;
+        let stake_table_total_stake = self.stake_tables_set_leaf_proof.leaf.0 .1;
+        let time_in_proof = self.stake_tables_set_leaf_proof.leaf.0 .2;
         // 0. check public input matched proof data
-        // 0.i) stake table proof leaf should contain correct total staked and time.
-        // But no need to check stake table commitment in leaf.0,
-        // we use this value to check stake amount proof below
-        if total_staked != self.stake_tables_set_leaf_proof.leaf.0 .1 {
-            return Err(ValidationError::BadCollectedRewardProof {});
-        }
-        if claimed_reward.time != self.stake_tables_set_leaf_proof.leaf.0 .2 {
+        // 0.i) stake table proof leaf should contain correct commitment, total staked, and time.
+        //   Only time needs to be checked against claimed reward's time,
+        //   Commitment in proof is used to check stake amount, and the total stake is returned for caller use.
+        if claimed_reward.time != time_in_proof {
             return Err(ValidationError::BadCollectedRewardProof {});
         }
 
-        // 0.ii) staking key and its stake must match stake amount proof data
-        let (pf_key, pf_value) = self
+        // 0.ii) staking key must be checked against claimed reward's staking key
+        let (staking_key_in_proof, key_staked_amount) = self
             .stake_amount_proof
             .get_leaf()
             .ok_or(ValidationError::BadCollectedRewardProof {})?;
-        if pf_key != claimed_reward.staking_key || pf_value != key_stake {
+        if staking_key_in_proof != claimed_reward.staking_key {
             return Err(ValidationError::BadCollectedRewardProof {});
         }
 
@@ -422,13 +408,13 @@ impl RewardNoteProofs {
                 .stake_amount_proof
                 .check(
                     claimed_reward.staking_key,
-                    self.stake_tables_set_leaf_proof.leaf.0 .0 .0, // this is stake table commitment in stake table set inclusion proof
+                    stake_table_commitment.0, // this is stake table commitment in stake table set inclusion proof
                 )
                 .unwrap(); // safe unwrap, check never returns None
             option_value.ok_or(ValidationError::BadStakeTableProof {})?;
         }
 
-        Ok(root)
+        Ok((root, key_staked_amount, stake_table_total_stake))
     }
 
     /// retrieves proof that reward hasn't been collected
