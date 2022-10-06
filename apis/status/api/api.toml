@@ -72,3 +72,18 @@ Returns
 }
 ```
 """
+
+[route.records]
+PATH = ["/records"]
+DOC = """
+Get statistics about the record set.
+
+Returns
+```
+{
+	"total": "integer",
+	"spent": "integer",
+	"unspent": "integer",
+}
+```
+"""

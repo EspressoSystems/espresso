@@ -99,7 +99,7 @@ jobs:
     needs: static-build
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Download address-book executable
         uses: actions/download-artifact@v3
