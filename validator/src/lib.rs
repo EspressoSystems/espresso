@@ -815,13 +815,14 @@ pub async fn init_validator(
 pub fn open_data_source(
     options: &NodeOpt,
     id: usize,
+    location: Option<String>,
     consensus: Consensus,
 ) -> Arc<RwLock<QueryData>> {
     let storage = get_store_dir(options, id);
     Arc::new(RwLock::new(if options.reset_store_state {
-        QueryData::new(&storage, Box::new(consensus)).unwrap()
+        QueryData::new(&storage, Box::new(consensus), location).unwrap()
     } else {
-        QueryData::load(&storage, Box::new(consensus)).unwrap()
+        QueryData::load(&storage, Box::new(consensus), location).unwrap()
     }))
 }
 

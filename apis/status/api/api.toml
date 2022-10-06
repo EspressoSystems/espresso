@@ -73,6 +73,14 @@ Returns
 ```
 """
 
+[route.location]
+PATH = ["/location"]
+DOC = """
+Get the location of this node.
+
+Returns a string, or null if the location isn't specified.
+"""
+
 [route.records]
 PATH = ["/records"]
 DOC = """

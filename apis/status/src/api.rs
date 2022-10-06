@@ -99,6 +99,13 @@ where
             }
             .boxed()
         })?
+        .get("location", |_, state| {
+            async move {
+                let location = state.get_location();
+                Ok(location.clone())
+            }
+            .boxed()
+        })?
         .get("records", |_, state| {
             async move {
                 let status = state.get_validator_status();

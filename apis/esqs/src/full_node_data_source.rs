@@ -70,6 +70,7 @@ pub struct QueryData {
     event_storage: AppendLog<BincodeLoadStore<Option<LedgerEvent<EspressoLedger>>>>,
     status_storage: RollingLog<BincodeLoadStore<ValidatorStatus>>,
     consensus: Consensus,
+    location: Option<String>,
 }
 
 pub trait Extract<T> {
@@ -541,6 +542,10 @@ impl StatusDataSource for QueryData {
     fn get_validator_status(&self) -> &ValidatorStatus {
         &self.node_status
     }
+
+    fn get_location(&self) -> &Option<String> {
+        &self.location
+    }
 }
 
 impl UpdateStatusData for QueryData {
@@ -588,7 +593,11 @@ impl ValidatorDataSource for QueryData {
 const STATUS_STORAGE_COUNT: u32 = 10u32;
 
 impl QueryData {
-    pub fn new(store_path: &Path, consensus: Consensus) -> Result<QueryData, PersistenceError> {
+    pub fn new(
+        store_path: &Path,
+        consensus: Consensus,
+        location: Option<String>,
+    ) -> Result<QueryData, PersistenceError> {
         let key_tag = "query_data_store";
         let blocks_tag = format!("{}_blocks", key_tag);
         let states_tag = format!("{}_states", key_tag);
@@ -627,10 +636,15 @@ impl QueryData {
             event_storage,
             status_storage,
             consensus,
+            location,
         })
     }
 
-    pub fn load(store_path: &Path, consensus: Consensus) -> Result<QueryData, PersistenceError> {
+    pub fn load(
+        store_path: &Path,
+        consensus: Consensus,
+        location: Option<String>,
+    ) -> Result<QueryData, PersistenceError> {
         let key_tag = "query_data_store";
         let blocks_tag = format!("{}_blocks", key_tag);
         let states_tag = format!("{}_states", key_tag);
@@ -763,6 +777,7 @@ impl QueryData {
             event_storage,
             status_storage,
             consensus,
+            location,
         })
     }
 
