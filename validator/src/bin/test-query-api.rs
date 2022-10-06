@@ -188,6 +188,11 @@ impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
 async fn test(opt: &Args) {
     let num_blocks = get::<u64, _>(opt, "/status/latest_block_id").await + 1;
 
+    assert_eq!(
+        get::<String, _>(opt, format!("/status/location")).await,
+        "My location"
+    );
+
     // Get the block summaries.
     let block_summaries: Vec<BlockSummaryQueryData> = get(
         opt,
