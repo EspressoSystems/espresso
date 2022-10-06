@@ -32,3 +32,6 @@ opt-level = 1
 [profile.release]
 debug = true
 lto = "thin"
+[profile.release-no-lto]
+debug = true
+lto = "off"
