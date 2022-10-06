@@ -189,8 +189,8 @@ async fn test(opt: &Args) {
     let num_blocks = get::<u64, _>(opt, "/status/latest_block_id").await + 1;
 
     assert_eq!(
-        get::<String, _>(opt, "/status/location").await,
-        "My location"
+        get::<Option<String>, _>(opt, "/status/location").await,
+        Some("My location".to_string())
     );
 
     // Get the block summaries.

@@ -78,12 +78,7 @@ PATH = ["/location"]
 DOC = """
 Get the location of this node.
 
-Returns
-```
-{
-	"location": "string"
-}
-```
+Returns a string, or null if the location isn't specified.
 """
 
 [route.records]

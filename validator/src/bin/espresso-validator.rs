@@ -50,8 +50,8 @@ struct Options {
 
     /// Location of the current node.
     ///
-    /// If not provided, the IP address will be used.
-    #[clap(long, env = "ESPRESSO_LOCATION")]
+    /// If not provided, the IP address will be used for dashboard display.
+    #[clap(long, env = "ESPRESSO_VALIDATOR_LOCATION")]
     pub location: Option<String>,
 
     /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
