@@ -19,7 +19,7 @@ use jf_cap::structs::RecordCommitment;
 use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 
-#[tagged_blob("EncodedPubKey")]
+#[tagged_blob("NODEID")]
 #[derive(Debug, Clone, CanonicalDeserialize, CanonicalSerialize, Hash, PartialEq, Eq)]
 pub struct EncodedPublicKey(pub Vec<u8>);
 
@@ -98,4 +98,6 @@ pub struct BlockSummaryQueryData {
     pub view_number: u64,
     pub timestamp: i128,
     pub proposer_id: Vec<u8>,
+    pub block_hash: ElaboratedBlockCommitment,
+    pub block_id: u64,
 }

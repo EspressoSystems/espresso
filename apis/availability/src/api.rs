@@ -159,24 +159,11 @@ where
 {
     let mut summaries = Vec::new();
     for id in ids {
-        let block_data = get_block(state.clone(), id)?;
-        let qcert_data = get_qcert(state.clone(), id)?;
-        let size = block_data.raw_block.serialized_size();
-        let txn_count = block_data.txn_hashes.len();
-        let records_from = block_data.records_from;
-        let record_count = block_data.record_count;
-        let view_number = *qcert_data.view_number.deref();
-        let timestamp = block_data.timestamp;
-        let proposer_id = block_data.proposer_id.0;
-        summaries.push(BlockSummaryQueryData {
-            size,
-            txn_count,
-            records_from,
-            record_count,
-            timestamp,
-            view_number,
-            proposer_id,
-        });
+        let summary = get_block_summary(state.clone(), id, 1)?
+            .first()
+            .ok_or(Error::MissingBlock { block_id: id })?
+            .clone();
+        summaries.push(summary);
     }
     Ok(summaries)
 }
@@ -223,6 +210,7 @@ where
         let view_number = *qcert_data.view_number.deref();
         let timestamp = block_data.timestamp;
         let proposer_id = block_data.proposer_id.0;
+        let block_hash = block_data.block_hash;
         summaries.push(BlockSummaryQueryData {
             size,
             txn_count,
@@ -231,6 +219,8 @@ where
             view_number,
             timestamp,
             proposer_id,
+            block_id: id,
+            block_hash,
         });
     }
     Ok(summaries)
@@ -349,11 +339,18 @@ where
             async move {
                 let proposer_id = req.blob_param("proposer")?;
                 let block_ids = state.get_block_ids_by_proposer_id(proposer_id);
-
-                if let Some(count) = req.opt_integer_param("count")? {
-                    return Ok(block_ids.into_iter().rev().take(count).collect());
-                }
-                Ok(block_ids)
+                let take = if let Some(count) = req.opt_integer_param("count")? {
+                    count
+                } else {
+                    block_ids.len()
+                };
+                let blocks: Result<Vec<BlockQueryData>, Error> = block_ids
+                    .into_iter()
+                    .rev()
+                    .take(take)
+                    .map(|id| get_block(state, id))
+                    .collect();
+                blocks
             }
             .boxed()
         })?
