@@ -25,17 +25,17 @@ use tracing::{error, info};
 #[derive(Parser)]
 struct Options {
     /// The frequency at which to poll current throughput.
-    #[clap(short, long, default_value = "60s", parse(try_from_str = espresso_validator::parse_duration))]
+    #[arg(short, long, default_value = "60s", value_parser = espresso_validator::parse_duration)]
     frequency: Duration,
 
     /// The total duration over which to measure throughput.
     ///
     /// If not provided, runs until killed.
-    #[clap(short, long, parse(try_from_str = espresso_validator::parse_duration))]
+    #[arg(short, long, value_parser = espresso_validator::parse_duration)]
     total: Option<Duration>,
 
     /// The query service to poll for ledger state.
-    #[clap(short = 'q', long, env = "ESPRESSO_ESQS_URL")]
+    #[arg(short = 'q', long, env = "ESPRESSO_ESQS_URL")]
     esqs_url: Url,
 }
 
@@ -103,7 +103,7 @@ async fn main() -> surf::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let opt = Options::from_args();
+    let opt = Options::parse();
     let frequency = opt.frequency;
     let total = opt.total.map(Duration::from);
 

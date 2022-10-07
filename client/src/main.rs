@@ -20,6 +20,7 @@
 mod cli_client;
 
 use async_trait::async_trait;
+use clap::Parser;
 use espresso_client::network::NetworkBackend;
 use espresso_core::ledger::EspressoLedger;
 use jf_cap::proof::UniversalParam;
@@ -32,33 +33,30 @@ use seahorse::{
 };
 use std::path::PathBuf;
 use std::process::exit;
-use structopt::StructOpt;
 use surf_disco::Url;
 
-#[derive(StructOpt)]
+#[derive(Parser)]
 pub struct Args {
     /// Generate keys for a keystore, do not run the REPL.
     ///
     /// The keys are stored in FILE and FILE.pub.
-    #[structopt(short = "g", long)]
+    #[arg(short = 'g', long)]
     pub key_gen: Option<PathBuf>,
 
     /// Path to a saved keystore, or a new directory where this keystore will be saved.
     ///
     /// If not given, the keystore will be stored in ~/.translucence/keystore. If a keystore already
     /// exists there, it will be loaded. Otherwise, a new keystore will be created.
-    #[structopt(short, long)]
+    #[arg(short, long)]
     pub storage: Option<PathBuf>,
 
     /// Create a new keystore and store it an a temporary location which will be deleted on exit.
     ///
     /// This option is mutually exclusive with --storage.
-    #[structopt(long)]
-    #[structopt(conflicts_with("storage"))]
-    #[structopt(hidden(true))]
+    #[arg(long, conflicts_with("storage"), hide(true))]
     pub tmp_storage: bool,
 
-    #[structopt(long)]
+    #[arg(long)]
     /// Run in a mode which is friendlier to automated scripting.
     ///
     /// Instead of prompting the user for input with a line editor, the prompt will be printed,
@@ -66,7 +64,7 @@ pub struct Args {
     pub non_interactive: bool,
 
     /// URL for the Espresso Query Service.
-    #[structopt(
+    #[arg(
         long,
         env = "ESPRESSO_ESQS_URL",
         default_value = "http://localhost:50087"
@@ -74,7 +72,7 @@ pub struct Args {
     pub esqs_url: Url,
 
     /// URL for the Espresso address book.
-    #[structopt(
+    #[arg(
         long,
         env = "ESPRESSO_ADDRESS_BOOK_URL",
         default_value = "http://localhost:50088"
@@ -82,7 +80,7 @@ pub struct Args {
     pub address_book_url: Url,
 
     /// URL for a validator to submit transactions to.
-    #[structopt(
+    #[arg(
         long,
         env = "ESPRESSO_SUBMIT_URL",
         default_value = "http://localhost:50089"
@@ -145,7 +143,7 @@ impl<'a> CLI<'a> for EspressoCli {
 
 #[async_std::main]
 async fn main() {
-    if let Err(err) = cli_main::<EspressoLedger, EspressoCli>(Args::from_args()).await {
+    if let Err(err) = cli_main::<EspressoLedger, EspressoCli>(Args::parse()).await {
         println!("{}", err);
         exit(1);
     }

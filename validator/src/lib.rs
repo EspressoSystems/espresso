@@ -156,13 +156,13 @@ pub struct NodeOpt {
     ///
     /// If the path to a node's persistence files doesn't exist, its persisted state will be reset
     /// regardless of this argument.
-    #[clap(long, short)]
+    #[arg(long, short)]
     pub reset_store_state: bool,
 
     /// Path to persistence files for all nodes.
     ///
     /// Persistence files will be nested under the specified directory.
-    #[clap(long, short, env = "ESPRESSO_VALIDATOR_STORE_PATH")]
+    #[arg(long, short, env = "ESPRESSO_VALIDATOR_STORE_PATH")]
     pub store_path: Option<PathBuf>,
 
     /// Port of the current node if it's non-bootstrap.
@@ -171,7 +171,7 @@ pub struct NodeOpt {
     ///
     /// If the node is bootstrap, thip option will be overriden by the corresponding port in
     /// `--bootstrap-nodes`.
-    #[clap(long, env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT")]
+    #[arg(long, env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT")]
     pub nonbootstrap_port: Option<u16>,
 
     /// The base port for the non-bootstrap nodes.
@@ -179,7 +179,7 @@ pub struct NodeOpt {
     /// If specified, the consesnsu port for node `i` will be `nonbootstrap_base_port + i`.
     ///
     /// Will be overriden by `nonbootstrap_port`.
-    #[clap(long, default_value = "9000")]
+    #[arg(long, default_value = "9000")]
     pub nonbootstrap_base_port: usize,
 
     /// Minimum time to wait for submitted transactions before proposing a block.
@@ -187,11 +187,11 @@ pub struct NodeOpt {
     /// Increasing this trades off latency for throughput: the rate of new block proposals gets
     /// slower, but each block is proportionally larger. Because of batch verification, larger
     /// blocks should lead to increased throughput.
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
         default_value = "0s",
-        parse(try_from_str = parse_duration)
+        value_parser = parse_duration
     )]
     pub min_propose_time: Duration,
 
@@ -199,25 +199,25 @@ pub struct NodeOpt {
     ///
     /// If a validator has not received any transactions after `min-propose-time`, it will wait up
     /// to `max-propose-time` before giving up and submitting an empty block.
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME",
         default_value = "10s",
-        parse(try_from_str = parse_duration)
+        value_parser = parse_duration
     )]
     pub max_propose_time: Duration,
 
     /// Base duration for next-view timeout.
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT",
         default_value = "100s",
-        parse(try_from_str = parse_duration)
+        value_parser = parse_duration
     )]
     pub next_view_timeout: Duration,
 
     /// The exponential backoff ratio for the next-view timeout.
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_TIMEOUT_RATIO",
         default_value = "11:10"
@@ -225,21 +225,21 @@ pub struct NodeOpt {
     pub timeout_ratio: Ratio,
 
     /// The delay a leader inserts before starting pre-commit.
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_ROUND_START_DELAY",
         default_value = "1ms",
-        parse(try_from_str = parse_duration)
+        value_parser = parse_duration
     )]
     pub round_start_delay: Duration,
 
     /// Delay after init before starting consensus.
-    #[clap(long, env = "ESPRESSO_VALIDATOR_START_DELAY", default_value = "1ms",
-        parse(try_from_str = parse_duration))]
+    #[arg(long, env = "ESPRESSO_VALIDATOR_START_DELAY", default_value = "1ms",
+        value_parser = parse_duration)]
     pub start_delay: Duration,
 
     /// Maximum number of transactions in a block.
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_MAX_TRANSACTIONS",
         default_value = "10000"
@@ -332,60 +332,60 @@ impl From<SecretKeySeed> for [u8; 32] {
 #[derive(Clone, Debug, Args)]
 pub struct ConsensusOpt {
     /// Seed number used to generate secret key set for all nodes.
-    #[clap(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
+    #[arg(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
     pub secret_key_seed: Option<SecretKeySeed>,
 
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_REPLICATION_FACTOR",
         default_value = "5"
     )]
     pub replication_factor: usize,
 
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH",
         default_value = "50"
     )]
     pub bootstrap_mesh_n_high: usize,
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW",
         default_value = "10"
     )]
     pub bootstrap_mesh_n_low: usize,
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN",
         default_value = "5"
     )]
     pub bootstrap_mesh_outbound_min: usize,
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N",
         default_value = "15"
     )]
     pub bootstrap_mesh_n: usize,
 
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH",
         default_value = "15"
     )]
     pub nonbootstrap_mesh_n_high: usize,
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW",
         default_value = "8"
     )]
     pub nonbootstrap_mesh_n_low: usize,
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN",
         default_value = "4"
     )]
     pub nonbootstrap_mesh_outbound_min: usize,
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N",
         default_value = "12"
@@ -393,7 +393,7 @@ pub struct ConsensusOpt {
     pub nonbootstrap_mesh_n: usize,
 
     /// URLs of the bootstrap nodes, in the format of `<host>:<port>`.
-    #[clap(
+    #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_BOOTSTRAP_NODES",
         default_value = "localhost:9000,localhost:9001,localhost:9002,localhost:9003,localhost:9004,localhost:9005,localhost:9006",
