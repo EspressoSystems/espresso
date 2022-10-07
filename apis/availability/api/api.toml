@@ -177,7 +177,7 @@ Returns a list of
     "block_id": integer,
     "records_from": integer, // The UID of the first output of this block
     "record_count": integer, // The total number of outputs in this block
-    "txn_hashes": [TaggedBase64],
+    "txn_hashes": TaggedBase64,
 }
 ```
 
