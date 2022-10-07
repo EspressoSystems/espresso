@@ -1464,7 +1464,6 @@ impl ValidatorState {
             self.total_stake,
         ));
         let stc_mt = stc_builder.build();
-        assert_eq!(now, stc_mt.num_leaves());
 
         if self.past_record_merkle_roots.0.len() >= Self::HISTORY_SIZE {
             self.past_record_merkle_roots.0.pop_back();

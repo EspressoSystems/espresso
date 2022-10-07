@@ -22,17 +22,17 @@ use std::process::{exit, Command, Stdio};
 use std::time::Duration;
 
 #[derive(Parser)]
-#[clap(
+#[command(
     name = "Multi-machine consensus",
     about = "Simulates consensus among multiple machines"
 )]
 struct Options {
-    #[clap(flatten)]
+    #[command(flatten)]
     node_opt: NodeOpt,
 
     /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of
     /// non-bootstrap nodes.
-    #[clap(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
+    #[arg(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
     pub num_nodes: usize,
 
     /// Public key which should own a faucet record in the genesis block.
@@ -42,37 +42,37 @@ struct Options {
     ///
     /// This option may be passed multiple times to initialize the ledger with multiple native
     /// token records.
-    #[clap(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ',')]
+    #[arg(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ',')]
     pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.
     ///
     /// If not provided, the validator will wait for externally submitted transactions.
-    #[clap(long, short, conflicts_with("faucet-pub-key"))]
+    #[arg(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txn: Option<u64>,
 
     /// Wait for web server to exit after transactions complete.
-    #[clap(long, short)]
+    #[arg(long, short)]
     pub wait: bool,
 
     /// Options for the new EsQS.
-    #[clap(subcommand)]
+    #[command(subcommand)]
     pub esqs: Option<full_node::Command>,
 
-    #[clap(long, short)]
+    #[arg(long, short)]
     verbose: bool,
 
     /// Number of nodes to run only `fail_after_txn` rounds.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
-    #[clap(long)]
+    #[arg(long)]
     num_fail_nodes: Option<usize>,
 
     /// Number of rounds that all nodes will be running, after which `num_fail_nodes` nodes will be
     /// killed.
     ///
     /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
-    #[clap(long, requires("num-fail-nodes"))]
+    #[arg(long, requires("num-fail-nodes"))]
     fail_after_txn: Option<usize>,
 }
 
@@ -89,13 +89,13 @@ fn cargo_run(bin: impl AsRef<str>) -> Command {
 #[async_std::main]
 async fn main() {
     // Construct arguments to pass to the multi-machine demo.
-    let options = Options::from_args();
+    let options = Options::parse();
     if let Err(msg) = options.node_opt.check() {
         eprintln!("{}", msg);
         exit(1);
     }
 
-    // With StructOpt/CLAP, environment variables override command line arguments, but we are going
+    // With clap, environment variables override command line arguments, but we are going
     // to construct a command line for each child, so the child processes shouldn't get their
     // options from the environment. Clear the environment variables corresponding to each option
     // that we will set explicitly in the command line.

@@ -32,3 +32,10 @@ opt-level = 1
 [profile.release]
 debug = true
 lto = "thin"
+incremental = true
+
+# To speed up the local build, run `cargo build` or `cargo test` with `--profile=release-no-lto`.
+[profile.release-no-lto]
+inherits = "release"
+# Disable LTO to decrease the linking time.
+lto = "off"

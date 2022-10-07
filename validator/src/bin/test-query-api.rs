@@ -52,11 +52,11 @@ use tracing::{event, Level};
 #[derive(Parser)]
 struct Args {
     /// Hostname or IP address of the query server.
-    #[clap(short = 'H', long = "--host", default_value = "localhost")]
+    #[arg(short = 'H', long = "--host", default_value = "localhost")]
     host: String,
 
     /// Port number of the query service.
-    #[clap(short = 'P', long = "--port", default_value = "50000")]
+    #[arg(short = 'P', long = "--port", default_value = "50000")]
     port: u16,
 }
 
@@ -188,6 +188,11 @@ impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
 async fn test(opt: &Args) {
     let num_blocks = get::<u64, _>(opt, "/status/latest_block_id").await + 1;
 
+    assert_eq!(
+        get::<Option<String>, _>(opt, "/status/location").await,
+        Some("My location".to_string())
+    );
+
     // Get the block summaries.
     let block_summaries: Vec<BlockSummaryQueryData> = get(
         opt,
@@ -261,7 +266,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    test(&Args::from_args()).await
+    test(&Args::parse()).await
 }
 
 #[cfg(all(test, feature = "slow-tests"))]

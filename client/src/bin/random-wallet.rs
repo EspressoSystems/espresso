@@ -33,6 +33,7 @@
 
 use address_book::error::AddressBookError;
 use async_std::task::sleep;
+use clap::Parser;
 use derive_more::Deref;
 use espresso_client::{ledger_state::TransactionUID, network::NetworkBackend, RecordAmount};
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
@@ -60,7 +61,6 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
-use structopt::StructOpt;
 use surf_disco::{Error, StatusCode, Url};
 use tempdir::TempDir;
 use tracing::{event, Level};
@@ -133,44 +133,44 @@ impl Display for Bytes {
     }
 }
 
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 struct Args {
     /// Path to a private key file to use for the keystore.
     ///
     /// If not given, new keys are generated randomly.
-    #[structopt(short, long)]
+    #[arg(short, long)]
     key_path: Option<PathBuf>,
 
     /// Seed for random number generation.
-    #[structopt(long)]
+    #[arg(long)]
     seed: Option<u64>,
 
     /// Path to a saved keystore, or a new directory where this keystore will be saved.
     /// Will use a TempDir if not provided
-    #[structopt(long, env = "ESPRESSO_RANDOM_WALLET_PATH")]
+    #[arg(long, env = "ESPRESSO_RANDOM_WALLET_PATH")]
     storage: Option<PathBuf>,
 
     /// URL of a server for querying with the ledger
-    #[structopt(short, long, env = "ESPRESSO_ESQS_URL")]
+    #[arg(short, long, env = "ESPRESSO_ESQS_URL")]
     esqs_url: Url,
 
     /// URL of a server for interacting with the ledger
-    #[structopt(short, long, env = "ESPRESSO_SUBMIT_URL")]
+    #[arg(short, long, env = "ESPRESSO_SUBMIT_URL")]
     validator_url: Url,
 
     /// URL of a server for address book
-    #[structopt(short, long, env = "ESPRESSO_ADDRESS_BOOK_URL")]
+    #[arg(short, long, env = "ESPRESSO_ADDRESS_BOOK_URL")]
     address_book_url: Url,
 
-    #[structopt(short, long, env = "ESPRESSO_FAUCET_URL")]
+    #[arg(short, long, env = "ESPRESSO_FAUCET_URL")]
     faucet_url: Url,
 
     /// Whether to color log output with ANSI color codes.
-    #[structopt(long, env = "ESPRESSO_COLORED_LOGS")]
+    #[arg(long, env = "ESPRESSO_COLORED_LOGS")]
     colored_logs: bool,
 
     /// Size of additional padding to add to transfers.
-    #[structopt(long, env = "ESPRESSO_RANDOM_WALLET_PADDING", default_value = "0")]
+    #[arg(long, env = "ESPRESSO_RANDOM_WALLET_PADDING", default_value = "0")]
     padding: Bytes,
 }
 
@@ -248,7 +248,7 @@ async fn get_native_from_faucet(keystore: &mut Keystore, pub_key: &UserPubKey, u
 
 #[async_std::main]
 async fn main() {
-    let args = Args::from_args();
+    let args = Args::parse();
 
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())

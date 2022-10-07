@@ -18,7 +18,7 @@ edition = "2021"
 
 [dependencies]
 ark-serialize = { version = "0.3.0", features = ["derive"] }
-clap = { version = "3.2.17", features = ["derive", "env"] }
+clap = { version = "4.0", features = ["derive", "env"] }
 commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.2.0" }
 derive_more = "0.99"
 espresso-core = { path = "../../core/" }
@@ -27,6 +27,6 @@ hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag 
 jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 serde = { version = "1.0", features = ["derive"] }
 snafu = { version = "0.7", features = ["backtraces"] }
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main" }
+tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.0" }
 toml = "0.5"
 tracing = "0.1.35"

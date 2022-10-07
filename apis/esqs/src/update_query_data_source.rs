@@ -120,7 +120,30 @@ where
     async fn update(&mut self, event: HotShotEvent) {
         if let HotShotEvent::Decide { block, state, qcs } = event {
             let mut num_txns = 0usize;
+            let mut num_records = 0usize;
+            let mut num_nullifiers = 0usize;
             let mut cumulative_size = 0usize;
+
+            if let Some(state) = state.first() {
+                // HotShot can give us a leaf chain that does not follow immediately from our last
+                // saved state, if it skipped ahead for liveness reasons. Insert missing blocks as
+                // placeholders for each missing leaf. These could potentially be filled in
+                // asynchronously by querying another full node.
+                let expected_block_height = self.validator_state.block_height + 1;
+                if state.block_height > expected_block_height {
+                    let num_placeholders = (state.block_height - expected_block_height) as usize;
+                    tracing::warn!(
+                        "HotShot event stream skipped blocks, appending {} placeholders",
+                        num_placeholders
+                    );
+                    let mut availability_store = self.availability_store.write().await;
+                    if let Err(e) =
+                        availability_store.append_blocks(vec![(None, None, None); num_placeholders])
+                    {
+                        tracing::warn!("failed to append placeholder blocks: {}", e);
+                    }
+                }
+            }
 
             for (mut block, state, qcert) in
                 izip!(block.iter().cloned(), state.iter(), qcs.iter().cloned()).rev()
@@ -202,6 +225,15 @@ where
 
                     first_uid - records_from
                 };
+
+                num_records += record_count as usize;
+                num_nullifiers += block
+                    .block
+                    .0
+                    .iter()
+                    .map(|txn| txn.input_len())
+                    .sum::<usize>();
+
                 {
                     let qcert_block_hash: [u8; H_256] =
                         qcert.block_hash.try_into().unwrap_or([0u8; H_256]);
@@ -250,6 +282,8 @@ where
                     vs.decided_block_count += block.len() as u64;
                     vs.cumulative_txn_count += num_txns as u64;
                     vs.cumulative_size += cumulative_size as u64;
+                    vs.record_count += num_records as u64;
+                    vs.nullifier_count += num_nullifiers as u64;
                     Ok(())
                 })
                 .unwrap();

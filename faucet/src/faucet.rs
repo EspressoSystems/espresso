@@ -19,6 +19,7 @@ use async_std::{
     task::{sleep, spawn, JoinHandle},
 };
 use atomic_store::{load_store::BincodeLoadStore, AppendLog, AtomicStore, AtomicStoreLoader};
+use clap::Parser;
 use espresso_client::{
     events::EventIndex,
     hd::Mnemonic,
@@ -46,7 +47,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use structopt::StructOpt;
 use surf::Url;
 use tide::{
     http::headers::HeaderValue,
@@ -54,22 +54,22 @@ use tide::{
 };
 use tracing::{error, info, warn};
 
-#[derive(Debug, StructOpt)]
-#[structopt(
+#[derive(Debug, Parser)]
+#[command(
     name = "Espresso Faucet Server",
     about = "Grants a native asset seed to a provided UserPubKey"
 )]
 pub struct FaucetOptions {
     /// mnemonic for the faucet keystore
-    #[structopt(long, env = "ESPRESSO_FAUCET_WALLET_MNEMONIC")]
+    #[arg(long, env = "ESPRESSO_FAUCET_WALLET_MNEMONIC")]
     pub mnemonic: Mnemonic,
 
     /// path to the faucet keystore
-    #[structopt(long = "keystore-path", env = "ESPRESSO_FAUCET_WALLET_STORE_PATH")]
+    #[arg(long = "keystore-path", env = "ESPRESSO_FAUCET_WALLET_STORE_PATH")]
     pub faucet_keystore_path: Option<PathBuf>,
 
     /// password on the faucet account keyfile
-    #[structopt(
+    #[arg(
         long = "keystore-password",
         env = "ESPRESSO_FAUCET_WALLET_PASSWORD",
         default_value = ""
@@ -77,19 +77,19 @@ pub struct FaucetOptions {
     pub faucet_password: String,
 
     /// binding port for the faucet service
-    #[structopt(long, env = "ESPRESSO_FAUCET_PORT", default_value = "50079")]
+    #[arg(long, env = "ESPRESSO_FAUCET_PORT", default_value = "50079")]
     pub faucet_port: u16,
 
     /// size of transfer for faucet grant
-    #[structopt(long, env = "ESPRESSO_FAUCET_GRANT_SIZE", default_value = "5000")]
+    #[arg(long, env = "ESPRESSO_FAUCET_GRANT_SIZE", default_value = "5000")]
     pub grant_size: u64,
 
     /// number of grants to give out per request
-    #[structopt(long, env = "ESPRESSO_FAUCET_NUM_GRANTS", default_value = "5")]
+    #[arg(long, env = "ESPRESSO_FAUCET_NUM_GRANTS", default_value = "5")]
     pub num_grants: usize,
 
     /// fee for faucet grant
-    #[structopt(long, env = "ESPRESSO_FAUCET_FEE_SIZE", default_value = "100")]
+    #[arg(long, env = "ESPRESSO_FAUCET_FEE_SIZE", default_value = "100")]
     pub fee_size: u64,
 
     /// number of records to maintain simultaneously.
@@ -99,7 +99,7 @@ pub struct FaucetOptions {
     /// tradeoff in startup cost for having more simultaneous records: when the faucet initializes,
     /// it must execute transfers to itself to break up its records into more, smaller ones. This
     /// can take a long time, and it also forces the relayer to pay a lot of gas.
-    #[structopt(
+    #[arg(
         long,
         name = "N",
         env = "ESPRESSO_FAUCET_NUM_RECORDS",
@@ -108,7 +108,7 @@ pub struct FaucetOptions {
     pub num_records: usize,
 
     /// URL for the Espresso Query Service.
-    #[structopt(
+    #[arg(
         long,
         env = "ESPRESSO_ESQS_URL",
         default_value = "http://localhost:50087"
@@ -116,7 +116,7 @@ pub struct FaucetOptions {
     pub esqs_url: Url,
 
     /// URL for the Espresso address book.
-    #[structopt(
+    #[arg(
         long,
         env = "ESPRESSO_ADDRESS_BOOK_URL",
         default_value = "http://localhost:50078"
@@ -124,7 +124,7 @@ pub struct FaucetOptions {
     pub address_book_url: Url,
 
     /// URL for a validator to submit transactions to.
-    #[structopt(
+    #[arg(
         long,
         env = "ESPRESSO_SUBMIT_URL",
         default_value = "http://localhost:50087"
@@ -134,14 +134,14 @@ pub struct FaucetOptions {
     /// Maximum number of outstanding requests to allow in the queue.
     ///
     /// If not provided, the queue can grow arbitrarily large.
-    #[structopt(long, env = "ESPRESSO_FAUCET_MAX_QUEUE_LENGTH")]
+    #[arg(long, env = "ESPRESSO_FAUCET_MAX_QUEUE_LENGTH")]
     pub max_queue_len: Option<usize>,
 
     /// Number of worker threads.
     ///
     /// It is a good idea to configure the faucet so that this is the same as
     /// `num_records / num_grants`.
-    #[structopt(long, env = "ESPRESSO_FAUCET_NUM_WORKERS", default_value = "5")]
+    #[arg(long, env = "ESPRESSO_FAUCET_NUM_WORKERS", default_value = "5")]
     pub num_workers: usize,
 }
 
@@ -922,7 +922,7 @@ async fn main() -> Result<(), std::io::Error> {
     // Initialize the faucet web server.
     init_web_server(
         &mut ChaChaRng::from_entropy(),
-        &FaucetOptions::from_args(),
+        &FaucetOptions::parse(),
         None,
     )
     .await?
