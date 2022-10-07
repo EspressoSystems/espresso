@@ -20,7 +20,7 @@ use async_std::task::block_on;
 use commit::Committable;
 use espresso_availability_api::{
     data_source::UpdateAvailabilityData,
-    query_data::{BlockQueryData, StateQueryData},
+    query_data::{BlockQueryData, EncodedPublicKey, StateQueryData},
 };
 use espresso_catchup_api::data_source::UpdateCatchUpData;
 use espresso_core::state::{
@@ -209,6 +209,8 @@ where
                             records_from,
                             record_count,
                             txn_hashes,
+                            timestamp: leaf.timestamp,
+                            proposer_id: EncodedPublicKey(leaf.proposer_id.clone().0),
                         }),
                         Some(StateQueryData {
                             state: state.clone(),

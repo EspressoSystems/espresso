@@ -10,12 +10,18 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+use ark_serialize::*;
 use espresso_core::state::{
     state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedBlockCommitment,
     ElaboratedTransaction, TransactionCommitment, ValidatorState,
 };
 use jf_cap::structs::RecordCommitment;
+use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
+
+#[tagged_blob("NODEID")]
+#[derive(Debug, Clone, CanonicalDeserialize, CanonicalSerialize, Hash, PartialEq, Eq)]
+pub struct EncodedPublicKey(pub Vec<u8>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockQueryData {
@@ -25,6 +31,8 @@ pub struct BlockQueryData {
     pub records_from: u64,
     pub record_count: u64,
     pub txn_hashes: Vec<TransactionCommitment>,
+    pub timestamp: i128,
+    pub proposer_id: EncodedPublicKey,
 }
 
 impl BlockQueryData {
@@ -79,8 +87,6 @@ pub struct StateQueryData {
     pub continuation_event_index: u64,
 }
 
-// TODO !keyao Add proposer ID and timestamp to the block summary data.
-// Issue: https://github.com/EspressoSystems/espresso/issues/624.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockSummaryQueryData {
     pub size: usize,
@@ -90,4 +96,8 @@ pub struct BlockSummaryQueryData {
     /// The total number of outputs in this block.
     pub record_count: u64,
     pub view_number: u64,
+    pub timestamp: i128,
+    pub proposer_id: Vec<u8>,
+    pub block_hash: ElaboratedBlockCommitment,
+    pub block_id: u64,
 }

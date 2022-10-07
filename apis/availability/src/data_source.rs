@@ -10,7 +10,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::query_data::{BlockQueryData, StateQueryData};
+use crate::query_data::{BlockQueryData, EncodedPublicKey, StateQueryData};
 use espresso_core::state::{ElaboratedBlockCommitment, TransactionCommitment, ValidatorState};
 use hotshot_types::data::QuorumCertificate;
 use jf_cap::MerkleTree;
@@ -37,6 +37,7 @@ pub trait AvailabilityDataSource {
                                                                             // it should be possible to implement this one in terms of the above,
                                                                             // leaving more compact and/or performant solutions as optional
     fn get_record_merkle_tree_at_block_index(&self, n: usize) -> Option<MerkleTree>;
+    fn get_block_ids_by_proposer_id(&self, id: EncodedPublicKey) -> Vec<u64>;
 }
 
 pub trait UpdateAvailabilityData {

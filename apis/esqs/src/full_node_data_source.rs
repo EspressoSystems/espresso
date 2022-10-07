@@ -23,6 +23,7 @@ use atomic_store::{
 use espresso_availability_api::data_source::{
     AvailabilityDataSource, BlockAndAssociated, UpdateAvailabilityData,
 };
+use espresso_availability_api::query_data::EncodedPublicKey;
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
 use espresso_catchup_api::data_source::{CatchUpDataSource, UpdateCatchUpData};
 use espresso_core::ledger::EspressoLedger;
@@ -58,6 +59,7 @@ pub struct QueryData {
     index_by_block_hash: HashMap<ElaboratedBlockCommitment, u64>,
     index_by_txn_hash: HashMap<TransactionCommitment, (u64, u64)>,
     index_by_last_record_id: BTreeMap<u64, u64>,
+    index_by_proposer_id: HashMap<EncodedPublicKey, Vec<u64>>,
     cached_events_start: usize,
     events: Vec<Option<LedgerEvent<EspressoLedger>>>,
     event_sender: broadcast::Sender<(usize, Option<LedgerEvent<EspressoLedger>>)>,
@@ -291,6 +293,13 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
             None
         }
     }
+    fn get_block_ids_by_proposer_id(&self, id: EncodedPublicKey) -> Vec<u64> {
+        if let Some(block_id) = self.index_by_proposer_id.get(&id) {
+            block_id.clone()
+        } else {
+            Vec::new()
+        }
+    }
 
     fn get_record_merkle_tree_at_block_index(&self, n: usize) -> Option<MerkleTree> {
         let apply = |state: &StateQueryData| {
@@ -335,6 +344,10 @@ impl UpdateAvailabilityData for QueryData {
             if let Some(block) = opt_block {
                 self.index_by_block_hash
                     .insert(block.block_hash, block.block_id);
+                self.index_by_proposer_id
+                    .entry(block.proposer_id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(block.block_id);
                 if block.record_count > 0 {
                     self.index_by_last_record_id
                         .insert(block.records_from + block.record_count - 1, block.block_id);
@@ -624,6 +637,7 @@ impl QueryData {
             index_by_block_hash: HashMap::new(),
             index_by_txn_hash: HashMap::new(),
             index_by_last_record_id: BTreeMap::new(),
+            index_by_proposer_id: HashMap::new(),
             cached_events_start: 0usize,
             events: Vec::new(),
             event_sender,
@@ -694,6 +708,7 @@ impl QueryData {
         let cached_blocks: Vec<BlockAndAssociated> = zipped_iters.collect();
         let mut index_by_txn_hash = HashMap::new();
         let mut index_by_last_record_id = BTreeMap::new();
+        let mut index_by_proposer_id = HashMap::new();
         let mut cached_nullifier_sets = BTreeMap::new();
         let mut running_nullifier_set = SetMerkleTree::default();
         let index_by_block_hash = block_storage
@@ -730,6 +745,10 @@ impl QueryData {
                         index_by_last_record_id
                             .insert(block.records_from + block.record_count - 1, block.block_id);
                     }
+                    index_by_proposer_id
+                        .entry(block.proposer_id)
+                        .or_insert_with(Vec::new)
+                        .push(block.block_id);
                     Some((block.block_hash, block.block_id))
                 }
             })
@@ -765,6 +784,7 @@ impl QueryData {
             index_by_block_hash,
             index_by_txn_hash,
             index_by_last_record_id,
+            index_by_proposer_id,
             cached_events_start,
             events,
             event_sender,
