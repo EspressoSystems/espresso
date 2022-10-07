@@ -346,6 +346,9 @@ mod test {
             "Testing {} txns with {}/{} nodes failed after txn {}",
             num_txn, num_fail_nodes, num_nodes, fail_after_txn
         );
+        // Views slow down as we add more nodes. This is a safe formula that allows ample time
+        // without overly slowing down the test.
+        let view_timeout = &format!("{}s", 6 * num_nodes);
         let num_nodes = &num_nodes.to_string();
         let num_txn = &num_txn.to_string();
         let num_fail_nodes = &num_fail_nodes.to_string();
@@ -369,10 +372,8 @@ mod test {
             // requires 2 empty blocks to be committed.
             "--max-propose-time",
             "10s",
-            // Make the view timeout only slightly longer than the propose time. Since some of the
-            // tests involve killing nodes, we may have views that fail.
             "--next-view-timeout",
-            "15s",
+            view_timeout,
             "--reset-store-state",
             "--verbose",
         ];

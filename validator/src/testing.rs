@@ -178,7 +178,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 min_propose_time: Duration::from_secs(5),
                 min_transactions: 1,
                 max_propose_time: Duration::from_secs(10),
-                next_view_timeout: Duration::from_secs(15),
+                next_view_timeout: Duration::from_secs(60),
                 ..NodeOpt::default()
             };
             let consensus =

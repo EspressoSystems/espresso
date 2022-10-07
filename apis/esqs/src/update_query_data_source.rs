@@ -116,9 +116,6 @@ where
                 }
             }
 
-            let mut num_txns = 0usize;
-            let mut num_records = 0usize;
-            let mut num_nullifiers = 0usize;
             let mut cumulative_size = 0usize;
             for leaf in leaf_chain.iter().rev() {
                 let mut block = leaf.deltas.clone();
@@ -145,7 +142,6 @@ where
                     let hash = TransactionCommitment(txn.commit());
                     txn_hashes.push(hash);
                 }
-                num_txns += block.block.0.len();
                 cumulative_size += block.serialized_size();
                 let continuation_event_index;
 
@@ -203,14 +199,6 @@ where
                     first_uid - records_from
                 };
 
-                num_records += record_count as usize;
-                num_nullifiers += block
-                    .block
-                    .0
-                    .iter()
-                    .map(|txn| txn.input_len())
-                    .sum::<usize>();
-
                 {
                     let mut availability_store = self.availability_store.write().await;
                     if let Err(e) = availability_store.append_blocks(vec![(
@@ -246,11 +234,11 @@ where
             status_store
                 .edit_status(|vs| {
                     vs.latest_block_id = self.validator_state.block_height as u64 - 1;
-                    vs.decided_block_count += leaf_chain.len() as u64;
-                    vs.cumulative_txn_count += num_txns as u64;
+                    vs.decided_block_count = self.validator_state.block_height as u64;
+                    vs.cumulative_txn_count = self.validator_state.transaction_count as u64;
                     vs.cumulative_size += cumulative_size as u64;
-                    vs.record_count += num_records as u64;
-                    vs.nullifier_count += num_nullifiers as u64;
+                    vs.record_count = self.validator_state.record_merkle_commitment.num_leaves;
+                    vs.nullifier_count = self.validator_state.nullifiers_count() as u64;
                     Ok(())
                 })
                 .unwrap();

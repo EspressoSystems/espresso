@@ -677,6 +677,7 @@ impl Committable for RecordMerkleFrontier {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct NullifierHistory {
     current: set_hash::Hash,
+    count: usize,
     history: VecDeque<(SetMerkleTree, Vec<Nullifier>)>,
 }
 
@@ -684,6 +685,7 @@ impl Default for NullifierHistory {
     fn default() -> Self {
         Self {
             current: SetMerkleTree::default().hash(),
+            count: 0,
             history: VecDeque::with_capacity(ValidatorState::HISTORY_SIZE),
         }
     }
@@ -700,6 +702,10 @@ impl NullifierHistory {
             .flat_map(|(_, nulls)| nulls)
             .cloned()
             .collect()
+    }
+
+    pub fn count(&self) -> usize {
+        self.count
     }
 
     /// Check if a nullifier has been spent.
@@ -786,6 +792,7 @@ impl NullifierHistory {
         if self.history.len() >= ValidatorState::HISTORY_SIZE {
             self.history.pop_back();
         }
+        self.count += nulls.len();
         self.history.push_front((snapshot.clone(), nulls));
         self.current = new_hash;
 
@@ -897,6 +904,7 @@ impl Committable for NullifierHistory {
     fn commit(&self) -> commit::Commitment<Self> {
         let mut ret = commit::RawCommitmentBuilder::new("Nullifier Hist Comm")
             .field("current", self.current.into())
+            .u64_field("count", self.count as u64)
             .constant_str("history")
             .u64(self.history.len() as u64);
         for (tree, delta) in self.history.iter() {
@@ -963,6 +971,7 @@ pub mod state_comm {
         pub chain: Commitment<ChainVariables>,
         pub prev_commit_time: ConsensusTime,
         pub block_height: u64,
+        pub transaction_count: usize,
         pub prev_state: Option<LedgerStateCommitment>,
         pub record_merkle_commitment: Commitment<RecordMerkleCommitment>,
         pub record_merkle_frontier: Commitment<RecordMerkleFrontier>,
@@ -1002,6 +1011,7 @@ pub mod state_comm {
                 .field("chain", self.chain)
                 .u64_field("prev_commit_time", *self.prev_commit_time)
                 .u64_field("block_height", self.block_height)
+                .u64_field("transaction_count", self.transaction_count as u64)
                 .array_field(
                     "prev_state",
                     &self
@@ -1185,6 +1195,7 @@ pub struct ValidatorState {
     /// and `block_height - 1` is the index of the previous block, which created this state. (The
     /// default, pre-genesis state has `block_height == 0`, since it was not created by any block.)
     pub block_height: u64,
+    pub transaction_count: usize,
     pub prev_state: Option<LedgerStateCommitment>,
     /// The current record Merkle commitment
     pub record_merkle_commitment: MerkleCommitment,
@@ -1232,6 +1243,7 @@ impl Committable for ValidatorState {
             chain: self.chain.commit(),
             prev_commit_time: self.prev_commit_time,
             block_height: self.block_height,
+            transaction_count: self.transaction_count,
             prev_state: self.prev_state,
             record_merkle_commitment: RecordMerkleCommitment(self.record_merkle_commitment)
                 .commit(),
@@ -1272,6 +1284,7 @@ impl ValidatorState {
             chain,
             prev_commit_time: ConsensusTime::genesis(),
             block_height: 0u64,
+            transaction_count: 0,
             prev_state: None,
             record_merkle_commitment: record_merkle_frontier.commitment(),
             record_merkle_frontier: record_merkle_frontier.frontier(),
@@ -1301,6 +1314,10 @@ impl ValidatorState {
 
     pub fn nullifiers_root(&self) -> set_hash::Hash {
         self.past_nullifiers.current_root()
+    }
+
+    pub fn nullifiers_count(&self) -> usize {
+        self.past_nullifiers.count()
     }
 
     /// Validate a block of elaborated transactions
@@ -1533,6 +1550,7 @@ impl ValidatorState {
         let comm = self.commit();
         self.prev_commit_time = *now;
         self.block_height += 1;
+        self.transaction_count += txns.0.len();
         self.prev_block = txns.commit();
         let null_pfs = self
             .past_nullifiers

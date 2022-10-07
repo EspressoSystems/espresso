@@ -235,7 +235,7 @@ pub struct NodeOpt {
     #[clap(
         long,
         env = "ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT",
-        default_value = "40s",
+        default_value = "60s",
         parse(try_from_str = parse_duration)
     )]
     pub next_view_timeout: Duration,

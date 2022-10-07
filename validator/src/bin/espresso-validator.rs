@@ -167,6 +167,11 @@ async fn generate_transactions(
                     EventType::Decide { leaf_chain } => {
                         let mut success = false;
                         info!("decide with {} leaves", leaf_chain.len());
+                        if let Some(leaf) = leaf_chain.last() {
+                            if leaf.state.block_height > state.validator.block_height + 1 {
+                                panic!("missed a block, proposer is behind and cannot build a transaction");
+                            }
+                        }
                         for leaf in leaf_chain.iter().rev() {
                             // Add the block.
                             if leaf.deltas.is_empty() {
@@ -225,7 +230,7 @@ async fn generate_transactions(
                             }
                         }
                         if success {
-                            let commit = leaf_chain.last().unwrap().state.commit();
+                            let commit = leaf_chain.first().unwrap().state.commit();
                             println!("  - Round {} completed. Commitment: {}", round + 1, commit);
                             final_commitment = Some(commit);
                             break;
@@ -247,19 +252,21 @@ async fn generate_transactions(
 
                 match event.event {
                     EventType::Decide { leaf_chain } => {
-                        if let Some(leaf) = leaf_chain.last() {
+                        if let Some(leaf) = leaf_chain.first() {
                             info!(
-                                "replica got block (block height {})",
-                                leaf.state.block_height
+                                "replica got block (block height {}, transaction count {})",
+                                leaf.state.block_height, leaf.state.transaction_count
                             );
-                        }
-                        if leaf_chain.iter().any(|leaf| {
-                            !leaf.deltas.is_empty() && !leaf.deltas.block.0[0].is_genesis()
-                        }) {
-                            let commit = leaf_chain.last().unwrap().state.commit();
-                            println!("  - Round {} completed. Commitment: {}", round + 1, commit);
-                            final_commitment = Some(commit);
-                            break;
+                            if leaf.state.transaction_count > (round + 1) as usize {
+                                let commit = leaf_chain.first().unwrap().state.commit();
+                                println!(
+                                    "  - Round {} completed. Commitment: {}",
+                                    round + 1,
+                                    commit
+                                );
+                                final_commitment = Some(commit);
+                                break;
+                            }
                         }
                     }
                     _ => {
