@@ -1042,13 +1042,13 @@
     <span class="doccomment">///</span>
     <span class="doccomment">/// If the path to a node&#39;s persistence files doesn&#39;t exist, its persisted state will be reset</span>
     <span class="doccomment">/// regardless of this argument.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">short</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>)]</span>
     <span class="kw">pub</span> <span class="ident">reset_store_state</span>: <span class="ident">bool</span>,
 
     <span class="doccomment">/// Path to persistence files for all nodes.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Persistence files will be nested under the specified directory.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">short</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_STORE_PATH&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_STORE_PATH&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">store_path</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PathBuf</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// Port of the current node if it&#39;s non-bootstrap.</span>
@@ -1057,7 +1057,7 @@
     <span class="doccomment">///</span>
     <span class="doccomment">/// If the node is bootstrap, thip option will be overriden by the corresponding port in</span>
     <span class="doccomment">/// `--bootstrap-nodes`.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">nonbootstrap_port</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u16</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// The base port for the non-bootstrap nodes.</span>
@@ -1065,7 +1065,7 @@
     <span class="doccomment">/// If specified, the consesnsu port for node `i` will be `nonbootstrap_base_port + i`.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Will be overriden by `nonbootstrap_port`.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;9000&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;9000&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">nonbootstrap_base_port</span>: <span class="ident">usize</span>,
 
     <span class="doccomment">/// Minimum time to wait for submitted transactions before proposing a block.</span>
@@ -1073,11 +1073,11 @@
     <span class="doccomment">/// Increasing this trades off latency for throughput: the rate of new block proposals gets</span>
     <span class="doccomment">/// slower, but each block is proportionally larger. Because of batch verification, larger</span>
     <span class="doccomment">/// blocks should lead to increased throughput.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;0s&quot;</span>,
-        <span class="ident">parse</span>(<span class="ident">try_from_str</span> <span class="op">=</span> <span class="ident">parse_duration</span>)
+        <span class="ident">value_parser</span> <span class="op">=</span> <span class="ident">parse_duration</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">min_propose_time</span>: <span class="ident">Duration</span>,
 
@@ -1085,25 +1085,25 @@
     <span class="doccomment">///</span>
     <span class="doccomment">/// If a validator has not received any transactions after `min-propose-time`, it will wait up</span>
     <span class="doccomment">/// to `max-propose-time` before giving up and submitting an empty block.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;10s&quot;</span>,
-        <span class="ident">parse</span>(<span class="ident">try_from_str</span> <span class="op">=</span> <span class="ident">parse_duration</span>)
+        <span class="ident">value_parser</span> <span class="op">=</span> <span class="ident">parse_duration</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">max_propose_time</span>: <span class="ident">Duration</span>,
 
     <span class="doccomment">/// Base duration for next-view timeout.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;100s&quot;</span>,
-        <span class="ident">parse</span>(<span class="ident">try_from_str</span> <span class="op">=</span> <span class="ident">parse_duration</span>)
+        <span class="ident">value_parser</span> <span class="op">=</span> <span class="ident">parse_duration</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">next_view_timeout</span>: <span class="ident">Duration</span>,
 
     <span class="doccomment">/// The exponential backoff ratio for the next-view timeout.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_TIMEOUT_RATIO&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;11:10&quot;</span>
@@ -1111,21 +1111,21 @@
     <span class="kw">pub</span> <span class="ident">timeout_ratio</span>: <span class="ident">Ratio</span>,
 
     <span class="doccomment">/// The delay a leader inserts before starting pre-commit.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_ROUND_START_DELAY&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;1ms&quot;</span>,
-        <span class="ident">parse</span>(<span class="ident">try_from_str</span> <span class="op">=</span> <span class="ident">parse_duration</span>)
+        <span class="ident">value_parser</span> <span class="op">=</span> <span class="ident">parse_duration</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">round_start_delay</span>: <span class="ident">Duration</span>,
 
     <span class="doccomment">/// Delay after init before starting consensus.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_START_DELAY&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;1ms&quot;</span>,
-        <span class="ident">parse</span>(<span class="ident">try_from_str</span> <span class="op">=</span> <span class="ident">parse_duration</span>))]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_START_DELAY&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;1ms&quot;</span>,
+        <span class="ident">value_parser</span> <span class="op">=</span> <span class="ident">parse_duration</span>)]</span>
     <span class="kw">pub</span> <span class="ident">start_delay</span>: <span class="ident">Duration</span>,
 
     <span class="doccomment">/// Maximum number of transactions in a block.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_MAX_TRANSACTIONS&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;10000&quot;</span>
@@ -1218,60 +1218,60 @@
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">Args</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ConsensusOpt</span> {
     <span class="doccomment">/// Seed number used to generate secret key set for all nodes.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_SECRET_KEY_SEED&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_SECRET_KEY_SEED&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">secret_key_seed</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">SecretKeySeed</span><span class="op">&gt;</span>,
 
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_REPLICATION_FACTOR&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5&quot;</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">replication_factor</span>: <span class="ident">usize</span>,
 
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;50&quot;</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">bootstrap_mesh_n_high</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;10&quot;</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">bootstrap_mesh_n_low</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5&quot;</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">bootstrap_mesh_outbound_min</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;15&quot;</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">bootstrap_mesh_n</span>: <span class="ident">usize</span>,
 
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;15&quot;</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_n_high</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;8&quot;</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_n_low</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;4&quot;</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_outbound_min</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;12&quot;</span>
@@ -1279,7 +1279,7 @@
     <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_n</span>: <span class="ident">usize</span>,
 
     <span class="doccomment">/// URLs of the bootstrap nodes, in the format of `&lt;host&gt;:&lt;port&gt;`.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_NODES&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;localhost:9000,localhost:9001,localhost:9002,localhost:9003,localhost:9004,localhost:9005,localhost:9006&quot;</span>,

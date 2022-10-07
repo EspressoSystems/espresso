@@ -148,8 +148,6 @@
 <span id="148">148</span>
 <span id="149">149</span>
 <span id="150">150</span>
-<span id="151">151</span>
-<span id="152">152</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -172,6 +170,7 @@
 <span class="kw">mod</span> <span class="ident">cli_client</span>;
 
 <span class="kw">use</span> <span class="ident">async_trait::async_trait</span>;
+<span class="kw">use</span> <span class="ident">clap::Parser</span>;
 <span class="kw">use</span> <span class="ident">espresso_client::network::NetworkBackend</span>;
 <span class="kw">use</span> <span class="ident">espresso_core::ledger::EspressoLedger</span>;
 <span class="kw">use</span> <span class="ident">jf_cap::proof::UniversalParam</span>;
@@ -184,33 +183,30 @@
 };
 <span class="kw">use</span> <span class="ident">std::path::PathBuf</span>;
 <span class="kw">use</span> <span class="ident">std::process::exit</span>;
-<span class="kw">use</span> <span class="ident">structopt::StructOpt</span>;
 <span class="kw">use</span> <span class="ident">surf_disco::Url</span>;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">StructOpt</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Parser</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Args</span> {
     <span class="doccomment">/// Generate keys for a keystore, do not run the REPL.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// The keys are stored in FILE and FILE.pub.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">short</span> <span class="op">=</span> <span class="string">&quot;g&quot;</span>, <span class="ident">long</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span> <span class="op">=</span> <span class="string">&#39;g&#39;</span>, <span class="ident">long</span>)]</span>
     <span class="kw">pub</span> <span class="ident">key_gen</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PathBuf</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// Path to a saved keystore, or a new directory where this keystore will be saved.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// If not given, the keystore will be stored in ~/.translucence/keystore. If a keystore already</span>
     <span class="doccomment">/// exists there, it will be loaded. Otherwise, a new keystore will be created.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">short</span>, <span class="ident">long</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span>, <span class="ident">long</span>)]</span>
     <span class="kw">pub</span> <span class="ident">storage</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PathBuf</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// Create a new keystore and store it an a temporary location which will be deleted on exit.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// This option is mutually exclusive with --storage.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>)]</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">conflicts_with</span>(<span class="string">&quot;storage&quot;</span>))]</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">hidden</span>(<span class="bool-val">true</span>))]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">conflicts_with</span>(<span class="string">&quot;storage&quot;</span>), <span class="ident">hide</span>(<span class="bool-val">true</span>))]</span>
     <span class="kw">pub</span> <span class="ident">tmp_storage</span>: <span class="ident">bool</span>,
 
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>)]</span>
     <span class="doccomment">/// Run in a mode which is friendlier to automated scripting.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Instead of prompting the user for input with a line editor, the prompt will be printed,</span>
@@ -218,7 +214,7 @@
     <span class="kw">pub</span> <span class="ident">non_interactive</span>: <span class="ident">bool</span>,
 
     <span class="doccomment">/// URL for the Espresso Query Service.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ESQS_URL&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;http://localhost:50087&quot;</span>
@@ -226,7 +222,7 @@
     <span class="kw">pub</span> <span class="ident">esqs_url</span>: <span class="ident">Url</span>,
 
     <span class="doccomment">/// URL for the Espresso address book.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ADDRESS_BOOK_URL&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;http://localhost:50088&quot;</span>
@@ -234,7 +230,7 @@
     <span class="kw">pub</span> <span class="ident">address_book_url</span>: <span class="ident">Url</span>,
 
     <span class="doccomment">/// URL for a validator to submit transactions to.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_SUBMIT_URL&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;http://localhost:50089&quot;</span>
@@ -297,7 +293,7 @@
 
 <span class="attribute">#[<span class="ident">async_std::main</span>]</span>
 <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">main</span>() {
-    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">err</span>) <span class="op">=</span> <span class="ident">cli_main</span>::<span class="op">&lt;</span><span class="ident">EspressoLedger</span>, <span class="ident">EspressoCli</span><span class="op">&gt;</span>(<span class="ident">Args::from_args</span>()).<span class="kw">await</span> {
+    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">err</span>) <span class="op">=</span> <span class="ident">cli_main</span>::<span class="op">&lt;</span><span class="ident">EspressoLedger</span>, <span class="ident">EspressoCli</span><span class="op">&gt;</span>(<span class="ident">Args::parse</span>()).<span class="kw">await</span> {
         <span class="macro">println!</span>(<span class="string">&quot;{}&quot;</span>, <span class="ident">err</span>);
         <span class="ident">exit</span>(<span class="number">1</span>);
     }

@@ -1246,6 +1246,7 @@
     <span class="ident">task</span>::{<span class="ident">sleep</span>, <span class="ident">spawn</span>, <span class="ident">JoinHandle</span>},
 };
 <span class="kw">use</span> <span class="ident">atomic_store</span>::{<span class="ident">load_store::BincodeLoadStore</span>, <span class="ident">AppendLog</span>, <span class="ident">AtomicStore</span>, <span class="ident">AtomicStoreLoader</span>};
+<span class="kw">use</span> <span class="ident">clap::Parser</span>;
 <span class="kw">use</span> <span class="ident">espresso_client</span>::{
     <span class="ident">events::EventIndex</span>,
     <span class="ident">hd::Mnemonic</span>,
@@ -1273,7 +1274,6 @@
 <span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">HashMap</span>, <span class="ident">HashSet</span>};
 <span class="kw">use</span> <span class="ident">std::path</span>::{<span class="ident">Path</span>, <span class="ident">PathBuf</span>};
 <span class="kw">use</span> <span class="ident">std::time::Duration</span>;
-<span class="kw">use</span> <span class="ident">structopt::StructOpt</span>;
 <span class="kw">use</span> <span class="ident">surf::Url</span>;
 <span class="kw">use</span> <span class="ident">tide</span>::{
     <span class="ident">http::headers::HeaderValue</span>,
@@ -1281,22 +1281,22 @@
 };
 <span class="kw">use</span> <span class="ident">tracing</span>::{<span class="ident">error</span>, <span class="ident">info</span>, <span class="ident">warn</span>};
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">StructOpt</span>)]</span>
-<span class="attribute">#[<span class="ident">structopt</span>(
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Parser</span>)]</span>
+<span class="attribute">#[<span class="ident">command</span>(
     <span class="ident">name</span> <span class="op">=</span> <span class="string">&quot;Espresso Faucet Server&quot;</span>,
     <span class="ident">about</span> <span class="op">=</span> <span class="string">&quot;Grants a native asset seed to a provided UserPubKey&quot;</span>
 )]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">FaucetOptions</span> {
     <span class="doccomment">/// mnemonic for the faucet keystore</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_WALLET_MNEMONIC&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_WALLET_MNEMONIC&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">mnemonic</span>: <span class="ident">Mnemonic</span>,
 
     <span class="doccomment">/// path to the faucet keystore</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span> <span class="op">=</span> <span class="string">&quot;keystore-path&quot;</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_WALLET_STORE_PATH&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span> <span class="op">=</span> <span class="string">&quot;keystore-path&quot;</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_WALLET_STORE_PATH&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">faucet_keystore_path</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PathBuf</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// password on the faucet account keyfile</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span> <span class="op">=</span> <span class="string">&quot;keystore-password&quot;</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_WALLET_PASSWORD&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;&quot;</span>
@@ -1304,19 +1304,19 @@
     <span class="kw">pub</span> <span class="ident">faucet_password</span>: <span class="ident">String</span>,
 
     <span class="doccomment">/// binding port for the faucet service</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_PORT&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;50079&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_PORT&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;50079&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">faucet_port</span>: <span class="ident">u16</span>,
 
     <span class="doccomment">/// size of transfer for faucet grant</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_GRANT_SIZE&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5000&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_GRANT_SIZE&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5000&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">grant_size</span>: <span class="ident">u64</span>,
 
     <span class="doccomment">/// number of grants to give out per request</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_NUM_GRANTS&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_NUM_GRANTS&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">num_grants</span>: <span class="ident">usize</span>,
 
     <span class="doccomment">/// fee for faucet grant</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_FEE_SIZE&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;100&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_FEE_SIZE&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;100&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">fee_size</span>: <span class="ident">u64</span>,
 
     <span class="doccomment">/// number of records to maintain simultaneously.</span>
@@ -1326,7 +1326,7 @@
     <span class="doccomment">/// tradeoff in startup cost for having more simultaneous records: when the faucet initializes,</span>
     <span class="doccomment">/// it must execute transfers to itself to break up its records into more, smaller ones. This</span>
     <span class="doccomment">/// can take a long time, and it also forces the relayer to pay a lot of gas.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">name</span> <span class="op">=</span> <span class="string">&quot;N&quot;</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_NUM_RECORDS&quot;</span>,
@@ -1335,7 +1335,7 @@
     <span class="kw">pub</span> <span class="ident">num_records</span>: <span class="ident">usize</span>,
 
     <span class="doccomment">/// URL for the Espresso Query Service.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ESQS_URL&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;http://localhost:50087&quot;</span>
@@ -1343,7 +1343,7 @@
     <span class="kw">pub</span> <span class="ident">esqs_url</span>: <span class="ident">Url</span>,
 
     <span class="doccomment">/// URL for the Espresso address book.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ADDRESS_BOOK_URL&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;http://localhost:50078&quot;</span>
@@ -1351,7 +1351,7 @@
     <span class="kw">pub</span> <span class="ident">address_book_url</span>: <span class="ident">Url</span>,
 
     <span class="doccomment">/// URL for a validator to submit transactions to.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(
+    <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_SUBMIT_URL&quot;</span>,
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;http://localhost:50087&quot;</span>
@@ -1361,14 +1361,14 @@
     <span class="doccomment">/// Maximum number of outstanding requests to allow in the queue.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// If not provided, the queue can grow arbitrarily large.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_MAX_QUEUE_LENGTH&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_MAX_QUEUE_LENGTH&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">max_queue_len</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// Number of worker threads.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// It is a good idea to configure the faucet so that this is the same as</span>
     <span class="doccomment">/// `num_records / num_grants`.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_NUM_WORKERS&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_NUM_WORKERS&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">num_workers</span>: <span class="ident">usize</span>,
 }
 
@@ -2149,7 +2149,7 @@
     <span class="comment">// Initialize the faucet web server.</span>
     <span class="ident">init_web_server</span>(
         <span class="kw-2">&amp;mut</span> <span class="ident">ChaChaRng::from_entropy</span>(),
-        <span class="kw-2">&amp;</span><span class="ident">FaucetOptions::from_args</span>(),
+        <span class="kw-2">&amp;</span><span class="ident">FaucetOptions::parse</span>(),
         <span class="prelude-val">None</span>,
     )
     .<span class="kw">await</span><span class="question-mark">?</span>

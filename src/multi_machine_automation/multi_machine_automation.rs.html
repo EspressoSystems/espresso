@@ -411,17 +411,17 @@
 <span class="kw">use</span> <span class="ident">std::time::Duration</span>;
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Parser</span>)]</span>
-<span class="attribute">#[<span class="ident">clap</span>(
+<span class="attribute">#[<span class="ident">command</span>(
     <span class="ident">name</span> <span class="op">=</span> <span class="string">&quot;Multi-machine consensus&quot;</span>,
     <span class="ident">about</span> <span class="op">=</span> <span class="string">&quot;Simulates consensus among multiple machines&quot;</span>
 )]</span>
 <span class="kw">struct</span> <span class="ident">Options</span> {
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">flatten</span>)]</span>
+    <span class="attribute">#[<span class="ident">command</span>(<span class="ident">flatten</span>)]</span>
     <span class="ident">node_opt</span>: <span class="ident">NodeOpt</span>,
 
     <span class="doccomment">/// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of</span>
     <span class="doccomment">/// non-bootstrap nodes.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">short</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NUM_NODES&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NUM_NODES&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">num_nodes</span>: <span class="ident">usize</span>,
 
     <span class="doccomment">/// Public key which should own a faucet record in the genesis block.</span>
@@ -431,37 +431,37 @@
     <span class="doccomment">///</span>
     <span class="doccomment">/// This option may be passed multiple times to initialize the ledger with multiple native</span>
     <span class="doccomment">/// token records.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_PUB_KEYS&quot;</span>, <span class="ident">value_delimiter</span> <span class="op">=</span> <span class="string">&#39;,&#39;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_PUB_KEYS&quot;</span>, <span class="ident">value_delimiter</span> <span class="op">=</span> <span class="string">&#39;,&#39;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">faucet_pub_key</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">UserPubKey</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// Number of transactions to generate.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// If not provided, the validator will wait for externally submitted transactions.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">short</span>, <span class="ident">conflicts_with</span>(<span class="string">&quot;faucet-pub-key&quot;</span>))]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>, <span class="ident">conflicts_with</span>(<span class="string">&quot;faucet-pub-key&quot;</span>))]</span>
     <span class="kw">pub</span> <span class="ident">num_txn</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// Wait for web server to exit after transactions complete.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">short</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>)]</span>
     <span class="kw">pub</span> <span class="ident">wait</span>: <span class="ident">bool</span>,
 
     <span class="doccomment">/// Options for the new EsQS.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">subcommand</span>)]</span>
+    <span class="attribute">#[<span class="ident">command</span>(<span class="ident">subcommand</span>)]</span>
     <span class="kw">pub</span> <span class="ident">esqs</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">full_node::Command</span><span class="op">&gt;</span>,
 
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">short</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>)]</span>
     <span class="ident">verbose</span>: <span class="ident">bool</span>,
 
     <span class="doccomment">/// Number of nodes to run only `fail_after_txn` rounds.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// If not provided, all nodes will keep running till `num_txn` rounds are completed.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>)]</span>
     <span class="ident">num_fail_nodes</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// Number of rounds that all nodes will be running, after which `num_fail_nodes` nodes will be</span>
     <span class="doccomment">/// killed.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// If not provided, all nodes will keep running till `num_txn` rounds are completed.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">requires</span>(<span class="string">&quot;num-fail-nodes&quot;</span>))]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">requires</span>(<span class="string">&quot;num-fail-nodes&quot;</span>))]</span>
     <span class="ident">fail_after_txn</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
 }
 
@@ -478,13 +478,13 @@
 <span class="attribute">#[<span class="ident">async_std::main</span>]</span>
 <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">main</span>() {
     <span class="comment">// Construct arguments to pass to the multi-machine demo.</span>
-    <span class="kw">let</span> <span class="ident">options</span> <span class="op">=</span> <span class="ident">Options::from_args</span>();
+    <span class="kw">let</span> <span class="ident">options</span> <span class="op">=</span> <span class="ident">Options::parse</span>();
     <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">msg</span>) <span class="op">=</span> <span class="ident">options</span>.<span class="ident">node_opt</span>.<span class="ident">check</span>() {
         <span class="macro">eprintln!</span>(<span class="string">&quot;{}&quot;</span>, <span class="ident">msg</span>);
         <span class="ident">exit</span>(<span class="number">1</span>);
     }
 
-    <span class="comment">// With StructOpt/CLAP, environment variables override command line arguments, but we are going</span>
+    <span class="comment">// With clap, environment variables override command line arguments, but we are going</span>
     <span class="comment">// to construct a command line for each child, so the child processes shouldn&#39;t get their</span>
     <span class="comment">// options from the environment. Clear the environment variables corresponding to each option</span>
     <span class="comment">// that we will set explicitly in the command line.</span>

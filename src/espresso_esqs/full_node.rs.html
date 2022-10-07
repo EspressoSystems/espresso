@@ -213,22 +213,22 @@
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Args</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Options</span> {
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ESQS_PORT&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ESQS_PORT&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">port</span>: <span class="ident">u16</span>,
 
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">flatten</span>)]</span>
+    <span class="attribute">#[<span class="ident">command</span>(<span class="ident">flatten</span>)]</span>
     <span class="kw">pub</span> <span class="ident">availability</span>: <span class="ident">availability::Options</span>,
 
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">flatten</span>)]</span>
+    <span class="attribute">#[<span class="ident">command</span>(<span class="ident">flatten</span>)]</span>
     <span class="kw">pub</span> <span class="ident">catchup</span>: <span class="ident">catchup::Options</span>,
 
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">flatten</span>)]</span>
+    <span class="attribute">#[<span class="ident">command</span>(<span class="ident">flatten</span>)]</span>
     <span class="kw">pub</span> <span class="ident">metastate</span>: <span class="ident">metastate::Options</span>,
 
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">flatten</span>)]</span>
+    <span class="attribute">#[<span class="ident">command</span>(<span class="ident">flatten</span>)]</span>
     <span class="kw">pub</span> <span class="ident">status</span>: <span class="ident">status::Options</span>,
 
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">flatten</span>)]</span>
+    <span class="attribute">#[<span class="ident">command</span>(<span class="ident">flatten</span>)]</span>
     <span class="kw">pub</span> <span class="ident">validator</span>: <span class="ident">validator::Options</span>,
 }
 

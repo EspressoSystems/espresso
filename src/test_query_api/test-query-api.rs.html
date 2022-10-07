@@ -403,11 +403,11 @@
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Parser</span>)]</span>
 <span class="kw">struct</span> <span class="ident">Args</span> {
     <span class="doccomment">/// Hostname or IP address of the query server.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">short</span> <span class="op">=</span> <span class="string">&#39;H&#39;</span>, <span class="ident">long</span> <span class="op">=</span> <span class="string">&quot;--host&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;localhost&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span> <span class="op">=</span> <span class="string">&#39;H&#39;</span>, <span class="ident">long</span> <span class="op">=</span> <span class="string">&quot;--host&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;localhost&quot;</span>)]</span>
     <span class="ident">host</span>: <span class="ident">String</span>,
 
     <span class="doccomment">/// Port number of the query service.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">short</span> <span class="op">=</span> <span class="string">&#39;P&#39;</span>, <span class="ident">long</span> <span class="op">=</span> <span class="string">&quot;--port&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;50000&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span> <span class="op">=</span> <span class="string">&#39;P&#39;</span>, <span class="ident">long</span> <span class="op">=</span> <span class="string">&quot;--port&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;50000&quot;</span>)]</span>
     <span class="ident">port</span>: <span class="ident">u16</span>,
 }
 
@@ -617,7 +617,7 @@
     <span class="ident">tracing_subscriber::fmt</span>()
         .<span class="ident">with_env_filter</span>(<span class="ident">tracing_subscriber::EnvFilter::from_default_env</span>())
         .<span class="ident">init</span>();
-    <span class="ident">test</span>(<span class="kw-2">&amp;</span><span class="ident">Args::from_args</span>()).<span class="kw">await</span>
+    <span class="ident">test</span>(<span class="kw-2">&amp;</span><span class="ident">Args::parse</span>()).<span class="kw">await</span>
 }
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">all</span>(<span class="ident">test</span>, <span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;slow-tests&quot;</span>))]</span>

@@ -725,6 +725,7 @@
 
 <span class="kw">use</span> <span class="ident">address_book::error::AddressBookError</span>;
 <span class="kw">use</span> <span class="ident">async_std::task::sleep</span>;
+<span class="kw">use</span> <span class="ident">clap::Parser</span>;
 <span class="kw">use</span> <span class="ident">derive_more::Deref</span>;
 <span class="kw">use</span> <span class="ident">espresso_client</span>::{<span class="ident">ledger_state::TransactionUID</span>, <span class="ident">network::NetworkBackend</span>, <span class="ident">RecordAmount</span>};
 <span class="kw">use</span> <span class="ident">espresso_core</span>::{<span class="ident">ledger::EspressoLedger</span>, <span class="ident">universal_params::UNIVERSAL_PARAM</span>};
@@ -752,7 +753,6 @@
 <span class="kw">use</span> <span class="ident">std::path::PathBuf</span>;
 <span class="kw">use</span> <span class="ident">std::str::FromStr</span>;
 <span class="kw">use</span> <span class="ident">std::time::Duration</span>;
-<span class="kw">use</span> <span class="ident">structopt::StructOpt</span>;
 <span class="kw">use</span> <span class="ident">surf_disco</span>::{<span class="ident">Error</span>, <span class="ident">StatusCode</span>, <span class="ident">Url</span>};
 <span class="kw">use</span> <span class="ident">tempdir::TempDir</span>;
 <span class="kw">use</span> <span class="ident">tracing</span>::{<span class="ident">event</span>, <span class="ident">Level</span>};
@@ -825,44 +825,44 @@
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">StructOpt</span>, <span class="ident">Debug</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Parser</span>, <span class="ident">Debug</span>)]</span>
 <span class="kw">struct</span> <span class="ident">Args</span> {
     <span class="doccomment">/// Path to a private key file to use for the keystore.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// If not given, new keys are generated randomly.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">short</span>, <span class="ident">long</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span>, <span class="ident">long</span>)]</span>
     <span class="ident">key_path</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PathBuf</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// Seed for random number generation.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>)]</span>
     <span class="ident">seed</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// Path to a saved keystore, or a new directory where this keystore will be saved.</span>
     <span class="doccomment">/// Will use a TempDir if not provided</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_RANDOM_WALLET_PATH&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_RANDOM_WALLET_PATH&quot;</span>)]</span>
     <span class="ident">storage</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PathBuf</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// URL of a server for querying with the ledger</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ESQS_URL&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ESQS_URL&quot;</span>)]</span>
     <span class="ident">esqs_url</span>: <span class="ident">Url</span>,
 
     <span class="doccomment">/// URL of a server for interacting with the ledger</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_SUBMIT_URL&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_SUBMIT_URL&quot;</span>)]</span>
     <span class="ident">validator_url</span>: <span class="ident">Url</span>,
 
     <span class="doccomment">/// URL of a server for address book</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ADDRESS_BOOK_URL&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ADDRESS_BOOK_URL&quot;</span>)]</span>
     <span class="ident">address_book_url</span>: <span class="ident">Url</span>,
 
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_URL&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_URL&quot;</span>)]</span>
     <span class="ident">faucet_url</span>: <span class="ident">Url</span>,
 
     <span class="doccomment">/// Whether to color log output with ANSI color codes.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_COLORED_LOGS&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_COLORED_LOGS&quot;</span>)]</span>
     <span class="ident">colored_logs</span>: <span class="ident">bool</span>,
 
     <span class="doccomment">/// Size of additional padding to add to transfers.</span>
-    <span class="attribute">#[<span class="ident">structopt</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_RANDOM_WALLET_PADDING&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;0&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_RANDOM_WALLET_PADDING&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;0&quot;</span>)]</span>
     <span class="ident">padding</span>: <span class="ident">Bytes</span>,
 }
 
@@ -940,7 +940,7 @@
 
 <span class="attribute">#[<span class="ident">async_std::main</span>]</span>
 <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">main</span>() {
-    <span class="kw">let</span> <span class="ident">args</span> <span class="op">=</span> <span class="ident">Args::from_args</span>();
+    <span class="kw">let</span> <span class="ident">args</span> <span class="op">=</span> <span class="ident">Args::parse</span>();
 
     <span class="ident">tracing_subscriber::fmt</span>()
         .<span class="ident">with_env_filter</span>(<span class="ident">tracing_subscriber::EnvFilter::from_default_env</span>())

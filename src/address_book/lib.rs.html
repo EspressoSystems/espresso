@@ -237,11 +237,11 @@
 
 <span class="doccomment">/// Command line arguments</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Parser</span>, <span class="ident">Debug</span>)]</span>
-<span class="attribute">#[<span class="ident">clap</span>(<span class="ident">author</span>, <span class="ident">version</span>, <span class="ident">about</span>, <span class="ident">long_about</span> <span class="op">=</span> <span class="prelude-val">None</span>)]</span>
+<span class="attribute">#[<span class="ident">command</span>(<span class="ident">author</span>, <span class="ident">version</span>, <span class="ident">about</span>, <span class="ident">long_about</span> <span class="op">=</span> <span class="prelude-val">None</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Args</span> {
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">flatten</span>)]</span>
+    <span class="attribute">#[<span class="ident">command</span>(<span class="ident">flatten</span>)]</span>
     <span class="kw">pub</span> <span class="ident">disco_args</span>: <span class="ident">DiscoArgs</span>,
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>)]</span>
     <span class="doccomment">/// Storage path</span>
     <span class="kw">pub</span> <span class="ident">store_path</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PathBuf</span><span class="op">&gt;</span>,
 }

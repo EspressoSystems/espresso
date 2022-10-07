@@ -146,7 +146,7 @@
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Args</span>, <span class="ident">Default</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Options</span> {
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span> <span class="op">=</span> <span class="string">&quot;status-api-path&quot;</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_STATUS_API_PATH&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span> <span class="op">=</span> <span class="string">&quot;status-api-path&quot;</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_STATUS_API_PATH&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">api_path</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PathBuf</span><span class="op">&gt;</span>,
 }
 

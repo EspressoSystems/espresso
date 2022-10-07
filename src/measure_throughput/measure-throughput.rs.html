@@ -158,17 +158,17 @@
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Parser</span>)]</span>
 <span class="kw">struct</span> <span class="ident">Options</span> {
     <span class="doccomment">/// The frequency at which to poll current throughput.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;60s&quot;</span>, <span class="ident">parse</span>(<span class="ident">try_from_str</span> <span class="op">=</span> <span class="ident">espresso_validator::parse_duration</span>))]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;60s&quot;</span>, <span class="ident">value_parser</span> <span class="op">=</span> <span class="ident">espresso_validator::parse_duration</span>)]</span>
     <span class="ident">frequency</span>: <span class="ident">Duration</span>,
 
     <span class="doccomment">/// The total duration over which to measure throughput.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// If not provided, runs until killed.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">parse</span>(<span class="ident">try_from_str</span> <span class="op">=</span> <span class="ident">espresso_validator::parse_duration</span>))]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span>, <span class="ident">long</span>, <span class="ident">value_parser</span> <span class="op">=</span> <span class="ident">espresso_validator::parse_duration</span>)]</span>
     <span class="ident">total</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Duration</span><span class="op">&gt;</span>,
 
     <span class="doccomment">/// The query service to poll for ledger state.</span>
-    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">short</span> <span class="op">=</span> <span class="string">&#39;q&#39;</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ESQS_URL&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">short</span> <span class="op">=</span> <span class="string">&#39;q&#39;</span>, <span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_ESQS_URL&quot;</span>)]</span>
     <span class="ident">esqs_url</span>: <span class="ident">Url</span>,
 }
 
@@ -236,7 +236,7 @@
         .<span class="ident">with_env_filter</span>(<span class="ident">tracing_subscriber::EnvFilter::from_default_env</span>())
         .<span class="ident">init</span>();
 
-    <span class="kw">let</span> <span class="ident">opt</span> <span class="op">=</span> <span class="ident">Options::from_args</span>();
+    <span class="kw">let</span> <span class="ident">opt</span> <span class="op">=</span> <span class="ident">Options::parse</span>();
     <span class="kw">let</span> <span class="ident">frequency</span> <span class="op">=</span> <span class="ident">opt</span>.<span class="ident">frequency</span>;
     <span class="kw">let</span> <span class="ident">total</span> <span class="op">=</span> <span class="ident">opt</span>.<span class="ident">total</span>.<span class="ident">map</span>(<span class="ident">Duration::from</span>);
 
