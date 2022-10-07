@@ -16,6 +16,8 @@ use jf_cap::structs::{Amount, ReceiverMemo};
 use jf_cap::Signature;
 use reef::traits::Validator;
 
+use derive_more::{From, Into};
+
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
 pub use crate::lw_persistence::LWPersistence;
@@ -935,14 +937,10 @@ pub mod state_comm {
         Deserialize,
         CanonicalSerialize,
         CanonicalDeserialize,
+        From,
+        Into,
     )]
     pub struct CommittableAmount(Amount);
-
-    impl From<Amount> for CommittableAmount {
-        fn from(amount: Amount) -> Self {
-            CommittableAmount(amount)
-        }
-    }
 
     impl Committable for CommittableAmount {
         fn commit(&self) -> Commitment<Self> {
@@ -1430,11 +1428,14 @@ impl ValidatorState {
                     .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
 
                 // check helper proofs (RewardNoteProofs)
-                let (root, key_stake, total_staked) = pfs.verify(self, latest_reward.clone())?;
+                let extracted_data = pfs.verify(self, latest_reward.clone())?;
 
                 //check reward amount
-                let max_reward =
-                    crate::reward::compute_reward_amount(self.now(), key_stake, total_staked);
+                let max_reward = crate::reward::compute_reward_amount(
+                    self.now(),
+                    extracted_data.key_stake,
+                    extracted_data.stake_table_total_stake,
+                );
                 if txn.reward_amount() > max_reward {
                     return Err(ValidationError::RewardAmountTooLarge);
                 }
@@ -1450,7 +1451,7 @@ impl ValidatorState {
                 verified_rewards_proofs.push((
                     latest_reward,
                     pfs.get_uncollected_reward_proof(),
-                    root,
+                    extracted_data.collected_reward_digest,
                 ));
             }
         }
