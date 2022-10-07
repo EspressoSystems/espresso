@@ -869,6 +869,8 @@ mod rewards_testing {
         let mut rng = rand::thread_rng();
         let priv_key = StakingPrivKey::generate();
         let pub_key = StakingKey::from_priv_key(&priv_key);
+        let bad_priv_key = StakingPrivKey::generate();
+        let bad_pub_key = StakingKey::from_priv_key(&bad_priv_key);
         let (vrf_proof, time) = get_vrf_proof_and_view_number(&priv_key, &pub_key);
 
         let time = time.into();
@@ -916,17 +918,155 @@ mod rewards_testing {
             time,
             1,
             &priv_key,
-            cap_address,
+            cap_address.clone(),
             Amount::from(100u64),
-            stake_amount_proof,
-            uncollected_reward_proof,
-            vrf_proof,
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
         )
         .unwrap();
 
         assert!(reward_note.verify().is_ok());
         assert!(aux_proofs
-            .verify(&validator_state, collected_reward)
+            .verify(&validator_state, collected_reward.clone())
             .is_ok());
+
+        //Kaley todo: make bad historical_stake_tables
+
+        //bad num_leaves
+        let (reward_note, aux_proofs) = CollectRewardNote::generate(
+            &mut rng,
+            &validator_state.historical_stake_tables,
+            2,
+            Amount::from(100u64),
+            time,
+            1,
+            &priv_key,
+            cap_address.clone(),
+            Amount::from(100u64),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+        )
+        .unwrap();
+
+        //note passes because num_leaves is only used to verify stake table commitments inclusion proof
+        assert!(reward_note.verify().is_ok());
+        assert!(aux_proofs
+            .verify(&validator_state, collected_reward.clone())
+            .is_err());
+
+        //bad block height: these both pass because block height is only used to calculate maximum allowed reward-
+        //will need to be tested once compute_reward_amount actually does something
+        let (reward_note, aux_proofs) = CollectRewardNote::generate(
+            &mut rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            2,
+            &priv_key,
+            cap_address.clone(),
+            Amount::from(100u64),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+        )
+        .unwrap();
+
+        assert!(reward_note.verify().is_ok());
+        assert!(aux_proofs
+            .verify(&validator_state, collected_reward.clone())
+            .is_ok());
+
+        //bad priv_key
+        let (reward_note, aux_proofs) = CollectRewardNote::generate(
+            &mut rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            &bad_priv_key,
+            cap_address.clone(),
+            Amount::from(100u64),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+        )
+        .unwrap();
+
+        assert!(reward_note.verify().is_err());
+        //Kaley todo: proofs pass with bad key but good collected_reward
+        assert!(aux_proofs
+            .verify(&validator_state, collected_reward.clone())
+            .is_ok());
+        //proofs fail with bad key and bad collected_reward
+        let bad_collected_reward = CollectedRewards {
+            staking_key: bad_pub_key.clone(),
+            time,
+        };
+        assert!(aux_proofs
+            .verify(&validator_state, bad_collected_reward.clone())
+            .is_err());
+
+        //bad stake_amount_proof: bad_pub_key not added to stake_table_mt
+        let bad_stake_amount_proof = stake_table_mt.lookup(bad_pub_key.clone()).unwrap().1;
+        let (reward_note, aux_proofs) = CollectRewardNote::generate(
+            &mut rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            &priv_key,
+            cap_address.clone(),
+            Amount::from(100u64),
+            bad_stake_amount_proof,
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+        )
+        .unwrap();
+
+        //note passes because proofs are not verified in note creation
+        assert!(reward_note.verify().is_ok());
+        //Kaley todo: proof check should not be passing with bad_stake_amount_proof? look tomorrow
+        assert!(aux_proofs
+            .verify(&validator_state, collected_reward.clone())
+            .is_ok());
+        //this check fails correctly: bad key in bad_collected_reward, bad proof
+        assert!(aux_proofs
+            .verify(&validator_state, bad_collected_reward.clone())
+            .is_err());
+
+        //Kaley todo: check with bad uncollected_rewards_proof
+
+        //bad vrf proof: proof and priv_key do not match
+        let (bad_vrf_proof, _bad_time) = get_vrf_proof_and_view_number(&bad_priv_key, &bad_pub_key);
+        let (reward_note, aux_proofs) = CollectRewardNote::generate(
+            &mut rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            &priv_key,
+            cap_address.clone(),
+            Amount::from(100u64),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            bad_vrf_proof.clone(),
+        )
+        .unwrap();
+
+        assert!(reward_note.verify().is_err());
+        //proofs pass with matching priv_key in collected_reward, but they never use vrf key (only collected_reward key)
+        assert!(aux_proofs
+            .verify(&validator_state, collected_reward.clone())
+            .is_ok());
+        //with bad keys in bad_collected_reward, we fail correctly
+        assert!(aux_proofs
+            .verify(&validator_state, bad_collected_reward.clone())
+            .is_err());
     }
 }
