@@ -66,8 +66,8 @@ use std::path::{Path, PathBuf};
 use std::str;
 use std::str::FromStr;
 use std::time::Duration;
-use surf::Url;
 use tracing::{debug, event, Level};
+use url::Url;
 
 mod node_impl;
 #[cfg(any(test, feature = "testing"))]

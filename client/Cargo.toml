@@ -45,14 +45,14 @@ hex = "0.4"
 human_bytes = "0.3"
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
-jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
-jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
-jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
+jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
+jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
+jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
 key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 lazy_static = "1.4.0"
 parse-size = { version = "1.0", features = ["std"] }
 portpicker = "0.1"
-primitive-types = "0.11"
+primitive-types = "0.12"
 rand = "0.8.5"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 reef = { git = "https://github.com/EspressoSystems/reef.git", features = ["testing"] }

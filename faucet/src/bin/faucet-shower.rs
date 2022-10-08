@@ -34,8 +34,8 @@ use rand_chacha::{
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::time::Duration;
-use surf::Url;
 use tempdir::TempDir;
+use tide_disco::Url;
 
 #[derive(Debug, Parser)]
 pub struct Options {

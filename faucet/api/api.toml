@@ -10,19 +10,17 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <https://www.gnu.org/licenses/>.
 
-[package]
-name = "espresso-metastate-api"
-version = "0.1.0"
-edition = "2021"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[meta]
+NAME = "fauceet"
+DESCRIPTION = "Espresso Testnet Faucet"
+FORMAT_VERSION = "0.1.0"
 
-[dependencies]
-clap = { version = "4.0", features = ["derive", "env"] }
-derive_more = "0.99"
-espresso-core = { path = "../../core/" }
-futures = "0.3.21"
-jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
-serde = { version = "1.0.139", features = ["derive", "rc"] }
-snafu = { version = "0.7", features = ["backtraces"] }
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1" }
-toml = "0.5"
+[route.request_fee_assets]
+PATH = ["/request_fee_assets"]
+METHOD = "POST"
+DOC = """
+Request a grant of Espresso fee tokens for a given address.
+
+The request payload should be the `UserPubKey` bundle requesting the assets, formatted as a JSON
+string (starting with "USERPUBKEY").
+"""
