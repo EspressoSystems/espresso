@@ -953,15 +953,19 @@ mod test {
     use tracing_test::traced_test;
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
-        let mut backoff = Duration::from_millis(100);
-        for _ in 0..13 {
-            if f().await {
-                return;
+        if std::env::var("ESPRESSO_FAUCET_TEST_DISABLE_TIMEOUT").is_ok() {
+            while !f().await {}
+        } else {
+            let mut backoff = Duration::from_millis(100);
+            for _ in 0..13 {
+                if f().await {
+                    return;
+                }
+                sleep(backoff).await;
+                backoff *= 2;
             }
-            sleep(backoff).await;
-            backoff *= 2;
+            panic!("retry loop did not complete in {:?}", backoff);
         }
-        panic!("retry loop did not complete in {:?}", backoff);
     }
 
     struct Faucet {

@@ -212,6 +212,7 @@
               [ cargo-llvm-cov stableToolchain ] ++ rustDeps;
 
             RUST_LOG = "info,libp2p=off";
+            ESPRESSO_FAUCET_TEST_DISABLE_TIMEOUT = "1";
           };
 
           staticShell = pkgs.mkShell {
