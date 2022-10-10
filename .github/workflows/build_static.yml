@@ -66,12 +66,12 @@ jobs:
       #   timeout-minutes: 60
       #   run: |
       #     ulimit -n 4096
-      #     nix develop .#staticShell --option sandbox relaxed -c cargo run --release --bin multi_machine_automation -- --num-nodes 7 --num-txn 3 --verbose --reset-store-state
+      #     nix develop .#staticShell --option sandbox relaxed -c cargo run --profile=release-lto --bin multi_machine_automation -- --num-nodes 7 --num-txn 3 --verbose --reset-store-state
 
       - name: Compile all executables
         timeout-minutes: 60
         run: |
-          nix develop .#staticShell --option sandbox relaxed -c cargo build --release
+          nix develop .#staticShell --option sandbox relaxed -c cargo build --profile=release-lto
 
       # prune all untagged artifacts besides the most recent 5.
       # BREAKING BUILD AS OF 2022-07-01
@@ -89,10 +89,10 @@ jobs:
         with:
           name: x86_64-unknown-linux-musl-services
           path: |
-            target/x86_64-unknown-linux-musl/release/address-book
-            target/x86_64-unknown-linux-musl/release/espresso-validator
-            target/x86_64-unknown-linux-musl/release/faucet
-            target/x86_64-unknown-linux-musl/release/random-wallet
+            target/x86_64-unknown-linux-musl/release-lto/address-book
+            target/x86_64-unknown-linux-musl/release-lto/espresso-validator
+            target/x86_64-unknown-linux-musl/release-lto/faucet
+            target/x86_64-unknown-linux-musl/release-lto/random-wallet
 
   static-dockers:
     runs-on: ubuntu-latest
