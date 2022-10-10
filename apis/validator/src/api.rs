@@ -25,7 +25,7 @@ use tide_disco::{
 
 #[derive(Args, Default)]
 pub struct Options {
-    #[clap(long = "validator-api-path", env = "ESPRESSO_VALIDATOR_API_PATH")]
+    #[arg(long = "validator-api-path", env = "ESPRESSO_VALIDATOR_API_PATH")]
     pub api_path: Option<PathBuf>,
 }
 

@@ -25,7 +25,7 @@ use tide_disco::{
 
 #[derive(Args, Default)]
 pub struct Options {
-    #[clap(long = "status-api-path", env = "ESPRESSO_STATUS_API_PATH")]
+    #[arg(long = "status-api-path", env = "ESPRESSO_STATUS_API_PATH")]
     pub api_path: Option<PathBuf>,
 }
 

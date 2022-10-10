@@ -28,22 +28,21 @@ use std::time::Duration;
 use tracing::info;
 
 #[derive(Parser)]
-#[clap(
+#[command(
     name = "Multi-machine consensus",
     about = "Simulates consensus among multiple machines"
 )]
 struct Options {
-    #[clap(flatten)]
+    #[command(flatten)]
     node_opt: NodeOpt,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     consensus_opt: ConsensusOpt,
 
     /// Id of the current node.
     ///
     /// If the node ID is 0, it will propose and try to add transactions.
-    #[clap(long, short, env = "ESPRESSO_VALIDATOR_ID")]
-    #[clap(requires("num-nodes"))]
+    #[arg(long, short, env = "ESPRESSO_VALIDATOR_ID", requires("num-nodes"))]
     pub id: usize,
 
     /// Location of the current node.
@@ -54,7 +53,7 @@ struct Options {
 
     /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
     /// bootstrap nodes.
-    #[clap(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
+    #[arg(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
     pub num_nodes: usize,
 
     /// Public key which should own a faucet record in the genesis block.
@@ -64,24 +63,24 @@ struct Options {
     ///
     /// This option may be passed multiple times to initialize the ledger with multiple native
     /// token records.
-    #[clap(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ',')]
+    #[arg(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ',')]
     pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.
     ///
     /// If not provided, the validator will wait for externally submitted transactions.
-    #[clap(long, short, conflicts_with("faucet-pub-key"))]
+    #[arg(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txn: Option<u64>,
 
     /// Whether to color log output with ANSI color codes.
-    #[clap(long, env = "ESPRESSO_COLORED_LOGS")]
+    #[arg(long, env = "ESPRESSO_COLORED_LOGS")]
     pub colored_logs: bool,
 
     /// Unique identifier for this instance of Espresso.
-    #[clap(long, env = "ESPRESSO_VALIDATOR_CHAIN_ID", default_value = "0")]
+    #[arg(long, env = "ESPRESSO_VALIDATOR_CHAIN_ID", default_value = "0")]
     pub chain_id: u16,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     pub esqs: Option<full_node::Command>,
 }
 
@@ -296,7 +295,7 @@ async fn generate_transactions(
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
-    let options = Options::from_args();
+    let options = Options::parse();
     if let Err(msg) = options.node_opt.check() {
         eprintln!("{}", msg);
         exit(1);

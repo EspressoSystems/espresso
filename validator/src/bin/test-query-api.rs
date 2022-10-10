@@ -52,11 +52,11 @@ use tracing::{event, Level};
 #[derive(Parser)]
 struct Args {
     /// Hostname or IP address of the query server.
-    #[clap(short = 'H', long = "--host", default_value = "localhost")]
+    #[arg(short = 'H', long = "--host", default_value = "localhost")]
     host: String,
 
     /// Port number of the query service.
-    #[clap(short = 'P', long = "--port", default_value = "50000")]
+    #[arg(short = 'P', long = "--port", default_value = "50000")]
     port: u16,
 
     /// Test all blocks in the history.
@@ -275,7 +275,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    test(&Args::from_args()).await
+    test(&Args::parse()).await
 }
 
 #[cfg(all(test, feature = "slow-tests"))]
