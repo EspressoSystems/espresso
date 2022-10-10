@@ -20,7 +20,7 @@ edition = "2021"
 ark-serialize = { version = "0.3.0", features = ["derive"] }
 ark-std = { version = "0.3.0", default-features = false }
 clap = { version = "4.0", features = ["derive", "env"] }
-commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.1.0" }
+commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.2.0" }
 derive_more = "0.99"
 espresso-core = { path = "../../core/" }
 futures = "0.3.21"
@@ -29,6 +29,6 @@ jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git
 jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.1" }
 serde = { version = "1.0", features = ["derive"] }
 snafu = { version = "0.7", features = ["backtraces"] }
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.0" }
+tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1" }
 toml = "0.5"
 tracing = "0.1.35"

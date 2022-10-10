@@ -24,5 +24,5 @@ futures = "0.3.21"
 jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 serde = { version = "1.0.139", features = ["derive", "rc"] }
 snafu = { version = "0.7", features = ["backtraces"] }
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.0" }
+tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1" }
 toml = "0.5"

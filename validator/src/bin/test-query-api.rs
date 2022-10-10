@@ -27,6 +27,7 @@
 
 use ark_serialize::CanonicalSerialize;
 use async_std::future::timeout;
+use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use clap::Parser;
 use commit::Committable;
@@ -170,6 +171,7 @@ struct UnencryptedKeystoreLoader {
     dir: TempDir,
 }
 
+#[async_trait]
 impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
     type Meta = ();
 
@@ -177,12 +179,15 @@ impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
         self.dir.path().into()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
+    async fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
         let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
+    async fn load(
+        &mut self,
+        _meta: &mut Self::Meta,
+    ) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
     }
 }
