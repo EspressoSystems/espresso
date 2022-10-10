@@ -17,7 +17,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "bincode",
- "clap 4.0.10",
+ "clap 4.0.12",
  "config",
  "dirs",
  "espresso-systems-common 0.2.0 (git+ssh://git@github.com/EspressoSystems/espresso-systems-common.git?tag=0.2.0)",
@@ -35,8 +35,8 @@ dependencies = [
  "signal-hook",
  "signal-hook-async-std",
  "snafu",
- "strum 0.24.1",
- "strum_macros 0.24.3",
+ "strum",
+ "strum_macros",
  "surf",
  "tagged-base64 0.2.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.2.1)",
  "tempdir",
@@ -1221,9 +1221,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.0.10"
+version = "4.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b1a0a4208c6c483b952ad35c6eed505fc13b46f08f631b81e828084a9318d74"
+checksum = "385007cbbed899260395a4107435fead4cad80684461b3cc78238bdcb0bad58f"
 dependencies = [
  "atty",
  "bitflags",
@@ -1289,6 +1289,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8ad8cef104ac57b68b89df3208164d228503abbdce70f6880ffa3d970e7443a"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "codespan-reporting"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3538270d33cc669650c4b093848450d380def10c331d38c768e34cac80576e6e"
+dependencies = [
+ "termcolor",
+ "unicode-width",
 ]
 
 [[package]]
@@ -1814,6 +1824,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "cxx"
+version = "1.0.78"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19f39818dcfc97d45b03953c1292efc4e80954e1583c4aa770bac1383e2310a4"
+dependencies = [
+ "cc",
+ "cxxbridge-flags",
+ "cxxbridge-macro",
+ "link-cplusplus",
+]
+
+[[package]]
+name = "cxx-build"
+version = "1.0.78"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e580d70777c116df50c390d1211993f62d40302881e54d4b79727acb83d0199"
+dependencies = [
+ "cc",
+ "codespan-reporting",
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "scratch",
+ "syn",
+]
+
+[[package]]
+name = "cxxbridge-flags"
+version = "1.0.78"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56a46460b88d1cec95112c8c363f0e2c39afdb237f60583b0b36343bf627ea9c"
+
+[[package]]
+name = "cxxbridge-macro"
+version = "1.0.78"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "747b608fecf06b0d72d440f27acc99288207324b793be2c17991839f3d4995ea"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "darling"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2065,7 +2119,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4d33be9473d06f75f58220f71f7a9317aca647dc061dbd3c361b0bef505fbea"
 dependencies = [
  "byteorder",
- "quick-error",
+ "quick-error 1.2.3",
 ]
 
 [[package]]
@@ -2237,7 +2291,7 @@ name = "espresso-availability-api"
 version = "0.1.0"
 dependencies = [
  "ark-serialize",
- "clap 4.0.10",
+ "clap 4.0.12",
  "commit 0.1.0 (git+https://github.com/EspressoSystems/commit.git?tag=0.2.0)",
  "derive_more",
  "espresso-core",
@@ -2256,7 +2310,7 @@ name = "espresso-catchup-api"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "clap 4.0.10",
+ "clap 4.0.12",
  "derive_more",
  "espresso-core",
  "futures",
@@ -2277,7 +2331,7 @@ dependencies = [
  "async-std",
  "async-trait",
  "bincode",
- "clap 4.0.10",
+ "clap 4.0.12",
  "derive_more",
  "escargot",
  "espresso-availability-api",
@@ -2298,7 +2352,7 @@ dependencies = [
  "lazy_static",
  "parse-size",
  "portpicker",
- "primitive-types 0.11.1",
+ "primitive-types 0.12.0",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "reef",
@@ -2355,7 +2409,7 @@ dependencies = [
  "mnemonic",
  "num-bigint 0.4.3",
  "procfs",
- "proptest",
+ "proptest 0.8.7",
  "quickcheck",
  "quickcheck_macros",
  "rand 0.8.5",
@@ -2374,8 +2428,8 @@ dependencies = [
  "serde_with 1.14.0",
  "sha3 0.10.5",
  "snafu",
- "strum 0.24.1",
- "strum_macros 0.24.3",
+ "strum",
+ "strum_macros",
  "surf",
  "tagged-base64 0.2.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.2.1)",
  "tempdir",
@@ -2394,7 +2448,7 @@ dependencies = [
  "async-trait",
  "async_executors",
  "atomic_store 0.1.3 (git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.3)",
- "clap 4.0.10",
+ "clap 4.0.12",
  "commit 0.1.0 (git+https://github.com/EspressoSystems/commit.git?tag=0.2.0)",
  "derive_more",
  "espresso-availability-api",
@@ -2441,7 +2495,7 @@ dependencies = [
 name = "espresso-metastate-api"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.10",
+ "clap 4.0.12",
  "derive_more",
  "espresso-core",
  "futures",
@@ -2456,7 +2510,7 @@ dependencies = [
 name = "espresso-status-api"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.10",
+ "clap 4.0.12",
  "derive_more",
  "espresso-core",
  "futures",
@@ -2491,9 +2545,10 @@ dependencies = [
  "ark-serialize",
  "ark-std",
  "async-std",
+ "async-trait",
  "async-tungstenite 0.15.0",
  "bincode",
- "clap 4.0.10",
+ "clap 4.0.12",
  "cld",
  "commit 0.1.0 (git+https://github.com/EspressoSystems/commit.git?tag=0.2.0)",
  "derive_more",
@@ -2533,8 +2588,8 @@ dependencies = [
  "sha3 0.10.5",
  "shellexpand",
  "snafu",
- "strum 0.24.1",
- "strum_macros 0.24.3",
+ "strum",
+ "strum_macros",
  "surf",
  "tagged-base64 0.2.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.2.1)",
  "tempdir",
@@ -2552,7 +2607,7 @@ name = "espresso-validator-api"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "clap 4.0.10",
+ "clap 4.0.12",
  "derive_more",
  "espresso-core",
  "futures",
@@ -2656,7 +2711,7 @@ dependencies = [
  "async-std",
  "atomic_store 0.1.3 (git+https://github.com/EspressoSystems/atomicstore.git)",
  "bincode",
- "clap 4.0.10",
+ "clap 4.0.12",
  "dirs",
  "escargot",
  "espresso-client",
@@ -2670,7 +2725,7 @@ dependencies = [
  "net",
  "num-bigint 0.4.3",
  "portpicker",
- "primitive-types 0.11.1",
+ "primitive-types 0.12.0",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "reef",
@@ -3317,15 +3372,26 @@ checksum = "88a0d4dc39ec942e44c1c306aa196da67f2bd6a30dc7b4a475465c13ccf28817"
 
 [[package]]
 name = "iana-time-zone"
-version = "0.1.50"
+version = "0.1.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd911b35d940d2bd0bea0f9100068e5b97b51a1cbe13d13382f132e0365257a0"
+checksum = "f5a6ef98976b22b3b7f2f3a806f858cb862044cfa66805aa3ad84cb3d3b785ed"
 dependencies = [
  "android_system_properties",
  "core-foundation-sys",
+ "iana-time-zone-haiku",
  "js-sys",
  "wasm-bindgen",
  "winapi",
+]
+
+[[package]]
+name = "iana-time-zone-haiku"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fde6edd6cef363e9359ed3c98ba64590ba9eecba2293eb5a723ab32aee8926aa"
+dependencies = [
+ "cxx",
+ "cxx-build",
 ]
 
 [[package]]
@@ -3589,7 +3655,7 @@ checksum = "4217ad341ebadf8d8e724e264f13e593e0648f5b3e94b3896a5df283be015ecc"
 [[package]]
 name = "jf-cap"
 version = "0.0.4"
-source = "git+https://github.com/EspressoSystems/cap.git?branch=testnet-v1#e3ce95c6fc1cdac1bd3a052b29dc5c0fcc6d3a28"
+source = "git+https://github.com/EspressoSystems/cap.git?branch=testnet-v1#ad9f4d87b7c4ba3ad434a098c92152464485843c"
 dependencies = [
  "anyhow",
  "ark-bn254",
@@ -3610,7 +3676,7 @@ dependencies = [
  "jf-plonk",
  "jf-primitives",
  "jf-rescue",
- "jf-utils 0.1.1",
+ "jf-utils 0.1.2",
  "num_cpus",
  "percentage",
  "rand 0.8.5",
@@ -3838,9 +3904,9 @@ checksum = "03087c2bad5e1034e8cace5926dec053fb3790248370865f5117a7d0213354c8"
 
 [[package]]
 name = "libc"
-version = "0.2.134"
+version = "0.2.135"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "329c933548736bc49fd575ee68c89e8be4d260064184389a5b77517cddd99ffb"
+checksum = "68783febc7782c6c5cb401fbda4de5a9898be1762314da0bb2c10ced61f18b0c"
 
 [[package]]
 name = "libnghttp2-sys"
@@ -4456,6 +4522,15 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "link-cplusplus"
+version = "1.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9272ab7b96c9046fbc5bc56c06c117cb639fe2d509df0c421cad82d2915cf369"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -5616,10 +5691,30 @@ dependencies = [
  "byteorder",
  "lazy_static",
  "num-traits",
- "quick-error",
+ "quick-error 1.2.3",
  "rand 0.5.6",
  "regex-syntax",
- "rusty-fork",
+ "rusty-fork 0.2.2",
+ "tempfile",
+]
+
+[[package]]
+name = "proptest"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e0d9cc07f18492d879586c92b485def06bc850da3118075cd45d50e9c95b0e5"
+dependencies = [
+ "bit-set",
+ "bitflags",
+ "byteorder",
+ "lazy_static",
+ "num-traits",
+ "quick-error 2.0.1",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "rand_xorshift",
+ "regex-syntax",
+ "rusty-fork 0.3.0",
  "tempfile",
 ]
 
@@ -5696,6 +5791,12 @@ name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
+
+[[package]]
+name = "quick-error"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quickcheck"
@@ -5875,6 +5976,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_xorshift"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d25bf25ec5ae4a3f1b92f929810509a2f53d7dca2f50b794ff57e3face536c8f"
+dependencies = [
+ "rand_core 0.6.4",
+]
+
+[[package]]
 name = "rand_xoshiro"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5939,7 +6049,7 @@ dependencies = [
 [[package]]
 name = "reef"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/reef.git#f01ed0d6f895b0da426206dc72509d295d4e8208"
+source = "git+https://github.com/EspressoSystems/reef.git#93e4d90b7355f12f0b4ed053ec4020985b4054a7"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -5953,7 +6063,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "snafu",
- "strum_macros 0.24.3",
+ "strum_macros",
 ]
 
 [[package]]
@@ -5998,7 +6108,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52e44394d2086d010551b14b53b1f24e31647570cd1deb0379e2c21b329aba00"
 dependencies = [
  "hostname",
- "quick-error",
+ "quick-error 1.2.3",
 ]
 
 [[package]]
@@ -6202,7 +6312,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3dd93264e10c577503e926bd1430193eeb5d21b059148910082245309b424fae"
 dependencies = [
  "fnv",
- "quick-error",
+ "quick-error 1.2.3",
+ "tempfile",
+ "wait-timeout",
+]
+
+[[package]]
+name = "rusty-fork"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb3dcc6e454c328bb824492db107ab7c0ae8fcffe4ad210136ef014458c1bc4f"
+dependencies = [
+ "fnv",
+ "quick-error 1.2.3",
  "tempfile",
  "wait-timeout",
 ]
@@ -6290,6 +6412,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 
 [[package]]
+name = "scratch"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c8132065adcfd6e02db789d9285a0deb2f3fcb04002865ab67d5fb103533898"
+
+[[package]]
 name = "sct"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6302,7 +6430,7 @@ dependencies = [
 [[package]]
 name = "seahorse"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#3c2bafa5bf692617abc4ff9fd9bff0df934d3013"
+source = "git+https://github.com/EspressoSystems/seahorse.git#23cfd33c74ccb882b7c7c4d226b8e637f68ef3bd"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -6335,7 +6463,7 @@ dependencies = [
  "num-traits",
  "pipe",
  "primitive-types 0.12.0",
- "proptest",
+ "proptest 1.0.0",
  "rand_chacha 0.3.1",
  "reef",
  "regex",
@@ -6346,8 +6474,8 @@ dependencies = [
  "sha3 0.10.5",
  "snafu",
  "structopt",
- "strum 0.24.1",
- "strum_macros 0.24.3",
+ "strum",
+ "strum_macros",
  "surf",
  "tagged-base64 0.2.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.2.1)",
  "tempdir",
@@ -6453,9 +6581,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.85"
+version = "1.0.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e55a28e3aaef9d5ce0506d0a14dbba8054ddc7e499ef522dd8b26859ec9d4a44"
+checksum = "41feea4228a6f1cd09ec7a3593a682276702cd67b5273544757dae23c096f074"
 dependencies = [
  "itoa 1.0.4",
  "ryu",
@@ -6754,9 +6882,9 @@ dependencies = [
 
 [[package]]
 name = "snafu"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5177903bf45656592d9eb5c0e22f408fc023aae51dbe2088889b71633ba451f2"
+checksum = "dd726aec4ebad65756394ff89a9b9598793d4e30121cd71690244c1e497b3aee"
 dependencies = [
  "backtrace",
  "doc-comment",
@@ -6765,9 +6893,9 @@ dependencies = [
 
 [[package]]
 name = "snafu-derive"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "410b26ed97440d90ced3e2488c868d56a86e2064f5d7d6f417909b286afe25e5"
+checksum = "712529e9b0b014eabaa345b38e06032767e3dc393e8b017e853b1d7247094e74"
 dependencies = [
  "heck 0.4.0",
  "proc-macro2",
@@ -6957,27 +7085,9 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7318c509b5ba57f18533982607f24070a55d353e90d4cae30c467cdb2ad5ac5c"
-
-[[package]]
-name = "strum"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
-
-[[package]]
-name = "strum_macros"
-version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee8bc6b87a5112aeeab1f4a9f7ab634fe6cbefc4850006df31267f4cfb9e3149"
-dependencies = [
- "heck 0.3.3",
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "strum_macros"
@@ -7024,7 +7134,7 @@ dependencies = [
 [[package]]
 name = "surf-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/surf-disco.git?branch=main#b367bb20a8706bbc83295555744a8c1af848ad9d"
+source = "git+ssh://git@github.com/EspressoSystems/surf-disco.git?branch=main#6a990bc9dc23e586e8fc7fe60c555c06313d173e"
 dependencies = [
  "async-std",
  "async-tungstenite 0.15.0",
@@ -7112,7 +7222,7 @@ version = "0.2.0"
 source = "git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.2.1#4ba55dd2f9aaa63601db03a621ea2a1b50d18292"
 dependencies = [
  "base64 0.13.0",
- "clap 4.0.10",
+ "clap 4.0.12",
  "console_error_panic_hook",
  "crc-any",
  "futures-channel",
@@ -7233,14 +7343,14 @@ dependencies = [
 
 [[package]]
 name = "tide-disco"
-version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?tag=v0.3.0#966c07f862b8f1ff656da5272d2ce668eecbe03c"
+version = "0.3.1"
+source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?tag=v0.3.1#2848d5d06f7d90bb1467a71156a807ec4f32c6e9"
 dependencies = [
  "ark-serialize",
  "async-std",
  "async-trait",
  "bincode",
- "clap 4.0.10",
+ "clap 4.0.12",
  "config",
  "derive_more",
  "dirs",
@@ -7249,7 +7359,7 @@ dependencies = [
  "futures-util",
  "http",
  "include_dir",
- "jf-utils 0.1.1",
+ "jf-utils 0.1.2",
  "lazy_static",
  "libc",
  "markdown",
@@ -7264,8 +7374,8 @@ dependencies = [
  "signal-hook",
  "signal-hook-async-std",
  "snafu",
- "strum 0.20.0",
- "strum_macros 0.20.1",
+ "strum",
+ "strum_macros",
  "surf",
  "tagged-base64 0.2.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.2.1)",
  "tide",
@@ -7753,9 +7863,9 @@ checksum = "099b7128301d285f79ddd55b9a83d5e6b9e97c92e0ea0daebee7263e932de992"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcc811dc4066ac62f84f11307873c4850cb653bfa9b1719cee2bd2204a4bc5dd"
+checksum = "6ceab39d59e4c9499d4e5a8ee0e2735b891bb7308ac83dfb4e80cad195c9f6f3"
 
 [[package]]
 name = "unicode-normalization"

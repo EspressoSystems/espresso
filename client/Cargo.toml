@@ -52,7 +52,7 @@ key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 lazy_static = "1.4.0"
 parse-size = { version = "1.0", features = ["std"] }
 portpicker = "0.1"
-primitive-types = "0.11"
+primitive-types = "0.12"
 rand = "0.8.5"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 reef = { git = "https://github.com/EspressoSystems/reef.git", features = ["testing"] }
