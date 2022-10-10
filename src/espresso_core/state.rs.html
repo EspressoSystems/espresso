@@ -1599,10 +1599,6 @@
 <span id="1599">1599</span>
 <span id="1600">1600</span>
 <span id="1601">1601</span>
-<span id="1602">1602</span>
-<span id="1603">1603</span>
-<span id="1604">1604</span>
-<span id="1605">1605</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">deny</span>(<span class="ident">warnings</span>)]</span>
 <span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
@@ -2463,7 +2459,6 @@
 
     <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
     <span class="kw">use</span> <span class="ident">jf_utils::tagged_blob</span>;
-    <span class="kw">use</span> <span class="ident">net::Hash</span>;
 
     <span class="attribute">#[<span class="ident">ser_test</span>(<span class="ident">arbitrary</span>)]</span>
     <span class="attribute">#[<span class="ident">tagged_blob</span>(<span class="string">&quot;STATE&quot;</span>)]</span>
@@ -2487,12 +2482,6 @@
     <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">LedgerStateCommitment</span> {
         <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
             <span class="self">self</span>.<span class="number">0</span>.<span class="ident">as_ref</span>()
-        }
-    }
-
-    <span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">LedgerStateCommitment</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Hash</span> {
-        <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">c</span>: <span class="ident">LedgerStateCommitment</span>) -&gt; <span class="self">Self</span> {
-            <span class="ident"><span class="self">Self</span>::from</span>(<span class="ident">commit::Commitment</span>::<span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="ident">::from</span>(<span class="ident">c</span>))
         }
     }
 
@@ -2976,8 +2965,11 @@
                     .<span class="ident">expect</span>(<span class="string">&quot;Failed to verify VRF Witness&quot;</span>);
 
                 <span class="comment">//check reward amount</span>
-                <span class="kw">let</span> <span class="ident">max_reward</span> <span class="op">=</span>
-                    <span class="ident"><span class="kw">crate</span>::reward::compute_reward_amount</span>(<span class="self">self</span>, <span class="self">self</span>.<span class="ident">now</span>(), <span class="self">self</span>.<span class="ident">total_stake</span>);
+                <span class="kw">let</span> <span class="ident">max_reward</span> <span class="op">=</span> <span class="ident"><span class="kw">crate</span>::reward::compute_reward_amount</span>(
+                    <span class="self">self</span>,
+                    <span class="self">self</span>.<span class="ident">block_height</span>(),
+                    <span class="self">self</span>.<span class="ident">total_stake</span>,
+                );
                 <span class="kw">if</span> <span class="ident">txn</span>.<span class="ident">body</span>.<span class="ident">reward_amount</span> <span class="op">&gt;</span> <span class="ident">max_reward</span> {
                     <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ValidationError::RewardAmountTooLarge</span>);
                 }

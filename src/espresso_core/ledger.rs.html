@@ -332,8 +332,6 @@
 <span id="332">332</span>
 <span id="333">333</span>
 <span id="334">334</span>
-<span id="335">335</span>
-<span id="336">336</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -353,7 +351,6 @@
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::util::canonical</span>;
 <span class="kw">use</span> <span class="ident">commit</span>::{<span class="ident">Commitment</span>, <span class="ident">Committable</span>};
 <span class="kw">use</span> <span class="ident">itertools::izip</span>;
-<span class="kw">use</span> <span class="ident">itertools::MultiUnzip</span>;
 <span class="kw">use</span> <span class="ident">jf_cap::structs::RecordOpening</span>;
 <span class="kw">use</span> <span class="ident">jf_cap::MerkleTree</span>;
 <span class="kw">use</span> <span class="ident">jf_cap</span>::{
@@ -598,18 +595,6 @@
     <span class="kw">type</span> <span class="ident">Transaction</span> <span class="op">=</span> <span class="ident">ElaboratedTransaction</span>;
     <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">ValidationError</span>;
 
-    <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">txns</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Transaction</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> (<span class="ident">txns</span>, <span class="ident">proofs</span>, <span class="ident">memos</span>): (<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">EspressoTransaction</span><span class="op">&gt;</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span>) <span class="op">=</span> <span class="ident">txns</span>
-            .<span class="ident">into_iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">txn</span><span class="op">|</span> (<span class="ident">txn</span>.<span class="ident">txn</span>, <span class="ident">txn</span>.<span class="ident">proofs</span>, <span class="ident">txn</span>.<span class="ident">memos</span>))
-            .<span class="ident">multiunzip</span>();
-        <span class="self">Self</span> {
-            <span class="ident">block</span>: <span class="ident"><span class="kw">crate</span>::state::Block</span>(<span class="ident">txns</span>),
-            <span class="ident">proofs</span>,
-            <span class="ident">memos</span>,
-        }
-    }
-
     <span class="kw">fn</span> <span class="ident">txns</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Transaction</span><span class="op">&gt;</span> {
         <span class="macro">izip!</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">block</span>.<span class="number">0</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">proofs</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">memos</span>)
             .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">txn</span>, <span class="ident">proofs</span>, <span class="ident">memos</span>)<span class="op">|</span> <span class="ident">ElaboratedTransaction</span> {
@@ -630,8 +615,17 @@
 <span class="kw">impl</span> <span class="ident">traits::Validator</span> <span class="kw">for</span> <span class="ident">ValidatorState</span> {
     <span class="kw">type</span> <span class="ident">StateCommitment</span> <span class="op">=</span> <span class="ident">LedgerStateCommitment</span>;
     <span class="kw">type</span> <span class="ident">Block</span> <span class="op">=</span> <span class="ident">ElaboratedBlock</span>;
+    <span class="kw">type</span> <span class="ident">Proof</span> <span class="op">=</span> ();
 
-    <span class="kw">fn</span> <span class="ident">now</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
+    <span class="kw">fn</span> <span class="ident">next_block</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::Block</span> {
+        <span class="ident">ElaboratedBlock</span> {
+            <span class="ident">block</span>: <span class="ident">Default::default</span>(),
+            <span class="ident">proofs</span>: <span class="ident">Default::default</span>(),
+            <span class="ident">memos</span>: <span class="ident">Default::default</span>(),
+        }
+    }
+
+    <span class="kw">fn</span> <span class="ident">block_height</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
         <span class="self">self</span>.<span class="ident">prev_commit_time</span>
     }
 
@@ -642,8 +636,10 @@
     <span class="kw">fn</span> <span class="ident">validate_and_apply</span>(
         <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
         <span class="ident">block</span>: <span class="ident"><span class="self">Self</span>::Block</span>,
+        <span class="ident">_proof</span>: <span class="ident"><span class="self">Self</span>::Proof</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>, <span class="ident">MerkleTree</span>), <span class="ident">ValidationError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">outputs</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">validate_and_apply</span>(<span class="self">self</span>.<span class="ident">now</span>() <span class="op">+</span> <span class="number">1</span>, <span class="ident">block</span>.<span class="ident">block</span>, <span class="ident">block</span>.<span class="ident">proofs</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">outputs</span> <span class="op">=</span>
+            <span class="self">self</span>.<span class="ident">validate_and_apply</span>(<span class="self">self</span>.<span class="ident">prev_commit_time</span> <span class="op">+</span> <span class="number">1</span>, <span class="ident">block</span>.<span class="ident">block</span>, <span class="ident">block</span>.<span class="ident">proofs</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>((<span class="ident">outputs</span>.<span class="ident">uids</span>, <span class="ident">outputs</span>.<span class="ident">record_proofs</span>))
     }
 }

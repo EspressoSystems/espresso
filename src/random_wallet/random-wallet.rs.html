@@ -690,6 +690,8 @@
 <span id="690">690</span>
 <span id="691">691</span>
 <span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -725,6 +727,7 @@
 
 <span class="kw">use</span> <span class="ident">address_book::error::AddressBookError</span>;
 <span class="kw">use</span> <span class="ident">async_std::task::sleep</span>;
+<span class="kw">use</span> <span class="ident">async_trait::async_trait</span>;
 <span class="kw">use</span> <span class="ident">clap::Parser</span>;
 <span class="kw">use</span> <span class="ident">derive_more::Deref</span>;
 <span class="kw">use</span> <span class="ident">espresso_client</span>::{<span class="ident">ledger_state::TransactionUID</span>, <span class="ident">network::NetworkBackend</span>, <span class="ident">RecordAmount</span>};
@@ -871,6 +874,7 @@
     <span class="kw">pub</span> <span class="ident">key_tree</span>: <span class="ident">KeyTree</span>,
 }
 
+<span class="attribute">#[<span class="ident">async_trait</span>]</span>
 <span class="kw">impl</span> <span class="ident">KeystoreLoader</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">TrivialKeystoreLoader</span> {
     <span class="kw">type</span> <span class="ident">Meta</span> <span class="op">=</span> ();
 
@@ -878,11 +882,11 @@
         <span class="self">self</span>.<span class="ident">dir</span>.<span class="ident">clone</span>()
     }
 
-    <span class="kw">fn</span> <span class="ident">create</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>((), <span class="ident">KeyTree</span>), <span class="ident">KeystoreError</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">create</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>((), <span class="ident">KeyTree</span>), <span class="ident">KeystoreError</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="prelude-val">Ok</span>(((), <span class="self">self</span>.<span class="ident">key_tree</span>.<span class="ident">clone</span>()))
     }
 
-    <span class="kw">fn</span> <span class="ident">load</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_meta</span>: <span class="kw-2">&amp;mut</span> ()) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">KeyTree</span>, <span class="ident">KeystoreError</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">load</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_meta</span>: <span class="kw-2">&amp;mut</span> ()) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">KeyTree</span>, <span class="ident">KeystoreError</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">key_tree</span>.<span class="ident">clone</span>())
     }
 }
