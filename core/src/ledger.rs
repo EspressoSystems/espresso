@@ -288,7 +288,7 @@ impl traits::Validator for ValidatorState {
     }
 
     fn block_height(&self) -> u64 {
-        self.prev_commit_time
+        self.block_height
     }
 
     fn commit(&self) -> Self::StateCommitment {

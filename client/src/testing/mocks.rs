@@ -56,12 +56,12 @@ pub struct MockEspressoNetwork<'a> {
 }
 
 impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
-    fn state(&self) -> &ValidatorState {
-        &self.validator
-    }
-
     fn now(&self) -> EventIndex {
         self.events.now()
+    }
+
+    fn state(&self) -> &ValidatorState {
+        &self.validator
     }
 
     fn event(

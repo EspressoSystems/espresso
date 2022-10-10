@@ -19,7 +19,7 @@ edition = "2021"
 [dependencies]
 ark-serialize = { version = "0.3.0", features = ["derive"] }
 clap = { version = "4.0", features = ["derive", "env"] }
-commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.1.0" }
+commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.2.0" }
 derive_more = "0.99"
 espresso-core = { path = "../../core/" }
 futures = "0.3.21"

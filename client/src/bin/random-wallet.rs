@@ -33,6 +33,7 @@
 
 use address_book::error::AddressBookError;
 use async_std::task::sleep;
+use async_trait::async_trait;
 use clap::Parser;
 use derive_more::Deref;
 use espresso_client::{ledger_state::TransactionUID, network::NetworkBackend, RecordAmount};
@@ -179,6 +180,7 @@ struct TrivialKeystoreLoader {
     pub key_tree: KeyTree,
 }
 
+#[async_trait]
 impl KeystoreLoader<EspressoLedger> for TrivialKeystoreLoader {
     type Meta = ();
 
@@ -186,11 +188,11 @@ impl KeystoreLoader<EspressoLedger> for TrivialKeystoreLoader {
         self.dir.clone()
     }
 
-    fn create(&mut self) -> Result<((), KeyTree), KeystoreError<EspressoLedger>> {
+    async fn create(&mut self) -> Result<((), KeyTree), KeystoreError<EspressoLedger>> {
         Ok(((), self.key_tree.clone()))
     }
 
-    fn load(&mut self, _meta: &mut ()) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
+    async fn load(&mut self, _meta: &mut ()) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
         Ok(self.key_tree.clone())
     }
 }
