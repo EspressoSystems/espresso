@@ -88,7 +88,7 @@ pub mod set_hash {
         SetMerkleTreeNode::Branch { l, r }.hash()
     }
 
-    pub fn elem_bits(x: Nullifier) -> BitVec<bitvec::order::Lsb0, u8> {
+    pub fn elem_bits(x: Nullifier) -> BitVec<u8, bitvec::order::Lsb0> {
         Elem(x).commit().into_bits()
     }
 }
@@ -134,7 +134,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SetMerkleTree {
 
 impl SetMerkleTree {
     fn new_leaf(height: usize, elem: Nullifier) -> Self {
-        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = set_hash::elem_bits(elem);
+        let elem_bit_vec: BitVec<u8, bitvec::order::Lsb0> = set_hash::elem_bits(elem);
         let elem_bits = elem_bit_vec.into_iter();
 
         let mut h = set_hash::leaf_hash(elem);
@@ -316,7 +316,7 @@ impl SetMerkleTree {
     /// Returns `None` if the element is in a forgotten subtree
     pub fn contains(&self, elem: Nullifier) -> Option<(bool, SetMerkleProof)> {
         use SetMerkleTree::*;
-        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = set_hash::elem_bits(elem);
+        let elem_bit_vec: BitVec<u8, bitvec::order::Lsb0> = set_hash::elem_bits(elem);
         let elem_bits = elem_bit_vec.into_iter().rev();
 
         let mut path = vec![];
@@ -368,7 +368,7 @@ impl SetMerkleTree {
 
     pub fn insert(&mut self, elem: Nullifier) -> Option<()> {
         use SetMerkleTree::*;
-        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = set_hash::elem_bits(elem);
+        let elem_bit_vec: BitVec<u8, bitvec::order::Lsb0> = set_hash::elem_bits(elem);
         let mut end_height = elem_bit_vec.len();
         let elem_bits = elem_bit_vec.into_iter().rev();
 
@@ -393,7 +393,7 @@ impl SetMerkleTree {
                     // Figure out if this leaf is down the same tree or if it's a sibling
                     let leaf_is_left = {
                         debug_assert!(height > 0);
-                        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> =
+                        let elem_bit_vec: BitVec<u8, bitvec::order::Lsb0> =
                             set_hash::elem_bits(elem);
                         !elem_bit_vec[height - 1]
                     };
@@ -455,7 +455,7 @@ impl SetMerkleTree {
 
     pub fn forget(&mut self, elem: Nullifier) -> Option<SetMerkleProof> {
         use SetMerkleTree::*;
-        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = set_hash::elem_bits(elem);
+        let elem_bit_vec: BitVec<u8, bitvec::order::Lsb0> = set_hash::elem_bits(elem);
         let elem_bits = elem_bit_vec.into_iter().rev();
 
         let mut siblings = vec![];
@@ -533,7 +533,7 @@ impl SetMerkleTree {
         let elem_in_set = proof.check(elem, &self.hash())?;
 
         use SetMerkleTree::*;
-        let elem_bit_vec: BitVec<bitvec::order::Lsb0, u8> = set_hash::elem_bits(elem);
+        let elem_bit_vec: BitVec<u8, bitvec::order::Lsb0> = set_hash::elem_bits(elem);
 
         let mut siblings = vec![];
         let mut end_branch = mem::replace(self, EmptySubtree);

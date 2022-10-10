@@ -858,7 +858,6 @@ pub mod state_comm {
 
     use super::*;
     use jf_utils::tagged_blob;
-    use net::Hash;
 
     #[ser_test(arbitrary)]
     #[tagged_blob("STATE")]
@@ -882,12 +881,6 @@ pub mod state_comm {
     impl AsRef<[u8]> for LedgerStateCommitment {
         fn as_ref(&self) -> &[u8] {
             self.0.as_ref()
-        }
-    }
-
-    impl From<LedgerStateCommitment> for Hash {
-        fn from(c: LedgerStateCommitment) -> Self {
-            Self::from(commit::Commitment::<_>::from(c))
         }
     }
 
@@ -1371,8 +1364,11 @@ impl ValidatorState {
                     .expect("Failed to verify VRF Witness");
 
                 //check reward amount
-                let max_reward =
-                    crate::reward::compute_reward_amount(self, self.now(), self.total_stake);
+                let max_reward = crate::reward::compute_reward_amount(
+                    self,
+                    self.block_height(),
+                    self.total_stake,
+                );
                 if txn.body.reward_amount > max_reward {
                     return Err(ValidationError::RewardAmountTooLarge);
                 }
