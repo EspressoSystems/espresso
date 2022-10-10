@@ -12,6 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use async_std::task::{block_on, spawn_blocking};
+use cld::ClDuration;
 use escargot::CargoBuild;
 use espresso_esqs::ApiError;
 use espresso_validator::{testing::AddressBook, MINIMUM_NODES};
@@ -24,6 +25,7 @@ use std::fs::{self};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::str::FromStr;
 use std::time::Duration;
 use surf_disco::Url;
 use tempdir::TempDir;
@@ -607,7 +609,10 @@ fn cargo_run(package: impl AsRef<str>, bin: impl AsRef<str>) -> Result<Command, 
 
 async fn wait_for_connect(port: u16) -> Result<(), String> {
     let url: Url = format!("http://localhost:{}", port).parse().unwrap();
-    let timeout = Duration::from_secs(300);
+    let timeout = match std::env::var("ESPRESSO_CLI_TEST_CONNECTION_TIMEOUT") {
+        Ok(t) => ClDuration::from_str(&t).unwrap().into(),
+        Err(_) => Duration::from_secs(300),
+    };
     if surf_disco::connect::<ApiError>(url, Some(timeout)).await {
         Ok(())
     } else {

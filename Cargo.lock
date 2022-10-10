@@ -2285,6 +2285,7 @@ dependencies = [
  "async-trait",
  "bincode",
  "clap 4.0.10",
+ "cld",
  "derive_more",
  "escargot",
  "espresso-availability-api",

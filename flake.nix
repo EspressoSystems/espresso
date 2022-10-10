@@ -214,6 +214,7 @@
             RUST_LOG = "info,libp2p=off";
             ESPRESSO_FAUCET_TEST_DISABLE_TIMEOUT = "1";
             SEAHORSE_TEST_TXN_HISTORY_TIME_TOLERANCE = "30";
+            ESPRESSO_CLI_TEST_CONNECTION_TIMEOUT = "30m";
           };
 
           staticShell = pkgs.mkShell {
