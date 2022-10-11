@@ -352,8 +352,6 @@
 <span id="352">352</span>
 <span id="353">353</span>
 <span id="354">354</span>
-<span id="355">355</span>
-<span id="356">356</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -389,11 +387,11 @@
 <span class="kw">use</span> <span class="ident">commit::Committable</span>;
 <span class="kw">use</span> <span class="ident">espresso_availability_api::query_data</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">espresso_core</span>::{<span class="ident">ledger::EspressoLedger</span>, <span class="ident">state::BlockCommitment</span>};
+<span class="kw">use</span> <span class="ident">espresso_esqs::ApiError</span>;
 <span class="kw">use</span> <span class="ident">espresso_metastate_api::api::NullifierCheck</span>;
 <span class="kw">use</span> <span class="ident">futures::prelude</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">hotshot_types::data::ViewNumber</span>;
 <span class="kw">use</span> <span class="ident">itertools::izip</span>;
-<span class="kw">use</span> <span class="ident">net::client</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">reef::traits::Transaction</span>;
 <span class="kw">use</span> <span class="ident">seahorse</span>::{<span class="ident">events::LedgerEvent</span>, <span class="ident">hd::KeyTree</span>, <span class="ident">loader::KeystoreLoader</span>, <span class="ident">KeySnafu</span>, <span class="ident">KeystoreError</span>};
 <span class="kw">use</span> <span class="ident">serde::Deserialize</span>;
@@ -402,7 +400,7 @@
 <span class="kw">use</span> <span class="ident">std::ops::Deref</span>;
 <span class="kw">use</span> <span class="ident">std::path::PathBuf</span>;
 <span class="kw">use</span> <span class="ident">std::time::Duration</span>;
-<span class="kw">use</span> <span class="ident">surf::Url</span>;
+<span class="kw">use</span> <span class="ident">surf_disco::Url</span>;
 <span class="kw">use</span> <span class="ident">tempdir::TempDir</span>;
 <span class="kw">use</span> <span class="ident">tracing</span>::{<span class="ident">event</span>, <span class="ident">Level</span>};
 
@@ -428,9 +426,7 @@
 <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">get</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="kw">for</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span> <span class="ident">Deserialize</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span>, <span class="ident">S</span>: <span class="ident">Display</span><span class="op">&gt;</span>(<span class="ident">opt</span>: <span class="kw-2">&amp;</span><span class="ident">Args</span>, <span class="ident">route</span>: <span class="ident">S</span>) -&gt; <span class="ident">T</span> {
     <span class="kw">let</span> <span class="ident">url</span> <span class="op">=</span> <span class="ident">url</span>(<span class="ident">opt</span>, <span class="ident">route</span>);
     <span class="macro">event!</span>(<span class="ident">Level::INFO</span>, <span class="string">&quot;GET {}&quot;</span>, <span class="ident">url</span>);
-    <span class="ident">response_body</span>(<span class="kw-2">&amp;mut</span> <span class="ident">surf::get</span>(<span class="ident">url</span>).<span class="ident">send</span>().<span class="kw">await</span>.<span class="ident">unwrap</span>())
-        .<span class="kw">await</span>
-        .<span class="ident">unwrap</span>()
+    <span class="ident">surf_disco::get</span>::<span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">ApiError</span><span class="op">&gt;</span>(<span class="ident">url</span>).<span class="ident">send</span>().<span class="kw">await</span>.<span class="ident">unwrap</span>()
 }
 
 <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">validate_committed_block</span>(

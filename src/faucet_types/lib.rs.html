@@ -75,13 +75,6 @@
 <span id="75">75</span>
 <span id="76">76</span>
 <span id="77">77</span>
-<span id="78">78</span>
-<span id="79">79</span>
-<span id="80">80</span>
-<span id="81">81</span>
-<span id="82">82</span>
-<span id="83">83</span>
-<span id="84">84</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -98,11 +91,14 @@
 <span class="kw">use</span> <span class="ident">jf_cap::keys::UserPubKey</span>;
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
 <span class="kw">use</span> <span class="ident">snafu::Snafu</span>;
-<span class="kw">use</span> <span class="ident">tide::StatusCode</span>;
+<span class="kw">use</span> <span class="ident">tide_disco</span>::{<span class="ident">RequestError</span>, <span class="ident">StatusCode</span>};
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Snafu</span>, <span class="ident">Serialize</span>, <span class="ident">Deserialize</span>)]</span>
 <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">visibility</span>(<span class="kw">pub</span>), <span class="ident">module</span>(<span class="ident">error</span>))]</span>
 <span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">FaucetError</span> {
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;bad request: {}&quot;</span>, <span class="ident">source</span>))]</span>
+    <span class="ident">Request</span> { <span class="ident">source</span>: <span class="ident">RequestError</span> },
+
     <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;error in faucet transfer: {}&quot;</span>, <span class="ident">msg</span>))]</span>
     <span class="ident">Transfer</span> { <span class="ident">msg</span>: <span class="ident">String</span> },
 
@@ -125,16 +121,14 @@
     <span class="ident">Unavailable</span>,
 }
 
-<span class="comment">// TODO @jeb.bearer Replace with tide_disco</span>
-<span class="kw">impl</span> <span class="ident">net::Error</span> <span class="kw">for</span> <span class="ident">FaucetError</span> {
-    <span class="kw">fn</span> <span class="ident">catch_all</span>(<span class="ident">msg</span>: <span class="ident">String</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident"><span class="self">Self</span>::Internal</span> {
-            <span class="ident">status</span>: <span class="ident">StatusCode::InternalServerError</span>,
-            <span class="ident">msg</span>,
-        }
+<span class="kw">impl</span> <span class="ident">tide_disco::Error</span> <span class="kw">for</span> <span class="ident">FaucetError</span> {
+    <span class="kw">fn</span> <span class="ident">catch_all</span>(<span class="ident">status</span>: <span class="ident">StatusCode</span>, <span class="ident">msg</span>: <span class="ident">String</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident"><span class="self">Self</span>::Internal</span> { <span class="ident">status</span>, <span class="ident">msg</span> }
     }
+
     <span class="kw">fn</span> <span class="ident">status</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">StatusCode</span> {
         <span class="kw">match</span> <span class="self">self</span> {
+            <span class="ident"><span class="self">Self</span>::Request</span> { .. } =&gt; <span class="ident">StatusCode::BadRequest</span>,
             <span class="ident"><span class="self">Self</span>::Transfer</span> { .. } =&gt; <span class="ident">StatusCode::BadRequest</span>,
             <span class="ident"><span class="self">Self</span>::Internal</span> { <span class="ident">status</span>, .. } =&gt; <span class="kw-2">*</span><span class="ident">status</span>,
             <span class="ident"><span class="self">Self</span>::AlreadyInQueue</span> { .. } =&gt; <span class="ident">StatusCode::TooManyRequests</span>,
@@ -142,16 +136,6 @@
             <span class="ident"><span class="self">Self</span>::Persistence</span> { .. } =&gt; <span class="ident">StatusCode::InternalServerError</span>,
             <span class="ident"><span class="self">Self</span>::Unavailable</span> =&gt; <span class="ident">StatusCode::ServiceUnavailable</span>,
         }
-    }
-}
-
-<span class="kw">impl</span> <span class="ident">tide_disco::Error</span> <span class="kw">for</span> <span class="ident">FaucetError</span> {
-    <span class="kw">fn</span> <span class="ident">catch_all</span>(<span class="ident">status</span>: <span class="ident">StatusCode</span>, <span class="ident">msg</span>: <span class="ident">String</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident"><span class="self">Self</span>::Internal</span> { <span class="ident">status</span>, <span class="ident">msg</span> }
-    }
-
-    <span class="kw">fn</span> <span class="ident">status</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">StatusCode</span> {
-        <span class="ident">net::Error::status</span>(<span class="self">self</span>)
     }
 }
 
@@ -163,8 +147,10 @@
     }
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">faucet_server_error</span><span class="op">&lt;</span><span class="ident">E</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">FaucetError</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">err</span>: <span class="ident">E</span>) -&gt; <span class="ident">tide::Error</span> {
-    <span class="ident">net::server_error</span>(<span class="ident">err</span>)
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">RequestError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">FaucetError</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">source</span>: <span class="ident">RequestError</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident"><span class="self">Self</span>::Request</span> { <span class="ident">source</span> }
+    }
 }
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="faucet_types" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>

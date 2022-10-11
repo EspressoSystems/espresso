@@ -145,13 +145,13 @@
 
 <span class="kw">use</span> <span class="ident">async_std::task::sleep</span>;
 <span class="kw">use</span> <span class="ident">clap::Parser</span>;
+<span class="kw">use</span> <span class="ident">espresso_esqs::ApiError</span>;
 <span class="kw">use</span> <span class="ident">espresso_status_api::Throughput</span>;
 <span class="kw">use</span> <span class="ident">human_bytes::human_bytes</span>;
-<span class="kw">use</span> <span class="ident">net::client::response_body</span>;
 <span class="kw">use</span> <span class="ident">std::fmt</span>::{<span class="self">self</span>, <span class="ident">Display</span>, <span class="ident">Formatter</span>};
 <span class="kw">use</span> <span class="ident">std::ops::Sub</span>;
 <span class="kw">use</span> <span class="ident">std::time</span>::{<span class="ident">Duration</span>, <span class="ident">Instant</span>};
-<span class="kw">use</span> <span class="ident">surf::Url</span>;
+<span class="kw">use</span> <span class="ident">surf_disco::Url</span>;
 <span class="kw">use</span> <span class="ident">tracing</span>::{<span class="ident">error</span>, <span class="ident">info</span>};
 
 <span class="doccomment">/// Measure system throughput over time by polling a query service.</span>
@@ -203,11 +203,11 @@
 }
 
 <span class="kw">impl</span> <span class="ident">Snapshot</span> {
-    <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">esqs_url</span>: <span class="kw-2">&amp;</span><span class="ident">Url</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">surf::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">res</span> <span class="op">=</span> <span class="ident">surf::get</span>(<span class="ident">esqs_url</span>.<span class="ident">join</span>(<span class="string">&quot;/status/throughput&quot;</span>).<span class="ident">unwrap</span>())
-            .<span class="ident">send</span>()
-            .<span class="kw">await</span><span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">m</span>: <span class="ident">Throughput</span> <span class="op">=</span> <span class="ident">response_body</span>(<span class="kw-2">&amp;mut</span> <span class="ident">res</span>).<span class="kw">await</span><span class="question-mark">?</span>;
+    <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">esqs_url</span>: <span class="kw-2">&amp;</span><span class="ident">Url</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">ApiError</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="ident">m</span> <span class="op">=</span>
+            <span class="ident">surf_disco::get</span>::<span class="op">&lt;</span><span class="ident">Throughput</span>, <span class="ident">ApiError</span><span class="op">&gt;</span>(<span class="ident">esqs_url</span>.<span class="ident">join</span>(<span class="string">&quot;/status/throughput&quot;</span>).<span class="ident">unwrap</span>())
+                .<span class="ident">send</span>()
+                .<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">Self</span> {
             <span class="ident">t</span>: <span class="ident">Instant::now</span>(),
             <span class="ident">num_txns</span>: <span class="ident">m</span>.<span class="ident">transactions_finalized</span>,
@@ -231,7 +231,7 @@
 }
 
 <span class="attribute">#[<span class="ident">async_std::main</span>]</span>
-<span class="kw">async</span> <span class="kw">fn</span> <span class="ident">main</span>() -&gt; <span class="ident">surf::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+<span class="kw">async</span> <span class="kw">fn</span> <span class="ident">main</span>() -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">ApiError</span><span class="op">&gt;</span> {
     <span class="ident">tracing_subscriber::fmt</span>()
         .<span class="ident">with_env_filter</span>(<span class="ident">tracing_subscriber::EnvFilter::from_default_env</span>())
         .<span class="ident">init</span>();

@@ -1595,10 +1595,6 @@
 <span id="1595">1595</span>
 <span id="1596">1596</span>
 <span id="1597">1597</span>
-<span id="1598">1598</span>
-<span id="1599">1599</span>
-<span id="1600">1600</span>
-<span id="1601">1601</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">deny</span>(<span class="ident">warnings</span>)]</span>
 <span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
@@ -1615,7 +1611,6 @@
 <span class="kw">use</span> <span class="ident">espresso_macros</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">jf_cap::structs</span>::{<span class="ident">Amount</span>, <span class="ident">ReceiverMemo</span>};
 <span class="kw">use</span> <span class="ident">jf_cap::Signature</span>;
-<span class="kw">use</span> <span class="ident">reef::traits::Validator</span>;
 
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::full_persistence::FullPersistence</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::kv_merkle_tree</span>::<span class="kw-2">*</span>;
@@ -2965,11 +2960,8 @@
                     .<span class="ident">expect</span>(<span class="string">&quot;Failed to verify VRF Witness&quot;</span>);
 
                 <span class="comment">//check reward amount</span>
-                <span class="kw">let</span> <span class="ident">max_reward</span> <span class="op">=</span> <span class="ident"><span class="kw">crate</span>::reward::compute_reward_amount</span>(
-                    <span class="self">self</span>,
-                    <span class="self">self</span>.<span class="ident">block_height</span>(),
-                    <span class="self">self</span>.<span class="ident">total_stake</span>,
-                );
+                <span class="kw">let</span> <span class="ident">max_reward</span> <span class="op">=</span>
+                    <span class="ident"><span class="kw">crate</span>::reward::compute_reward_amount</span>(<span class="self">self</span>, <span class="self">self</span>.<span class="ident">block_height</span>, <span class="self">self</span>.<span class="ident">total_stake</span>);
                 <span class="kw">if</span> <span class="ident">txn</span>.<span class="ident">body</span>.<span class="ident">reward_amount</span> <span class="op">&gt;</span> <span class="ident">max_reward</span> {
                     <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ValidationError::RewardAmountTooLarge</span>);
                 }
