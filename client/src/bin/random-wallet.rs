@@ -213,7 +213,7 @@ async fn get_peers(url: &Url) -> Result<Vec<UserPubKey>, AddressBookError> {
 async fn get_native_from_faucet(keystore: &mut Keystore, pub_key: &UserPubKey, url: &Url) {
     // Request native asset for the keystore.
     loop {
-        match surf_disco::post::<(), FaucetError>(url.join("request_fee_assets").unwrap())
+        match surf_disco::post::<(), FaucetError>(url.join("api/request_fee_assets").unwrap())
             .body_binary(pub_key)
             .unwrap()
             .send()

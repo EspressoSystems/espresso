@@ -284,15 +284,11 @@ impl traits::Validator for ValidatorState {
     type Proof = ();
 
     fn next_block(&self) -> Self::Block {
-        ElaboratedBlock {
-            block: Default::default(),
-            proofs: Default::default(),
-            memos: Default::default(),
-        }
+        ElaboratedBlock::default()
     }
 
     fn block_height(&self) -> u64 {
-        self.prev_commit_time
+        self.block_height
     }
 
     fn commit(&self) -> Self::StateCommitment {

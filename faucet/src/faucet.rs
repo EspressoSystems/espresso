@@ -31,12 +31,15 @@ use espresso_client::{
 };
 use espresso_core::{ledger::EspressoLedger, universal_params::UNIVERSAL_PARAM};
 use faucet_types::*;
-use futures::{channel::mpsc, future::join_all, stream::StreamExt};
+use futures::{
+    channel::mpsc,
+    future::{join_all, FutureExt},
+    stream::StreamExt,
+};
 use jf_cap::{
     keys::{UserKeyPair, UserPubKey},
     structs::{AssetCode, FreezeFlag},
 };
-use net::server::response;
 use rand::{
     distributions::{Alphanumeric, DistString},
     SeedableRng,
@@ -45,13 +48,10 @@ use rand_chacha::ChaChaRng;
 use reef::traits::Validator;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use surf::Url;
-use tide::{
-    http::headers::HeaderValue,
-    security::{CorsMiddleware, Origin},
-};
+use tide_disco::{App, RequestParams, StatusCode, Url};
 use tracing::{error, info, warn};
 
 #[derive(Debug, Parser)]
@@ -79,6 +79,10 @@ pub struct FaucetOptions {
     /// binding port for the faucet service
     #[arg(long, env = "ESPRESSO_FAUCET_PORT", default_value = "50079")]
     pub faucet_port: u16,
+
+    /// override path to API specification
+    #[arg(long, env = "ESPRESSO_FAUCET_API_PATH")]
+    pub api_path: Option<PathBuf>,
 
     /// size of transfer for faucet grant
     #[arg(long, env = "ESPRESSO_FAUCET_GRANT_SIZE", default_value = "5000")]
@@ -455,6 +459,14 @@ pub struct HealthCheck {
     pub status: FaucetStatus,
 }
 
+impl tide_disco::healthcheck::HealthCheck for HealthCheck {
+    fn status(&self) -> StatusCode {
+        // The healtcheck should succeed even if the status is [Initializing], otherwise the load
+        // balancer may kill us while we are initializing.
+        StatusCode::Ok
+    }
+}
+
 /// Return a JSON expression with status 200 indicating the server
 /// is up and running. The JSON expression is simply,
 ///    `{"status": Status}`
@@ -464,36 +476,24 @@ pub struct HealthCheck {
 /// When the server is running but unable to process requests
 /// normally, a response with status 503 and payload {"status":
 /// "unavailable"} should be added.
-async fn healthcheck(req: tide::Request<FaucetState>) -> Result<tide::Response, tide::Error> {
-    response(
-        &req,
-        &HealthCheck {
-            status: *req.state().status.read().await,
-        },
-    )
-}
-
-async fn check_service_available(state: &FaucetState) -> Result<(), tide::Error> {
-    if *state.status.read().await == FaucetStatus::Available {
-        Ok(())
-    } else {
-        Err(faucet_server_error(FaucetError::Unavailable))
+async fn healthcheck(state: &FaucetState) -> HealthCheck {
+    HealthCheck {
+        status: *state.status.read().await,
     }
 }
 
-async fn request_fee_assets(
-    mut req: tide::Request<FaucetState>,
-) -> Result<tide::Response, tide::Error> {
-    check_service_available(req.state()).await?;
-    let pub_key: UserPubKey = net::server::request_body(&mut req).await?;
-    response(
-        &req,
-        &req.state()
-            .queue
-            .push(pub_key)
-            .await
-            .map_err(faucet_server_error)?,
-    )
+async fn check_service_available(state: &FaucetState) -> Result<(), FaucetError> {
+    if *state.status.read().await == FaucetStatus::Available {
+        Ok(())
+    } else {
+        Err(FaucetError::Unavailable)
+    }
+}
+
+async fn request_fee_assets(req: RequestParams, state: &FaucetState) -> Result<(), FaucetError> {
+    check_service_available(state).await?;
+    let pub_key: UserPubKey = req.body_auto()?;
+    state.queue.push(pub_key).await
 }
 
 async fn worker(id: usize, mut state: FaucetState) {
@@ -531,7 +531,7 @@ async fn worker(id: usize, mut state: FaucetState) {
                         "worker {}: transferring 2 records of {} tokens each to {}",
                         id,
                         state.grant_size,
-                        net::UserAddress(pub_key.address())
+                        pub_key.address()
                     );
                     (
                         keystore
@@ -552,7 +552,7 @@ async fn worker(id: usize, mut state: FaucetState) {
                         "worker {}: transferring 1 record of {} tokens to {}",
                         id,
                         state.grant_size,
-                        net::UserAddress(pub_key.address())
+                        pub_key.address()
                     );
                     (
                         keystore
@@ -853,17 +853,20 @@ pub async fn init_web_server(
     let state = FaucetState::new(keystore, signal_breaker_thread.0, opt)
         .await
         .unwrap();
-    let mut app = tide::with_state(state.clone());
-    app.at("/healthcheck").get(healthcheck);
-    app.with(
-        CorsMiddleware::new()
-            .allow_methods("GET, POST".parse::<HeaderValue>().unwrap())
-            .allow_headers("*".parse::<HeaderValue>().unwrap())
-            .allow_origin(Origin::from("*")),
-    );
-    app.at("/request_fee_assets").post(request_fee_assets);
+    let mut app = App::<FaucetState, FaucetError>::with_state(state.clone());
+    let api = match &opt.api_path {
+        Some(path) => toml::from_slice(&fs::read(path)?).unwrap(),
+        None => toml::from_str(include_str!("../api/api.toml")).unwrap(),
+    };
+    app.module("api", api)
+        .unwrap()
+        .at("request_fee_assets", |req, state| {
+            request_fee_assets(req, state).boxed()
+        })
+        .unwrap()
+        .with_health_check(|state| async move { healthcheck(state).await }.boxed());
     let address = format!("0.0.0.0:{}", opt.faucet_port);
-    let handle = spawn(app.listen(address));
+    let handle = spawn(app.serve(address));
 
     if let Some(key) = new_key {
         // Wait until we have scanned the ledger for records belonging to this key.
@@ -940,7 +943,6 @@ mod test {
     use espresso_validator::testing::minimal_test_network;
     use futures::{future::join_all, Future};
     use jf_cap::structs::AssetDefinition;
-    use net::client::response_body;
     use portpicker::pick_unused_port;
     use primitive_types::U256;
     use rand::Rng;
@@ -949,7 +951,6 @@ mod test {
     use std::process::Child;
     use std::time::Duration;
     use tempdir::TempDir;
-    use tide::StatusCode;
     use tracing_test::traced_test;
 
     async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
@@ -1028,11 +1029,14 @@ mod test {
 
             // Wait for the service to become available.
             loop {
-                if let Ok(mut res) = surf::get(format!("http://localhost:{}/healthcheck", port))
-                    .send()
-                    .await
+                if let Ok(health) = surf_disco::get::<HealthCheck, FaucetError>(
+                    format!("http://localhost:{}/api/healthcheck", port)
+                        .parse()
+                        .unwrap(),
+                )
+                .send()
+                .await
                 {
-                    let health: HealthCheck = response_body(&mut res).await.unwrap();
                     if health.status == FaucetStatus::Available {
                         break;
                     }
@@ -1088,18 +1092,22 @@ mod test {
         };
         faucet.start().await;
         println!("Faucet server initiated.");
+        let client = surf_disco::Client::<FaucetError>::new(
+            format!("http://localhost:{}/api/", faucet_port)
+                .parse()
+                .unwrap(),
+        );
 
         // Check the status is "available".
-        let mut res = surf::get(format!("http://localhost:{}/healthcheck", faucet_port))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::Ok);
         assert_eq!(
+            client
+                .get::<HealthCheck>("healthcheck")
+                .send()
+                .await
+                .unwrap(),
             HealthCheck {
                 status: FaucetStatus::Available
-            },
-            res.body_json().await.unwrap(),
+            }
         );
 
         // Create receiver keystores.
@@ -1138,15 +1146,16 @@ mod test {
         }
 
         join_all(keys.iter().map(|key| {
-            let url = format!("http://localhost:{}/request_fee_assets", faucet_port);
+            let client = &client;
             async move {
                 // Request native asset for the receiver.
-                let response = surf::post(url)
-                    .content_type(surf::http::mime::BYTE_STREAM)
-                    .body_bytes(&bincode::serialize(key).unwrap())
+                client
+                    .post::<()>("request_fee_assets")
+                    .body_binary(&key)
+                    .unwrap()
+                    .send()
                     .await
                     .unwrap();
-                assert_eq!(response.status(), StatusCode::Ok);
                 println!("Asset transferred.");
             }
         }))

@@ -14,7 +14,7 @@ use crate::{
     gen_keys, genesis, init_validator, open_data_source, run_consensus, ConsensusOpt, NodeOpt,
     MINIMUM_NODES,
 };
-use address_book::store::FileStore;
+use address_book::{error::AddressBookError, store::FileStore};
 use async_std::task::{block_on, spawn, JoinHandle};
 use espresso_core::state::ElaboratedBlock;
 use espresso_esqs::full_node::{self, EsQS};
@@ -26,9 +26,8 @@ use std::io;
 use std::iter;
 use std::mem::take;
 use std::time::{Duration, Instant};
-use surf::Url;
+use surf_disco::Url;
 use tempdir::TempDir;
-use tide_disco::{wait_for_server, SERVER_STARTUP_RETRIES, SERVER_STARTUP_SLEEP_MS};
 
 pub struct TestNode {
     esqs: Option<EsQS>,
@@ -65,22 +64,13 @@ impl AddressBook {
         let app = address_book::init_web_server(api_path.to_str().unwrap().to_string(), store)
             .expect("address_book app");
         let handle = spawn(app.serve(base_url.clone()));
-        // Don't add `http://` to `base_url` until `handle` is created, to avoid the `spawn` failure
-        // due to `Can't assign requested address`.
-        let base_url: String = format!("http://{base_url}");
-        wait_for_server(
-            &Url::parse(&base_url).unwrap(),
-            SERVER_STARTUP_RETRIES,
-            SERVER_STARTUP_SLEEP_MS,
-        )
-        .await;
 
         let ab = AddressBook {
             port,
             _store: dir,
             _wait: handle,
         };
-        wait_for_server(&ab.url(), SERVER_STARTUP_RETRIES, SERVER_STARTUP_SLEEP_MS).await;
+        assert!(surf_disco::connect::<AddressBookError>(ab.url(), None).await);
         ab
     }
 
