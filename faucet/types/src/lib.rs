@@ -14,11 +14,14 @@ use atomic_store::PersistenceError;
 use jf_cap::keys::UserPubKey;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
-use tide::StatusCode;
+use tide_disco::{RequestError, StatusCode};
 
 #[derive(Debug, Snafu, Serialize, Deserialize)]
 #[snafu(visibility(pub), module(error))]
 pub enum FaucetError {
+    #[snafu(display("bad request: {}", source))]
+    Request { source: RequestError },
+
     #[snafu(display("error in faucet transfer: {}", msg))]
     Transfer { msg: String },
 
@@ -41,16 +44,14 @@ pub enum FaucetError {
     Unavailable,
 }
 
-// TODO @jeb.bearer Replace with tide_disco
-impl net::Error for FaucetError {
-    fn catch_all(msg: String) -> Self {
-        Self::Internal {
-            status: StatusCode::InternalServerError,
-            msg,
-        }
+impl tide_disco::Error for FaucetError {
+    fn catch_all(status: StatusCode, msg: String) -> Self {
+        Self::Internal { status, msg }
     }
+
     fn status(&self) -> StatusCode {
         match self {
+            Self::Request { .. } => StatusCode::BadRequest,
             Self::Transfer { .. } => StatusCode::BadRequest,
             Self::Internal { status, .. } => *status,
             Self::AlreadyInQueue { .. } => StatusCode::TooManyRequests,
@@ -58,16 +59,6 @@ impl net::Error for FaucetError {
             Self::Persistence { .. } => StatusCode::InternalServerError,
             Self::Unavailable => StatusCode::ServiceUnavailable,
         }
-    }
-}
-
-impl tide_disco::Error for FaucetError {
-    fn catch_all(status: StatusCode, msg: String) -> Self {
-        Self::Internal { status, msg }
-    }
-
-    fn status(&self) -> StatusCode {
-        net::Error::status(self)
     }
 }
 
@@ -79,6 +70,8 @@ impl From<PersistenceError> for FaucetError {
     }
 }
 
-pub fn faucet_server_error<E: Into<FaucetError>>(err: E) -> tide::Error {
-    net::server_error(err)
+impl From<RequestError> for FaucetError {
+    fn from(source: RequestError) -> Self {
+        Self::Request { source }
+    }
 }

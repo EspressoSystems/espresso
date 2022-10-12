@@ -36,8 +36,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use strum_macros::AsRefStr;
-use tide::StatusCode;
-use tide_disco::{Api, App, DiscoArgs, RequestParams};
+use tide_disco::{Api, App, DiscoArgs, RequestParams, StatusCode};
 use tracing::trace;
 
 pub mod error;
@@ -171,14 +170,15 @@ pub fn init_web_server<T: Store + 'static>(
     Ok(app)
 }
 
-/// Lookup a user public key from a signed public key address. Fail with
-/// tide::StatusCode::BadRequest if key deserialization or the signature check
-/// fail.
+/// Lookup a user public key from a signed public key address.
+///
+/// Fail with [StatusCode::BadRequest] if key deserialization or the signature check fail.
 pub fn verify_sig_and_get_pub_key(insert_request: InsertPubKey) -> Result<UserPubKey> {
-    let pub_key: UserPubKey = bincode::deserialize(&insert_request.pub_key_bytes)
-        .map_err(|e| tide::Error::new(tide::StatusCode::BadRequest, e))?;
+    let pub_key: UserPubKey = bincode::deserialize(&insert_request.pub_key_bytes)?;
     pub_key
         .verify_sig(&insert_request.pub_key_bytes, &insert_request.sig)
-        .map_err(|e| tide::Error::new(tide::StatusCode::BadRequest, e))?;
+        .map_err(|err| AddressBookError::InvalidSignature {
+            msg: err.to_string(),
+        })?;
     Ok(pub_key)
 }

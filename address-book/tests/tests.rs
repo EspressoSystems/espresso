@@ -11,6 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use address_book::{
+    error::AddressBookError,
     init_web_server,
     store::{address_book_temp_dir, FileStore, Store, TransientFileStore},
     InsertPubKey,
@@ -20,9 +21,7 @@ use jf_cap::keys::{UserKeyPair, UserPubKey};
 use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
 use std::collections::HashSet;
-use tide::StatusCode;
-use tide_disco::{wait_for_server, SERVER_STARTUP_RETRIES, SERVER_STARTUP_SLEEP_MS};
-use url::Url;
+use surf_disco::{Error, StatusCode};
 
 const ROUND_TRIP_COUNT: u64 = 100;
 const NOT_FOUND_COUNT: u64 = 100;
@@ -47,13 +46,9 @@ async fn round_trip<T: Store + 'static>(store: T) {
     let handle = spawn(app.serve(base_url.clone()));
     // Don't add `http://` to `base_url` until `handle` is created, to avoid the `spawn` failure
     // due to `Can't assign requested address`.
-    let base_url: String = format!("http://{base_url}");
-    wait_for_server(
-        &Url::parse(&base_url).unwrap(),
-        SERVER_STARTUP_RETRIES,
-        SERVER_STARTUP_SLEEP_MS,
-    )
-    .await;
+    let base_url = format!("http://{base_url}").parse().unwrap();
+    let client = surf_disco::Client::<AddressBookError>::new(base_url);
+    assert!(client.connect(None).await);
 
     let mut rng = rand_chacha::ChaChaRng::from_seed([0u8; 32]);
     let mut rng2 = rand_chacha::ChaChaRng::from_seed([0u8; 32]);
@@ -67,59 +62,63 @@ async fn round_trip<T: Store + 'static>(store: T) {
         let pub_key_bytes = bincode::serialize(&pub_key).unwrap();
         let sig = user_key.sign(&pub_key_bytes);
         let json_request = InsertPubKey { pub_key_bytes, sig };
-        let url = format!("{base_url}/insert_pubkey");
-        let response = surf::post(url)
-            .content_type(surf::http::mime::JSON)
+        client
+            .post::<()>("insert_pubkey")
             .body_json(&json_request)
             .unwrap()
+            .send()
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::Ok);
-        let address_bytes = bincode::serialize(&pub_key.address()).unwrap();
-        let url = format!("{base_url}/request_pubkey");
-        let response = surf::post(url)
-            .content_type(surf::http::mime::BYTE_STREAM)
-            .body_bytes(&address_bytes);
-        let mut response = response.await.unwrap();
-        assert_eq!(response.status(), StatusCode::Ok);
-        let gotten_pub_key: UserPubKey = response.body_json().await.unwrap();
-        assert_eq!(gotten_pub_key, pub_key);
-        let mut response = surf::get(format!("{base_url}/request_peers"))
-            .await
-            .unwrap();
-        let bytes = response.body_bytes().await.unwrap();
-        let gotten_pub_keys: Vec<UserPubKey> = serde_json::from_slice(&bytes).unwrap();
-        let gotten_set: HashSet<UserPubKey> = gotten_pub_keys.into_iter().collect();
-        assert_eq!(gotten_set, inserted);
+        assert_eq!(
+            client
+                .post::<UserPubKey>("request_pubkey")
+                .body_binary(&pub_key.address())
+                .unwrap()
+                .send()
+                .await
+                .unwrap(),
+            pub_key
+        );
+        assert_eq!(
+            client
+                .get::<Vec<UserPubKey>>("request_peers")
+                .send()
+                .await
+                .unwrap()
+                .into_iter()
+                .collect::<HashSet<_>>(),
+            inserted
+        );
     }
     // Lookup the addresses just inserted to demonstrate that all the keys
     // are still present after the lookups.
     for _ in 0..ROUND_TRIP_COUNT {
         let user_key = UserKeyPair::generate(&mut rng2);
         let pub_key = user_key.pub_key();
-        let address_bytes = bincode::serialize(&pub_key.address()).unwrap();
-        let mut response = surf::post(format!("{base_url}/request_pubkey"))
-            .content_type(surf::http::mime::BYTE_STREAM)
-            .body_bytes(&address_bytes)
-            .await
-            .unwrap();
-        let bytes = response.body_bytes().await.unwrap();
-        let gotten_pub_key: UserPubKey = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(gotten_pub_key, pub_key);
+        assert_eq!(
+            client
+                .post::<UserPubKey>("request_pubkey")
+                .body_binary(&pub_key.address())
+                .unwrap()
+                .send()
+                .await
+                .unwrap(),
+            pub_key
+        );
     }
 
     // Lookup addresses we didn't insert.
     for _ in 0..NOT_FOUND_COUNT {
         let user_key = UserKeyPair::generate(&mut rng2);
         let pub_key = user_key.pub_key();
-        let address_bytes = bincode::serialize(&pub_key.address()).unwrap();
-        let mut response = surf::post(format!("{base_url}/request_pubkey"))
-            .content_type(surf::http::mime::BYTE_STREAM)
-            .body_bytes(&address_bytes)
+        let err = client
+            .post::<UserPubKey>("request_pubkey")
+            .body_binary(&pub_key.address())
+            .unwrap()
+            .send()
             .await
-            .unwrap();
-        let bytes = response.body_bytes().await.unwrap();
-        assert!(bincode::deserialize::<UserPubKey>(&bytes).is_err());
+            .unwrap_err();
+        assert_eq!(err.status(), StatusCode::NotFound);
     }
     assert!(handle.cancel().await.is_none());
 }
