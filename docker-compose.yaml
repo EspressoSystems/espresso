@@ -51,6 +51,7 @@ services:
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
+      - ESPRESSO_VALIDATOR_LIBP2P
       - RUST_LOG
     volumes:
       - validator0-store:/store
@@ -80,6 +81,7 @@ services:
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
+      - ESPRESSO_VALIDATOR_LIBP2P
       - RUST_LOG
     volumes:
       - validator1-store:/store
@@ -109,6 +111,7 @@ services:
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
+      - ESPRESSO_VALIDATOR_LIBP2P
       - RUST_LOG
     volumes:
       - validator2-store:/store
@@ -138,6 +141,7 @@ services:
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
+      - ESPRESSO_VALIDATOR_LIBP2P
       - RUST_LOG
     volumes:
       - validator3-store:/store
@@ -167,6 +171,7 @@ services:
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
+      - ESPRESSO_VALIDATOR_LIBP2P
       - RUST_LOG
     volumes:
       - validator4-store:/store
@@ -196,6 +201,7 @@ services:
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
+      - ESPRESSO_VALIDATOR_LIBP2P
       - RUST_LOG
     volumes:
       - validator5-store:/store
@@ -225,6 +231,7 @@ services:
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
       - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
+      - ESPRESSO_VALIDATOR_LIBP2P
       - RUST_LOG
     volumes:
       - validator6-store:/store
@@ -255,6 +262,7 @@ services:
       - ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT=40000
       - ESPRESSO_FAUCET_PUB_KEYS
       - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
+      - ESPRESSO_VALIDATOR_LIBP2P
       - RUST_LOG
     volumes:
       - validator7-store:/store
@@ -285,6 +293,7 @@ services:
       - ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT=40000
       - ESPRESSO_FAUCET_PUB_KEYS
       - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
+      - ESPRESSO_VALIDATOR_LIBP2P
       - RUST_LOG
     volumes:
       - validator8-store:/store
@@ -315,6 +324,7 @@ services:
       - ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT=40000
       - ESPRESSO_FAUCET_PUB_KEYS
       - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
+      - ESPRESSO_VALIDATOR_LIBP2P
       - RUST_LOG
     volumes:
       - validator9-store:/store

@@ -36,7 +36,7 @@ espresso-availability-api = { path = "../apis/availability", optional = true }
 espresso-core = { path = "../core/" }
 espresso-esqs = { path = "../apis/esqs" }
 espresso-metastate-api = { path = "../apis/metastate", optional = true }
-espresso-status-api = { path = "../apis/status", optional = true }
+espresso-status-api = { path = "../apis/status" }
 espresso-validator-api = { path = "../apis/validator" }
 futures = "0.3.0"
 futures-util = "0.3.8"
@@ -84,7 +84,6 @@ testing = [ "address-book"
           , "async-tungstenite"
           , "espresso-availability-api"
           , "espresso-metastate-api"
-          , "espresso-status-api"
           , "portpicker"
           , "reef/testing"
           , "seahorse"

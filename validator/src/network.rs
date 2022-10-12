@@ -121,12 +121,13 @@ impl HybridNetwork {
                 .unwrap(),
             pub_key,
         );
-        loop {
+        while !network.run_ready() {
             let connected = network.get_connected_client_count().await;
-            if connected as usize >= num_nodes {
-                break;
-            }
-            tracing::debug!("waiting for peers to connect ({}/{})", connected, num_nodes);
+            tracing::debug!(
+                "waiting for start signal ({}/{} connected)",
+                connected,
+                num_nodes
+            );
             sleep(Duration::from_secs(1)).await;
         }
         Ok(Self::Cdn(network))

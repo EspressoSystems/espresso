@@ -226,14 +226,17 @@ async fn generate_transactions(
                                     )
                                     .unwrap();
 
+                                println!(
+                                    "  - Round {} completed. Commitment: {}",
+                                    round + 1,
+                                    leaf.state.commit()
+                                );
                                 round += 1;
                                 success = true;
                             }
                         }
                         if success {
-                            let commit = leaf_chain.first().unwrap().state.commit();
-                            println!("  - Round {} completed. Commitment: {}", round + 1, commit);
-                            final_commitment = Some(commit);
+                            final_commitment = Some(leaf_chain.first().unwrap().state.commit());
                             break;
                         }
                     }
@@ -261,7 +264,6 @@ async fn generate_transactions(
                             if leaf.state.transaction_count > (round + 1) as usize {
                                 // Update round to account for all committed transactions, excluding
                                 // the genesis transaction.
-                                round = (leaf.state.transaction_count - 1) as u64;
                                 let commit = leaf_chain.first().unwrap().state.commit();
                                 println!(
                                     "  - Round {} completed. Commitment: {}",
@@ -269,6 +271,7 @@ async fn generate_transactions(
                                     commit
                                 );
                                 final_commitment = Some(commit);
+                                round = (leaf.state.transaction_count - 1) as u64;
                                 break;
                             }
                         }

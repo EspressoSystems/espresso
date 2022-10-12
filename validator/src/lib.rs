@@ -182,6 +182,14 @@ pub struct NodeOpt {
     #[arg(long, env = "ESPRESSO_CDN_SERVER_URL")]
     pub cdn: Option<Url>,
 
+    /// Use in conjunction with --cdn to use libp2p for consensus networking.
+    ///
+    /// The centralized server will still be used for orchestration (e.g. synchronizing startup), as
+    /// opposed to the default configuration (with netiher --cdn nor --libp2p) where libp2p
+    /// networking is used without any orchestration.
+    #[arg(long, requires = "cdn", env = "ESPRESSO_VALIDATOR_LIBP2P")]
+    pub libp2p: bool,
+
     /// Minimum time to wait for submitted transactions before proposing a block.
     ///
     /// Increasing this trades off latency for throughput: the rate of new block proposals gets
@@ -739,20 +747,33 @@ pub async fn init_validator(
     let threshold = ((pub_keys.len() as u64 * 2) / 3) + 1;
 
     let own_network = match node_opt.cdn.clone() {
-        Some(cdn) => Network::new_cdn(pub_keys.clone(), cdn, own_id)
+        Some(cdn) if !node_opt.libp2p => Network::new_cdn(pub_keys.clone(), cdn, own_id)
             .await
             .unwrap(),
-        None => Network::new_p2p(
-            pub_keys[own_id],
-            to_connect_addrs,
-            own_id,
-            node_type,
-            parse_url(&format!("0.0.0.0:{:?}", port)).unwrap(),
-            own_identity,
-            consensus_opt,
-        )
-        .await
-        .unwrap(),
+        _ => {
+            let network = Network::new_p2p(
+                pub_keys[own_id],
+                to_connect_addrs,
+                own_id,
+                node_type,
+                parse_url(&format!("0.0.0.0:{:?}", port)).unwrap(),
+                own_identity,
+                consensus_opt,
+            )
+            .await
+            .unwrap();
+
+            if let Some(cdn) = node_opt.cdn.clone() {
+                // If there is a centralized server, use it as a barrier, so we don't proceed beyond
+                // this point until all nodes have reached this point and connected to the server.
+                // We will still use the libp2p network for consensus itself.
+                Network::new_cdn(pub_keys.clone(), cdn, own_id)
+                    .await
+                    .unwrap();
+            }
+
+            network
+        }
     };
 
     let known_nodes = pub_keys.clone();

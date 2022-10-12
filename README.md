@@ -276,11 +276,10 @@ To go back to using the images from the registry run `docker compose pull`.
 The static dev shell is currently not supported on `aarch64` (for example M1
 Macs).
 
-The Docker compose setup runs with a CDN for fast communication between validators. This
+By default, the Docker compose setup runs with a CDN for fast communication between validators. This
 demonstrates the optimistic case of the HotShot consensus protocol, where optimistic responsiveness
-allows consensus to proceed as fast as the network allows. You can also run a network without a CDN,
-running at the slower speed of peer-to-peer gossip, but for that you'll need to modify
-`docker-compose.yaml` or run all the services yourself.
+allows consensus to proceed as fast as the network allows. You can also run a network using the
+slower, decentralized libp2p networking implementation, by setting `ESPRESSO_VALIDATOR_LIBP2P=1`.
 
 The Docker compose setup also includes four instances of the [random wallet test](#random-wallet-test),
 a service that attaches to the network and randomly generates transactions as a stress test.

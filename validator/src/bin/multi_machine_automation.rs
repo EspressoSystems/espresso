@@ -134,6 +134,9 @@ async fn main() {
         args.push("--cdn");
         args.push(&cdn);
     }
+    if options.node_opt.libp2p {
+        args.push("--libp2p");
+    }
     let min_propose_time = format!("{}ms", options.node_opt.min_propose_time.as_millis());
     args.push("--min-propose-time");
     args.push(&min_propose_time);
@@ -190,11 +193,12 @@ async fn main() {
     // Start a CDN server if one is required.
     let cdn = options.node_opt.cdn.as_ref().map(|url| {
         let port = url.port_or_known_default().unwrap().to_string();
+        let num_nodes = options.num_nodes.to_string();
         if options.verbose {
-            println!("cdn-server -p {}", port);
+            println!("cdn-server -p {} -n {}", port, num_nodes);
         }
         let mut process = cargo_run("cdn-server")
-            .args(["-p", &port])
+            .args(["-p", &port, "-n", &num_nodes])
             .stdout(Stdio::piped())
             .spawn()
             .expect("Failed to start the CDN");
@@ -389,7 +393,7 @@ mod test {
         num_fail_nodes: u64,
         fail_after_txn: u64,
         expect_success: bool,
-        cdn: bool,
+        libp2p: bool,
     ) {
         println!(
             "Testing {} txns with {}/{} nodes failed after txn {}",
@@ -401,7 +405,11 @@ mod test {
         let num_txn = &num_txn.to_string();
         let num_fail_nodes = &num_fail_nodes.to_string();
         let fail_after_txn = &fail_after_txn.to_string();
+        let cdn_port = pick_unused_port().unwrap();
+        let cdn_url = &format!("tcp://localhost:{}", cdn_port);
         let mut args = vec![
+            "--cdn",
+            cdn_url,
             "--num-nodes",
             num_nodes,
             "--num-txn",
@@ -425,12 +433,8 @@ mod test {
             "--reset-store-state",
             "--verbose",
         ];
-        let cdn_url;
-        if cdn {
-            let port = pick_unused_port().unwrap();
-            cdn_url = format!("tcp://localhost:{}", port);
-            args.push("--cdn");
-            args.push(&cdn_url);
+        if libp2p {
+            args.push("--libp2p");
         }
         let now = Instant::now();
         let status = cargo_run("multi_machine_automation")
@@ -446,12 +450,11 @@ mod test {
     }
 
     // This test is disabled until the libp2p networking implementation is fixed.
-    #[ignore]
     #[async_std::test]
     async fn test_automation_libp2p() {
-        automate(7, 5, 1, 3, true, false).await;
-        automate(7, 5, 3, 1, false, false).await;
-        automate(11, 2, 0, 0, true, false).await;
+        automate(7, 5, 1, 3, true, true).await;
+        automate(7, 5, 3, 1, false, true).await;
+        automate(11, 2, 0, 0, true, true).await;
 
         // Disabling the following test cases to avoid exceeding the time limit.
         // automate(5, 0, 0, true).await;
@@ -461,8 +464,8 @@ mod test {
 
     #[async_std::test]
     async fn test_automation_cdn() {
-        automate(7, 5, 1, 3, true, true).await;
-        automate(7, 5, 3, 1, false, true).await;
-        automate(11, 2, 0, 0, true, true).await;
+        automate(7, 5, 1, 3, true, false).await;
+        automate(7, 5, 3, 1, false, false).await;
+        automate(11, 2, 0, 0, true, false).await;
     }
 }
