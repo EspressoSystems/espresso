@@ -19,17 +19,15 @@ use async_std::sync::{Arc, RwLock};
 use clap::{Args, Parser};
 use cld::ClDuration;
 use dirs::data_local_dir;
-use espresso_core::reward::{mock_eligibility, CollectRewardNote};
-use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof};
 use espresso_core::{
     committee::Committee,
     genesis::GenesisNote,
+    reward::{mock_eligibility, CollectRewardNote},
     stake_table::{StakeTableHash, StakingPrivKey},
     state::{
-        ChainVariables, ElaboratedBlock, ElaboratedTransaction, LWPersistence, NullifierHistory,
-        SetMerkleTree, ValidatorState,
+        ChainVariables, ElaboratedBlock, ElaboratedTransaction, EspressoTransaction,
+        EspressoTxnHelperProofs, KVMerkleProof, LWPersistence, ValidatorState,
     },
-    testing::{MultiXfrRecordSpec, MultiXfrTestState},
     universal_params::VERIF_CRS,
     PrivKey, PubKey,
 };
@@ -75,8 +73,7 @@ pub mod testing;
 pub mod validator;
 
 pub const MINIMUM_NODES: usize = 6;
-
-const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
+pub const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 const DEFAULT_SECRET_KEY_SEED: [u8; 32] = [
     1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8,
 ];
@@ -468,46 +465,6 @@ pub fn genesis(
         ChainVariables::new(chain_id, VERIF_CRS.clone()),
         Arc::new(faucet_records),
     )
-}
-
-pub fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
-    let mut state = MultiXfrTestState::initialize(
-        GENESIS_SEED,
-        10,
-        10,
-        (
-            MultiXfrRecordSpec {
-                asset_def_ix: 0,
-                owner_key_ix: 0,
-                asset_amount: 100,
-            },
-            vec![
-                MultiXfrRecordSpec {
-                    asset_def_ix: 1,
-                    owner_key_ix: 0,
-                    asset_amount: 50,
-                },
-                MultiXfrRecordSpec {
-                    asset_def_ix: 0,
-                    owner_key_ix: 0,
-                    asset_amount: 70,
-                },
-            ],
-        ),
-    )
-    .unwrap();
-
-    // [GenesisNote] doesn't support a non-empty nullifiers set, so we clear the nullifiers set in
-    // our test state. This effectively "unspends" the records which were used to set up the initial
-    // state. This is fine for testing purposes.
-    state.nullifiers = SetMerkleTree::default();
-    state.validator.past_nullifiers = NullifierHistory::default();
-
-    let genesis = GenesisNote::new(
-        ChainVariables::new(42, VERIF_CRS.clone()),
-        Arc::new(state.records().collect()),
-    );
-    (genesis, state)
 }
 
 /// Creates the initial state and hotshot for simulation.

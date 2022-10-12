@@ -12,12 +12,17 @@
 
 #![deny(warnings)]
 
-use async_std::task::{sleep, spawn_blocking};
+use async_std::{
+    sync::Arc,
+    task::{sleep, spawn_blocking},
+};
 use clap::Parser;
-use espresso_core::testing::MultiXfrRecordSpecTransaction;
 use espresso_core::{
-    state::ElaboratedBlock,
-    testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo},
+    genesis::GenesisNote,
+    state::{ChainVariables, ElaboratedBlock, NullifierHistory, SetMerkleTree},
+    testing::MultiXfrRecordSpecTransaction,
+    testing::{MultiXfrRecordSpec, MultiXfrTestState, TestTxSpec, TxnPrintInfo},
+    universal_params::VERIF_CRS,
 };
 use espresso_validator::{validator::*, *};
 use hotshot::types::EventType;
@@ -37,6 +42,46 @@ struct Options {
     /// Number of transactions to generate.
     #[arg(long, short)]
     pub num_txns: u64,
+}
+
+fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
+    let mut state = MultiXfrTestState::initialize(
+        GENESIS_SEED,
+        10,
+        10,
+        (
+            MultiXfrRecordSpec {
+                asset_def_ix: 0,
+                owner_key_ix: 0,
+                asset_amount: 100,
+            },
+            vec![
+                MultiXfrRecordSpec {
+                    asset_def_ix: 1,
+                    owner_key_ix: 0,
+                    asset_amount: 50,
+                },
+                MultiXfrRecordSpec {
+                    asset_def_ix: 0,
+                    owner_key_ix: 0,
+                    asset_amount: 70,
+                },
+            ],
+        ),
+    )
+    .unwrap();
+
+    // [GenesisNote] doesn't support a non-empty nullifiers set, so we clear the nullifiers set in
+    // our test state. This effectively "unspends" the records which were used to set up the initial
+    // state. This is fine for testing purposes.
+    state.nullifiers = SetMerkleTree::default();
+    state.validator.past_nullifiers = NullifierHistory::default();
+
+    let genesis = GenesisNote::new(
+        ChainVariables::new(42, VERIF_CRS.clone()),
+        Arc::new(state.records().collect()),
+    );
+    (genesis, state)
 }
 
 async fn generate_transactions(
