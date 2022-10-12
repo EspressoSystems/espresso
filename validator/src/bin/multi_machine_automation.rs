@@ -194,11 +194,19 @@ async fn main() {
     let cdn = options.node_opt.cdn.as_ref().map(|url| {
         let port = url.port_or_known_default().unwrap().to_string();
         let num_nodes = options.num_nodes.to_string();
+        let mut cdn_args = vec!["-p", &port, "-n", &num_nodes];
+        if !options.node_opt.libp2p {
+            // If we're not using libp2p (we're just using the CDN for networking) we don't need a
+            // long startup delay, because as soon as all the nodes join the CDN, the network is
+            // ready.
+            cdn_args.push("--start-delay");
+            cdn_args.push("5s");
+        }
         if options.verbose {
-            println!("cdn-server -p {} -n {}", port, num_nodes);
+            println!("cdn-server {}", cdn_args.join(" "));
         }
         let mut process = cargo_run("cdn-server")
-            .args(["-p", &port, "-n", &num_nodes])
+            .args(cdn_args)
             .stdout(Stdio::piped())
             .spawn()
             .expect("Failed to start the CDN");
@@ -207,19 +215,17 @@ async fn main() {
 
         // Collect output from the process as it runs. If we don't do this eagerly, the CDN can
         // block when its output pipe fills up causing deadlock.
-        spawn_blocking(move || {
+        spawn_blocking(move || loop {
             let mut line = String::new();
-            loop {
-                if stdout
-                    .read_line(&mut line)
-                    .expect("Failed to read stdout for CDN")
-                    == 0
-                {
-                    break;
-                }
-                if verbose {
-                    print!("[CDN] {}", line);
-                }
+            if stdout
+                .read_line(&mut line)
+                .expect("Failed to read stdout for CDN")
+                == 0
+            {
+                break;
+            }
+            if verbose {
+                print!("[CDN] {}", line);
             }
         });
 
