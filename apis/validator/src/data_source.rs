@@ -46,7 +46,7 @@ pub trait ValidatorDataSource {
 #[async_trait]
 impl<N> ValidatorDataSource for HotShotHandle<N>
 where
-    N: NodeImplementation<State = ValidatorState>,
+    N: NodeImplementation<StateType = ValidatorState>,
 {
     type Error = HotShotError;
 

@@ -40,7 +40,7 @@ use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
 use derive_more::{From, Into};
-use hotshot::traits::{BlockContents, StateContents};
+use hotshot::traits::{Block as ConsensusBlock, State as ConsensusState};
 use jf_cap::{
     errors::TxnApiError, structs::Nullifier, txn_batch_verify, MerkleCommitment, MerkleFrontier,
     MerkleLeafProof, MerkleTree, NodeValue, TransactionNote,
@@ -359,7 +359,7 @@ impl Committable for ElaboratedTransaction {
 }
 
 /// Allow an elaborated block to be used by the [HotShot](https://hotshot.docs.espressosys.com/hotshot/) consensus protocol.
-impl BlockContents for ElaboratedBlock {
+impl ConsensusBlock for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
 
@@ -1686,19 +1686,19 @@ impl Hash for ValidatorState {
     }
 }
 
-impl StateContents for ValidatorState {
+impl ConsensusState for ValidatorState {
     type Error = ValidationError;
 
-    type Block = ElaboratedBlock;
+    type BlockType = ElaboratedBlock;
 
     type Time = ConsensusTime;
 
-    fn next_block(&self) -> Self::Block {
-        Self::Block::new(self.commit())
+    fn next_block(&self) -> Self::BlockType {
+        ElaboratedBlock::new(self.commit())
     }
 
     /// Validate a block for consensus
-    fn validate_block(&self, block: &Self::Block, time: &Self::Time) -> bool {
+    fn validate_block(&self, block: &Self::BlockType, time: &Self::Time) -> bool {
         self.validate_block_check(
             time,
             block.parent_state,
@@ -1712,7 +1712,7 @@ impl StateContents for ValidatorState {
     ///
     /// # Errors
     /// See validate_and_apply.
-    fn append(&self, block: &Self::Block, time: &Self::Time) -> Result<Self, Self::Error> {
+    fn append(&self, block: &Self::BlockType, time: &Self::Time) -> Result<Self, Self::Error> {
         let mut state = self.clone();
         state.validate_and_apply(
             time,

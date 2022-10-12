@@ -36,15 +36,10 @@ use espresso_core::{
 use espresso_esqs::full_node_data_source::QueryData;
 use espresso_validator_api::data_source::ValidatorDataSource;
 use futures::{select, Future, FutureExt};
-use hotshot::traits::implementations::Libp2pNetwork;
-use hotshot::traits::NetworkError;
-use hotshot::types::{
-    ed25519::{Ed25519Priv, Ed25519Pub},
-    EventType,
-};
+use hotshot::types::{ed25519::Ed25519Priv, EventType};
 use hotshot::{
     traits::implementations::MemoryStorage,
-    types::{HotShotHandle, Message, SignatureKey},
+    types::{HotShotHandle, SignatureKey},
     HotShot, HotShotInitializer,
 };
 use hotshot_types::{ExecutionType, HotShotConfig};
@@ -54,13 +49,11 @@ use jf_cap::{
 };
 use jf_utils::tagged_blob;
 use libp2p::identity::ed25519::SecretKey;
-use libp2p::identity::Keypair;
 use libp2p::{multiaddr, Multiaddr, PeerId};
-use libp2p_networking::network::{MeshParams, NetworkNodeConfigBuilder, NetworkNodeType};
+use libp2p_networking::network::NetworkNodeType;
 use node_impl::ValidatorNodeImpl;
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
 use snafu::Snafu;
-use std::collections::HashSet;
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::io::Read;
@@ -72,6 +65,7 @@ use std::time::Duration;
 use surf::Url;
 use tracing::{debug, event, Level};
 
+mod network;
 mod node_impl;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
@@ -102,8 +96,6 @@ pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
         Multiaddr::from_str(&format!("/ip4/{}/tcp/{}", ip, port))
     }
 }
-
-type PLNetwork = Libp2pNetwork<Message<ValidatorState, Ed25519Pub>, Ed25519Pub>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ratio {
@@ -182,6 +174,13 @@ pub struct NodeOpt {
     /// Will be overriden by `nonbootstrap_port`.
     #[arg(long, default_value = "9000")]
     pub nonbootstrap_base_port: usize,
+
+    /// URL for a CDN server to use for optimistic communication.
+    ///
+    /// Note that the configuration provided by the CDN will override consensus-level configuration
+    /// specified in these options.
+    #[arg(long, env = "ESPRESSO_CDN_SERVER_URL")]
+    pub cdn: Option<Url>,
 
     /// Minimum time to wait for submitted transactions before proposing a block.
     ///
@@ -459,8 +458,9 @@ fn get_secret_key_seed(consensus_opt: &ConsensusOpt) -> [u8; 32] {
         .into()
 }
 
-type PLStorage = MemoryStorage<ValidatorState>;
-pub type Consensus = HotShotHandle<ValidatorNodeImpl<PLNetwork, PLStorage>>;
+type Network = network::HybridNetwork;
+type Storage = MemoryStorage<ValidatorState>;
+pub type Consensus = HotShotHandle<ValidatorNodeImpl<Network, Storage>>;
 
 pub fn genesis(
     chain_id: u16,
@@ -540,7 +540,7 @@ async fn init_hotshot(
     priv_key: PrivKey,
     threshold: u64,
     node_id: usize,
-    networking: PLNetwork,
+    networking: Network,
     genesis: GenesisNote,
     num_bootstrap: usize,
 ) -> Consensus {
@@ -676,60 +676,6 @@ pub struct KeyPair {
     pub private: PrivKey,
 }
 
-/// Create a new libp2p network.
-#[allow(clippy::too_many_arguments)]
-pub async fn new_libp2p_network(
-    pubkey: Ed25519Pub,
-    bs: Vec<(Option<PeerId>, Multiaddr)>,
-    node_id: usize,
-    node_type: NetworkNodeType,
-    bound_addr: Multiaddr,
-    identity: Option<Keypair>,
-    consensus_opt: &ConsensusOpt,
-) -> Result<PLNetwork, NetworkError> {
-    let mut config_builder = NetworkNodeConfigBuilder::default();
-    // NOTE we may need to change this as we scale
-    config_builder.replication_factor(NonZeroUsize::new(consensus_opt.replication_factor).unwrap());
-    // `to_connect_addrs` is an empty field that will be removed. We will pass `bs` into
-    // `Libp2pNetwork::new` as the addresses to connect.
-    config_builder.to_connect_addrs(HashSet::new());
-    config_builder.node_type(node_type);
-    config_builder.bound_addr(Some(bound_addr));
-
-    if let Some(identity) = identity {
-        config_builder.identity(identity);
-    }
-
-    let mesh_params = match node_type {
-        NetworkNodeType::Bootstrap => MeshParams {
-            mesh_n_high: consensus_opt.bootstrap_mesh_n_high,
-            mesh_n_low: consensus_opt.bootstrap_mesh_n_low,
-            mesh_outbound_min: consensus_opt.bootstrap_mesh_outbound_min,
-            mesh_n: consensus_opt.bootstrap_mesh_n,
-        },
-        NetworkNodeType::Regular => MeshParams {
-            mesh_n_high: consensus_opt.nonbootstrap_mesh_n_high,
-            mesh_n_low: consensus_opt.nonbootstrap_mesh_n_low,
-            mesh_outbound_min: consensus_opt.nonbootstrap_mesh_outbound_min,
-            mesh_n: consensus_opt.nonbootstrap_mesh_n,
-        },
-        NetworkNodeType::Conductor => unreachable!(),
-    };
-
-    config_builder.mesh_params(Some(mesh_params));
-
-    let config = config_builder.build().unwrap();
-
-    Libp2pNetwork::new(
-        config,
-        pubkey,
-        Arc::new(RwLock::new(bs)),
-        consensus_opt.bootstrap_nodes.len(),
-        node_id,
-    )
-    .await
-}
-
 pub async fn init_validator(
     node_opt: &NodeOpt,
     consensus_opt: &ConsensusOpt,
@@ -792,17 +738,22 @@ pub async fn init_validator(
     // hotshot requires this threshold to be at least 2/3rd of the nodes for safety guarantee reasons
     let threshold = ((pub_keys.len() as u64 * 2) / 3) + 1;
 
-    let own_network = new_libp2p_network(
-        pub_keys[own_id],
-        to_connect_addrs,
-        own_id,
-        node_type,
-        parse_url(&format!("0.0.0.0:{:?}", port)).unwrap(),
-        own_identity,
-        consensus_opt,
-    )
-    .await
-    .unwrap();
+    let own_network = match node_opt.cdn.clone() {
+        Some(cdn) => Network::new_cdn(pub_keys.clone(), cdn, own_id)
+            .await
+            .unwrap(),
+        None => Network::new_p2p(
+            pub_keys[own_id],
+            to_connect_addrs,
+            own_id,
+            node_type,
+            parse_url(&format!("0.0.0.0:{:?}", port)).unwrap(),
+            own_identity,
+            consensus_opt,
+        )
+        .await
+        .unwrap(),
+    };
 
     let known_nodes = pub_keys.clone();
 

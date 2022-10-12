@@ -32,8 +32,8 @@ espresso-metastate-api = { path = "../metastate" }
 espresso-status-api = { path = "../status" }
 espresso-validator-api = { path = "../validator" }
 futures = "0.3.21"
-hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.2.1", features = ["async-std-executor", "channel-async-std"] }
-hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.2.1", features = ["async-std-executor", "channel-async-std"] }
+hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", branch = "main", features = ["async-std-executor", "channel-async-std"] }
+hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", branch = "main", features = ["async-std-executor", "channel-async-std"] }
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 postage = { version = "0.5", features = ["futures-traits"] }

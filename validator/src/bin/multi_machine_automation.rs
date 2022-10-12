@@ -51,10 +51,6 @@ struct Options {
     #[arg(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txn: Option<u64>,
 
-    /// Wait for web server to exit after transactions complete.
-    #[arg(long, short)]
-    pub wait: bool,
-
     /// Options for the new EsQS.
     #[command(subcommand)]
     pub esqs: Option<full_node::Command>,
@@ -126,6 +122,18 @@ async fn main() {
         args.push("--store-path");
         args.push(&store_path);
     }
+    let cdn;
+    if let Some(url) = &options.node_opt.cdn {
+        if url.host_str() != Some("localhost") {
+            panic!(
+                "for automated local testing, CDN host must be `localhost' \
+                (note that a scheme is required for URL parsing, e.g. tcp://localhost:80)"
+            );
+        }
+        cdn = url.to_string();
+        args.push("--cdn");
+        args.push(&cdn);
+    }
     let min_propose_time = format!("{}ms", options.node_opt.min_propose_time.as_millis());
     args.push("--min-propose-time");
     args.push(&min_propose_time);
@@ -178,6 +186,41 @@ async fn main() {
         }
         None => (0, "".to_string()),
     };
+
+    // Start a CDN server if one is required.
+    let cdn = options.node_opt.cdn.as_ref().map(|url| {
+        let port = url.port_or_known_default().unwrap().to_string();
+        if options.verbose {
+            println!("cdn-server -p {}", port);
+        }
+        let mut process = cargo_run("cdn-server")
+            .args(["-p", &port])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Failed to start the CDN");
+        let mut stdout = BufReader::new(process.stdout.take().unwrap());
+        let verbose = options.verbose;
+
+        // Collect output from the process as it runs. If we don't do this eagerly, the CDN can
+        // block when its output pipe fills up causing deadlock.
+        spawn_blocking(move || {
+            let mut line = String::new();
+            loop {
+                if stdout
+                    .read_line(&mut line)
+                    .expect("Failed to read stdout for CDN")
+                    == 0
+                {
+                    break;
+                }
+                if verbose {
+                    print!("[CDN] {}", line);
+                }
+            }
+        });
+
+        process
+    });
 
     // Start the consensus for each node.
     let first_fail_id = num_nodes - num_fail_nodes;
@@ -324,6 +367,10 @@ async fn main() {
         p.wait()
             .unwrap_or_else(|_| panic!("Failed to wait for node {} to exit", id));
     }
+    if let Some(mut p) = cdn {
+        p.kill().expect("Failed to kill CDN");
+        p.wait().expect("failed to wait for CDN to exit");
+    }
 
     // Check whether the number of succeeded nodes meets the threshold.
     assert!(succeeded_nodes >= threshold);
@@ -333,6 +380,7 @@ async fn main() {
 #[cfg(all(test, feature = "slow-tests"))]
 mod test {
     use super::*;
+    use portpicker::pick_unused_port;
     use std::time::Instant;
 
     async fn automate(
@@ -341,6 +389,7 @@ mod test {
         num_fail_nodes: u64,
         fail_after_txn: u64,
         expect_success: bool,
+        cdn: bool,
     ) {
         println!(
             "Testing {} txns with {}/{} nodes failed after txn {}",
@@ -348,12 +397,11 @@ mod test {
         );
         // Views slow down as we add more nodes. This is a safe formula that allows ample time
         // without overly slowing down the test.
-        let view_timeout = &format!("{}s", 6 * num_nodes);
         let num_nodes = &num_nodes.to_string();
         let num_txn = &num_txn.to_string();
         let num_fail_nodes = &num_fail_nodes.to_string();
         let fail_after_txn = &fail_after_txn.to_string();
-        let args = vec![
+        let mut args = vec![
             "--num-nodes",
             num_nodes,
             "--num-txn",
@@ -373,10 +421,17 @@ mod test {
             "--max-propose-time",
             "10s",
             "--next-view-timeout",
-            view_timeout,
+            "30s",
             "--reset-store-state",
             "--verbose",
         ];
+        let cdn_url;
+        if cdn {
+            let port = pick_unused_port().unwrap();
+            cdn_url = format!("tcp://localhost:{}", port);
+            args.push("--cdn");
+            args.push(&cdn_url);
+        }
         let now = Instant::now();
         let status = cargo_run("multi_machine_automation")
             .args(args)
@@ -390,15 +445,24 @@ mod test {
         assert_eq!(expect_success, status.success());
     }
 
+    // This test is disabled until the libp2p networking implementation is fixed.
+    #[ignore]
     #[async_std::test]
-    async fn test_automation() {
-        automate(7, 5, 1, 3, true).await;
-        automate(7, 5, 3, 1, false).await;
-        automate(11, 2, 0, 0, true).await;
+    async fn test_automation_libp2p() {
+        automate(7, 5, 1, 3, true, false).await;
+        automate(7, 5, 3, 1, false, false).await;
+        automate(11, 2, 0, 0, true, false).await;
 
         // Disabling the following test cases to avoid exceeding the time limit.
         // automate(5, 0, 0, true).await;
         // automate(5, 2, 2, true).await;
         // automate(50, 2, 10, true).await;
+    }
+
+    #[async_std::test]
+    async fn test_automation_cdn() {
+        automate(7, 5, 1, 3, true, true).await;
+        automate(7, 5, 3, 1, false, true).await;
+        automate(11, 2, 0, 0, true, true).await;
     }
 }

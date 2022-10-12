@@ -21,7 +21,7 @@ use espresso_core::{
 use espresso_esqs::full_node::{self, EsQS};
 use espresso_validator::*;
 use futures::future::pending;
-use hotshot::{traits::StateContents, types::EventType};
+use hotshot::{traits::State, types::EventType};
 use jf_cap::keys::UserPubKey;
 use std::process::exit;
 use std::time::Duration;
@@ -140,7 +140,8 @@ async fn generate_transactions(
 
     // Start consensus for each transaction
     let mut final_commitment = None;
-    for round in 0..num_txn {
+    let mut round = 0;
+    while round < num_txn {
         info!("Starting round {}", round + 1);
         report_mem();
         info!("Commitment: {}", hotshot.get_state().await.commit());
@@ -225,6 +226,7 @@ async fn generate_transactions(
                                     )
                                     .unwrap();
 
+                                round += 1;
                                 success = true;
                             }
                         }
@@ -257,6 +259,9 @@ async fn generate_transactions(
                                 leaf.state.block_height, leaf.state.transaction_count
                             );
                             if leaf.state.transaction_count > (round + 1) as usize {
+                                // Update round to account for all committed transactions, excluding
+                                // the genesis transaction.
+                                round = (leaf.state.transaction_count - 1) as u64;
                                 let commit = leaf_chain.first().unwrap().state.commit();
                                 println!(
                                     "  - Round {} completed. Commitment: {}",

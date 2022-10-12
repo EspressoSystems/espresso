@@ -273,7 +273,7 @@ impl traits::Block for ElaboratedBlock {
     }
 
     fn add_transaction(&mut self, txn: Self::Transaction) -> Result<(), ValidationError> {
-        use hotshot::traits::BlockContents;
+        use hotshot::traits::Block;
         *self = self.add_transaction_raw(&txn)?;
         Ok(())
     }

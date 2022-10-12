@@ -15,10 +15,19 @@
 
 version: '2'
 services:
+  cdn-server:
+    image: ghcr.io/espressosystems/espresso/cdn-server:main
+    ports:
+      - "$ESPRESSO_CDN_SERVER_PORT:$ESPRESSO_CDN_SERVER_PORT"
+    environment:
+      - ESPRESSO_CDN_SERVER_PORT
+      - RUST_LOG
+
   # Configure the validators. Each validator exposes 2 ports: the validation port that other
   # validators use to connect to it during consensus, and a port where it hosts a query service.
   validator0:
     image: ghcr.io/espressosystems/espresso/validator:main
+    command: wait-for-it cdn-server:$ESPRESSO_CDN_SERVER_PORT -- /bin/espresso-validator esqs
     ports:
       - "40000:40000/tcp"
       - "60000:$ESPRESSO_ESQS_PORT/tcp"
@@ -41,11 +50,13 @@ services:
       - ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
+      - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
       - RUST_LOG
     volumes:
       - validator0-store:/store
   validator1:
     image: ghcr.io/espressosystems/espresso/validator:main
+    command: wait-for-it cdn-server:$ESPRESSO_CDN_SERVER_PORT -- /bin/espresso-validator esqs
     ports:
       - "40001:40000/tcp"
       - "60001:$ESPRESSO_ESQS_PORT/tcp"
@@ -68,11 +79,13 @@ services:
       - ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
+      - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
       - RUST_LOG
     volumes:
       - validator1-store:/store
   validator2:
     image: ghcr.io/espressosystems/espresso/validator:main
+    command: wait-for-it cdn-server:$ESPRESSO_CDN_SERVER_PORT -- /bin/espresso-validator esqs
     ports:
       - "40002:40000/tcp"
       - "60002:$ESPRESSO_ESQS_PORT/tcp"
@@ -95,11 +108,13 @@ services:
       - ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
+      - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
       - RUST_LOG
     volumes:
       - validator2-store:/store
   validator3:
     image: ghcr.io/espressosystems/espresso/validator:main
+    command: wait-for-it cdn-server:$ESPRESSO_CDN_SERVER_PORT -- /bin/espresso-validator esqs
     ports:
       - "40003:40000/tcp"
       - "60003:$ESPRESSO_ESQS_PORT/tcp"
@@ -122,11 +137,13 @@ services:
       - ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
+      - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
       - RUST_LOG
     volumes:
       - validator3-store:/store
   validator4:
     image: ghcr.io/espressosystems/espresso/validator:main
+    command: wait-for-it cdn-server:$ESPRESSO_CDN_SERVER_PORT -- /bin/espresso-validator esqs
     ports:
       - 40004:40000/tcp
       - 60004:$ESPRESSO_ESQS_PORT/tcp
@@ -149,11 +166,13 @@ services:
       - ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
+      - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
       - RUST_LOG
     volumes:
       - validator4-store:/store
   validator5:
     image: ghcr.io/espressosystems/espresso/validator:main
+    command: wait-for-it cdn-server:$ESPRESSO_CDN_SERVER_PORT -- /bin/espresso-validator esqs
     ports:
       - "40005:40000/tcp"
       - "60005:$ESPRESSO_ESQS_PORT/tcp"
@@ -176,11 +195,13 @@ services:
       - ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
+      - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
       - RUST_LOG
     volumes:
       - validator5-store:/store
   validator6:
     image: ghcr.io/espressosystems/espresso/validator:main
+    command: wait-for-it cdn-server:$ESPRESSO_CDN_SERVER_PORT -- /bin/espresso-validator esqs
     ports:
       - "40006:40000/tcp"
       - "60006:$ESPRESSO_ESQS_PORT/tcp"
@@ -203,11 +224,13 @@ services:
       - ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_FAUCET_PUB_KEYS
+      - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
       - RUST_LOG
     volumes:
       - validator6-store:/store
   validator7:
     image: ghcr.io/espressosystems/espresso/validator:main
+    command: wait-for-it cdn-server:$ESPRESSO_CDN_SERVER_PORT -- /bin/espresso-validator esqs
     ports:
       - "40007:40000/tcp"
       - "60007:$ESPRESSO_ESQS_PORT/tcp"
@@ -231,11 +254,13 @@ services:
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT=40000
       - ESPRESSO_FAUCET_PUB_KEYS
+      - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
       - RUST_LOG
     volumes:
       - validator7-store:/store
   validator8:
     image: ghcr.io/espressosystems/espresso/validator:main
+    command: wait-for-it cdn-server:$ESPRESSO_CDN_SERVER_PORT -- /bin/espresso-validator esqs
     ports:
       - "40008:40000/tcp"
       - "60008:$ESPRESSO_ESQS_PORT/tcp"
@@ -259,11 +284,13 @@ services:
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT=40000
       - ESPRESSO_FAUCET_PUB_KEYS
+      - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
       - RUST_LOG
     volumes:
       - validator8-store:/store
   validator9:
     image: ghcr.io/espressosystems/espresso/validator:main
+    command: wait-for-it cdn-server:$ESPRESSO_CDN_SERVER_PORT -- /bin/espresso-validator esqs
     ports:
       - "40009:40000/tcp"
       - "60009:$ESPRESSO_ESQS_PORT/tcp"
@@ -287,6 +314,7 @@ services:
       - ESPRESSO_ESQS_PORT
       - ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT=40000
       - ESPRESSO_FAUCET_PUB_KEYS
+      - ESPRESSO_CDN_SERVER_URL=tcp://cdn-server:$ESPRESSO_CDN_SERVER_PORT
       - RUST_LOG
     volumes:
       - validator9-store:/store

@@ -12,7 +12,7 @@
 
 use commit::{Commitment, Committable};
 use hotshot::committee::DynamicCommittee;
-use hotshot::traits::StateContents;
+use hotshot::traits::State;
 use hotshot::H_256;
 use hotshot_types::data::ViewNumber;
 use hotshot_types::traits::election::Election;
@@ -46,7 +46,7 @@ impl<S> Committee<S> {
     }
 }
 
-impl<S: Send + Sync + Default + Committable + StateContents, T: ConsensusTime> Election<PubKey, T>
+impl<S: Send + Sync + Default + Committable + State, T: ConsensusTime> Election<PubKey, T>
     for Committee<S>
 {
     /// A table mapping public keys with their associated stake.
@@ -58,7 +58,7 @@ impl<S: Send + Sync + Default + Committable + StateContents, T: ConsensusTime> E
     type SelectionThreshold = [u8; H_256];
 
     /// Arbitrary state type. It's not used since the stake table is stateless for now.
-    type State = S;
+    type StateType = S;
 
     /// A membership proof.
     type VoteToken = EncodedSignature;
@@ -67,7 +67,7 @@ impl<S: Send + Sync + Default + Committable + StateContents, T: ConsensusTime> E
     type ValidatedVoteToken = (PubKey, EncodedSignature, HashSet<u64>);
 
     /// The stake table is stateless for now.
-    fn get_stake_table(&self, _state: &Self::State) -> Self::StakeTable {
+    fn get_stake_table(&self, _state: &Self::StateType) -> Self::StakeTable {
         self.stake_table.clone()
     }
 
@@ -84,7 +84,7 @@ impl<S: Send + Sync + Default + Committable + StateContents, T: ConsensusTime> E
         view_number: ViewNumber,
         pub_key: PubKey,
         token: Self::VoteToken,
-        next_state: Commitment<Self::State>,
+        next_state: Commitment<Self::StateType>,
     ) -> Option<Self::ValidatedVoteToken> {
         DynamicCommittee::<S>::get_votes(
             table,
@@ -110,7 +110,7 @@ impl<S: Send + Sync + Default + Committable + StateContents, T: ConsensusTime> E
         selection_threshold: Self::SelectionThreshold,
         view_number: ViewNumber,
         private_key: &PrivKey,
-        next_state: Commitment<Self::State>,
+        next_state: Commitment<Self::StateType>,
     ) -> Option<Self::VoteToken> {
         DynamicCommittee::<S>::make_vote_token(
             table,

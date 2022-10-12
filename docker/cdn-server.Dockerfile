@@ -10,20 +10,15 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <https://www.gnu.org/licenses/>.
 
-[package]
-name = "espresso-validator-api"
-version = "0.1.0"
-edition = "2021"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+FROM ubuntu:jammy
 
-[dependencies]
-async-trait = "0.1.51"
-clap = { version = "4.0", features = ["derive", "env"] }
-derive_more = "0.99"
-espresso-core = { path = "../../core/" }
-futures = "0.3.21"
-hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", branch = "main", features = ["async-std-executor", "channel-async-std"] }
-serde = { version = "1.0.139", features = ["derive", "rc"] }
-snafu = { version = "0.7", features = ["backtraces"] }
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1" }
-toml = "0.5"
+RUN apt-get update \
+&&  apt-get install -y curl wait-for-it \
+&&  rm -rf /var/lib/apt/lists/*
+
+COPY target/x86_64-unknown-linux-musl/release/cdn-server /bin/cdn-server
+RUN chmod +x /bin/cdn-server
+
+ENV ESPRESSO_CDN_SERVER_PORT=50000
+
+CMD [ "/bin/cdn-server"]

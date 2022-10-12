@@ -47,7 +47,7 @@ impl<NET: PLNet, STORE: PLStore> Debug for ValidatorNodeImpl<NET, STORE> {
 }
 
 impl<NET: PLNet, STORE: PLStore> NodeImplementation for ValidatorNodeImpl<NET, STORE> {
-    type State = ValidatorState;
+    type StateType = ValidatorState;
 
     type Storage = STORE;
 
