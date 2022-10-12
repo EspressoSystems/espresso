@@ -8,12 +8,13 @@ var sourcesIndex = JSON.parse('{\
 "espresso_esqs":["",[],["full_node.rs","full_node_data_source.rs","lib.rs","update_query_data_source.rs"]],\
 "espresso_metastate_api":["",[],["api.rs","data_source.rs","lib.rs","query_data.rs"]],\
 "espresso_status_api":["",[],["api.rs","data_source.rs","lib.rs","query_data.rs"]],\
-"espresso_validator":["",[],["lib.rs","node_impl.rs","testing.rs"]],\
+"espresso_validator":["",[],["lib.rs","node_impl.rs","testing.rs","validator.rs"]],\
 "espresso_validator_api":["",[],["api.rs","data_source.rs","lib.rs"]],\
+"espresso_validator_testing":["",[],["espresso-validator-testing.rs"]],\
 "faucet":["",[],["faucet.rs","faucet_keystore_test_setup.rs","lib.rs"]],\
 "faucet_types":["",[],["lib.rs"]],\
 "measure_throughput":["",[],["measure-throughput.rs"]],\
-"multi_machine_automation":["",[],["multi_machine_automation.rs"]],\
+"multi_machine_automation":["",[],["multi-machine-automation.rs"]],\
 "random_wallet":["",[],["random-wallet.rs"]],\
 "test_query_api":["",[],["test-query-api.rs"]],\
 "wallet_cli":["",[],["cli_client.rs","main.rs"]]\

@@ -842,48 +842,6 @@
 <span id="842">842</span>
 <span id="843">843</span>
 <span id="844">844</span>
-<span id="845">845</span>
-<span id="846">846</span>
-<span id="847">847</span>
-<span id="848">848</span>
-<span id="849">849</span>
-<span id="850">850</span>
-<span id="851">851</span>
-<span id="852">852</span>
-<span id="853">853</span>
-<span id="854">854</span>
-<span id="855">855</span>
-<span id="856">856</span>
-<span id="857">857</span>
-<span id="858">858</span>
-<span id="859">859</span>
-<span id="860">860</span>
-<span id="861">861</span>
-<span id="862">862</span>
-<span id="863">863</span>
-<span id="864">864</span>
-<span id="865">865</span>
-<span id="866">866</span>
-<span id="867">867</span>
-<span id="868">868</span>
-<span id="869">869</span>
-<span id="870">870</span>
-<span id="871">871</span>
-<span id="872">872</span>
-<span id="873">873</span>
-<span id="874">874</span>
-<span id="875">875</span>
-<span id="876">876</span>
-<span id="877">877</span>
-<span id="878">878</span>
-<span id="879">879</span>
-<span id="880">880</span>
-<span id="881">881</span>
-<span id="882">882</span>
-<span id="883">883</span>
-<span id="884">884</span>
-<span id="885">885</span>
-<span id="886">886</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -905,17 +863,15 @@
 <span class="kw">use</span> <span class="ident">clap</span>::{<span class="ident">Args</span>, <span class="ident">Parser</span>};
 <span class="kw">use</span> <span class="ident">cld::ClDuration</span>;
 <span class="kw">use</span> <span class="ident">dirs::data_local_dir</span>;
-<span class="kw">use</span> <span class="ident">espresso_core::reward</span>::{<span class="ident">mock_eligibility</span>, <span class="ident">CollectRewardNote</span>};
-<span class="kw">use</span> <span class="ident">espresso_core::state</span>::{<span class="ident">EspressoTransaction</span>, <span class="ident">EspressoTxnHelperProofs</span>, <span class="ident">KVMerkleProof</span>};
 <span class="kw">use</span> <span class="ident">espresso_core</span>::{
     <span class="ident">committee::Committee</span>,
     <span class="ident">genesis::GenesisNote</span>,
+    <span class="ident">reward</span>::{<span class="ident">mock_eligibility</span>, <span class="ident">CollectRewardNote</span>},
     <span class="ident">stake_table</span>::{<span class="ident">StakeTableHash</span>, <span class="ident">StakingPrivKey</span>},
     <span class="ident">state</span>::{
-        <span class="ident">ChainVariables</span>, <span class="ident">ElaboratedBlock</span>, <span class="ident">ElaboratedTransaction</span>, <span class="ident">LWPersistence</span>, <span class="ident">NullifierHistory</span>,
-        <span class="ident">SetMerkleTree</span>, <span class="ident">ValidatorState</span>,
+        <span class="ident">ChainVariables</span>, <span class="ident">ElaboratedBlock</span>, <span class="ident">ElaboratedTransaction</span>, <span class="ident">EspressoTransaction</span>,
+        <span class="ident">EspressoTxnHelperProofs</span>, <span class="ident">KVMerkleProof</span>, <span class="ident">LWPersistence</span>, <span class="ident">ValidatorState</span>,
     },
-    <span class="ident">testing</span>::{<span class="ident">MultiXfrRecordSpec</span>, <span class="ident">MultiXfrTestState</span>},
     <span class="ident">universal_params::VERIF_CRS</span>,
     <span class="ident">PrivKey</span>, <span class="ident">PubKey</span>,
 };
@@ -958,10 +914,10 @@
 <span class="kw">mod</span> <span class="ident">node_impl</span>;
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">any</span>(<span class="ident">test</span>, <span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;testing&quot;</span>))]</span>
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">testing</span>;
+<span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">validator</span>;
 
 <span class="kw">pub</span> <span class="kw">const</span> <span class="ident">MINIMUM_NODES</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">6</span>;
-
-<span class="kw">const</span> <span class="ident">GENESIS_SEED</span>: [<span class="ident">u8</span>; <span class="number">32</span>] <span class="op">=</span> [<span class="number">0x7au8</span>; <span class="number">32</span>];
+<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">GENESIS_SEED</span>: [<span class="ident">u8</span>; <span class="number">32</span>] <span class="op">=</span> [<span class="number">0x7au8</span>; <span class="number">32</span>];
 <span class="kw">const</span> <span class="ident">DEFAULT_SECRET_KEY_SEED</span>: [<span class="ident">u8</span>; <span class="number">32</span>] <span class="op">=</span> [
     <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">5</span>, <span class="number">6</span>, <span class="number">7</span>, <span class="number">8</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">5</span>, <span class="number">6</span>, <span class="number">7</span>, <span class="number">8</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">5</span>, <span class="number">6</span>, <span class="number">7</span>, <span class="number">8</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">5</span>, <span class="number">6</span>, <span class="number">7</span>, <span class="number">8</span>,
 ];
@@ -1353,46 +1309,6 @@
         <span class="ident">ChainVariables::new</span>(<span class="ident">chain_id</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>()),
         <span class="ident">Arc::new</span>(<span class="ident">faucet_records</span>),
     )
-}
-
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">genesis_for_test</span>() -&gt; (<span class="ident">GenesisNote</span>, <span class="ident">MultiXfrTestState</span>) {
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">state</span> <span class="op">=</span> <span class="ident">MultiXfrTestState::initialize</span>(
-        <span class="ident">GENESIS_SEED</span>,
-        <span class="number">10</span>,
-        <span class="number">10</span>,
-        (
-            <span class="ident">MultiXfrRecordSpec</span> {
-                <span class="ident">asset_def_ix</span>: <span class="number">0</span>,
-                <span class="ident">owner_key_ix</span>: <span class="number">0</span>,
-                <span class="ident">asset_amount</span>: <span class="number">100</span>,
-            },
-            <span class="macro">vec!</span>[
-                <span class="ident">MultiXfrRecordSpec</span> {
-                    <span class="ident">asset_def_ix</span>: <span class="number">1</span>,
-                    <span class="ident">owner_key_ix</span>: <span class="number">0</span>,
-                    <span class="ident">asset_amount</span>: <span class="number">50</span>,
-                },
-                <span class="ident">MultiXfrRecordSpec</span> {
-                    <span class="ident">asset_def_ix</span>: <span class="number">0</span>,
-                    <span class="ident">owner_key_ix</span>: <span class="number">0</span>,
-                    <span class="ident">asset_amount</span>: <span class="number">70</span>,
-                },
-            ],
-        ),
-    )
-    .<span class="ident">unwrap</span>();
-
-    <span class="comment">// [GenesisNote] doesn&#39;t support a non-empty nullifiers set, so we clear the nullifiers set in</span>
-    <span class="comment">// our test state. This effectively &quot;unspends&quot; the records which were used to set up the initial</span>
-    <span class="comment">// state. This is fine for testing purposes.</span>
-    <span class="ident">state</span>.<span class="ident">nullifiers</span> <span class="op">=</span> <span class="ident">SetMerkleTree::default</span>();
-    <span class="ident">state</span>.<span class="ident">validator</span>.<span class="ident">past_nullifiers</span> <span class="op">=</span> <span class="ident">NullifierHistory::default</span>();
-
-    <span class="kw">let</span> <span class="ident">genesis</span> <span class="op">=</span> <span class="ident">GenesisNote::new</span>(
-        <span class="ident">ChainVariables::new</span>(<span class="number">42</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>()),
-        <span class="ident">Arc::new</span>(<span class="ident">state</span>.<span class="ident">records</span>().<span class="ident">collect</span>()),
-    );
-    (<span class="ident">genesis</span>, <span class="ident">state</span>)
 }
 
 <span class="doccomment">/// Creates the initial state and hotshot for simulation.</span>
