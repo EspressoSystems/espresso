@@ -13,7 +13,7 @@
 #![deny(warnings)]
 
 use clap::Parser;
-use espresso_validator::{simulation::*, *};
+use espresso_validator::{validator::*, *};
 use futures::future::pending;
 use jf_cap::keys::UserPubKey;
 
@@ -24,7 +24,7 @@ use jf_cap::keys::UserPubKey;
 )]
 struct Options {
     #[command(flatten)]
-    simulation_opt: SimulationOpt,
+    validator_opt: ValidatorOpt,
 
     /// Public key which should own a faucet record in the genesis block.
     ///
@@ -40,11 +40,8 @@ struct Options {
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::parse();
-    let (hotshot, _) = init(
-        SimulationMode::Standard(options.faucet_pub_key),
-        options.simulation_opt,
-    )
-    .await?;
+    let genesis = genesis(options.validator_opt.chain_id, options.faucet_pub_key);
+    let hotshot = init(genesis, options.validator_opt).await?;
     run_consensus(hotshot, pending::<()>()).await;
     Ok(())
 }

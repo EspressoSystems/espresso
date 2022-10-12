@@ -70,9 +70,9 @@ use surf::Url;
 use tracing::{debug, event, Level};
 
 mod node_impl;
-pub mod simulation;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+pub mod validator;
 
 pub const MINIMUM_NODES: usize = 6;
 

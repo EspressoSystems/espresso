@@ -18,9 +18,9 @@ use espresso_core::state::ElaboratedBlock;
 use espresso_esqs::full_node::{self, EsQS};
 use std::process::exit;
 
-/// Command line arguments for validator simulation.
+/// Command line arguments for a validator.
 #[derive(Parser)]
-pub struct SimulationOpt {
+pub struct ValidatorOpt {
     #[command(flatten)]
     node_opt: NodeOpt,
 
@@ -56,19 +56,11 @@ pub struct SimulationOpt {
     pub esqs: Option<full_node::Command>,
 }
 
-/// Whether to simulate the validators for testing purposes.
-pub enum SimulationMode {
-    /// The standard mode with a list of faucet public keys.
-    Standard(Vec<UserPubKey>),
-    /// The testing mode to generate the given number of transactions.
-    Test(u64),
-}
-
-/// Initiate the hotshot, and the test state if in testing mode.
+/// Initiate the hotshot
 pub async fn init(
-    mode: SimulationMode,
-    options: SimulationOpt,
-) -> Result<(Consensus, Option<MultiXfrTestState>), std::io::Error> {
+    genesis: GenesisNote,
+    options: ValidatorOpt,
+) -> Result<Consensus, std::io::Error> {
     if let Err(msg) = options.node_opt.check() {
         eprintln!("{}", msg);
         exit(1);
@@ -80,22 +72,11 @@ pub async fn init(
         .init();
 
     let own_id = options.id;
-    // Initialize the state and hotshot
-    let (genesis, state) = match mode {
-        SimulationMode::Standard(faucet_pub_keys) => {
-            (genesis(options.chain_id, faucet_pub_keys), None)
-        }
-        SimulationMode::Test(_) => {
-            // If we are going to generate transactions, we need to initialize the ledger with a
-            // test state.
-            let (genesis, state) = genesis_for_test();
-            (genesis, Some(state))
-        }
-    };
+
+    // Initialize the hotshot
     let keys = gen_keys(&options.consensus_opt, options.num_nodes);
     let priv_key = keys[own_id].private.clone();
     let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
-
     let hotshot = init_validator(
         &options.node_opt,
         &options.consensus_opt,
@@ -120,5 +101,5 @@ pub async fn init(
         None
     };
 
-    Ok((hotshot, state))
+    Ok(hotshot)
 }

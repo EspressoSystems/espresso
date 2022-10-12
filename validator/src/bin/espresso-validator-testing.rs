@@ -19,7 +19,7 @@ use espresso_core::{
     state::ElaboratedBlock,
     testing::{MultiXfrTestState, TestTxSpec, TxnPrintInfo},
 };
-use espresso_validator::{simulation::*, *};
+use espresso_validator::{validator::*, *};
 use hotshot::types::EventType;
 use std::time::Duration;
 use tagged_base64::TaggedBase64;
@@ -32,7 +32,7 @@ use tracing::info;
 )]
 struct Options {
     #[command(flatten)]
-    simulation_opt: SimulationOpt,
+    validator_opt: ValidatorOpt,
 
     /// Number of transactions to generate.
     #[arg(long, short)]
@@ -209,12 +209,9 @@ async fn generate_transactions(
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::parse();
-    let id = options.simulation_opt.id;
-    let (hotshot, state) = init(
-        SimulationMode::Test(options.num_txns),
-        options.simulation_opt,
-    )
-    .await?;
-    generate_transactions(options.num_txns, id, hotshot, state.unwrap()).await;
+    let id = options.validator_opt.id;
+    let (genesis, state) = genesis_for_test();
+    let hotshot = init(genesis, options.validator_opt).await?;
+    generate_transactions(options.num_txns, id, hotshot, state).await;
     Ok(())
 }

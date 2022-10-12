@@ -21,7 +21,7 @@ given number of transactions has been generated.
 
 ## Build code
 * Run `cargo run --release` with `--bin espresso-validator` or `--bin espresso-validator-testing`.
-* Check that `espresso-validator` or ``espresso-validator-testing` is generated under
+* Check that `espresso-validator` or `espresso-validator-testing` is generated under
 `target/release/`.
 
 ### Statically linked binary
@@ -72,9 +72,8 @@ accordingly.
             * `num_nodes` is the number of nodes, including the bootstrap nodes in the node config
             file, and non-bootstrap nodes.
             * `num_txns` is the number of transactions to generate.
-                * To make the consensus keep running till the process is killed, skip this option
-                and replace `espresso-validator-testing` with `espresso-validator`. For easier
-                manual testing, do not skip it.
+                * If skipped, the consensus will keep running till the process is killed. For
+                easier manual testing, do not skip it.
     * Unlike the multi-process simulation, the single-command simulation will automatically check
     if the final commitments are the same and the number of succeeded nodes meets the threshold.
 
@@ -102,9 +101,8 @@ node, which means it stores the entire state of the ledger, including history, w
 information it needs to provide in order to run the query service.
 
 ## Running with a keystore
-By default, one of the validator nodes in the demo will automatically generate transactions to
-propose to the other nodes. But the demo can also be driven by a keystore,
-running externally to all of the nodes.
+`espresso-validator` will not automatically generate transactions. Instead, transaction generation
+is driven by a keystore, running externally to all of the nodes.
 
 To use a keystore with the demo, first generate a key pair for the keystore by logging into the CLI
 (`wallet-cli`) and generating a key (`gen_key sending`). Next,
