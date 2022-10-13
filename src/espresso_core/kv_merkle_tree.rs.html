@@ -969,6 +969,20 @@
 <span id="969">969</span>
 <span id="970">970</span>
 <span id="971">971</span>
+<span id="972">972</span>
+<span id="973">973</span>
+<span id="974">974</span>
+<span id="975">975</span>
+<span id="976">976</span>
+<span id="977">977</span>
+<span id="978">978</span>
+<span id="979">979</span>
+<span id="980">980</span>
+<span id="981">981</span>
+<span id="982">982</span>
+<span id="983">983</span>
+<span id="984">984</span>
+<span id="985">985</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -1370,6 +1384,14 @@
             <span class="prelude-val">Some</span>((<span class="prelude-val">None</span>, <span class="ident">running_hash</span>))
         }
     }
+
+    <span class="doccomment">/// Get leaf key, value pair. Return None if terminal node is an empty subtree</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_leaf</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">KVHash::Key</span>, <span class="ident">KVHash::Value</span>)<span class="op">&gt;</span> {
+        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">terminal_node</span> {
+            <span class="ident">KVMerkleTerminalNode::EmptySubtree</span> =&gt; <span class="prelude-val">None</span>,
+            <span class="ident">KVMerkleTerminalNode::Leaf</span> { <span class="ident">key</span>, <span class="ident">value</span>, .. } =&gt; <span class="prelude-val">Some</span>((<span class="ident">key</span>.<span class="ident">clone</span>(), <span class="ident">value</span>.<span class="ident">clone</span>())),
+        }
+    }
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">KVHash</span><span class="op">&gt;</span> <span class="ident">KVMerkleTree</span><span class="op">&lt;</span><span class="ident">KVHash</span><span class="op">&gt;</span>
@@ -1762,6 +1784,24 @@
 
         <span class="prelude-val">Ok</span>(())
     }
+
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">multi_insert</span>(
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
+        <span class="ident">inserts</span>: <span class="kw">impl</span> <span class="ident">IntoIterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> (<span class="ident">KVHash::Key</span>, <span class="ident">KVHash::Value</span>, <span class="ident">KVMerkleProof</span><span class="op">&lt;</span><span class="ident">KVHash</span><span class="op">&gt;</span>)<span class="op">&gt;</span>,
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">KVMerkleProof</span><span class="op">&lt;</span><span class="ident">KVHash</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident">KVHash::Digest</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">kvs</span> <span class="op">=</span> <span class="macro">vec!</span>[];
+        <span class="kw">for</span> (<span class="ident">k</span>, <span class="ident">v</span>, <span class="ident">proof</span>) <span class="kw">in</span> <span class="ident">inserts</span>.<span class="ident">into_iter</span>() {
+            <span class="self">self</span>.<span class="ident">remember</span>(<span class="ident">k</span>.<span class="ident">clone</span>(), <span class="ident">proof</span>)<span class="question-mark">?</span>;
+            <span class="ident">kvs</span>.<span class="ident">push</span>((<span class="ident">k</span>, <span class="ident">v</span>));
+        }
+        <span class="kw">for</span> (<span class="ident">k</span>, <span class="ident">v</span>) <span class="kw">in</span> <span class="ident">kvs</span>.<span class="ident">iter</span>() {
+            <span class="self">self</span>.<span class="ident">insert</span>(<span class="ident">k</span>.<span class="ident">clone</span>(), <span class="ident">v</span>.<span class="ident">clone</span>()).<span class="ident">unwrap</span>();
+        }
+        <span class="prelude-val">Ok</span>(<span class="ident">kvs</span>
+            .<span class="ident">into_iter</span>()
+            .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">k</span>, <span class="kw">_</span>)<span class="op">|</span> <span class="self">self</span>.<span class="ident">lookup</span>(<span class="ident">k</span>).<span class="ident">unwrap</span>().<span class="number">1</span>)
+            .<span class="ident">collect</span>())
+    }
 }
 
 <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::type_complexity</span>)]</span>
@@ -1774,21 +1814,9 @@
     <span class="op">&lt;</span><span class="ident">KVHash::BranchArityMinus1</span> <span class="kw">as</span> <span class="ident">AddLength</span><span class="op">&lt;</span><span class="ident">KVHash::Digest</span>, <span class="ident">U1</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="ident">::Output</span>:
         <span class="ident">ArrayLength</span><span class="op">&lt;</span><span class="ident">KVMerkleTree</span><span class="op">&lt;</span><span class="ident">KVHash</span><span class="op">&gt;</span><span class="op">&gt;</span>,
 {
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">kvs</span> <span class="op">=</span> <span class="macro">vec!</span>[];
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">s</span> <span class="op">=</span> <span class="ident">KVMerkleTree::ForgottenSubtree</span> { <span class="ident">digest</span>: <span class="ident">root</span> };
-    <span class="kw">for</span> (<span class="ident">k</span>, <span class="ident">v</span>, <span class="ident">proof</span>) <span class="kw">in</span> <span class="ident">inserts</span> {
-        <span class="ident">s</span>.<span class="ident">remember</span>(<span class="ident">k</span>.<span class="ident">clone</span>(), <span class="ident">proof</span>)<span class="question-mark">?</span>;
-        <span class="ident">kvs</span>.<span class="ident">push</span>((<span class="ident">k</span>, <span class="ident">v</span>));
-    }
-    <span class="kw">for</span> (<span class="ident">k</span>, <span class="ident">v</span>) <span class="kw">in</span> <span class="ident">kvs</span>.<span class="ident">iter</span>() {
-        <span class="ident">s</span>.<span class="ident">insert</span>(<span class="ident">k</span>.<span class="ident">clone</span>(), <span class="ident">v</span>.<span class="ident">clone</span>()).<span class="ident">unwrap</span>();
-    }
-    <span class="prelude-val">Ok</span>((
-        <span class="ident">s</span>.<span class="ident">hash</span>(),
-        <span class="ident">kvs</span>.<span class="ident">into_iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">k</span>, <span class="kw">_</span>)<span class="op">|</span> <span class="ident">s</span>.<span class="ident">lookup</span>(<span class="ident">k</span>).<span class="ident">unwrap</span>().<span class="number">1</span>)
-            .<span class="ident">collect</span>(),
-    ))
+    <span class="kw">let</span> <span class="ident">proofs</span> <span class="op">=</span> <span class="ident">s</span>.<span class="ident">multi_insert</span>(<span class="ident">inserts</span>)<span class="question-mark">?</span>;
+    <span class="prelude-val">Ok</span>((<span class="ident">s</span>.<span class="ident">hash</span>(), <span class="ident">proofs</span>))
 }
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>

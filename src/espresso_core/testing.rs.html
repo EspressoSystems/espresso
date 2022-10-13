@@ -2141,6 +2141,8 @@
 <span id="2141">2141</span>
 <span id="2142">2142</span>
 <span id="2143">2143</span>
+<span id="2144">2144</span>
+<span id="2145">2145</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">deny</span>(<span class="ident">warnings</span>)]</span>
 <span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
@@ -2154,6 +2156,7 @@
 <span class="comment">// You should have received a copy of the GNU General Public License along with this program. If not,</span>
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table</span>::{<span class="ident">StakeTableMap</span>, <span class="ident">StakeTableSetMT</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::state</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::universal_params</span>::{<span class="ident">MERKLE_HEIGHT</span>, <span class="ident">PROVER_CRS</span>, <span class="ident">UNIVERSAL_PARAM</span>, <span class="ident">VERIF_CRS</span>};
 <span class="kw">use</span> <span class="ident">arbitrary::Arbitrary</span>;
@@ -2462,7 +2465,7 @@
                 <span class="ident">t</span>,
                 <span class="ident">StakeTableMap::EmptySubtree</span>,
                 <span class="ident">Amount::from</span>(<span class="number">0u64</span>),
-                <span class="ident">StakeTableCommMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
+                <span class="ident">StakeTableSetMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
             ),
             <span class="ident">outer_timer</span>: <span class="ident">timer</span>,
             <span class="ident">inner_timer</span>: <span class="ident">Instant::now</span>(),
@@ -3375,6 +3378,7 @@
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
 <span class="kw">mod</span> <span class="ident">tests</span> {
     <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table</span>::{<span class="ident">StakeTableMap</span>, <span class="ident">StakeTableSetMT</span>};
     <span class="kw">use</span> <span class="ident">async_std::sync::Arc</span>;
     <span class="kw">use</span> <span class="ident">commit::Committable</span>;
     <span class="kw">use</span> <span class="ident">jf_cap::structs</span>::{<span class="ident">NoteType</span>, <span class="ident">Nullifier</span>};
@@ -3559,7 +3563,7 @@
         <span class="kw">let</span> <span class="ident">validator</span> <span class="op">=</span> <span class="op">|</span><span class="ident">xfrs</span>: <span class="kw-2">&amp;</span>[<span class="kw">_</span>], <span class="ident">freezes</span>: <span class="kw-2">&amp;</span>[<span class="kw">_</span>]<span class="op">|</span> {
             <span class="kw">let</span> <span class="ident">record_merkle_tree</span> <span class="op">=</span> <span class="ident">MerkleTree::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>();
             <span class="kw">let</span> <span class="ident">stake_table_map</span> <span class="op">=</span> <span class="ident">StakeTableMap::EmptySubtree</span>;
-            <span class="kw">let</span> <span class="ident">stake_table_commitments_mt</span> <span class="op">=</span> <span class="ident">StakeTableCommMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>();
+            <span class="kw">let</span> <span class="ident">stake_table_commitments_mt</span> <span class="op">=</span> <span class="ident">StakeTableSetMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>();
             <span class="ident">ValidatorState::new</span>(
                 <span class="ident">ChainVariables::new</span>(
                     <span class="number">42</span>,
@@ -3617,7 +3621,7 @@
             <span class="ident">MerkleTree::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
             <span class="ident">StakeTableMap::EmptySubtree</span>,
             <span class="ident">Amount::from</span>(<span class="number">0u64</span>),
-            <span class="ident">StakeTableCommMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
+            <span class="ident">StakeTableSetMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
         );
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">v2</span> <span class="op">=</span> <span class="ident">v1</span>.<span class="ident">clone</span>();
 
@@ -3772,7 +3776,7 @@
             <span class="ident">t</span>,
             <span class="ident">StakeTableMap::EmptySubtree</span>,
             <span class="ident">Amount::from</span>(<span class="number">0u64</span>),
-            <span class="ident">StakeTableCommMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
+            <span class="ident">StakeTableSetMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
         );
 
         <span class="macro">println!</span>(<span class="string">&quot;Validator set up: {}s&quot;</span>, <span class="ident">now</span>.<span class="ident">elapsed</span>().<span class="ident">as_secs_f32</span>());
