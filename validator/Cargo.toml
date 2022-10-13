@@ -40,9 +40,9 @@ espresso-status-api = { path = "../apis/status" }
 espresso-validator-api = { path = "../apis/validator" }
 futures = "0.3.0"
 futures-util = "0.3.8"
-hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.2.2", features = ["async-std-executor", "channel-async-std"] }
-hotshot-centralized-server = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.2.2" }
-hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.2.2", features = ["async-std-executor", "channel-async-std"] }
+hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.2.3", features = ["async-std-executor", "channel-async-std"] }
+hotshot-centralized-server = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.2.3" }
+hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.2.3", features = ["async-std-executor", "channel-async-std"] }
 human_bytes = "0.3"
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
@@ -51,7 +51,7 @@ jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/
 jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
 key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 libp2p = "0.48"
-libp2p-networking = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.2.2" }
+libp2p-networking = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.2.3" }
 markdown = "0.3"
 portpicker = { version = "0.1", optional = true }
 rand = "0.8.5"

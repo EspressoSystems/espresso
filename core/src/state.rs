@@ -18,7 +18,10 @@ use jf_cap::Signature;
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
 pub use crate::lw_persistence::LWPersistence;
-use crate::reward::{CollectRewardNote, CollectedRewards, RewardNoteProofs};
+use crate::reward::{
+    CollectRewardNote, CollectedRewards, CollectedRewardsHistory, CollectedRewardsProof,
+    CollectedRewardsProofs, RewardNoteProofs,
+};
 pub use crate::set_merkle_tree::*;
 pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
@@ -28,9 +31,13 @@ pub use hotshot_types::data::ViewNumber as ConsensusTime;
 pub use state_comm::LedgerStateCommitment;
 
 use crate::genesis::GenesisNote;
-use crate::reward::{CollectedRewardsCommitment, CollectedRewardsHash};
-use crate::stake_table::{StakeTableCommitment, StakeTableCommitmentsCommitment, StakeTableHash};
+use crate::stake_table::{
+    CommittableStakeTableSetCommitment, CommittableStakeTableSetFrontier, StakeTableCommitment,
+    StakeTableMap, StakeTableSetCommitment, StakeTableSetFrontier, StakeTableSetHistory,
+    StakeTableSetMT,
+};
 
+use crate::state::state_comm::CommittableAmount;
 use crate::universal_params::{MERKLE_HEIGHT, VERIF_CRS};
 use arbitrary::{Arbitrary, Unstructured};
 use ark_serialize::*;
@@ -487,11 +494,25 @@ pub enum ValidationError {
     /// Attempted to apply a block with a time in the past
     InvalidTime,
 
-    /// Reward in transaction has already been collected
-    PreviouslyCollectedReward,
+    /// Bad CollectRewardNote
+    BadCollectRewardNote,
+
+    /// A record was already spent.
+    RewardAlreadyCollected {
+        reward: CollectedRewards,
+    },
+
+    /// An invalid Collected Reward proof.
+    BadCollectedRewardProof {},
 
     /// Stake amount in transaction does not match amount in stake table
     RewardAmountTooLarge,
+
+    /// verification error for stake table proof
+    BadStakeTableProof {},
+
+    /// verification error for stake table commitments proof
+    BadStakeTableCommitmentsProof {},
 }
 
 pub(crate) mod ser_display {
@@ -548,8 +569,14 @@ impl Clone for ValidationError {
             UnexpectedGenesis => UnexpectedGenesis,
             IncorrectParent => IncorrectParent,
             InvalidTime => InvalidTime,
-            PreviouslyCollectedReward => PreviouslyCollectedReward,
+            BadCollectRewardNote => BadCollectRewardNote,
+            RewardAlreadyCollected { reward } => RewardAlreadyCollected {
+                reward: reward.clone(),
+            },
+            BadCollectedRewardProof {} => BadCollectedRewardProof {},
             RewardAmountTooLarge => RewardAmountTooLarge,
+            BadStakeTableProof {} => BadStakeTableProof {},
+            BadStakeTableCommitmentsProof {} => BadStakeTableCommitmentsProof {},
         }
     }
 }
@@ -924,9 +951,13 @@ impl Committable for NullifierHistory {
 /// the validators, so that all agree. Any discrepency in the history
 /// would produce a disagreement.
 pub mod state_comm {
-    use crate::stake_table::{StakeTableCommitment, StakeTableCommitmentsCommitment};
+    use crate::stake_table::{
+        CommittableStakeTableSetCommitment, CommittableStakeTableSetFrontier, StakeTableCommitment,
+        StakeTableSetHistory,
+    };
 
     use super::*;
+    use crate::reward::CollectedRewardsHistory;
     use jf_utils::tagged_blob;
 
     #[ser_test(arbitrary)]
@@ -954,6 +985,31 @@ pub mod state_comm {
         }
     }
 
+    /// Wrapper around amount to make it committable
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Default,
+        Hash,
+        Eq,
+        Serialize,
+        Deserialize,
+        CanonicalSerialize,
+        CanonicalDeserialize,
+        From,
+        Into,
+    )]
+    pub struct CommittableAmount(Amount);
+
+    impl Committable for CommittableAmount {
+        fn commit(&self) -> Commitment<Self> {
+            commit::RawCommitmentBuilder::new("Amount")
+                .var_size_bytes(&canonical::serialize(self).unwrap())
+                .finalize()
+        }
+    }
     /// The essential state of the ledger
     ///
     /// Note that many elements of the state are represented
@@ -992,9 +1048,11 @@ pub mod state_comm {
         pub past_nullifiers: Commitment<NullifierHistory>,
         pub prev_block: Commitment<Block>,
         pub stake_table: Commitment<StakeTableCommitment>,
-        pub total_stake: Amount,
-        pub stake_table_commitments: Commitment<StakeTableCommitmentsCommitment>,
-        pub collected_rewards: Commitment<CollectedRewardsCommitment>,
+        pub total_stake: Commitment<CommittableAmount>,
+        pub historical_stake_tables: Commitment<CommittableStakeTableSetFrontier>,
+        pub past_stc_merkle_roots: Commitment<StakeTableSetHistory>,
+        pub historial_stake_tables_commitment: Commitment<CommittableStakeTableSetCommitment>,
+        pub collected_rewards: Commitment<CollectedRewardsHistory>,
     }
 
     impl LedgerCommitmentOpening {
@@ -1018,6 +1076,15 @@ pub mod state_comm {
                 .field("past_record_merkle_roots", self.past_record_merkle_roots)
                 .field("past_nullifiers", self.past_nullifiers)
                 .field("prev_block", self.prev_block)
+                .field("stake_table", self.stake_table)
+                .field("total_stake", self.total_stake)
+                .field("stake_table_commitments", self.historical_stake_tables)
+                .field("past_stc_merkle_roots", self.past_stc_merkle_roots)
+                .field(
+                    "stake_table_commitments_commitment",
+                    self.historial_stake_tables_commitment,
+                )
+                .field("collected_rewards", self.collected_rewards)
                 .finalize()
                 .into()
         }
@@ -1152,19 +1219,6 @@ impl ChainVariables {
     }
 }
 
-/// KeyValue Merkle tree alias for StakeTable
-pub type StakeTableMap = KVMerkleTree<StakeTableHash>;
-
-/// Merkle Tree for Stake table commitments merkle tree
-pub type StakeTableCommMT = crate::merkle_tree::MerkleTree<(StakeTableCommitment, Amount)>;
-
-/// Merkle Frontier for Stake table commitments
-pub type StakeTableCommFrontier =
-    crate::merkle_tree::MerkleFrontier<(StakeTableCommitment, Amount)>;
-
-/// Merkle Frontier for Stake table commitments
-pub type StakeTableCommCommitment = crate::merkle_tree::MerkleCommitment;
-
 /// The working state of the ledger
 ///
 /// Only the previous state is represented as a commitment. Other
@@ -1201,21 +1255,22 @@ pub struct ValidatorState {
     /// Staking table. For fixed-stake, this will be the same each round
     pub stake_table: StakeTableMap,
     /// Total amount staked for the current table
-    // TODO: this type should match the type of stake
     pub total_stake: Amount,
     /// Keeps track of previous stake tables and their total stake
-    pub stake_table_commitments: StakeTableCommFrontier,
-    /// Commitment to stake table commitments set
-    pub stake_table_commitments_commitment: StakeTableCommCommitment,
-    /// Track already-collected rewards via (staking_key, block number) tuples
-    pub collected_rewards: KVMerkleTree<CollectedRewardsHash>,
+    pub historical_stake_tables: StakeTableSetFrontier,
+    /// A list of recent historial stake table merkle root hashes for validating slightly out-of-date transactions
+    pub past_historial_stake_table_merkle_roots: StakeTableSetHistory,
+    /// Commitment to historical stake tables
+    pub historical_stake_tables_commitment: StakeTableSetCommitment,
+    /// CollectedRewards form recent blocks, allows validating slightly out-of-date-transactions
+    pub collected_rewards: CollectedRewardsHistory,
 }
 
 /// Nullifier proofs, organized by the root hash for which they are valid.
 pub type NullifierProofs = Vec<(Nullifier, SetMerkleProof, set_hash::Hash)>;
 
 /// Information to mint CAP records for reward collectors
-pub type VerifiedRewards = Vec<CollectedRewards>;
+pub type VerifiedRewards = Vec<CollectedRewardsProof>;
 
 impl Default for ValidatorState {
     fn default() -> Self {
@@ -1224,7 +1279,7 @@ impl Default for ValidatorState {
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
             StakeTableMap::EmptySubtree,
             Amount::from(0u64),
-            StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+            StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
         )
     }
 }
@@ -1242,16 +1297,20 @@ impl Committable for ValidatorState {
             record_merkle_frontier: RecordMerkleFrontier(self.record_merkle_frontier.clone())
                 .commit(),
             past_record_merkle_roots: self.past_record_merkle_roots.commit(),
-
             past_nullifiers: self.past_nullifiers.commit(),
             prev_block: self.prev_block,
             stake_table: StakeTableCommitment(self.stake_table.hash()).commit(),
-            total_stake: self.total_stake,
-            stake_table_commitments: StakeTableCommitmentsCommitment(
-                self.stake_table_commitments_commitment.root_value,
+            total_stake: CommittableAmount::from(self.total_stake).commit(),
+            historical_stake_tables: CommittableStakeTableSetFrontier(
+                self.historical_stake_tables.clone(),
             )
             .commit(),
-            collected_rewards: CollectedRewardsCommitment(self.collected_rewards.hash()).commit(),
+            past_stc_merkle_roots: self.past_historial_stake_table_merkle_roots.commit(),
+            historial_stake_tables_commitment: CommittableStakeTableSetCommitment(
+                self.historical_stake_tables_commitment,
+            )
+            .commit(),
+            collected_rewards: self.collected_rewards.commit(),
         };
         inputs.commit().into()
     }
@@ -1270,7 +1329,7 @@ impl ValidatorState {
         record_merkle_frontier: MerkleTree,
         stake_table_map: StakeTableMap,
         total_stake: Amount,
-        stake_table_commitments_mt: StakeTableCommMT,
+        stake_table_commitments_mt: StakeTableSetMT,
     ) -> Self {
         Self {
             chain,
@@ -1287,9 +1346,12 @@ impl ValidatorState {
             prev_block: Block::default().commit(),
             stake_table: stake_table_map,
             total_stake,
-            stake_table_commitments: stake_table_commitments_mt.frontier(),
-            stake_table_commitments_commitment: stake_table_commitments_mt.commitment(),
-            collected_rewards: KVMerkleTree::<CollectedRewardsHash>::EmptySubtree,
+            historical_stake_tables: stake_table_commitments_mt.frontier(),
+            past_historial_stake_table_merkle_roots: StakeTableSetHistory(VecDeque::with_capacity(
+                Self::HISTORY_SIZE,
+            )),
+            historical_stake_tables_commitment: stake_table_commitments_mt.commitment(),
+            collected_rewards: CollectedRewardsHistory::default(),
         }
     }
 
@@ -1332,7 +1394,7 @@ impl ValidatorState {
     /// - [ValidationError::NullifierAlreadyExists]
     /// - [ValidationError::UnsupportedFreezeSize]
     /// - [ValidationError::UnsupportedTransferSize]
-    /// - [ValidationError::PreviouslyCollectedReward]
+    /// - [ValidationError::RewardAlreadyCollected]
     /// - [ValidationError::RewardAmountTooLarge]
     ///
     pub fn validate_block_check(
@@ -1341,7 +1403,7 @@ impl ValidatorState {
         parent_state: LedgerStateCommitment,
         txns: Block,
         txns_helper_proofs: Vec<EspressoTxnHelperProofs>,
-    ) -> Result<(Block, NullifierProofs, VerifiedRewards), ValidationError> {
+    ) -> Result<(Block, NullifierProofs, CollectedRewardsProofs), ValidationError> {
         // The block must be intended for this state.
         if parent_state != self.commit() {
             return Err(ValidationError::IncorrectParent);
@@ -1458,46 +1520,48 @@ impl ValidatorState {
         }
 
         let mut verified_rewards = vec![];
+        let mut verified_rewards_proofs = vec![];
         {
-            //verify rewards collection transactions
+            // verify rewards collection transactions
             for (pfs, txn) in rewards_proofs
                 .into_iter()
                 .zip(reward_txns.clone().into_iter())
             {
-                //verify reward txn (CollectRewardNote)
-                txn.verify().expect("Failed to verify CollectRewardNote");
+                let latest_reward = CollectedRewards {
+                    staking_key: txn.staking_key(),
+                    time: txn.time(),
+                };
 
-                //check helper proofs (RewardNoteProofs)
-                pfs.verify(
-                    self,
-                    txn.body.vrf_witness.staking_key.clone(),
-                    txn.body.vrf_witness.view_number,
-                )
-                .expect("Failed to verify auxillary proofs");
+                // verify eligibility reward txn (CollectRewardNote)
+                txn.verify()
+                    .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
 
-                //check vrf witness (EligibilityWitness)
-                txn.body
-                    .vrf_witness
-                    .verify()
-                    .expect("Failed to verify VRF Witness");
+                // check helper proofs (RewardNoteProofs)
+                let extracted_data = pfs.verify(self, latest_reward.clone())?;
 
                 //check reward amount
-                let max_reward =
-                    crate::reward::compute_reward_amount(self, self.block_height, self.total_stake);
-                if txn.body.reward_amount > max_reward {
+                let max_reward = crate::reward::compute_reward_amount(
+                    self.block_height,
+                    extracted_data.key_stake,
+                    extracted_data.stake_table_total_stake,
+                );
+                if txn.reward_amount() > max_reward {
                     return Err(ValidationError::RewardAmountTooLarge);
                 }
-                let latest_reward = CollectedRewards {
-                    staking_key: txn.body.vrf_witness.staking_key,
-                    view_number: txn.body.vrf_witness.view_number,
-                };
 
                 //check for duplicate reward in current block
                 if verified_rewards.contains(&latest_reward) {
-                    return Err(ValidationError::PreviouslyCollectedReward);
+                    return Err(ValidationError::RewardAlreadyCollected {
+                        reward: latest_reward,
+                    });
                 }
+                verified_rewards.push(latest_reward.clone());
 
-                verified_rewards.push(latest_reward);
+                verified_rewards_proofs.push((
+                    latest_reward,
+                    pfs.get_uncollected_reward_proof(),
+                    extracted_data.collected_reward_digest,
+                ));
             }
         }
         // assemble Block
@@ -1507,7 +1571,7 @@ impl ValidatorState {
             .chain(reward_txns.into_iter().map(EspressoTransaction::Reward))
             .collect();
 
-        Ok((Block(txns), nullifiers_proofs, verified_rewards))
+        Ok((Block(txns), nullifiers_proofs, verified_rewards_proofs))
     }
 
     /// Performs validation for a block, updating the ValidatorState.
@@ -1571,18 +1635,6 @@ impl ValidatorState {
         let record_merkle_frontier = record_merkle_builder.build();
         assert_eq!(uid, record_merkle_frontier.num_leaves());
 
-        let mut stc_builder = crate::merkle_tree::FilledMTBuilder::from_frontier(
-            &self.stake_table_commitments_commitment,
-            &self.stake_table_commitments,
-        )
-        .expect("failed to restore stake table commitments merkle tree from frontier");
-
-        stc_builder.push((
-            StakeTableCommitment(self.stake_table.hash()),
-            self.total_stake,
-        ));
-        let stc_mt = stc_builder.build();
-
         if self.past_record_merkle_roots.0.len() >= Self::HISTORY_SIZE {
             self.past_record_merkle_roots.0.pop_back();
         }
@@ -1591,19 +1643,36 @@ impl ValidatorState {
             .push_front(self.record_merkle_commitment.root_value);
         self.record_merkle_commitment = record_merkle_frontier.commitment();
         self.record_merkle_frontier = record_merkle_frontier.frontier();
-        self.stake_table_commitments_commitment = stc_mt.commitment();
-        self.stake_table_commitments = stc_mt.frontier();
+
+        // Build stake table commitments frontier, history and new commitment
+        let mut historial_stake_tables_builder =
+            crate::merkle_tree::FilledMTBuilder::from_frontier(
+                &self.historical_stake_tables_commitment,
+                &self.historical_stake_tables,
+            )
+            .expect("failed to restore stake table commitments merkle tree from frontier");
+
+        historial_stake_tables_builder.push((
+            StakeTableCommitment(self.stake_table.hash()),
+            self.total_stake,
+            *now,
+        ));
+        let historial_stake_tables_mt = historial_stake_tables_builder.build();
+
+        if self.past_historial_stake_table_merkle_roots.0.len() >= Self::HISTORY_SIZE {
+            self.past_historial_stake_table_merkle_roots.0.pop_back();
+        }
+        self.past_historial_stake_table_merkle_roots
+            .0
+            .push_front(self.historical_stake_tables_commitment.root_value);
+        self.historical_stake_tables_commitment = historial_stake_tables_mt.commitment();
+        self.historical_stake_tables = historial_stake_tables_mt.frontier();
 
         //insert rewards transactions from this block
-        for r in rewards.clone() {
-            self.collected_rewards
-                .insert(r, ())
-                .expect("failed to add collected rewards");
-        }
-        //prune tree by forgetting rewards
-        for r in rewards {
-            self.collected_rewards.forget(r);
-        }
+        let _collected_rewards = self
+            .collected_rewards
+            .append_block(rewards)
+            .expect("failed to append collected rewards after validation");
         self.prev_state = Some(comm);
         Ok(ValidationOutputs {
             uids,

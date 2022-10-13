@@ -11,6 +11,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+use crate::stake_table::{StakeTableMap, StakeTableSetMT};
 use crate::state::*;
 use crate::universal_params::{MERKLE_HEIGHT, PROVER_CRS, UNIVERSAL_PARAM, VERIF_CRS};
 use arbitrary::Arbitrary;
@@ -323,7 +324,7 @@ impl MultiXfrTestState {
                 t,
                 StakeTableMap::EmptySubtree,
                 Amount::from(0u64),
-                StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+                StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
             ),
             outer_timer: timer,
             inner_timer: Instant::now(),
@@ -1240,6 +1241,7 @@ pub fn crypto_rng_from_seed(seed: [u8; 32]) -> ChaChaRng {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stake_table::{StakeTableMap, StakeTableSetMT};
     use async_std::sync::Arc;
     use commit::Committable;
     use jf_cap::structs::{NoteType, Nullifier};
@@ -1429,7 +1431,7 @@ mod tests {
         let validator = |xfrs: &[_], freezes: &[_]| {
             let record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
             let stake_table_map = StakeTableMap::EmptySubtree;
-            let stake_table_commitments_mt = StakeTableCommMT::new(MERKLE_HEIGHT).unwrap();
+            let stake_table_commitments_mt = StakeTableSetMT::new(MERKLE_HEIGHT).unwrap();
             ValidatorState::new(
                 ChainVariables::new(
                     42,
@@ -1487,7 +1489,7 @@ mod tests {
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
             StakeTableMap::EmptySubtree,
             Amount::from(0u64),
-            StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+            StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
         );
         let mut v2 = v1.clone();
 
@@ -1647,7 +1649,7 @@ mod tests {
             t,
             StakeTableMap::EmptySubtree,
             Amount::from(0u64),
-            StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+            StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
         );
 
         println!("Validator set up: {}s", now.elapsed().as_secs_f32());

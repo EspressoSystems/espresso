@@ -399,6 +399,14 @@ where
             Some((None, running_hash))
         }
     }
+
+    /// Get leaf key, value pair. Return None if terminal node is an empty subtree
+    pub fn get_leaf(&self) -> Option<(KVHash::Key, KVHash::Value)> {
+        match &self.terminal_node {
+            KVMerkleTerminalNode::EmptySubtree => None,
+            KVMerkleTerminalNode::Leaf { key, value, .. } => Some((key.clone(), value.clone())),
+        }
+    }
 }
 
 impl<KVHash> KVMerkleTree<KVHash>
@@ -791,6 +799,24 @@ where
 
         Ok(())
     }
+
+    pub fn multi_insert(
+        &mut self,
+        inserts: impl IntoIterator<Item = (KVHash::Key, KVHash::Value, KVMerkleProof<KVHash>)>,
+    ) -> Result<Vec<KVMerkleProof<KVHash>>, KVHash::Digest> {
+        let mut kvs = vec![];
+        for (k, v, proof) in inserts.into_iter() {
+            self.remember(k.clone(), proof)?;
+            kvs.push((k, v));
+        }
+        for (k, v) in kvs.iter() {
+            self.insert(k.clone(), v.clone()).unwrap();
+        }
+        Ok(kvs
+            .into_iter()
+            .map(|(k, _)| self.lookup(k).unwrap().1)
+            .collect())
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -803,21 +829,9 @@ where
     <KVHash::BranchArityMinus1 as AddLength<KVHash::Digest, U1>>::Output:
         ArrayLength<KVMerkleTree<KVHash>>,
 {
-    let mut kvs = vec![];
     let mut s = KVMerkleTree::ForgottenSubtree { digest: root };
-    for (k, v, proof) in inserts {
-        s.remember(k.clone(), proof)?;
-        kvs.push((k, v));
-    }
-    for (k, v) in kvs.iter() {
-        s.insert(k.clone(), v.clone()).unwrap();
-    }
-    Ok((
-        s.hash(),
-        kvs.into_iter()
-            .map(|(k, _)| s.lookup(k).unwrap().1)
-            .collect(),
-    ))
+    let proofs = s.multi_insert(inserts)?;
+    Ok((s.hash(), proofs))
 }
 
 #[cfg(test)]

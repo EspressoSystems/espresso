@@ -3062,7 +3062,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.3#e619dbbcfdb16d1f58e65baaa8509be83a744cf8"
 dependencies = [
  "async-lock",
  "async-std",
@@ -3098,7 +3098,7 @@ dependencies = [
 [[package]]
 name = "hotshot-centralized-server"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.3#e619dbbcfdb16d1f58e65baaa8509be83a744cf8"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3118,7 +3118,7 @@ dependencies = [
 [[package]]
 name = "hotshot-consensus"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.3#e619dbbcfdb16d1f58e65baaa8509be83a744cf8"
 dependencies = [
  "async-lock",
  "async-std",
@@ -3137,9 +3137,10 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.3#e619dbbcfdb16d1f58e65baaa8509be83a744cf8"
 dependencies = [
  "arbitrary",
+ "ark-serialize",
  "async-std",
  "async-trait",
  "async-tungstenite 0.17.2",
@@ -3167,7 +3168,7 @@ dependencies = [
 [[package]]
 name = "hotshot-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.3#e619dbbcfdb16d1f58e65baaa8509be83a744cf8"
 dependencies = [
  "async-channel",
  "async-lock",
@@ -4041,7 +4042,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.3#e619dbbcfdb16d1f58e65baaa8509be83a744cf8"
 dependencies = [
  "async-lock",
  "async-std",
