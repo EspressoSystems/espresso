@@ -60,6 +60,10 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
         self.events.now()
     }
 
+    fn state(&self) -> &ValidatorState {
+        &self.validator
+    }
+
     fn event(
         &self,
         index: EventIndex,
@@ -96,6 +100,7 @@ impl<'a> MockNetwork<'a, EspressoLedger> for MockEspressoNetwork<'a> {
                     block: block.clone(),
                     block_id,
                     state_comm: self.validator.commit(),
+                    proof: (),
                 });
 
                 // Store the block in the history

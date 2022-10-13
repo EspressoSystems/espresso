@@ -12,10 +12,10 @@
 
 //! A script to export environment variables for test deployments of the Esresso testnet.
 
+use clap::Parser;
 use espresso_client::hd::{KeyTree, Mnemonic};
 use num_bigint::BigUint;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-use structopt::StructOpt;
 
 pub fn field_to_hex(f: impl Into<BigUint>) -> String {
     let bytes = f
@@ -27,20 +27,20 @@ pub fn field_to_hex(f: impl Into<BigUint>) -> String {
     hex::encode(&bytes)
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(
+#[derive(Debug, Parser)]
+#[command(
     name = "Espresso Faucet utility",
     about = "Create address and encryption key from mnemonic"
 )]
 pub struct Options {
     /// mnemonic for the faucet keystore (if not provided, a random mnemonic will be generated)
-    #[structopt(long, env = "ESPRESSO_FAUCET_MANAGER_MNEMONIC")]
+    #[arg(long, env = "ESPRESSO_FAUCET_MANAGER_MNEMONIC")]
     pub mnemonic: Option<String>,
 }
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
-    let opt = Options::from_args();
+    let opt = Options::parse();
     let mnemonic = match opt.mnemonic {
         Some(phrase) => Mnemonic::from_phrase(phrase.replace('-', " ")).unwrap(),
         None => KeyTree::random(&mut ChaChaRng::from_entropy()).1,
@@ -55,10 +55,7 @@ async fn main() -> Result<(), std::io::Error> {
 
     eprintln!("Faucet manager mnemonic: {}", mnemonic);
     eprintln!("Faucet manager encryption key: {}", pub_key);
-    eprintln!(
-        "Faucet manager address: {}",
-        net::UserAddress(pub_key.address())
-    );
+    eprintln!("Faucet manager address: {}", pub_key.address());
 
     println!("export ESPRESSO_FAUCET_MANAGER_MNEMONIC=\"{}\"", mnemonic);
     println!("export ESPRESSO_FAUCET_PUB_KEY=\"{}\"", pub_key);

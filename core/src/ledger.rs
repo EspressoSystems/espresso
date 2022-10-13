@@ -17,7 +17,6 @@ use crate::state::{
 use crate::util::canonical;
 use commit::{Commitment, Committable};
 use itertools::izip;
-use itertools::MultiUnzip;
 use jf_cap::structs::RecordOpening;
 use jf_cap::MerkleTree;
 use jf_cap::{
@@ -164,6 +163,11 @@ impl EspressoTransaction {
             Self::Reward(_) => vec![],
         }
     }
+
+    /// Get the number of inputs to the transaction.
+    pub fn input_len(&self) -> usize {
+        self.input_nullifiers().len()
+    }
 }
 
 impl commit::Committable for EspressoTransaction {
@@ -257,18 +261,6 @@ impl traits::Block for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
 
-    fn new(txns: Vec<Self::Transaction>) -> Self {
-        let (txns, proofs, memos): (Vec<EspressoTransaction>, Vec<_>, Vec<_>) = txns
-            .into_iter()
-            .map(|txn| (txn.txn, txn.proofs, txn.memos))
-            .multiunzip();
-        Self {
-            block: crate::state::Block(txns),
-            proofs,
-            memos,
-        }
-    }
-
     fn txns(&self) -> Vec<Self::Transaction> {
         izip!(&self.block.0, &self.proofs, &self.memos)
             .map(|(txn, proofs, memos)| ElaboratedTransaction {
@@ -289,9 +281,14 @@ impl traits::Block for ElaboratedBlock {
 impl traits::Validator for ValidatorState {
     type StateCommitment = LedgerStateCommitment;
     type Block = ElaboratedBlock;
+    type Proof = ();
 
-    fn now(&self) -> u64 {
-        self.prev_commit_time
+    fn next_block(&self) -> Self::Block {
+        ElaboratedBlock::default()
+    }
+
+    fn block_height(&self) -> u64 {
+        self.block_height
     }
 
     fn commit(&self) -> Self::StateCommitment {
@@ -301,8 +298,10 @@ impl traits::Validator for ValidatorState {
     fn validate_and_apply(
         &mut self,
         block: Self::Block,
+        _proof: Self::Proof,
     ) -> Result<(Vec<u64>, MerkleTree), ValidationError> {
-        let outputs = self.validate_and_apply(self.now() + 1, block.block, block.proofs)?;
+        let outputs =
+            self.validate_and_apply(self.prev_commit_time + 1, block.block, block.proofs)?;
         Ok((outputs.uids, outputs.record_proofs))
     }
 }

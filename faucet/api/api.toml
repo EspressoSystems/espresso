@@ -10,32 +10,17 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <https://www.gnu.org/licenses/>.
 
-[workspace]
-resolver = "2"
+[meta]
+NAME = "fauceet"
+DESCRIPTION = "Espresso Testnet Faucet"
+FORMAT_VERSION = "0.1.0"
 
-members = [
-    "address-book",
-    "apis/availability",
-    "apis/catchup",
-    "apis/esqs",
-    "apis/metastate",
-    "apis/status",
-    "apis/validator",
-    "client",
-    "core",
-    "faucet",
-    "faucet/types",
-    "validator",
-  ]
-[profile.dev]
-opt-level = 1
-[profile.release]
-debug = true
-lto = "thin"
-incremental = true
+[route.request_fee_assets]
+PATH = ["/request_fee_assets"]
+METHOD = "POST"
+DOC = """
+Request a grant of Espresso fee tokens for a given address.
 
-# To speed up the local build, run `cargo build` or `cargo test` with `--profile=release-no-lto`.
-[profile.release-no-lto]
-inherits = "release"
-# Disable LTO to decrease the linking time.
-lto = "off"
+The request payload should be the `UserPubKey` bundle requesting the assets, formatted as a JSON
+string (starting with "USERPUBKEY").
+"""

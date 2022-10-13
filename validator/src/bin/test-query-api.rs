@@ -27,16 +27,17 @@
 
 use ark_serialize::CanonicalSerialize;
 use async_std::future::timeout;
+use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use clap::Parser;
 use commit::Committable;
 use espresso_availability_api::query_data::*;
 use espresso_core::{ledger::EspressoLedger, state::BlockCommitment};
+use espresso_esqs::ApiError;
 use espresso_metastate_api::api::NullifierCheck;
 use futures::prelude::*;
 use hotshot_types::data::ViewNumber;
 use itertools::izip;
-use net::client::*;
 use reef::traits::Transaction;
 use seahorse::{events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnafu, KeystoreError};
 use serde::Deserialize;
@@ -45,18 +46,18 @@ use std::fmt::Display;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::time::Duration;
-use surf::Url;
+use surf_disco::Url;
 use tempdir::TempDir;
 use tracing::{event, Level};
 
 #[derive(Parser)]
 struct Args {
     /// Hostname or IP address of the query server.
-    #[clap(short = 'H', long = "--host", default_value = "localhost")]
+    #[arg(short = 'H', long = "--host", default_value = "localhost")]
     host: String,
 
     /// Port number of the query service.
-    #[clap(short = 'P', long = "--port", default_value = "50000")]
+    #[arg(short = 'P', long = "--port", default_value = "50000")]
     port: u16,
 }
 
@@ -71,9 +72,7 @@ fn url(opt: &Args, route: impl Display) -> Url {
 async fn get<T: for<'de> Deserialize<'de>, S: Display>(opt: &Args, route: S) -> T {
     let url = url(opt, route);
     event!(Level::INFO, "GET {}", url);
-    response_body(&mut surf::get(url).send().await.unwrap())
-        .await
-        .unwrap()
+    surf_disco::get::<T, ApiError>(url).send().await.unwrap()
 }
 
 async fn validate_committed_block(
@@ -168,6 +167,7 @@ struct UnencryptedKeystoreLoader {
     dir: TempDir,
 }
 
+#[async_trait]
 impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
     type Meta = ();
 
@@ -175,18 +175,26 @@ impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
         self.dir.path().into()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
+    async fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
         let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
+    async fn load(
+        &mut self,
+        _meta: &mut Self::Meta,
+    ) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
     }
 }
 
 async fn test(opt: &Args) {
     let num_blocks = get::<u64, _>(opt, "/status/latest_block_id").await + 1;
+
+    assert_eq!(
+        get::<Option<String>, _>(opt, "/status/location").await,
+        Some("My location".to_string())
+    );
 
     // Get the block summaries.
     let block_summaries: Vec<BlockSummaryQueryData> = get(
@@ -261,7 +269,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    test(&Args::from_args()).await
+    test(&Args::parse()).await
 }
 
 #[cfg(all(test, feature = "slow-tests"))]
