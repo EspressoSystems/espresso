@@ -1287,7 +1287,7 @@ impl ValidatorState {
     /// - [ValidationError::NullifierAlreadyExists]
     /// - [ValidationError::UnsupportedFreezeSize]
     /// - [ValidationError::UnsupportedTransferSize]
-    /// - [ValidationError::PreviouslyCollectedReward]
+    /// - [ValidationError::RewardAlreadyCollected]
     /// - [ValidationError::RewardAmountTooLarge]
     ///
     pub fn validate_block_check(
