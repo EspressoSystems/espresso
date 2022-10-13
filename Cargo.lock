@@ -3062,7 +3062,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#649157ff2c8f54d6759fad8307671b2afd218132"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
 dependencies = [
  "async-lock",
  "async-std",
@@ -3098,7 +3098,7 @@ dependencies = [
 [[package]]
 name = "hotshot-centralized-server"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#649157ff2c8f54d6759fad8307671b2afd218132"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3118,7 +3118,7 @@ dependencies = [
 [[package]]
 name = "hotshot-consensus"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#649157ff2c8f54d6759fad8307671b2afd218132"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
 dependencies = [
  "async-lock",
  "async-std",
@@ -3137,7 +3137,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#649157ff2c8f54d6759fad8307671b2afd218132"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
 dependencies = [
  "arbitrary",
  "async-std",
@@ -3159,7 +3159,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "snafu",
- "tagged-base64 0.2.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.2.1)",
+ "tagged-base64 0.2.2",
  "time 0.3.15",
  "tracing",
 ]
@@ -3167,7 +3167,7 @@ dependencies = [
 [[package]]
 name = "hotshot-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#649157ff2c8f54d6759fad8307671b2afd218132"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
 dependencies = [
  "async-channel",
  "async-lock",
@@ -4041,7 +4041,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?branch=main#649157ff2c8f54d6759fad8307671b2afd218132"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.2.2#dc9b34ce459b14eb944cbb849e73307631cac3ba"
 dependencies = [
  "async-lock",
  "async-std",
@@ -6991,6 +6991,16 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "tagged-base64"
+version = "0.2.2"
+source = "git+https://github.com/EspressoSystems/tagged-base64?tag=0.2.2#d1632c058ed4a727ef996dc77de89841ad316585"
+dependencies = [
+ "base64",
+ "crc-any",
+ "wasm-bindgen",
 ]
 
 [[package]]
