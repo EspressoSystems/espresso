@@ -1,3 +1,0 @@
-(function() {var implementors = {};
-implementors["faucet_types"] = [{"text":"impl Error for <a class=\"enum\" href=\"faucet_types/enum.FaucetError.html\" title=\"enum faucet_types::FaucetError\">FaucetError</a>","synthetic":false,"types":["faucet_types::FaucetError"]}];
-if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
