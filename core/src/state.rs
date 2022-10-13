@@ -14,7 +14,6 @@
 use espresso_macros::*;
 use jf_cap::structs::{Amount, ReceiverMemo};
 use jf_cap::Signature;
-use reef::traits::Validator;
 
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
@@ -1483,11 +1482,8 @@ impl ValidatorState {
                     .expect("Failed to verify VRF Witness");
 
                 //check reward amount
-                let max_reward = crate::reward::compute_reward_amount(
-                    self,
-                    self.block_height(),
-                    self.total_stake,
-                );
+                let max_reward =
+                    crate::reward::compute_reward_amount(self, self.block_height, self.total_stake);
                 if txn.body.reward_amount > max_reward {
                     return Err(ValidationError::RewardAmountTooLarge);
                 }

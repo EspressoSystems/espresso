@@ -53,7 +53,6 @@ key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 libp2p = "0.48"
 libp2p-networking = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", branch = "main" }
 markdown = "0.3"
-net = { git = "https://github.com/EspressoSystems/net.git" }
 portpicker = { version = "0.1", optional = true }
 rand = "0.8.5"
 rand_chacha = { package = "rand_chacha", version = "0.3.1" }
@@ -68,15 +67,14 @@ shellexpand = "2.0"
 snafu = { version = "0.7", features = ["backtraces"] }
 strum = "0.24"
 strum_macros = "0.24"
-surf = "2.3.1"
+surf-disco = { git = "ssh://git@github.com/EspressoSystems/surf-disco.git", branch = "main" }
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.2.1" }
 tempdir = "0.3.7"
-tide = { version = "0.16.0", default-features = false }
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1", optional = true }
 tracing = "0.1.35"
 tracing-distributed = "0.3.1"
 tracing-futures = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2.3"
 
 [features]
 slow-tests = []
@@ -87,14 +85,12 @@ testing = [ "address-book"
           , "portpicker"
           , "reef/testing"
           , "seahorse"
-          , "tide-disco"
           ]
 
 [dev-dependencies]
 address-book = { path = "../address-book" }
 espresso-client = { path = "../client" }
 portpicker = "0.1"
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1" }
 tracing-test = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -36,7 +36,7 @@ use std::net::ToSocketAddrs;
 use std::num::NonZeroUsize;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
-use surf::Url;
+use url::Url;
 
 #[derive(Clone, Debug)]
 pub enum HybridNetwork {

@@ -23,8 +23,8 @@ use std::time::Duration;
 
 #[derive(Parser)]
 #[command(
-    name = "Multi-machine consensus",
-    about = "Simulates consensus among multiple machines"
+    name = "Multi-machine consensus automation",
+    about = "Automates the consensus among multiple machines"
 )]
 struct Options {
     #[command(flatten)]
@@ -47,9 +47,11 @@ struct Options {
 
     /// Number of transactions to generate.
     ///
-    /// If not provided, the validator will wait for externally submitted transactions.
+    /// If this option is provided, runs the `espresso-validator-testing` executable to generate
+    /// transactions. Otherwise, runs the `espresso-validator` executable and waits for externally
+    /// submitted transactions.
     #[arg(long, short, conflicts_with("faucet-pub-key"))]
-    pub num_txn: Option<u64>,
+    pub num_txns: Option<u64>,
 
     /// Options for the new EsQS.
     #[command(subcommand)]
@@ -60,14 +62,14 @@ struct Options {
 
     /// Number of nodes to run only `fail_after_txn` rounds.
     ///
-    /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
+    /// If not provided, all nodes will keep running till `num_txns` rounds are completed.
     #[arg(long)]
     num_fail_nodes: Option<usize>,
 
     /// Number of rounds that all nodes will be running, after which `num_fail_nodes` nodes will be
     /// killed.
     ///
-    /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
+    /// If not provided, all nodes will keep running till `num_txns` rounds are completed.
     #[arg(long, requires("num-fail-nodes"))]
     fail_after_txn: Option<usize>,
 }
@@ -170,9 +172,9 @@ async fn main() {
         args.push(pub_key);
     }
 
-    let num_txn_str = match options.num_txn {
-        Some(num_txn) => num_txn.to_string(),
-        None => "".to_string(),
+    let (num_txn_str, exe) = match options.num_txns {
+        Some(num_txns) => (num_txns.to_string(), "espresso-validator-testing"),
+        None => ("".to_string(), "espresso-validator"),
     };
     let (num_fail_nodes, fail_after_txn_str) = match options.num_fail_nodes {
         Some(num_fail_nodes) => {
@@ -243,10 +245,10 @@ async fn main() {
             this_args.push("--num-nodes");
             this_args.push(&num_nodes_str);
             if id >= first_fail_id {
-                this_args.push("--num-txn");
+                this_args.push("--num-txns");
                 this_args.push(&fail_after_txn_str);
             } else if !num_txn_str.is_empty() {
-                this_args.push("--num-txn");
+                this_args.push("--num-txns");
                 this_args.push(&num_txn_str);
             }
             let mut esqs_args = vec![];
@@ -265,11 +267,11 @@ async fn main() {
                 this_args.push(arg);
             }
             if options.verbose {
-                println!("espresso-validator {}", this_args.join(" "));
+                println!("{} {}", exe, this_args.join(" "));
             }
             (
                 id,
-                cargo_run("espresso-validator")
+                cargo_run(exe)
                     .args(this_args)
                     .stdout(Stdio::piped())
                     .spawn()
@@ -328,7 +330,7 @@ async fn main() {
             match p.try_wait() {
                 Ok(Some(_)) => {
                     // Check whether the commitments are the same.
-                    if options.num_txn.is_some() {
+                    if options.num_txns.is_some() {
                         let lines = output.await;
                         if id < first_fail_id as usize {
                             for line in lines {
@@ -395,7 +397,7 @@ mod test {
 
     async fn automate(
         num_nodes: u64,
-        num_txn: u64,
+        num_txns: u64,
         num_fail_nodes: u64,
         fail_after_txn: u64,
         expect_success: bool,
@@ -403,12 +405,12 @@ mod test {
     ) {
         println!(
             "Testing {} txns with {}/{} nodes failed after txn {}",
-            num_txn, num_fail_nodes, num_nodes, fail_after_txn
+            num_txns, num_fail_nodes, num_nodes, fail_after_txn
         );
         // Views slow down as we add more nodes. This is a safe formula that allows ample time
         // without overly slowing down the test.
         let num_nodes = &num_nodes.to_string();
-        let num_txn = &num_txn.to_string();
+        let num_txns = &num_txns.to_string();
         let num_fail_nodes = &num_fail_nodes.to_string();
         let fail_after_txn = &fail_after_txn.to_string();
         let cdn_port = pick_unused_port().unwrap();
@@ -418,8 +420,8 @@ mod test {
             cdn_url,
             "--num-nodes",
             num_nodes,
-            "--num-txn",
-            num_txn,
+            "--num-txns",
+            num_txns,
             "--num-fail-nodes",
             num_fail_nodes,
             "--fail-after-txn",
@@ -443,13 +445,13 @@ mod test {
             args.push("--libp2p");
         }
         let now = Instant::now();
-        let status = cargo_run("multi_machine_automation")
+        let status = cargo_run("multi-machine-automation")
             .args(args)
             .status()
             .expect("Failed to execute the multi-machine automation");
         println!(
             "Completed {} txns in {} s",
-            num_txn,
+            num_txns,
             now.elapsed().as_secs_f32()
         );
         assert_eq!(expect_success, status.success());

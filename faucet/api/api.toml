@@ -10,16 +10,17 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <https://www.gnu.org/licenses/>.
 
-[package]
-name = "faucet-types"
-version = "0.1.0"
-authors = ["Espresso Systems <hello@espressosys.com>"]
-edition = "2021"
-license = "GPL-3.0-or-later"
+[meta]
+NAME = "fauceet"
+DESCRIPTION = "Espresso Testnet Faucet"
+FORMAT_VERSION = "0.1.0"
 
-[dependencies]
-atomic_store = { git = "https://github.com/EspressoSystems/atomicstore.git", version = "0.1.3" }
-jf-cap = { git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
-serde = "1.0.139"
-snafu = "0.7.1"
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1" }
+[route.request_fee_assets]
+PATH = ["/request_fee_assets"]
+METHOD = "POST"
+DOC = """
+Request a grant of Espresso fee tokens for a given address.
+
+The request payload should be the `UserPubKey` bundle requesting the assets, formatted as a JSON
+string (starting with "USERPUBKEY").
+"""
