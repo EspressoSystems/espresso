@@ -10,17 +10,18 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::kv_merkle_tree::KVMerkleProof;
+use crate::kv_merkle_tree::{KVMerkleProof, KVMerkleTree};
 use crate::merkle_tree::MerkleFrontier;
 use crate::stake_table::{
-    StakeTableCommitment, StakeTableHash, StakingKey, StakingKeySignature, StakingPrivKey,
-    ViewNumber,
+    ConsensusTime, StakeTableCommitment, StakeTableHash, StakeTableSetFrontier, StakingKey,
+    StakingKeySignature, StakingPrivKey,
 };
-use crate::state::{CommitableHash, CommitableHashTag, ValidatorState};
+use crate::state::{CommitableHash, CommitableHashTag, ValidationError, ValidatorState};
 use crate::tree_hash::KVTreeHash;
 pub use crate::util::canonical;
 use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
+use commit::Committable;
 use core::hash::Hash;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::structs::{
@@ -29,6 +30,8 @@ use jf_cap::structs::{
 use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::iter::once;
 
 /// Proof for Vrf output
 pub type VrfProof = StakingKeySignature;
@@ -36,9 +39,9 @@ pub type VrfProof = StakingKeySignature;
 /// Compute the allowed stake amount given current state (e.g. circulating supply), view_number and stake amount
 /// Hard-coded to 0 for FST
 pub fn compute_reward_amount(
-    _validator_state: &ValidatorState,
     _block_height: u64,
     _stake: Amount,
+    _total_staked_amount: Amount,
 ) -> Amount {
     Amount::from(0u64)
 }
@@ -47,8 +50,10 @@ pub fn compute_reward_amount(
 #[tagged_blob("COLLECTED-REWARD")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 pub struct CollectedRewards {
+    /// Staking key eligible for reward
     pub staking_key: StakingKey,
-    pub view_number: ViewNumber,
+    /// Time at which `staking key` was eligible for reward
+    pub time: ConsensusTime,
 }
 
 /// Identifying tag for CollectedReward
@@ -63,17 +68,6 @@ impl CommitableHashTag for CollectedRewardsTag {
 /// Hash for set Merkle tree for all of the previously-collected rewards
 pub type CollectedRewardsHash = CommitableHash<CollectedRewards, (), CollectedRewardsTag>;
 
-/// Committable type for CollectedRewards
-pub struct CollectedRewardsCommitment(pub <CollectedRewardsHash as KVTreeHash>::Digest);
-
-impl commit::Committable for CollectedRewardsCommitment {
-    fn commit(&self) -> commit::Commitment<Self> {
-        commit::RawCommitmentBuilder::new("Collected Reward")
-            .var_size_bytes(&canonical::serialize(&self.0).unwrap())
-            .finalize()
-    }
-}
-
 /// Reward Collection Transaction Note
 #[derive(
     Clone,
@@ -87,7 +81,7 @@ impl commit::Committable for CollectedRewardsCommitment {
     Deserialize,
 )]
 pub struct CollectRewardNote {
-    pub body: CollectRewardBody,
+    body: CollectRewardBody,
     signature: StakingKeySignature,
 }
 
@@ -97,25 +91,31 @@ impl CollectRewardNote {
     #[allow(clippy::too_many_arguments)]
     pub fn generate<R: CryptoRng + RngCore>(
         rng: &mut R,
-        validator_state: &ValidatorState,
-        view_number: hotshot_types::data::ViewNumber,
+        historical_stake_tables_frontier: &StakeTableSetFrontier,
+        historical_stake_tables_num_leaves: u64,
+        total_staked_amount: Amount,
+        time: ConsensusTime,
         block_height: u64,
         staking_priv_key: &StakingPrivKey,
         cap_address: UserAddress,
         stake_amount: Amount,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: CollectedRewardsProof,
         vrf_proof: VrfProof,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
         let staking_key = StakingKey::from_priv_key(staking_priv_key);
         let (body, proofs) = CollectRewardBody::generate(
             rng,
-            validator_state,
-            view_number,
+            historical_stake_tables_frontier,
+            historical_stake_tables_num_leaves,
+            total_staked_amount,
+            time,
             block_height,
             staking_key,
             cap_address,
             stake_amount,
             stake_amount_proof,
+            uncollected_reward_proof,
             vrf_proof,
         )?;
         let size = CanonicalSerialize::serialized_size(&body);
@@ -129,7 +129,7 @@ impl CollectRewardNote {
         Ok((note, proofs))
     }
 
-    /// verified a reward collect note
+    /// verifies a reward collect note
     pub fn verify(&self) -> Result<(), RewardError> {
         self.body.verify()?;
         let size = CanonicalSerialize::serialized_size(&self.body);
@@ -145,6 +145,21 @@ impl CollectRewardNote {
         } else {
             Err(RewardError::SignatureError {})
         }
+    }
+
+    /// returns staking for which reward is being claimed
+    pub fn staking_key(&self) -> StakingKey {
+        self.body.vrf_witness.staking_key.clone()
+    }
+
+    /// returns time for which reward is being claimed
+    pub fn time(&self) -> ConsensusTime {
+        self.body.vrf_witness.time
+    }
+
+    /// returns amount claimed for reward
+    pub fn reward_amount(&self) -> Amount {
+        self.body.reward_amount
     }
 }
 
@@ -176,9 +191,9 @@ pub struct CollectRewardBody {
     /// Address that owns the reward
     cap_address: UserAddress,
     /// Reward amount
-    pub reward_amount: Amount,
+    reward_amount: Amount,
     /// Staking `pub_key`, `view` number and a proof that staking key was selected for committee election on `view`
-    pub vrf_witness: EligibilityWitness,
+    vrf_witness: EligibilityWitness,
 }
 
 impl CollectRewardBody {
@@ -187,33 +202,43 @@ impl CollectRewardBody {
     #[allow(clippy::too_many_arguments)]
     pub fn generate<R: RngCore + CryptoRng>(
         rng: &mut R,
-        validator_state: &ValidatorState,
-        view_number: hotshot_types::data::ViewNumber,
+        historical_stake_tables_frontier: &StakeTableSetFrontier,
+        historical_stake_tables_num_leaves: u64,
+        total_staked_amount: Amount,
+        time: ConsensusTime,
         block_height: u64,
         staking_key: StakingKey,
         cap_address: UserAddress,
         stake_amount: Amount,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: CollectedRewardsProof,
         vrf_proof: VrfProof,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
-        let reward_amount = compute_reward_amount(validator_state, block_height, stake_amount);
+        let allowed_reward = compute_reward_amount(block_height, stake_amount, total_staked_amount);
         let blind_factor = BlindFactor::rand(rng);
-        let rewards_proofs = RewardNoteProofs::generate(
-            validator_state,
-            view_number,
-            &staking_key,
-            stake_amount_proof,
-        )?;
+        let rewards_proofs = {
+            // assemble reward proofs
+            match &historical_stake_tables_frontier {
+                MerkleFrontier::Proof(merkle_proof) => RewardNoteProofs {
+                    stake_tables_set_leaf_proof: merkle_proof.clone(),
+                    stake_amount_proof,
+                    uncollected_reward_proof,
+                    leaf_proof_pos: historical_stake_tables_num_leaves - 1,
+                },
+                MerkleFrontier::Empty { .. } => {
+                    return Err(RewardError::EmptyStakeTableCommitmentSet {});
+                }
+            }
+        };
         let vrf_witness = EligibilityWitness {
             staking_key,
-            view_number: view_number.into(),
-            stake_amount,
+            time,
             vrf_proof,
         };
         let body = CollectRewardBody {
             blind_factor,
             cap_address,
-            reward_amount,
+            reward_amount: allowed_reward, // TODO allow fees, need to subtract fee from reward_amouint
             vrf_witness,
         };
         Ok((body, rewards_proofs))
@@ -251,24 +276,22 @@ impl CollectRewardBody {
     Serialize,
     Deserialize,
 )]
-pub struct EligibilityWitness {
+struct EligibilityWitness {
     /// Staking public key
-    pub staking_key: StakingKey,
-    /// View number for which the key was elected
-    pub view_number: ViewNumber,
-    /// amount of stake on `view_number`
-    stake_amount: Amount,
+    staking_key: StakingKey,
+    /// View number for which the key was elected for reward
+    time: ConsensusTime,
     /// Cryptographic proof
     vrf_proof: VrfProof,
 }
 
 impl EligibilityWitness {
     pub fn verify(&self) -> Result<(), RewardError> {
-        if mock_eligibility::is_eligible(self.view_number, &self.staking_key, &self.vrf_proof) {
+        if mock_eligibility::is_eligible(self.time, &self.staking_key, &self.vrf_proof) {
             Ok(())
         } else {
             Err(RewardError::KeyNotEligible {
-                view: self.view_number,
+                view: self.time,
                 staking_key: self.staking_key.clone(),
             })
         }
@@ -294,121 +317,122 @@ impl EligibilityWitness {
 )]
 pub struct RewardNoteProofs {
     /// Proof for stake table commitment and total stake for view number
-    stake_table_commitment_leaf_proof:
-        crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount)>,
+    stake_tables_set_leaf_proof:
+        crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount, ConsensusTime)>,
     /// Proof for stake_amount for staking key under above stake table commitment
     stake_amount_proof: KVMerkleProof<StakeTableHash>,
     /// Proof that reward hasn't been collected
-    uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+    uncollected_reward_proof: CollectedRewardsProof,
     /// Index of relevant stake table commitment in MerkleTree
     leaf_proof_pos: u64,
 }
 
+/// RewardNote fields extracted data from proof
+/// returned by RewardNoteProof::verify
+/// It contains
+/// i) digest for which uncollected reward proof was verified against,
+/// ii) Stake owned by the staking key at time of reward eligibility
+/// iii) Total staked in stake table at time of reward eligibility
+pub struct RewardProofsValidationOutputs {
+    pub(crate) collected_reward_digest: CollectedRewardsDigest,
+    pub(crate) key_stake: Amount,
+    pub(crate) stake_table_total_stake: Amount,
+}
+
 impl RewardNoteProofs {
-    /// Return RewardNoteHelperProofs if view_number is valid and staking_key was elected for it, otherwise return RewardError.
-    pub(crate) fn generate(
-        validator_state: &ValidatorState,
-        view_number: hotshot_types::data::ViewNumber,
-        stake_key: &StakingKey,
-        stake_amount_proof: KVMerkleProof<StakeTableHash>,
-    ) -> Result<Self, RewardError> {
-        let stake_table_commitment_leaf_proof =
-            Self::get_stake_commitment_total_stake_and_proof(validator_state)?;
-        let uncollected_reward_proof =
-            Self::proof_uncollected_rewards(validator_state, stake_key, view_number)?;
-        let leaf_proof_pos = validator_state
-            .stake_table_commitments_commitment
-            .num_leaves
-            - 1;
-        Ok(Self {
-            stake_table_commitment_leaf_proof,
-            stake_amount_proof,
-            uncollected_reward_proof,
-            leaf_proof_pos,
-        })
-    }
-
-    /// Returns StakeTable commitment for view number, if view number is valid, otherwise return RewardError::InvalidViewNumber
-    fn get_stake_commitment_total_stake_and_proof(
-        validator_state: &ValidatorState,
-    ) -> Result<crate::merkle_tree::MerkleLeafProof<(StakeTableCommitment, Amount)>, RewardError>
-    {
-        match validator_state.stake_table_commitments.clone() {
-            MerkleFrontier::Empty { .. } => Err(RewardError::EmptyStakeTableCommitmentSet {}),
-            MerkleFrontier::Proof(merkle_proof) => Ok(merkle_proof),
-        }
-    }
-
-    /// Returns proof if reward hasn't been collected, otherwise RewardError::RewardAlreadyCollected
-    fn proof_uncollected_rewards(
-        validator_state: &ValidatorState,
-        staking_key: &StakingKey,
-        view_number: hotshot_types::data::ViewNumber,
-    ) -> Result<KVMerkleProof<CollectedRewardsHash>, RewardError> {
-        let key = CollectedRewards {
-            staking_key: staking_key.clone(),
-            view_number: view_number.into(),
-        };
-        // if (key, proof) not found, then key is present but not in memory. Hence, reward was collected.
-        // if value is found, then reward was also collected
-        // if value not found, return proof for it
-        let (found, proof) = validator_state
-            .collected_rewards
-            .lookup(key)
-            .ok_or(RewardError::RewardAlreadyCollected {})?;
-        if found.is_none() {
-            Ok(proof)
-        } else {
-            Err(RewardError::RewardAlreadyCollected {})
-        }
-    }
-
-    ///Checks proofs in RewardNoteProofs against ValidatorState
+    /// Checks proofs in RewardNoteProofs against ValidatorState
+    /// On success, return RewardProofExtractedData
     pub fn verify(
         &self,
         validator_state: &ValidatorState,
-        staking_key: StakingKey,
-        view_number: ViewNumber,
-    ) -> Result<(), RewardError> {
-        //check collected reward non-inclusion proof
-        let collected_reward_check = self.uncollected_reward_proof.check(
-            CollectedRewards {
-                staking_key: staking_key.clone(),
-                view_number,
-            },
-            validator_state.collected_rewards.hash(),
-        );
-        match collected_reward_check {
-            None => return Err(RewardError::ProofNotInMemory {}),
-            Some((Some(_), _)) => {
-                return Err(RewardError::RewardAlreadyCollected {});
-            }
-            //Non-inclusion proof is valid and proof check returns no value for given key
-            Some((None, _)) => {}
+        claimed_reward: CollectedRewards, // staking key and time t
+    ) -> Result<RewardProofsValidationOutputs, ValidationError> {
+        let stake_table_commitment = self.stake_tables_set_leaf_proof.leaf.0 .0;
+        let stake_table_total_stake = self.stake_tables_set_leaf_proof.leaf.0 .1;
+        let time_in_proof = self.stake_tables_set_leaf_proof.leaf.0 .2;
+        // 0. check public input matched proof data
+        // 0.i) stake table proof leaf should contain correct commitment, total staked, and time.
+        //   Only time needs to be checked against claimed reward's time,
+        //   Commitment in proof is used to check stake amount, and the total stake is returned for caller use.
+        if claimed_reward.time != time_in_proof {
+            return Err(ValidationError::BadCollectedRewardProof {});
         }
 
-        //check stake_table_commitment_proof
-        crate::merkle_tree::MerkleTree::check_proof(
+        // 0.ii) staking key must be checked against claimed reward's staking key
+        let (staking_key_in_proof, key_staked_amount) = self
+            .stake_amount_proof
+            .get_leaf()
+            .ok_or(ValidationError::BadCollectedRewardProof {})?;
+        if staking_key_in_proof != claimed_reward.staking_key {
+            return Err(ValidationError::BadCollectedRewardProof {});
+        }
+
+        // 1. Check reward hasn't been collected, retrieve merkle root of collected reward set that checked
+        let root = {
+            let recently_collected_rewards =
+                validator_state.collected_rewards.recent_collected_rewards();
             validator_state
-                .stake_table_commitments_commitment
-                .root_value,
-            self.leaf_proof_pos,
-            &self.stake_table_commitment_leaf_proof,
-        )
-        .map_err(|_| RewardError::BadStakeTableCommitmentProof {})?;
+                .collected_rewards
+                .check_uncollected_rewards(
+                    &recently_collected_rewards,
+                    &self.uncollected_reward_proof,
+                    claimed_reward.clone(),
+                )?
+        };
 
-        //check stake amount proof
-        let stake_amount_check = self.stake_amount_proof.check(
-            staking_key,
-            self.stake_table_commitment_leaf_proof.leaf.0 .0 .0,
-        );
-        match stake_amount_check {
-            Some((Some(_), _)) => {}
-            _ => {
-                return Err(RewardError::BadStakeTableProof {});
+        // 2. Validate stake table commitments inclusion proof
+        {
+            let mut found = false;
+            for root_value in once(
+                validator_state
+                    .historical_stake_tables_commitment
+                    .root_value,
+            )
+            .chain(
+                validator_state
+                    .past_historial_stake_table_merkle_roots
+                    .0
+                    .iter()
+                    .copied(),
+            ) {
+                if crate::merkle_tree::MerkleTree::check_proof(
+                    root_value,
+                    self.leaf_proof_pos,
+                    &self.stake_tables_set_leaf_proof,
+                )
+                .is_ok()
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return Err(ValidationError::BadStakeTableCommitmentsProof {});
             }
         }
-        Ok(())
+
+        // 3. Check stake amount proof
+        {
+            let (option_value, _derived_stake_amount_root) = self
+                .stake_amount_proof
+                .check(
+                    claimed_reward.staking_key,
+                    stake_table_commitment.0, // this is stake table commitment in stake table set inclusion proof
+                )
+                .unwrap(); // safe unwrap, check never returns None
+            option_value.ok_or(ValidationError::BadStakeTableProof {})?;
+        }
+
+        Ok(RewardProofsValidationOutputs {
+            collected_reward_digest: root,
+            key_stake: key_staked_amount,
+            stake_table_total_stake,
+        })
+    }
+
+    /// retrieves proof that reward hasn't been collected
+    pub fn get_uncollected_reward_proof(&self) -> CollectedRewardsProof {
+        self.uncollected_reward_proof.clone()
     }
 }
 
@@ -417,7 +441,7 @@ impl RewardNoteProofs {
 #[snafu(visibility(pub(crate)))]
 pub enum RewardError {
     /// An invalid view number
-    InvalidViewNumber { view_number: ViewNumber },
+    InvalidViewNumber { view_number: ConsensusTime },
 
     /// Serialization error
     SerializationError { reason: String },
@@ -436,21 +460,12 @@ pub enum RewardError {
 
     /// Staking key not eligible for reward
     KeyNotEligible {
-        view: ViewNumber,
+        view: ConsensusTime,
         staking_key: StakingKey,
     },
 
     /// RewardNote failed signature
     SignatureError {},
-
-    /// StakeTableCommitmentProof check failed
-    BadStakeTableCommitmentProof {},
-
-    /// Request reward too large
-    RewardAmountTooLarge {},
-
-    /// Stake table proof check failed
-    BadStakeTableProof {},
 }
 
 impl From<ark_serialize::SerializationError> for RewardError {
@@ -469,7 +484,7 @@ pub mod mock_eligibility {
 
     /// check weather a staking key is elegible for rewards
     pub fn is_eligible(
-        view_number: ViewNumber,
+        view_number: ConsensusTime,
         staking_key: &StakingKey,
         proof: &VrfProof,
     ) -> bool {
@@ -488,7 +503,7 @@ pub mod mock_eligibility {
 
     /// Prove that staking key is eligible for reward on view number. Return None if key is not eligible
     pub fn prove_eligibility(
-        view_number: ViewNumber,
+        view_number: ConsensusTime,
         staking_priv_key: &StakingPrivKey,
     ) -> Option<VrfProof> {
         // 1. compute vrf proof
@@ -532,5 +547,275 @@ pub mod mock_eligibility {
                 view_number
             )
         }
+    }
+}
+
+pub type CollectedRewardsSet = KVMerkleTree<CollectedRewardsHash>;
+pub type CollectedRewardsDigest = <CollectedRewardsHash as KVTreeHash>::Digest;
+pub type CollectedRewardsProof = KVMerkleProof<CollectedRewardsHash>;
+
+/// CollectedRewards proofs, organized by the root hash for which they are valid.
+pub type CollectedRewardsProofs = Vec<(
+    CollectedRewards,
+    CollectedRewardsProof,
+    CollectedRewardsDigest,
+)>;
+
+/// Sliding window for reward collection
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CollectedRewardsHistory {
+    current: CollectedRewardsDigest,
+    history: VecDeque<(CollectedRewardsSet, Vec<CollectedRewards>)>,
+}
+
+impl Default for CollectedRewardsHistory {
+    fn default() -> Self {
+        Self {
+            current: CollectedRewardsSet::EmptySubtree.hash(),
+            history: VecDeque::with_capacity(ValidatorState::HISTORY_SIZE),
+        }
+    }
+}
+
+impl CollectedRewardsHistory {
+    pub fn current_root(&self) -> CollectedRewardsDigest {
+        self.current
+    }
+
+    pub fn recent_collected_rewards(&self) -> HashSet<CollectedRewards> {
+        self.history
+            .iter()
+            .flat_map(|(_, collected_rewards)| collected_rewards)
+            .cloned()
+            .collect()
+    }
+
+    /// Check if a claimed reward has been collected.
+    ///
+    /// This function succeeds if `proof` is valid relative to some recent collected reward set (less than
+    /// [HISTORY_SIZE](ValidatorState::HISTORY_SIZE) blocks old) and proves that `claimed_reward` was not
+    /// in the set at that time, and if `claimed_reward` has not been spent since that historical state.
+    ///
+    /// `recent_collected_rewards` must be the result of calling [Self::recent_collected_rewards]; that is, it
+    /// should contain all of the claimed rewards which have been collected during the historical window
+    /// represented by this object.
+    ///
+    /// If successful, it returns the root hash of the collected_reward set for which `proof` is valid.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `proof` is not valid relative to any recent collected reward set, if `proof` proves that
+    /// `claimed_reward` _was_ in the set at the time `proof` was generated, or if `claimed_reward` has been
+    /// collected since `proof` was generated.
+    pub fn check_uncollected_rewards(
+        &self,
+        recent_collected_rewards: &HashSet<CollectedRewards>,
+        proof: &CollectedRewardsProof,
+        claimed_reward: CollectedRewards,
+    ) -> Result<CollectedRewardsDigest, ValidationError> {
+        // Make sure the claimed reward has not been spent during the sliding window of historical
+        // snapshots. If it hasn't, then it must be unspent as long as `proof` proves it unspent
+        // relative to any of our historical snapshots.
+        if recent_collected_rewards.contains(&claimed_reward) {
+            return Err(ValidationError::RewardAlreadyCollected {
+                reward: claimed_reward,
+            });
+        }
+
+        // Find a historical collected_reward set root hash which validates the proof.
+        for root in once(self.current).chain(self.history.iter().map(|(tree, _)| tree.hash())) {
+            let (option_value, computed_root) = proof.check(claimed_reward.clone(), root).unwrap();
+            if computed_root == root {
+                match option_value {
+                    None => {
+                        return Ok(root);
+                    }
+                    Some(_) => {
+                        return Err(ValidationError::RewardAlreadyCollected {
+                            reward: claimed_reward,
+                        })
+                    }
+                }
+            }
+        }
+
+        // The collected_reward proof didn't check against any of the past root hashes.
+        Err(ValidationError::BadCollectedRewardProof {})
+    }
+
+    /// Append a block with new collected rewards to the set.
+    ///
+    /// `inserts` is a list of collected_rewards to insert, in order, along with their proofs and the
+    /// historical root hash which their proof should be validated against. Note that inserting
+    /// rewards in different orders may yield different [CollectedRewardsHistory]s, so `inserts` must be
+    /// given in a canonical order -- the order in which the claimed rewards appear in the block. Each
+    /// collected reward and proof in `inserts` should be labeled with the [Hash](CollectedRewardsHash::Digest) that was
+    /// returned from [check_uncollected_rewards](Self::check_uncollected_rewards) when validating that proof. In addition,
+    /// [append_block](Self::append_block) must not have been called since any of the relevant calls
+    /// to [check_uncollected_rewards](Self::check_uncollected_rewards).
+    ///
+    /// This method uses the historical sparse [KVMerkleTree] snapshots to update each of the given
+    /// proofs to a proof relative to the current collected rewards set, constructing a sparse view of the
+    /// current set which includes paths to leaves for each of the collected_rewards to be inserted. From
+    /// there, the new claimed rewards can be directly inserted into the sparse [KVMerkleTree], which
+    /// can then be used to derive a new root hash.
+    ///
+    /// If the collected rewards proofs are successfully updated, this function may remove the oldest entry
+    /// from the history in order to keep the size of the history below
+    /// [HISTORY_SIZE](ValidatorState::HISTORY_SIZE).
+    ///
+    /// If successful, returns updated non-membership proofs for each claimed rewards in `inserts`, in the
+    /// form of a sparse representation of a [KVMerkleTree].
+    ///
+    /// # Errors
+    ///
+    /// This function fails if any of the proofs in `inserts` are invalid relative to the
+    /// corresponding [Hash](CollectedRewardsHash::Digest).
+    pub fn append_block(
+        &mut self,
+        inserts: CollectedRewardsProofs,
+    ) -> Result<CollectedRewardsSet, ValidationError> {
+        let (snapshot, new_hash, rewards) = self.apply_block(inserts)?;
+
+        // Update the state: append the new historical snapshot, prune an old snapshot if necessary,
+        // and update the current hash.
+        if self.history.len() >= ValidatorState::HISTORY_SIZE {
+            self.history.pop_back();
+        }
+        self.history.push_front((snapshot.clone(), rewards));
+        self.current = new_hash;
+
+        Ok(snapshot)
+    }
+
+    /// Update a set of historical collected rewards non-membership proofs.
+    ///
+    /// `inserts` is a list of new collected rewards along with their proofs and the historical root hash
+    /// which their proof should be validated against. [update_proofs](Self::update_proofs) will
+    /// compute a sparse [KVMerkleTree] containing non-membership proofs for each collected reward in
+    /// `inserts`, updated so that the root hash of each new proof is the latest root hash in
+    /// `self`.
+    ///
+    /// Each collected reward and proof in `inserts` should be labeled with the [Hash](CollectedRewardsHash::Digest) that
+    /// was returned from [check_uncollected_rewards](Self::check_uncollected_rewards) when validating that proof. In
+    /// addition, [append_block](Self::append_block) must not have been called since any of the
+    /// relevant calls to [check_uncollected_rewards](Self::check_uncollected_rewards).
+    ///
+    /// # Errors
+    ///
+    /// This function fails if any of the proofs in `inserts` are invalid relative to the
+    /// corresponding [Hash](CollectedRewardsHash::Digest).
+    pub fn update_proofs(
+        &self,
+        inserts: CollectedRewardsProofs,
+    ) -> Result<CollectedRewardsSet, ValidationError> {
+        Ok(self.apply_block(inserts)?.0)
+    }
+
+    fn apply_block(
+        &self,
+        inserts: CollectedRewardsProofs,
+    ) -> Result<
+        (
+            CollectedRewardsSet,
+            CollectedRewardsDigest,
+            Vec<CollectedRewards>,
+        ),
+        ValidationError,
+    > {
+        let collected_rewards = inserts
+            .iter()
+            .map(|(n, _, _)| n.clone())
+            .collect::<Vec<_>>();
+
+        // A map from a historical root hash to the proofs which are to be validated against that
+        // hash
+        let mut proofs_by_root = HashMap::<CollectedRewardsDigest, Vec<_>>::new();
+        for (n, proof, root) in inserts {
+            proofs_by_root.entry(root).or_default().push((n, proof));
+        }
+
+        // Get a sparse representation of the oldest set in the history. We will use this
+        // accumulator to incrementally build up a sparse representation of the current set that
+        // includes all of the necessary Merkle paths.
+        let mut accum = if let Some((oldest_tree, _)) = self.history.back() {
+            oldest_tree.clone()
+        } else {
+            CollectedRewardsSet::sparse(self.current)
+        };
+
+        // For each snapshot in the history, add the paths for each collected reward in the delta to
+        // `accum`, add the paths for each collected reward in `inserts` whose proof is relative to this
+        // snapshot, and then advance `accum` to the next historical state by inserting the
+        // collected rewards from the delta.
+        for (tree, delta) in self.history.iter().rev() {
+            assert_eq!(accum.hash(), tree.hash());
+            // Add Merkle paths for new collected reward whose proofs correspond to this snapshot.
+            for (n, proof) in proofs_by_root.remove(&tree.hash()).unwrap_or_default() {
+                accum
+                    .remember(n, proof)
+                    .map_err(|_| ValidationError::BadCollectedRewardProof {})?;
+            }
+            // Insert collected reward from `delta`, advancing `accum` to the next historical state while
+            // updating all of the Merkle paths it currently contains.
+            accum
+                .multi_insert(
+                    delta
+                        .iter()
+                        .map(|n| (n.clone(), (), tree.lookup(n.clone()).unwrap().1)),
+                )
+                .unwrap();
+        }
+
+        // Finally, add Merkle paths for any collected reward whose proofs were already current.
+        for (n, proof) in proofs_by_root.remove(&accum.hash()).unwrap_or_default() {
+            accum
+                .remember(n, proof)
+                .map_err(|_| ValidationError::BadCollectedRewardProof {})?;
+        }
+
+        // At this point, `accum` contains Merkle paths for each of the new collected rewards
+        // as well as all of the historical collected rewards. We want to do two different things with this
+        // tree:
+        //  * Insert the new collected rewards to derive the next collected rewards set commitment. We can do this
+        //    directly.
+        //  * Create a sparse representation that _only_ contains paths for the new collected rewards.
+        //    Unfortunately, this is more complicated. We cannot simply `forget` the historical
+        //    collected rewards, because the new ones are not actually in the set, which means they
+        //    don't necessarily correspond to unique leaves, and therefore forgetting other
+        //    collected rewards may inadvertently cause us to forget part of a path corresponding to a new
+        //    rewards. Instead, we will create a new sparse representation of the current set by
+        //    starting with the current commitment and remembering paths only for the rewards we
+        //    care about. We can get the paths from `accum`.
+        assert_eq!(accum.hash(), self.current);
+        let mut current = CollectedRewardsSet::sparse(self.current);
+        for n in &collected_rewards {
+            current
+                .remember(n.clone(), accum.lookup(n.clone()).unwrap().1)
+                .unwrap();
+        }
+
+        // Now that we have created a sparse snapshot of the current collected rewards set, we can insert
+        // the new ones into `accum` to derive the new commitment.
+        for n in &collected_rewards {
+            accum.insert(n.clone(), ()).unwrap();
+        }
+
+        Ok((current, accum.hash(), collected_rewards))
+    }
+}
+
+impl Committable for CollectedRewardsHistory {
+    fn commit(&self) -> commit::Commitment<Self> {
+        let mut ret = commit::RawCommitmentBuilder::new("Collected Rewards Hist Comm")
+            .field("current", self.current)
+            .constant_str("history")
+            .u64(self.history.len() as u64);
+        for (tree, delta) in self.history.iter() {
+            ret = ret
+                .field("root", tree.hash())
+                .var_size_bytes(&crate::util::canonical::serialize(delta).unwrap())
+        }
+        ret.finalize()
     }
 }
