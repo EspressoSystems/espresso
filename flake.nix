@@ -43,7 +43,7 @@
         os = (builtins.elemAt (builtins.elemAt info 3) 0);
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        rust_version = "1.63.0";
+        rust_version = "1.64.0";
         stableToolchain = pkgs.rust-bin.stable.${rust_version}.minimal.override {
           extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
         };
