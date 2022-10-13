@@ -160,85 +160,84 @@ async fn generate_transactions(
                     .next_event()
                     .await
                     .expect("HotShot unexpectedly closed");
-                match event.event {
-                    EventType::Decide { leaf_chain } => {
-                        let mut success = false;
-                        info!("decide with {} leaves", leaf_chain.len());
-                        if let Some(leaf) = leaf_chain.last() {
-                            if leaf.state.block_height > state.validator.block_height + 1 {
-                                panic!("missed a block, proposer is behind and cannot build a transaction");
-                            }
-                        }
-                        for leaf in leaf_chain.iter().rev() {
-                            // Add the block.
-                            if leaf.deltas.is_empty() {
-                                state
-                                    .validate_and_apply(
-                                        leaf.deltas.clone(),
-                                        &leaf.view_number,
-                                        0.0,
-                                        TxnPrintInfo::new_no_time(round as usize, 1),
-                                    )
-                                    .unwrap();
-                                empty_blocks += 1;
-                                info!("got empty block ({} since last commit)", empty_blocks);
-                                if empty_blocks >= ValidatorState::HISTORY_SIZE {
-                                    // If the transaction has expired due to empty blocks, propose
-                                    // a new one. We could update the same one and fix all its
-                                    // nullifier proofs, but for testing it doesn't matter and its
-                                    // simpler to just build a new transaction.
-                                    info!("transaction expired, proposing a new one");
-                                    (state, txn) = generate_transaction(state, round).await;
-                                    hotshot
-                                        .submit_transaction(txn.transaction.clone())
-                                        .await
-                                        .unwrap();
-                                    empty_blocks = 0;
-                                }
-                            } else if leaf.deltas.block.0[0].is_genesis() {
-                                // Nothing to do, the genesis transaction is already accounted for
-                                // in our mock state.
-                            } else {
-                                // In this demo, the only (non-genesis) blocks should be empty
-                                // blocks and the singleton block that we submitted.
-                                assert_eq!(leaf.deltas.block.0.len(), 1);
-                                assert_eq!(txn.transaction.txn, leaf.deltas.block.0[0]);
-                                let mut blk = state.validator.next_block();
-                                let kixs = txn.keys_and_memos.iter().map(|(kix, _)| *kix).collect();
-                                state
-                                    .try_add_transaction(
-                                        &mut blk,
-                                        txn.transaction.clone(),
-                                        txn.index,
-                                        kixs,
-                                        TxnPrintInfo::new_no_time(round as usize, 1),
-                                    )
-                                    .unwrap();
-                                state
-                                    .validate_and_apply(
-                                        blk,
-                                        &leaf.view_number,
-                                        0.0,
-                                        TxnPrintInfo::new_no_time(round as usize, 1),
-                                    )
-                                    .unwrap();
-                                println!(
-                                    "  - Round {} completed. Commitment: {}",
-                                    round + 1,
-                                    leaf.state.commit()
-                                );
-                                round += 1;
-                                success = true;
-                            }
-                        }
-                        if success {
-                            final_commitment = Some(leaf_chain.first().unwrap().state.commit());
-                            break;
+                if let EventType::Decide { leaf_chain } = &event.event {
+                    let mut success = false;
+                    info!("decide with {} leaves", leaf_chain.len());
+                    if let Some(leaf) = leaf_chain.last() {
+                        if leaf.state.block_height > state.validator.block_height + 1 {
+                            panic!(
+                                "missed a block, proposer is behind and cannot build a transaction"
+                            );
                         }
                     }
-                    _ => {
-                        info!("EVENT: {:?}", event);
+                    for leaf in leaf_chain.iter().rev() {
+                        // Add the block.
+                        if leaf.deltas.is_empty() {
+                            state
+                                .validate_and_apply(
+                                    leaf.deltas.clone(),
+                                    &leaf.view_number,
+                                    0.0,
+                                    TxnPrintInfo::new_no_time(round as usize, 1),
+                                )
+                                .unwrap();
+                            empty_blocks += 1;
+                            info!("got empty block ({} since last commit)", empty_blocks);
+                            if empty_blocks >= ValidatorState::HISTORY_SIZE {
+                                // If the transaction has expired due to empty blocks, propose a new
+                                // one. We could update the same one and fix all its nullifier
+                                // proofs, but for testing it doesn't matter and its simpler to just
+                                // build a new transaction.
+                                info!("transaction expired, proposing a new one");
+                                (state, txn) = generate_transaction(state, round).await;
+                                hotshot
+                                    .submit_transaction(txn.transaction.clone())
+                                    .await
+                                    .unwrap();
+                                empty_blocks = 0;
+                            }
+                        } else if leaf.deltas.block.0[0].is_genesis() {
+                            // Nothing to do, the genesis transaction is already accounted for in
+                            // our mock state.
+                        } else {
+                            // In this demo, the only (non-genesis) blocks should be empty blocks
+                            // and the singleton block that we submitted.
+                            assert_eq!(leaf.deltas.block.0.len(), 1);
+                            assert_eq!(txn.transaction.txn, leaf.deltas.block.0[0]);
+                            let mut blk = state.validator.next_block();
+                            let kixs = txn.keys_and_memos.iter().map(|(kix, _)| *kix).collect();
+                            state
+                                .try_add_transaction(
+                                    &mut blk,
+                                    txn.transaction.clone(),
+                                    txn.index,
+                                    kixs,
+                                    TxnPrintInfo::new_no_time(round as usize, 1),
+                                )
+                                .unwrap();
+                            state
+                                .validate_and_apply(
+                                    blk,
+                                    &leaf.view_number,
+                                    0.0,
+                                    TxnPrintInfo::new_no_time(round as usize, 1),
+                                )
+                                .unwrap();
+                            println!(
+                                "  - Round {} completed. Commitment: {}",
+                                round + 1,
+                                leaf.state.commit()
+                            );
+                            round += 1;
+                            success = true;
+                        }
                     }
+                    if success {
+                        final_commitment = Some(leaf_chain.first().unwrap().state.commit());
+                        break;
+                    }
+                } else {
+                    info!("EVENT: {:?}", event);
                 }
             }
         } else {
@@ -249,31 +248,24 @@ async fn generate_transactions(
                     .next_event()
                     .await
                     .expect("HotShot unexpectedly closed");
-                match event.event {
-                    EventType::Decide { leaf_chain } => {
-                        if let Some(leaf) = leaf_chain.first() {
-                            info!(
-                                "replica got block (block height {}, transaction count {})",
-                                leaf.state.block_height, leaf.state.transaction_count
-                            );
-                            if leaf.state.transaction_count > (round + 1) as usize {
-                                // Update round to account for all committed transactions, excluding
-                                // the genesis transaction.
-                                let commit = leaf_chain.first().unwrap().state.commit();
-                                println!(
-                                    "  - Round {} completed. Commitment: {}",
-                                    round + 1,
-                                    commit
-                                );
-                                final_commitment = Some(commit);
-                                round = (leaf.state.transaction_count - 1) as u64;
-                                break;
-                            }
+                if let EventType::Decide { leaf_chain } = &event.event {
+                    if let Some(leaf) = leaf_chain.first() {
+                        info!(
+                            "replica got block (block height {}, transaction count {})",
+                            leaf.state.block_height, leaf.state.transaction_count
+                        );
+                        if leaf.state.transaction_count > (round + 1) as usize {
+                            // Update round to account for all committed transactions, excluding the
+                            // genesis transaction.
+                            let commit = leaf_chain.first().unwrap().state.commit();
+                            println!("  - Round {} completed. Commitment: {}", round + 1, commit);
+                            final_commitment = Some(commit);
+                            round = (leaf.state.transaction_count - 1) as u64;
+                            break;
                         }
                     }
-                    _ => {
-                        info!("EVENT: {:?}", event);
-                    }
+                } else {
+                    info!("EVENT: {:?}", event);
                 }
             }
         }
