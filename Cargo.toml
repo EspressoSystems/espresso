@@ -29,13 +29,18 @@ members = [
   ]
 [profile.dev]
 opt-level = 1
+
+# The default release profile without LTO.
 [profile.release]
 debug = true
-lto = "thin"
 incremental = true
-
-# To speed up the local build, run `cargo build` or `cargo test` with `--profile=release-no-lto`.
-[profile.release-no-lto]
-inherits = "release"
 # Disable LTO to decrease the linking time.
 lto = "off"
+
+# The release profile with LTO.
+# CI uses this profile. To run it locally, add `--profile=release-lto` to `cargo build` or `cargo
+# test`.
+[profile.release-lto]
+inherits = "release"
+# Enable "thin" LTO to optimize performance.
+lto = "thin"

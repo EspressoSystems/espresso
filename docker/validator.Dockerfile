@@ -16,7 +16,7 @@ RUN apt-get update \
 &&  apt-get install -y curl wait-for-it \
 &&  rm -rf /var/lib/apt/lists/*
 
-COPY target/x86_64-unknown-linux-musl/release/espresso-validator /bin/espresso-validator
+COPY target/x86_64-unknown-linux-musl/release-lto/espresso-validator /bin/espresso-validator
 RUN chmod +x /bin/espresso-validator
 
 # Set file locations.
