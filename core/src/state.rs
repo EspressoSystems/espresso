@@ -1533,19 +1533,19 @@ impl ValidatorState {
         self.record_merkle_frontier = record_merkle_frontier.frontier();
 
         // Build stake table commitments frontier, history and new commitment
-        let mut stc_builder = crate::merkle_tree::FilledMTBuilder::from_frontier(
-            &self.historical_stake_tables_commitment,
-            &self.historical_stake_tables,
-        )
-        .expect("failed to restore stake table commitments merkle tree from frontier");
+        let mut historial_stake_tables_builder =
+            crate::merkle_tree::FilledMTBuilder::from_frontier(
+                &self.historical_stake_tables_commitment,
+                &self.historical_stake_tables,
+            )
+            .expect("failed to restore stake table commitments merkle tree from frontier");
 
-        stc_builder.push((
+        historial_stake_tables_builder.push((
             StakeTableCommitment(self.stake_table.hash()),
             self.total_stake,
             ConsensusTime(now),
         ));
-        let stc_mt = stc_builder.build();
-        assert_eq!(now, stc_mt.num_leaves()); // TODO why now??
+        let historial_stake_tables_mt = historial_stake_tables_builder.build();
 
         if self.past_historial_stake_table_merkle_roots.0.len() >= Self::HISTORY_SIZE {
             self.past_historial_stake_table_merkle_roots.0.pop_back();
@@ -1553,8 +1553,8 @@ impl ValidatorState {
         self.past_historial_stake_table_merkle_roots
             .0
             .push_front(self.historical_stake_tables_commitment.root_value);
-        self.historical_stake_tables_commitment = stc_mt.commitment();
-        self.historical_stake_tables = stc_mt.frontier();
+        self.historical_stake_tables_commitment = historial_stake_tables_mt.commitment();
+        self.historical_stake_tables = historial_stake_tables_mt.frontier();
 
         //insert rewards transactions from this block
         let _collected_rewards = self

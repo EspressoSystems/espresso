@@ -834,11 +834,11 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
     rng: &mut R,
     stake_proof: KVMerkleProof<StakeTableHash>,
     stake_amount: Amount,
+    mut collected_rewards: CollectedRewardsSet,
     staking_priv_key: &StakingPrivKey,
     cap_address: &UserAddress,
     mut hotshot: Consensus,
 ) {
-    let mut collected_rewards = CollectedRewardsSet::EmptySubtree;
     let staking_key = StakingKey::from_priv_key(staking_priv_key);
     loop {
         let event = hotshot
