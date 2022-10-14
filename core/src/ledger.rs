@@ -35,6 +35,7 @@ pub enum EspressoTransactionKind {
     GENESIS,
     CAP(reef::cap::TransactionKind),
     REWARD,
+    EVM,
 }
 
 impl traits::TransactionKind for EspressoTransactionKind {
@@ -111,6 +112,7 @@ impl EspressoTransaction {
             }
             Self::Genesis(_) => Err(ViewingError::NoViewingMemos),
             Self::Reward(_) => Err(ViewingError::NoViewingMemos),
+            Self::EVM(_) => todo!(),
         }
     }
 
@@ -120,6 +122,7 @@ impl EspressoTransaction {
             Self::Genesis(txn) => txn.output_commitments(),
             Self::CAP(txn) => txn.output_commitments(),
             Self::Reward(txn) => vec![txn.output_commitment()],
+            Self::EVM(_) => todo!(),
         }
     }
 
@@ -129,6 +132,7 @@ impl EspressoTransaction {
             Self::Genesis(txn) => Some(txn.output_openings()),
             Self::CAP(txn) => txn.output_openings(), // returns None
             Self::Reward(txn) => Some(vec![txn.output_opening()]),
+            Self::EVM(_) => todo!(),
         }
     }
 
@@ -143,6 +147,7 @@ impl EspressoTransaction {
             Self::Genesis(_) => EspressoTransactionKind::GENESIS,
             Self::CAP(txn) => EspressoTransactionKind::CAP(txn.kind()),
             Self::Reward(_) => EspressoTransactionKind::REWARD,
+            Self::EVM(_) => todo!(),
         }
     }
 
@@ -152,6 +157,7 @@ impl EspressoTransaction {
             Self::Genesis(txn) => txn.output_len(),
             Self::CAP(txn) => txn.output_len(),
             Self::Reward(_) => 1,
+            Self::EVM(_) => todo!(),
         }
     }
 
@@ -161,6 +167,7 @@ impl EspressoTransaction {
             Self::Genesis(_) => vec![],
             Self::CAP(txn) => txn.input_nullifiers(),
             Self::Reward(_) => vec![],
+            Self::EVM(_) => todo!(),
         }
     }
 

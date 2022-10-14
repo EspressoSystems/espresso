@@ -11,6 +11,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+// use espresso_evm::evm_node::EvmNode;
 use espresso_macros::*;
 use jf_cap::structs::{Amount, ReceiverMemo};
 use jf_cap::Signature;
@@ -45,6 +46,9 @@ use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
+use espresso_evm::transaction::EvmTransaction;
+use espresso_evm::validator_state::{EvmExecutionResult, EvmHeader, EvmValidatorState};
+use espresso_evm::EvmBlockchainError;
 use hotshot::{
     data::{BlockHash, LeafHash, TransactionHash},
     traits::{BlockContents, State, Transaction as TransactionTrait},
@@ -71,6 +75,7 @@ pub enum EspressoTransaction {
     Genesis(GenesisNote),
     CAP(TransactionNote),
     Reward(Box<CollectRewardNote>),
+    EVM(EvmTransaction),
 }
 
 impl CanonicalSerialize for EspressoTransaction {
@@ -91,6 +96,11 @@ impl CanonicalSerialize for EspressoTransaction {
                 writer.write_all(&[flag])?;
                 <GenesisNote as CanonicalSerialize>::serialize(genesis_note, &mut writer)
             }
+            Self::EVM(txn) => {
+                let flag = 3;
+                writer.write_all(&[flag])?;
+                <EvmTransaction as CanonicalSerialize>::serialize(txn, &mut writer)
+            }
         }
     }
 
@@ -99,6 +109,7 @@ impl CanonicalSerialize for EspressoTransaction {
             Self::CAP(txn) => txn.serialized_size() + 1,
             Self::Reward(reward) => reward.serialized_size() + 1,
             Self::Genesis(genesis) => genesis.serialized_size() + 1,
+            Self::EVM(_) => todo!(),
         }
     }
 }
@@ -119,6 +130,9 @@ impl CanonicalDeserialize for EspressoTransaction {
             ))),
             2 => Ok(Self::Genesis(
                 <GenesisNote as CanonicalDeserialize>::deserialize(&mut r)?,
+            )),
+            3 => Ok(Self::EVM(
+                <EvmTransaction as CanonicalDeserialize>::deserialize(&mut r)?,
             )),
             _ => Err(SerializationError::InvalidData),
         }
@@ -443,6 +457,17 @@ pub enum ValidationError {
 
     /// verification error for stake table commitments proof
     BadStakeTableCommitmentsProof {},
+
+    /// Validation error for EVM transactions
+    InvalidEvmTransaction {
+        #[serde(with = "ser_display")]
+        err: Result<EvmBlockchainError, String>,
+    },
+
+    // TODO: mathis - implement our own error type for EVM validation errors.
+    // or find a way to convert the types.
+    /// Generic EVM validation failed error
+    EvmFailed {},
 }
 
 pub(crate) mod ser_display {
@@ -505,6 +530,8 @@ impl Clone for ValidationError {
             RewardAmountTooLarge => RewardAmountTooLarge,
             BadStakeTableProof {} => BadStakeTableProof {},
             BadStakeTableCommitmentsProof {} => BadStakeTableCommitmentsProof {},
+            InvalidEvmTransaction { .. } => EvmFailed {}, // TODO: mathis - implement our own error type for EVM validation errors.
+            EvmFailed {} => EvmFailed {},
         }
     }
 }
@@ -1030,6 +1057,9 @@ pub struct ValidationOutputs {
     /// Sparse [MerkleTree] containing membership proofs for each new record created by this block,
     /// relative to the record set root hash after applying this block.
     pub record_proofs: MerkleTree,
+
+    /// The result of applying the EVM transactions in the block.
+    pub evm_execution_result: EvmExecutionResult,
 }
 
 /// Serializable [Arc]
@@ -1175,6 +1205,10 @@ pub struct ValidatorState {
     pub historical_stake_tables_commitment: StakeTableSetCommitment,
     /// CollectedRewards form recent blocks, allows validating slightly out-of-date-transactions
     pub collected_rewards: CollectedRewardsHistory,
+    /// The current state of the EVM validator.
+    pub evm_validator: EvmValidatorState, // TODO: mathis - remove the infinitely growing DB
+    /// The current header of the EVM block
+    pub evm_block_header: EvmHeader,
 }
 
 /// Nullifier proofs, organized by the root hash for which they are valid.
@@ -1230,6 +1264,8 @@ impl ValidatorState {
             )),
             historical_stake_tables_commitment: stake_table_commitments_mt.commitment(),
             collected_rewards: CollectedRewardsHistory::default(),
+            evm_validator: EvmValidatorState::new(), // TODO: mathis - initialize correctly
+            evm_block_header: EvmHeader::default(),  // TODO: mathis - initialize correctly
         }
     }
 
@@ -1314,6 +1350,7 @@ impl ValidatorState {
         let mut reward_txns = vec![];
         let mut cap_nulls_proofs = vec![];
         let mut rewards_proofs = vec![];
+        let mut evm_txns = vec![];
         for (txn, helper_proofs) in txns.0.into_iter().zip(txns_helper_proofs.into_iter()) {
             match (txn, helper_proofs) {
                 (EspressoTransaction::CAP(cap_txn), EspressoTxnHelperProofs::CAP(cap_nuls_pfs)) => {
@@ -1326,6 +1363,9 @@ impl ValidatorState {
                 ) => {
                     reward_txns.push(reward_txn);
                     rewards_proofs.push(reward_pfs);
+                }
+                (EspressoTransaction::EVM(evm_txn), _) => {
+                    evm_txns.push(evm_txn);
                 }
                 (EspressoTransaction::Genesis(_), _) => {
                     return Err(ValidationError::UnexpectedGenesis)
@@ -1447,11 +1487,22 @@ impl ValidatorState {
                 ));
             }
         }
+
+        // verify evm transactions
+        for evm_txn in evm_txns.iter() {
+            self.evm_validator
+                .validate_transaction_sync(evm_txn)
+                .map_err(|err| ValidationError::InvalidEvmTransaction {
+                    err: Ok(err.into()),
+                })?;
+        }
+
         // assemble Block
         let txns: Vec<_> = cap_txns
             .into_iter()
             .map(EspressoTransaction::CAP)
             .chain(reward_txns.into_iter().map(EspressoTransaction::Reward))
+            .chain(evm_txns.into_iter().map(EspressoTransaction::EVM))
             .collect();
 
         Ok((Block(txns), nullifiers_proofs, verified_rewards_proofs))
@@ -1548,6 +1599,22 @@ impl ValidatorState {
         self.historical_stake_tables_commitment = historial_stake_tables_mt.commitment();
         self.historical_stake_tables = historial_stake_tables_mt.frontier();
 
+        // Execute EVM transactions and collect results
+        let evm_txns = txns
+            .0
+            .iter()
+            .filter_map(|x| match x {
+                EspressoTransaction::EVM(txn) => Some(txn.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        let evm_execution_result = self
+            .evm_validator
+            .execute(evm_txns)
+            .expect("Failed to apply EVM transactions");
+        self.evm_block_header = evm_execution_result.header();
+
         //insert rewards transactions from this block
         let _collected_rewards = self
             .collected_rewards
@@ -1558,6 +1625,7 @@ impl ValidatorState {
             uids,
             nullifier_proofs: null_pfs,
             record_proofs: record_merkle_frontier,
+            evm_execution_result,
         })
     }
 

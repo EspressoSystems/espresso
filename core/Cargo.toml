@@ -35,6 +35,7 @@ chacha20 = "0.8.1"
 chrono = "0.4.19"
 commit = { git = "https://github.com/EspressoSystems/commit.git", tag = "0.2.0" }
 derive_more = "0.99"
+espresso-evm = { git = "ssh://git@github.com/EspressoSystems/espresso-evm" }
 espresso-macros = { git = "https://github.com/EspressoSystems/espresso-macros.git" }
 futures = "0.3.16"
 generic-array = { version = "0.14.4", features = ["serde"] }

@@ -44,3 +44,19 @@ lto = "off"
 inherits = "release"
 # Enable "thin" LTO to optimize performance.
 lto = "thin"
+
+# In order to avoid a dependency resolution error with `zeroize` we patch
+# jellyfish to include an update of `crypto_box`. Once espresso is using a
+# jellyfish version that includes commit
+# 535e190b3b443d4dca53d930832eb246425d32c2, this patch can be removed.
+[patch."https://github.com/EspressoSystems/jellyfish.git"]
+# The double slash before jellyfish is to work around the following error
+#     patch for `jf-plonk` in `https://github.com/EspressoSystems/jellyfish.git` points to the same source, but patches must point to different sources
+jf-primitives = { git = "https://github.com/EspressoSystems//jellyfish", branch = "cherry-picked-crypto_box-update" }
+jf-plonk = { git = "https://github.com/EspressoSystems//jellyfish", branch = "cherry-picked-crypto_box-update" }
+jf-utils = { git = "https://github.com/EspressoSystems//jellyfish", branch = "cherry-picked-crypto_box-update" }
+jf-utils-derive = { git = "https://github.com/EspressoSystems//jellyfish", branch = "cherry-picked-crypto_box-update" }
+
+
+[patch."ssh://git@github.com/EspressoSystems/espresso-evm"]
+espresso-evm = { path = "../espresso-evm" }
