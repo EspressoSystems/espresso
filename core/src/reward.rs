@@ -984,13 +984,6 @@ mod rewards_testing {
 
         assert!(note_error.is_err());
         assert_eq!(note_error.err().unwrap(), RewardError::BadStakingKey {});
-        /*match note_error.err().unwrap() {
-            BadUncollectedRewardProof {} => {}
-            BadStakeAmountProof {} => {}
-            BadStakingKey {},
-            BadStakeAmount {},
-
-        }*/
 
         let mut bad_reward_note = reward_note.clone();
         bad_reward_note.body.vrf_witness.staking_key = bad_pub_key.clone();
@@ -1050,7 +1043,6 @@ mod rewards_testing {
         uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
         vrf_proof: VrfProof,
         collected_reward: CollectedRewards,
-        _reward_note: &CollectRewardNote,
         aux_proofs: &RewardNoteProofs,
     ) {
         let note_error = CollectRewardNote::generate(
@@ -1096,7 +1088,6 @@ mod rewards_testing {
         cap_address: UserAddress,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
         uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
-        _collected_reward: CollectedRewards,
         reward_note: &CollectRewardNote,
         aux_proofs: &RewardNoteProofs,
     ) {
@@ -1251,7 +1242,6 @@ mod rewards_testing {
         uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
         vrf_proof: VrfProof,
         collected_reward: CollectedRewards,
-        _reward_note: &CollectRewardNote,
         aux_proofs: &RewardNoteProofs,
     ) {
         let note_error = CollectRewardNote::generate(
@@ -1465,7 +1455,6 @@ mod rewards_testing {
                 staking_key: bad_pub_key.clone(),
                 time,
             },
-            &reward_note,
             &aux_proofs,
         );
 
@@ -1527,7 +1516,6 @@ mod rewards_testing {
             uncollected_reward_proof.clone(),
             vrf_proof.clone(),
             collected_reward.clone(),
-            &reward_note,
             &aux_proofs,
         );
 
@@ -1539,7 +1527,6 @@ mod rewards_testing {
             cap_address.clone(),
             stake_amount_proof.clone(),
             uncollected_reward_proof.clone(),
-            collected_reward.clone(),
             &reward_note,
             &aux_proofs,
         );
@@ -1575,7 +1562,6 @@ mod rewards_testing {
             bad_uncollected_reward_proof.clone(),
             vrf_proof.clone(),
             collected_reward.clone(),
-            &reward_note,
             &aux_proofs,
         );
 
@@ -1592,7 +1578,6 @@ mod rewards_testing {
             bad_uncollected_reward_proof,
             vrf_proof.clone(),
             collected_reward.clone(),
-            &reward_note,
             &aux_proofs,
         );
 
