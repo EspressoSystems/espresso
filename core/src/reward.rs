@@ -876,7 +876,7 @@ mod rewards_testing {
             view_number = view_number.add(1);
             counter += 1;
             if counter > 600 {
-                assert!(false, "test error: loop never returned");
+                panic!("test error: loop never returned");
             }
         };
         (vrf_proof, view_number)
@@ -929,7 +929,7 @@ mod rewards_testing {
             Amount::from(100u64),
             time,
             1,
-            &priv_key,
+            priv_key,
             cap_address,
             Amount::from(100u64),
             stake_amount_proof,
@@ -941,16 +941,22 @@ mod rewards_testing {
         //note passes because num_leaves is only used to verify stake table commitments inclusion proof
         assert!(bad_leaves_reward_note.verify().is_ok());
         assert!(bad_leaves_aux_proofs
-            .verify(&validator_state, collected_reward.clone())
+            .verify(validator_state, collected_reward.clone())
             .is_err());
 
         match bad_leaves_aux_proofs
-            .verify(&validator_state, collected_reward.clone())
+            .verify(validator_state, collected_reward.clone())
             .err()
             .unwrap()
         {
             ValidationError::BadStakeTableCommitmentsProof {} => {}
-            _ => assert!(false, "error type is wrong"),
+            _ => panic!(
+                "error type is wrong: {}",
+                bad_leaves_aux_proofs
+                    .verify(validator_state, collected_reward)
+                    .err()
+                    .unwrap()
+            ),
         }
     }
     fn bad_priv_key_test<R: CryptoRng + RngCore>(
@@ -975,11 +981,11 @@ mod rewards_testing {
             time,
             1,
             &bad_priv_key,
-            cap_address.clone(),
+            cap_address,
             Amount::from(100u64),
-            stake_amount_proof.clone(),
-            uncollected_reward_proof.clone(),
-            vrf_proof.clone(),
+            stake_amount_proof,
+            uncollected_reward_proof,
+            vrf_proof,
         );
 
         assert!(note_error.is_err());
@@ -990,16 +996,14 @@ mod rewards_testing {
 
         assert!(bad_reward_note.verify().is_err());
 
-        assert!(aux_proofs
-            .verify(&validator_state, collected_reward.clone())
-            .is_ok());
+        assert!(aux_proofs.verify(validator_state, collected_reward).is_ok());
         //proofs fail with bad key and bad collected_reward
         let bad_key_collected_reward = CollectedRewards {
-            staking_key: bad_pub_key.clone(),
+            staking_key: bad_pub_key,
             time,
         };
         assert!(aux_proofs
-            .verify(&validator_state, bad_key_collected_reward.clone())
+            .verify(validator_state, bad_key_collected_reward)
             .is_err());
     }
 
@@ -1020,13 +1024,13 @@ mod rewards_testing {
             Amount::from(100u64),
             time,
             1,
-            &priv_key,
-            cap_address.clone(),
+            priv_key,
+            cap_address,
             //correct amount is 100
             Amount::from(52u64),
-            stake_amount_proof.clone(),
-            uncollected_reward_proof.clone(),
-            vrf_proof.clone(),
+            stake_amount_proof,
+            uncollected_reward_proof,
+            vrf_proof,
         );
 
         assert!(note_error.is_err());
@@ -1052,31 +1056,37 @@ mod rewards_testing {
             Amount::from(100u64),
             time,
             1,
-            &priv_key,
-            cap_address.clone(),
+            priv_key,
+            cap_address,
             Amount::from(100u64),
             stake_amount_proof.clone(),
-            uncollected_reward_proof.clone(),
-            vrf_proof.clone(),
+            uncollected_reward_proof,
+            vrf_proof,
         );
 
         assert!(note_error.is_err());
         assert_eq!(note_error.err().unwrap(), RewardError::BadStakingKey {});
 
         let mut bad_aux_proofs = aux_proofs.clone();
-        bad_aux_proofs.stake_amount_proof = stake_amount_proof.clone();
+        bad_aux_proofs.stake_amount_proof = stake_amount_proof;
 
         assert!(bad_aux_proofs
-            .verify(&validator_state, collected_reward.clone())
+            .verify(validator_state, collected_reward.clone())
             .is_err());
 
         match bad_aux_proofs
-            .verify(&validator_state, collected_reward.clone())
+            .verify(validator_state, collected_reward.clone())
             .err()
             .unwrap()
         {
             ValidationError::BadCollectedRewardProof {} => {}
-            _ => assert!(false, "error type is wrong"),
+            _ => panic!(
+                "error type is wrong: {}",
+                bad_aux_proofs
+                    .verify(validator_state, collected_reward)
+                    .err()
+                    .unwrap()
+            ),
         }
     }
 
@@ -1121,11 +1131,11 @@ mod rewards_testing {
             Amount::from(100u64),
             time,
             1,
-            &priv_key,
-            cap_address.clone(),
+            priv_key,
+            cap_address,
             Amount::from(100u64),
-            stake_amount_proof.clone(),
-            uncollected_reward_proof.clone(),
+            stake_amount_proof,
+            uncollected_reward_proof,
             //Kaley todo: nonmatching instead of "bad"
             bad_vrf_proof.clone(),
         );
@@ -1140,7 +1150,10 @@ mod rewards_testing {
         assert!(bad_reward_note.verify().is_err());
         match bad_reward_note.verify().err().unwrap() {
             RewardError::SignatureError {} => {}
-            _ => assert!(false, "error type is wrong"),
+            _ => panic!(
+                "error type is wrong: {}",
+                bad_reward_note.verify().err().unwrap()
+            ),
         }
 
         //check with bad_time in CollectedReward
@@ -1149,19 +1162,18 @@ mod rewards_testing {
             time: bad_time.into(),
         };
         assert!(aux_proofs
-            .verify(&validator_state, bad_collected_reward.clone())
+            .verify(validator_state, bad_collected_reward.clone())
             .is_err());
         match aux_proofs
-            .verify(&validator_state, bad_collected_reward.clone())
+            .verify(validator_state, bad_collected_reward.clone())
             .err()
             .unwrap()
         {
             ValidationError::BadCollectedRewardProof {} => {}
-            _ => assert!(
-                false,
+            _ => panic!(
                 "error type is wrong: {}",
                 aux_proofs
-                    .verify(&validator_state, bad_collected_reward.clone())
+                    .verify(validator_state, bad_collected_reward)
                     .err()
                     .unwrap()
             ),
@@ -1189,12 +1201,12 @@ mod rewards_testing {
             Amount::from(100u64),
             bad_time,
             1,
-            &priv_key,
-            cap_address.clone(),
+            priv_key,
+            cap_address,
             Amount::from(100u64),
-            stake_amount_proof.clone(),
-            uncollected_reward_proof.clone(),
-            vrf_proof.clone(),
+            stake_amount_proof,
+            uncollected_reward_proof,
+            vrf_proof,
         );
 
         assert!(note_error.is_err());
@@ -1206,26 +1218,28 @@ mod rewards_testing {
         match bad_reward_note.verify().err().unwrap() {
             //time does not match vrf proof, so we get KeyNotEligible error from vrf verification
             RewardError::KeyNotEligible { .. } => {}
-            _ => assert!(false, "error type is wrong: {:?}", bad_reward_note.verify(),),
+            _ => panic!(
+                "reward type is wrong: {}",
+                bad_reward_note.verify().err().unwrap()
+            ),
         }
 
-        let mut bad_collected_reward = collected_reward.clone();
+        let mut bad_collected_reward = collected_reward;
         bad_collected_reward.time = bad_time;
         assert!(aux_proofs
-            .verify(&validator_state, bad_collected_reward.clone())
+            .verify(validator_state, bad_collected_reward.clone())
             .is_err());
 
         match aux_proofs
-            .verify(&validator_state, bad_collected_reward.clone())
+            .verify(validator_state, bad_collected_reward.clone())
             .err()
             .unwrap()
         {
             ValidationError::BadCollectedRewardProof {} => {}
-            _ => assert!(
-                false,
-                "error type is wrong: {:?}",
+            _ => panic!(
+                "error type is wrong: {}",
                 aux_proofs
-                    .verify(&validator_state, bad_collected_reward.clone())
+                    .verify(validator_state, bad_collected_reward)
                     .err()
                     .unwrap(),
             ),
@@ -1251,34 +1265,33 @@ mod rewards_testing {
             Amount::from(100u64),
             time,
             1,
-            &priv_key,
-            cap_address.clone(),
+            priv_key,
+            cap_address,
             Amount::from(100u64),
-            stake_amount_proof.clone(),
+            stake_amount_proof,
             uncollected_reward_proof.clone(),
-            vrf_proof.clone(),
+            vrf_proof,
         );
 
         assert!(note_error.is_err());
         let mut bad_aux_proofs = aux_proofs.clone();
-        bad_aux_proofs.uncollected_reward_proof = uncollected_reward_proof.clone();
+        bad_aux_proofs.uncollected_reward_proof = uncollected_reward_proof;
 
         assert!(bad_aux_proofs
-            .verify(&validator_state, collected_reward.clone())
+            .verify(validator_state, collected_reward.clone())
             .is_err());
 
         match bad_aux_proofs
-            .verify(&validator_state, collected_reward.clone())
+            .verify(validator_state, collected_reward.clone())
             .err()
             .unwrap()
         {
             ValidationError::BadCollectedRewardProof { .. } => {}
             ValidationError::RewardAlreadyCollected { .. } => {}
-            _ => assert!(
-                false,
-                "error type is wrong: {:?}",
+            _ => panic!(
+                "error type is wrong: {}",
                 bad_aux_proofs
-                    .verify(&validator_state, collected_reward.clone())
+                    .verify(validator_state, collected_reward)
                     .err()
                     .unwrap(),
             ),
@@ -1304,31 +1317,30 @@ mod rewards_testing {
             Amount::from(100u64),
             time,
             1,
-            &priv_key,
-            cap_address.clone(),
+            priv_key,
+            cap_address,
             Amount::from(100u64),
-            stake_amount_proof.clone(),
-            uncollected_reward_proof.clone(),
-            vrf_proof.clone(),
+            stake_amount_proof,
+            uncollected_reward_proof,
+            vrf_proof,
         )
         .unwrap();
 
         assert!(aux_proofs
-            .verify(&validator_state, collected_reward.clone())
+            .verify(validator_state, collected_reward.clone())
             .is_err());
         match aux_proofs
-            .verify(&validator_state, collected_reward.clone())
+            .verify(validator_state, collected_reward.clone())
             .err()
             .unwrap()
         {
             ValidationError::BadCollectedRewardProof { .. } => {}
-            _ => assert!(
-                false,
-                "error type is wrong: {:?}",
+            _ => panic!(
+                "error type is wrong: {}",
                 aux_proofs
-                    .verify(&validator_state, collected_reward.clone())
+                    .verify(validator_state, collected_reward)
                     .err()
-                    .unwrap(),
+                    .unwrap()
             ),
         }
     }
@@ -1374,10 +1386,12 @@ mod rewards_testing {
 
         let cap_address = UserPubKey::default().address();
 
-        let mut validator_state = ValidatorState::default();
-        validator_state.historical_stake_tables = stc_mt.frontier();
-        validator_state.block_height = 1;
-        validator_state.historical_stake_tables_commitment = stc_mt.commitment();
+        let mut validator_state = ValidatorState {
+            historical_stake_tables_commitment: stc_mt.commitment(),
+            historical_stake_tables: stc_mt.frontier(),
+            block_height: 1,
+            ..ValidatorState::default()
+        };
 
         let (reward_note, aux_proofs) = CollectRewardNote::generate(
             &mut rng,
@@ -1434,7 +1448,7 @@ mod rewards_testing {
             time,
             &priv_key,
             cap_address.clone(),
-            stake_amount_proof.clone(),
+            stake_amount_proof,
             uncollected_reward_proof.clone(),
             vrf_proof.clone(),
         );
@@ -1448,7 +1462,7 @@ mod rewards_testing {
             time,
             &bad_priv_key,
             cap_address.clone(),
-            noninclusion_stake_amount_proof.clone(),
+            noninclusion_stake_amount_proof,
             uncollected_reward_proof.clone(),
             vrf_proof.clone(),
             CollectedRewards {
@@ -1460,9 +1474,9 @@ mod rewards_testing {
 
         //add bad_pub_key to stake table to test valid proofs but mismatached keys in different proofs
         stake_table_mt.insert(bad_pub_key.clone(), amount);
-        let bad_key_stake_amount_proof = stake_table_mt.lookup(bad_pub_key.clone()).unwrap().1;
+        let bad_key_stake_amount_proof = stake_table_mt.lookup(bad_pub_key).unwrap().1;
         //regenerate valid stake_amount_proof with new table
-        let stake_amount_proof = stake_table_mt.lookup(pub_key.clone()).unwrap().1;
+        let stake_amount_proof = stake_table_mt.lookup(pub_key).unwrap().1;
         let stake_table_commitment = stake_table_mt.hash();
         // Build stake table commitments from scratch to simulate fixed-stake design
         let mut stc_builder = crate::merkle_tree::FilledMTBuilder::<(
@@ -1500,7 +1514,7 @@ mod rewards_testing {
                 .is_ok(),
             "error type: {:?}",
             aux_proofs
-                .verify(&validator_state, collected_reward.clone())
+                .verify(&validator_state, collected_reward)
                 .err()
                 .unwrap()
         );
@@ -1512,7 +1526,7 @@ mod rewards_testing {
             time,
             &priv_key,
             cap_address.clone(),
-            bad_key_stake_amount_proof.clone(),
+            bad_key_stake_amount_proof,
             uncollected_reward_proof.clone(),
             vrf_proof.clone(),
             collected_reward.clone(),
