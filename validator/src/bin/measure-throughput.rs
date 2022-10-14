@@ -12,30 +12,30 @@
 
 use async_std::task::sleep;
 use clap::Parser;
+use espresso_esqs::ApiError;
 use espresso_status_api::Throughput;
 use human_bytes::human_bytes;
-use net::client::response_body;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Sub;
 use std::time::{Duration, Instant};
-use surf::Url;
+use surf_disco::Url;
 use tracing::{error, info};
 
 /// Measure system throughput over time by polling a query service.
 #[derive(Parser)]
 struct Options {
     /// The frequency at which to poll current throughput.
-    #[clap(short, long, default_value = "60s", parse(try_from_str = espresso_validator::parse_duration))]
+    #[arg(short, long, default_value = "60s", value_parser = espresso_validator::parse_duration)]
     frequency: Duration,
 
     /// The total duration over which to measure throughput.
     ///
     /// If not provided, runs until killed.
-    #[clap(short, long, parse(try_from_str = espresso_validator::parse_duration))]
+    #[arg(short, long, value_parser = espresso_validator::parse_duration)]
     total: Option<Duration>,
 
     /// The query service to poll for ledger state.
-    #[clap(short = 'q', long, env = "ESPRESSO_ESQS_URL")]
+    #[arg(short = 'q', long, env = "ESPRESSO_ESQS_URL")]
     esqs_url: Url,
 }
 
@@ -70,11 +70,11 @@ struct Snapshot {
 }
 
 impl Snapshot {
-    async fn new(esqs_url: &Url) -> Result<Self, surf::Error> {
-        let mut res = surf::get(esqs_url.join("/status/throughput").unwrap())
-            .send()
-            .await?;
-        let m: Throughput = response_body(&mut res).await?;
+    async fn new(esqs_url: &Url) -> Result<Self, ApiError> {
+        let m =
+            surf_disco::get::<Throughput, ApiError>(esqs_url.join("/status/throughput").unwrap())
+                .send()
+                .await?;
         Ok(Self {
             t: Instant::now(),
             num_txns: m.transactions_finalized,
@@ -98,12 +98,12 @@ impl Sub for &Snapshot {
 }
 
 #[async_std::main]
-async fn main() -> surf::Result<()> {
+async fn main() -> Result<(), ApiError> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let opt = Options::from_args();
+    let opt = Options::parse();
     let frequency = opt.frequency;
     let total = opt.total.map(Duration::from);
 

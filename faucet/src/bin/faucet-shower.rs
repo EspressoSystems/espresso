@@ -15,6 +15,7 @@
 //! Give faucet-shower a master mnemonic for a funded keystore and a number N and it will generate N
 //! new keystores, transfer some tokens from the master keystore to each new keystore, and print the
 //! mnemonics and public keys of the newly funded keystores.
+use clap::Parser;
 use espresso_client::{
     hd::{KeyTree, Mnemonic},
     ledger_state::TransactionStatus,
@@ -33,30 +34,29 @@ use rand_chacha::{
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::time::Duration;
-use structopt::StructOpt;
-use surf::Url;
 use tempdir::TempDir;
+use tide_disco::Url;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 pub struct Options {
     /// mnemonic for the master faucet keystore
-    #[structopt(short, long, env = "ESPRESSO_FAUCET_WALLET_MNEMONIC")]
+    #[arg(short, long, env = "ESPRESSO_FAUCET_WALLET_MNEMONIC")]
     pub master_mnemonic: Mnemonic,
 
     /// number of new keystores to generate
-    #[structopt(short, long, default_value = "10")]
+    #[arg(short, long, default_value = "10")]
     pub num_keystores: usize,
 
     /// number of records to create in each new keystore
-    #[structopt(short, long, default_value = "1")]
+    #[arg(short, long, default_value = "1")]
     pub num_records: u64,
 
     /// size of each record to create in the new keystores
-    #[structopt(short, long, default_value = "1000000")]
+    #[arg(short, long, default_value = "1000000")]
     pub record_size: u64,
 
     /// URL for the Ethereum Query Service.
-    #[structopt(
+    #[arg(
         long,
         env = "ESPRESSO_ESQS_URL",
         default_value = "http://localhost:50087"
@@ -90,7 +90,7 @@ async fn create_keystore(
 
 #[async_std::main]
 async fn main() {
-    let opt = Options::from_args();
+    let opt = Options::parse();
     let mut rng = ChaChaRng::from_entropy();
     let dir = TempDir::new("faucet-shower").unwrap();
 

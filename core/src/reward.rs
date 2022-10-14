@@ -349,17 +349,26 @@ pub struct RewardNoteProofs {
     leaf_proof_pos: u64,
 }
 
+/// RewardNote fields extracted data from proof
+/// returned by RewardNoteProof::verify
+/// It contains
+/// i) digest for which uncollected reward proof was verified against,
+/// ii) Stake owned by the staking key at time of reward eligibility
+/// iii) Total staked in stake table at time of reward eligibility
+pub struct RewardProofsValidationOutputs {
+    pub(crate) collected_reward_digest: CollectedRewardsDigest,
+    pub(crate) key_stake: Amount,
+    pub(crate) stake_table_total_stake: Amount,
+}
+
 impl RewardNoteProofs {
     /// Checks proofs in RewardNoteProofs against ValidatorState
-    /// If success, return
-    ///  i) collected reward merkle root for which proof was validated agains
-    ///  ii) staking key amount on stake table at elegibility time
-    ///  iii) total staked amount on stake table at eligibility time
+    /// On success, return RewardProofExtractedData
     pub fn verify(
         &self,
         validator_state: &ValidatorState,
         claimed_reward: CollectedRewards, // staking key and time t
-    ) -> Result<(CollectedRewardsDigest, Amount, Amount), ValidationError> {
+    ) -> Result<RewardProofsValidationOutputs, ValidationError> {
         let stake_table_commitment = self.stake_tables_set_leaf_proof.leaf.0 .0;
         let stake_table_total_stake = self.stake_tables_set_leaf_proof.leaf.0 .1;
         let time_in_proof = self.stake_tables_set_leaf_proof.leaf.0 .2;
@@ -436,7 +445,11 @@ impl RewardNoteProofs {
             option_value.ok_or(ValidationError::BadStakeTableProof {})?;
         }
 
-        Ok((root, key_staked_amount, stake_table_total_stake))
+        Ok(RewardProofsValidationOutputs {
+            collected_reward_digest: root,
+            key_stake: key_staked_amount,
+            stake_table_total_stake,
+        })
     }
 
     /// retrieves proof that reward hasn't been collected
@@ -1220,7 +1233,10 @@ mod rewards_testing {
             _ => assert!(
                 false,
                 "error type is wrong: {:?}",
-                aux_proofs.verify(&validator_state, bad_collected_reward.clone()),
+                aux_proofs
+                    .verify(&validator_state, bad_collected_reward.clone())
+                    .err()
+                    .unwrap(),
             ),
         }
     }
@@ -1271,7 +1287,10 @@ mod rewards_testing {
             _ => assert!(
                 false,
                 "error type is wrong: {:?}",
-                bad_aux_proofs.verify(&validator_state, collected_reward.clone()),
+                bad_aux_proofs
+                    .verify(&validator_state, collected_reward.clone())
+                    .err()
+                    .unwrap(),
             ),
         }
     }
@@ -1316,7 +1335,10 @@ mod rewards_testing {
             _ => assert!(
                 false,
                 "error type is wrong: {:?}",
-                aux_proofs.verify(&validator_state, collected_reward.clone()),
+                aux_proofs
+                    .verify(&validator_state, collected_reward.clone())
+                    .err()
+                    .unwrap(),
             ),
         }
     }
@@ -1488,7 +1510,10 @@ mod rewards_testing {
                 .verify(&validator_state, collected_reward.clone())
                 .is_ok(),
             "error type: {:?}",
-            aux_proofs.verify(&validator_state, collected_reward.clone())
+            aux_proofs
+                .verify(&validator_state, collected_reward.clone())
+                .err()
+                .unwrap()
         );
 
         //call with priv_key as parameter and in collected_reward, but bad_pub_key in bad_key_stake_amount_proof

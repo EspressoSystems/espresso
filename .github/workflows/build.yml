@@ -37,7 +37,7 @@ jobs:
     container:
       image: ghcr.io/espressosystems/devops-rust:1.63
     steps:
-      - uses: styfle/cancel-workflow-action@0.10.0
+      - uses: styfle/cancel-workflow-action@0.11.0
         name: Cancel Outdated Builds
         with:
           all_but_latest: true
@@ -68,16 +68,16 @@ jobs:
 
       - name: Build
         run: |
-          cargo build --workspace --release
+          cargo build --workspace --profile=release-lto
 
       - name: Build Slow Tests
         # Make sure the slow tests build, but don't run them (we have another workflow for that).
-        run: cargo test --release --features=testing,slow-tests --no-run
+        run: cargo test --profile=release-lto --features=testing,slow-tests --no-run
 
       - name: Test
         run: |
-          cargo test --workspace --release --features testing --no-run
-          cargo test --workspace --release --features testing --verbose -- -Zunstable-options --report-time --test-threads 2
+          cargo test --workspace --profile=release-lto --features testing --no-run
+          cargo test --workspace --profile=release-lto --features testing --verbose -- -Zunstable-options --report-time --test-threads 2
         timeout-minutes: 30
 
       - name: Upload address book artifact
@@ -85,7 +85,7 @@ jobs:
         with:
           name: x86_64-unknown-linux-gnu-services
           path: |
-            target/release/address-book
-            target/release/espresso-validator
-            target/release/faucet
-            target/release/random-wallet
+            target/release-lto/address-book
+            target/release-lto/espresso-validator
+            target/release-lto/faucet
+            target/release-lto/random-wallet

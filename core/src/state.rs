@@ -14,7 +14,8 @@
 use espresso_macros::*;
 use jf_cap::structs::{Amount, ReceiverMemo};
 use jf_cap::Signature;
-use reef::traits::Validator;
+
+use derive_more::{From, Into};
 
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
@@ -889,7 +890,6 @@ pub mod state_comm {
     use super::*;
     use crate::reward::CollectedRewardsHistory;
     use jf_utils::tagged_blob;
-    use net::Hash;
 
     #[ser_test(arbitrary)]
     #[tagged_blob("STATE")]
@@ -916,12 +916,6 @@ pub mod state_comm {
         }
     }
 
-    impl From<LedgerStateCommitment> for Hash {
-        fn from(c: LedgerStateCommitment) -> Self {
-            Self::from(commit::Commitment::<_>::from(c))
-        }
-    }
-
     /// Wrapper around amount to make it committable
     #[derive(
         Debug,
@@ -935,14 +929,10 @@ pub mod state_comm {
         Deserialize,
         CanonicalSerialize,
         CanonicalDeserialize,
+        From,
+        Into,
     )]
     pub struct CommittableAmount(Amount);
-
-    impl From<Amount> for CommittableAmount {
-        fn from(amount: Amount) -> Self {
-            CommittableAmount(amount)
-        }
-    }
 
     impl Committable for CommittableAmount {
         fn commit(&self) -> Commitment<Self> {
@@ -1297,7 +1287,7 @@ impl ValidatorState {
     /// - [ValidationError::NullifierAlreadyExists]
     /// - [ValidationError::UnsupportedFreezeSize]
     /// - [ValidationError::UnsupportedTransferSize]
-    /// - [ValidationError::PreviouslyCollectedReward]
+    /// - [ValidationError::RewardAlreadyCollected]
     /// - [ValidationError::RewardAmountTooLarge]
     ///
     pub fn validate_block_check(
@@ -1430,11 +1420,14 @@ impl ValidatorState {
                     .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
 
                 // check helper proofs (RewardNoteProofs)
-                let (root, key_stake, total_staked) = pfs.verify(self, latest_reward.clone())?;
+                let extracted_data = pfs.verify(self, latest_reward.clone())?;
 
                 //check reward amount
-                let max_reward =
-                    crate::reward::compute_reward_amount(self.now(), key_stake, total_staked);
+                let max_reward = crate::reward::compute_reward_amount(
+                    self.block_height,
+                    extracted_data.key_stake,
+                    extracted_data.stake_table_total_stake,
+                );
                 if txn.reward_amount() > max_reward {
                     return Err(ValidationError::RewardAmountTooLarge);
                 }
@@ -1450,7 +1443,7 @@ impl ValidatorState {
                 verified_rewards_proofs.push((
                     latest_reward,
                     pfs.get_uncollected_reward_proof(),
-                    root,
+                    extracted_data.collected_reward_digest,
                 ));
             }
         }
@@ -1532,19 +1525,19 @@ impl ValidatorState {
         self.record_merkle_frontier = record_merkle_frontier.frontier();
 
         // Build stake table commitments frontier, history and new commitment
-        let mut stc_builder = crate::merkle_tree::FilledMTBuilder::from_frontier(
-            &self.historical_stake_tables_commitment,
-            &self.historical_stake_tables,
-        )
-        .expect("failed to restore stake table commitments merkle tree from frontier");
+        let mut historial_stake_tables_builder =
+            crate::merkle_tree::FilledMTBuilder::from_frontier(
+                &self.historical_stake_tables_commitment,
+                &self.historical_stake_tables,
+            )
+            .expect("failed to restore stake table commitments merkle tree from frontier");
 
-        stc_builder.push((
+        historial_stake_tables_builder.push((
             StakeTableCommitment(self.stake_table.hash()),
             self.total_stake,
             ConsensusTime(now),
         ));
-        let stc_mt = stc_builder.build();
-        assert_eq!(now, stc_mt.num_leaves()); // TODO why now??
+        let historial_stake_tables_mt = historial_stake_tables_builder.build();
 
         if self.past_historial_stake_table_merkle_roots.0.len() >= Self::HISTORY_SIZE {
             self.past_historial_stake_table_merkle_roots.0.pop_back();
@@ -1552,8 +1545,8 @@ impl ValidatorState {
         self.past_historial_stake_table_merkle_roots
             .0
             .push_front(self.historical_stake_tables_commitment.root_value);
-        self.historical_stake_tables_commitment = stc_mt.commitment();
-        self.historical_stake_tables = stc_mt.frontier();
+        self.historical_stake_tables_commitment = historial_stake_tables_mt.commitment();
+        self.historical_stake_tables = historial_stake_tables_mt.frontier();
 
         //insert rewards transactions from this block
         let _collected_rewards = self

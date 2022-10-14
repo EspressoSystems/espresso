@@ -43,22 +43,22 @@ use tide_disco::{http::Url, App};
 
 #[derive(Args)]
 pub struct Options {
-    #[clap(short, long, env = "ESPRESSO_ESQS_PORT")]
+    #[arg(short, long, env = "ESPRESSO_ESQS_PORT")]
     pub port: u16,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     pub availability: availability::Options,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     pub catchup: catchup::Options,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     pub metastate: metastate::Options,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     pub status: status::Options,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     pub validator: validator::Options,
 }
 

@@ -26,7 +26,7 @@ use tide_disco::{
 
 #[derive(Args, Default)]
 pub struct Options {
-    #[clap(long = "metastate-api-path", env = "ESPRESSO_METASTATE_API_PATH")]
+    #[arg(long = "metastate-api-path", env = "ESPRESSO_METASTATE_API_PATH")]
     pub api_path: Option<PathBuf>,
 }
 

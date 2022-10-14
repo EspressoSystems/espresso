@@ -17,12 +17,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "3.2.17", features = ["derive", "env"] }
+clap = { version = "4.0", features = ["derive", "env"] }
 derive_more = "0.99"
 espresso-core = { path = "../../core/" }
 futures = "0.3.21"
 jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 serde = { version = "1.0.139", features = ["derive", "rc"] }
 snafu = { version = "0.7", features = ["backtraces"] }
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", branch = "main" }
+tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1" }
 toml = "0.5"

@@ -17,6 +17,7 @@ use std::fmt::Debug;
 
 pub trait StatusDataSource {
     fn get_validator_status(&self) -> &ValidatorStatus;
+    fn get_location(&self) -> &Option<String>;
 }
 
 pub trait UpdateStatusData {

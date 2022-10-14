@@ -25,7 +25,7 @@ use tide_disco::{
 
 #[derive(Args, Default)]
 pub struct Options {
-    #[clap(long = "catchup-api-path", env = "ESPRESSO_CATCHUP_API_PATH")]
+    #[arg(long = "catchup-api-path", env = "ESPRESSO_CATCHUP_API_PATH")]
     pub api_path: Option<PathBuf>,
 }
 
@@ -97,7 +97,7 @@ where
                     .map(Ok)
                     .chain(receiver.filter_map(move |(i, e)| async move {
                         if i >= first {
-                            Some(Ok(Some(e)))
+                            Some(Ok(e))
                         } else {
                             None
                         }
