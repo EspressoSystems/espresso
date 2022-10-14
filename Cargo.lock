@@ -6947,7 +6947,7 @@ dependencies = [
 [[package]]
 name = "surf-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/surf-disco.git?branch=main#c60bedec6fafb6b4a7f755c261a4f9f95a707f5c"
+source = "git+ssh://git@github.com/EspressoSystems/surf-disco.git?branch=main#2bd39463c93bdf62ea75ff2836f9c8244dfc0366"
 dependencies = [
  "async-std",
  "async-tungstenite 0.15.0",
