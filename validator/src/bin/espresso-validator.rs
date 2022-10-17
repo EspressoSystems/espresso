@@ -15,7 +15,10 @@
 use clap::Parser;
 use espresso_validator::{validator::*, *};
 use futures::future::pending;
-use jf_cap::keys::UserPubKey;
+use jf_cap::keys::{UserAddress, UserPubKey};
+use rand::SeedableRng;
+use rand_chacha::ChaChaRng;
+use std::collections::BTreeMap;
 
 #[derive(Parser)]
 #[command(
@@ -40,8 +43,18 @@ struct Options {
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::parse();
-    let genesis = genesis(options.validator_opt.chain_id, options.faucet_pub_key);
-    let hotshot = init(genesis, options.validator_opt).await?;
+    let genesis = genesis(
+        options.validator_opt.chain_id,
+        options.faucet_pub_key,
+        BTreeMap::new(),
+    ); // TODO add stake table
+    let hotshot = init(
+        ChaChaRng::from_entropy(),
+        genesis,
+        options.validator_opt,
+        UserAddress::default(),
+    )
+    .await?;
     run_consensus(hotshot, pending::<()>()).await;
     Ok(())
 }

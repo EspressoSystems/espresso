@@ -19,9 +19,11 @@ use async_std::task::{block_on, spawn, JoinHandle};
 use espresso_core::state::ElaboratedBlock;
 use espresso_esqs::full_node::{self, EsQS};
 use futures::{channel::oneshot, future::join_all};
-use jf_cap::keys::UserPubKey;
+use jf_cap::keys::{UserAddress, UserPubKey};
 use portpicker::pick_unused_port;
+use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::{rand_core::RngCore, ChaChaRng};
+use std::collections::BTreeMap;
 use std::io;
 use std::iter;
 use std::mem::take;
@@ -120,7 +122,11 @@ impl Drop for TestNetwork {
 /// This function will start the minimal number of validators needed to run consensus. One of the
 /// validators will be a full node with a query service, which can be used to follow the ledger
 /// state and submit transactions. The URL for the query service is returned.
-pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKey) -> TestNetwork {
+pub async fn minimal_test_network(
+    rng: &mut ChaChaRng,
+    faucet_pub_key: UserPubKey,
+    reward_address: UserAddress,
+) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
     let base_port = pick_unused_port().unwrap();
@@ -148,16 +154,19 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     println!("generated public keys in {:?}", start.elapsed());
 
     let store = TempDir::new("minimal_test_network_store").unwrap();
-    let genesis = genesis(0, iter::once(faucet_pub_key));
-    let nodes = join_all((0..MINIMUM_NODES).into_iter().map(|i| {
+    let genesis = genesis(0, iter::once(faucet_pub_key), BTreeMap::new()); // TODO add a stake table
+    let mut nodes_futures = vec![];
+    for (i, key) in keys.iter().enumerate() {
         let consensus_opt = consensus_opt.clone();
         let genesis = genesis.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
-        let priv_key = keys[i].private.clone();
+        let priv_key = key.private.clone();
 
         store_path.push(i.to_string());
-        async move {
+        let reward_address_cloned = reward_address.clone();
+        let new_rng = ChaChaRng::from_rng(&mut *rng).unwrap();
+        let future = async move {
             let node_opt = NodeOpt {
                 store_path: Some(store_path),
                 nonbootstrap_base_port: base_port as usize,
@@ -165,10 +174,12 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 ..NodeOpt::default()
             };
             let consensus = init_validator(
+                new_rng,
                 &node_opt,
                 &consensus_opt,
                 priv_key,
                 pub_keys,
+                reward_address_cloned,
                 genesis.clone(),
                 i,
             )
@@ -200,9 +211,10 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             let (kill, recv_kill) = oneshot::channel();
             let wait = spawn(run_consensus(consensus, recv_kill));
             TestNode { esqs, kill, wait }
-        }
-    }))
-    .await;
+        };
+        nodes_futures.push(future);
+    }
+    let nodes = join_all(nodes_futures).await;
 
     let address_book = AddressBook::init().await;
     let address_book_api = address_book.url();

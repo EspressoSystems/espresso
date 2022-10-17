@@ -26,6 +26,10 @@ use espresso_core::{
 };
 use espresso_validator::{validator::*, *};
 use hotshot::types::EventType;
+use jf_cap::keys::UserAddress;
+use rand::SeedableRng;
+use rand_chacha::ChaChaRng;
+use std::collections::BTreeMap;
 use std::time::Duration;
 use tagged_base64::TaggedBase64;
 use tracing::info;
@@ -80,6 +84,7 @@ fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
     let genesis = GenesisNote::new(
         ChainVariables::new(42, VERIF_CRS.clone()),
         Arc::new(state.records().collect()),
+        BTreeMap::new(), // TODO add stake table
     );
     (genesis, state)
 }
@@ -256,7 +261,13 @@ async fn main() -> Result<(), std::io::Error> {
     let options = Options::parse();
     let id = options.validator_opt.id;
     let (genesis, state) = genesis_for_test();
-    let hotshot = init(genesis, options.validator_opt).await?;
+    let hotshot = init(
+        ChaChaRng::from_entropy(),
+        genesis,
+        options.validator_opt,
+        UserAddress::default(),
+    )
+    .await?;
     generate_transactions(options.num_txns, id, hotshot, state).await;
     Ok(())
 }

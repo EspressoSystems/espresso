@@ -33,8 +33,8 @@ pub use crate::{PrivKey, PubKey};
 use crate::genesis::GenesisNote;
 use crate::stake_table::{
     CommittableStakeTableSetCommitment, CommittableStakeTableSetFrontier, ConsensusTime,
-    StakeTableCommitment, StakeTableMap, StakeTableSetCommitment, StakeTableSetFrontier,
-    StakeTableSetHistory, StakeTableSetMT,
+    StakeTableCommitment, StakeTableHash, StakeTableMap, StakeTableSetCommitment,
+    StakeTableSetFrontier, StakeTableSetHistory, StakeTableSetMT,
 };
 
 use crate::state::state_comm::CommittableAmount;
@@ -50,6 +50,7 @@ use hotshot::{
     traits::{BlockContents, State, Transaction as TransactionTrait},
     H_256,
 };
+use hotshot_types::data::ViewNumber;
 use jf_cap::{
     errors::TxnApiError, structs::Nullifier, txn_batch_verify, MerkleCommitment, MerkleFrontier,
     MerkleLeafProof, MerkleTree, NodeValue, TransactionNote,
@@ -1493,7 +1494,25 @@ impl ValidatorState {
         // If this is a genesis block, apply system parameter updates.
         // TODO: update total_stake when stake table is added to genesis note
         if let Some(EspressoTransaction::Genesis(txn)) = txns.0.get(0) {
-            self.chain = txn.chain.clone()
+            self.chain = txn.chain.clone();
+            let mut total_stake = Amount::from(0u128);
+            let mut stake_table = KVMerkleTree::<StakeTableHash>::default();
+            for (key, amount) in txn.stake_table.iter() {
+                total_stake += *amount;
+                stake_table.insert(key.clone(), *amount);
+                stake_table.forget(key.clone());
+            }
+            self.stake_table = stake_table;
+            self.total_stake = total_stake;
+            let mut stake_table_set =
+                crate::merkle_tree::FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
+            stake_table_set.push((
+                StakeTableCommitment(self.stake_table.hash()),
+                self.total_stake,
+                ViewNumber::genesis().into(),
+            ));
+            let stake_table_set_mt = stake_table_set.build();
+            self.historical_stake_tables = stake_table_set_mt.frontier();
         }
 
         let mut record_merkle_builder = FilledMTBuilder::from_frontier(

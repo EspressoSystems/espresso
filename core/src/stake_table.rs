@@ -19,6 +19,7 @@ use crate::{PrivKey, PubKey};
 use crate::kv_merkle_tree::KVMerkleTree;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use commit::{Commitment, Committable};
+use derive_more::From;
 use espresso_macros::*;
 use hotshot_types::traits::signature_key::{EncodedSignature, SignatureKey};
 use jf_cap::structs::Amount;
@@ -30,7 +31,7 @@ use std::ops::Deref;
 /// PubKey used for stake table key
 #[tagged_blob("STAKING_KEY")]
 #[ser_test(random(random_for_test))]
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq, From, PartialOrd, Ord)]
 pub struct StakingKey(pub(crate) PubKey);
 
 impl StakingKey {
@@ -46,6 +47,7 @@ impl StakingKey {
 }
 
 /// Staking Private Key
+#[derive(From)]
 pub struct StakingPrivKey(pub(crate) PrivKey);
 
 impl StakingPrivKey {

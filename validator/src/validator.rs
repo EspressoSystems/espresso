@@ -57,9 +57,11 @@ pub struct ValidatorOpt {
 }
 
 /// Initiate the hotshot
-pub async fn init(
+pub async fn init<R: CryptoRng + RngCore + Send + 'static>(
+    rng: R,
     genesis: GenesisNote,
     options: ValidatorOpt,
+    reward_address: UserAddress, // TODO add it to Options
 ) -> Result<Consensus, std::io::Error> {
     if let Err(msg) = options.node_opt.check() {
         eprintln!("{}", msg);
@@ -78,10 +80,12 @@ pub async fn init(
     let priv_key = keys[own_id].private.clone();
     let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
     let hotshot = init_validator(
+        rng,
         &options.node_opt,
         &options.consensus_opt,
         priv_key,
         known_nodes,
+        reward_address,
         genesis.clone(),
         own_id,
     )

@@ -13,12 +13,16 @@
 #![deny(warnings)]
 #![allow(clippy::format_push_string)]
 
+extern crate core;
+
 use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
 use async_std::sync::{Arc, RwLock};
+use async_std::task::spawn;
 use clap::{Args, Parser};
 use cld::ClDuration;
 use dirs::data_local_dir;
+use espresso_core::kv_merkle_tree::KVMerkleTree;
 use espresso_core::reward::{
     mock_eligibility, CollectRewardNote, CollectedRewards, CollectedRewardsSet,
 };
@@ -59,7 +63,7 @@ use libp2p_networking::network::{MeshParams, NetworkNodeConfigBuilder, NetworkNo
 use node_impl::ValidatorNodeImpl;
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
 use snafu::Snafu;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::io::Read;
@@ -443,6 +447,7 @@ pub type Consensus = HotShotHandle<ValidatorNodeImpl<PLNetwork, PLStorage>, H_25
 pub fn genesis(
     chain_id: u16,
     faucet_pub_keys: impl IntoIterator<Item = UserPubKey>,
+    stake_table: BTreeMap<StakingKey, Amount>,
 ) -> GenesisNote {
     let mut rng = ChaChaRng::from_seed(GENESIS_SEED);
 
@@ -468,6 +473,7 @@ pub fn genesis(
     GenesisNote::new(
         ChainVariables::new(chain_id, VERIF_CRS.clone()),
         Arc::new(faucet_records),
+        stake_table,
     )
 }
 
@@ -482,7 +488,12 @@ async fn init_hotshot(
     networking: PLNetwork,
     genesis: GenesisNote,
     num_bootstrap: usize,
-) -> Consensus {
+) -> (
+    Consensus,
+    KVMerkleProof<StakeTableHash>,
+    Amount,
+    CollectedRewardsSet,
+) {
     // Create the initial hotshot
     let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
     let pub_key = known_nodes[node_id].clone();
@@ -503,25 +514,42 @@ async fn init_hotshot(
 
     let storage = get_store_dir(options, node_id);
     let storage_path = Path::new(&storage);
-    let lw_persistence = if options.reset_store_state {
+    let (lw_persistence, collected_rewards_set) = if options.reset_store_state {
         debug!("Initializing new session");
-        LWPersistence::new(storage_path, "validator").unwrap()
+        (
+            LWPersistence::new(storage_path, "validator").unwrap(),
+            CollectedRewardsSet::EmptySubtree,
+        )
     } else {
         debug!("Restoring from persisted session");
-        LWPersistence::load(storage_path, "validator").unwrap()
+        LWPersistence::load(storage_path, "validator").unwrap();
+        panic!("unimplemented") // TODO not storing CollectedRewardSet yet + catchup not implemented
     };
+    let stake_table_list = genesis.stake_table.clone();
     let genesis = ElaboratedBlock::genesis(genesis);
-    let state = lw_persistence.load_latest_state().unwrap_or_else(|_| {
-        // HotShot does not currently support genesis nicely. It should take a genesis block and
-        // apply it to the default state. However, it currently takes the genesis block _and_ the
-        // resulting state. This means we must apply the genesis block to the default state
-        // ourselves.
-        let mut state = ValidatorState::default();
-        state
-            .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
-            .unwrap();
-        state
-    });
+    let (state, stake_proof, stake_amount) = match lw_persistence.load_latest_state() {
+        Ok(_state) => {
+            panic!("");
+        }
+        Err(_) => {
+            let mut state = ValidatorState::default();
+            let mut stake_table = KVMerkleTree::<StakeTableHash>::default();
+            for (key, amount) in stake_table_list.iter() {
+                stake_table.insert(key.clone(), *amount);
+            }
+            let (amount, stake_proof) = stake_table
+                .lookup(StakingKey::from_priv_key(&priv_key.clone().into()))
+                .unwrap();
+            for (key, _) in stake_table_list.iter() {
+                stake_table.forget(key.clone());
+            }
+
+            state
+                .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
+                .unwrap();
+            (state, stake_proof, amount.unwrap())
+        }
+    };
 
     let hotshot_storage_path = [storage_path, Path::new("hotshot")]
         .iter()
@@ -549,7 +577,7 @@ async fn init_hotshot(
     .unwrap();
 
     debug!("Hotshot online!");
-    hotshot
+    (hotshot, stake_proof, stake_amount, collected_rewards_set)
 }
 
 pub async fn run_consensus<F: Send + Future>(mut consensus: Consensus, kill: F) {
@@ -681,12 +709,14 @@ pub async fn new_libp2p_network(
     )
     .await
 }
-
-pub async fn init_validator(
+#[allow(clippy::too_many_arguments)]
+pub async fn init_validator<R: CryptoRng + RngCore + Send + 'static>(
+    rng: R,
     node_opt: &NodeOpt,
     consensus_opt: &ConsensusOpt,
     priv_key: PrivKey,
     pub_keys: Vec<PubKey>,
+    reward_address: UserAddress,
     genesis: GenesisNote,
     own_id: usize,
 ) -> Consensus {
@@ -761,17 +791,29 @@ pub async fn init_validator(
     debug!("All nodes connected to network");
 
     // Initialize the state and hotshot
-    init_hotshot(
+    let (hotshot, stake_proof, stake_amount, collected_rewards) = init_hotshot(
         node_opt,
         known_nodes,
-        priv_key,
+        priv_key.clone(),
         threshold,
         own_id,
         own_network,
         genesis,
         num_bootstrap,
     )
-    .await
+    .await;
+
+    spawn(collect_reward_daemon(
+        rng,
+        stake_proof,
+        stake_amount,
+        collected_rewards,
+        StakingPrivKey::from(priv_key),
+        reward_address,
+        hotshot.clone(),
+    ));
+
+    hotshot
 }
 
 pub fn open_data_source(
@@ -789,16 +831,16 @@ pub fn open_data_source(
 }
 
 #[allow(dead_code)] // FIXME use this function in main
-async fn collect_reward_daemon<R: CryptoRng + RngCore>(
-    rng: &mut R,
+async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
+    mut rng: R,
     stake_proof: KVMerkleProof<StakeTableHash>,
     stake_amount: Amount,
     mut collected_rewards: CollectedRewardsSet,
-    staking_priv_key: &StakingPrivKey,
-    cap_address: &UserAddress,
+    staking_priv_key: StakingPrivKey,
+    cap_address: UserAddress,
     mut hotshot: Consensus,
 ) {
-    let staking_key = StakingKey::from_priv_key(staking_priv_key);
+    let staking_key = StakingKey::from_priv_key(&staking_priv_key);
     loop {
         let event = hotshot
             .next_event()
@@ -811,7 +853,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                 let view_number = qc.view_number;
                 // 0. check if I'm elected
                 if let Some(vrf_proof) =
-                    mock_eligibility::prove_eligibility(view_number.into(), staking_priv_key)
+                    mock_eligibility::prove_eligibility(view_number.into(), &staking_priv_key)
                 {
                     let claimed_reward = CollectedRewards {
                         staking_key: staking_key.clone(),
@@ -821,13 +863,13 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                         collected_rewards.lookup(claimed_reward).unwrap().1;
                     // 1. generate collect reward transaction
                     let (note, proof) = CollectRewardNote::generate(
-                        rng,
+                        &mut rng,
                         &validator_state.historical_stake_tables,
                         validator_state.block_height - 1,
                         validator_state.total_stake,
                         view_number.into(),
                         validator_state.block_height,
-                        staking_priv_key,
+                        &staking_priv_key,
                         cap_address.clone(),
                         stake_amount,
                         stake_proof.clone(),

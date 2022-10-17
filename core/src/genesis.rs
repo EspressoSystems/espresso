@@ -10,6 +10,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+use crate::stake_table::StakingKey;
 use crate::{
     state::{ArcSer, ChainVariables},
     universal_params::MERKLE_HEIGHT,
@@ -18,11 +19,13 @@ use crate::{
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use async_std::sync::Arc;
 use commit::{Commitment, Committable, RawCommitmentBuilder};
+use jf_cap::structs::Amount;
 use jf_cap::{
     structs::{RecordCommitment, RecordOpening},
     MerkleTree,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Genesis transaction
 ///
@@ -45,6 +48,7 @@ use serde::{Deserialize, Serialize};
 pub struct GenesisNote {
     pub chain: ChainVariables,
     pub faucet_records: ArcSer<Vec<RecordOpening>>,
+    pub stake_table: BTreeMap<StakingKey, Amount>,
 }
 
 impl Committable for GenesisNote {
@@ -57,13 +61,17 @@ impl Committable for GenesisNote {
 }
 
 impl GenesisNote {
-    pub fn new(chain: ChainVariables, faucet_records: Arc<Vec<RecordOpening>>) -> Self {
+    pub fn new(
+        chain: ChainVariables,
+        faucet_records: Arc<Vec<RecordOpening>>,
+        stake_table: BTreeMap<StakingKey, Amount>,
+    ) -> Self {
         Self {
             chain,
             faucet_records: faucet_records.into(),
+            stake_table,
         }
     }
-
     pub fn output_len(&self) -> usize {
         self.faucet_records.len()
     }
