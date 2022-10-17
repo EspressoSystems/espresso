@@ -855,6 +855,7 @@ impl Committable for CollectedRewardsHistory {
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 mod rewards_testing {
     use super::*;
     use crate::reward::mock_eligibility::{is_eligible, prove_eligibility};
