@@ -104,6 +104,21 @@ impl CollectRewardNote {
         vrf_proof: VrfProof,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
         let staking_key = StakingKey::from_priv_key(staking_priv_key);
+
+        if uncollected_reward_proof.get_leaf().is_some() {
+            return Err(RewardError::BadUncollectedRewardProof {});
+        }
+        match stake_amount_proof.get_leaf() {
+            Some((key, value)) => {
+                if key != staking_key {
+                    return Err(RewardError::BadStakingKey {});
+                }
+                if value != stake_amount {
+                    return Err(RewardError::BadStakeAmount {});
+                }
+            }
+            None => return Err(RewardError::BadStakeAmountProof {}),
+        }
         let (body, proofs) = CollectRewardBody::generate(
             rng,
             historical_stake_tables_frontier,
@@ -230,11 +245,18 @@ impl CollectRewardBody {
                 }
             }
         };
+
+        //verify staking key/signature
+        let data = bincode::serialize(&time).unwrap();
+        if !staking_key.validate(&vrf_proof, &data[..]) {
+            return Err(RewardError::SignatureError {});
+        }
         let vrf_witness = EligibilityWitness {
             staking_key,
             time,
             vrf_proof,
         };
+
         let body = CollectRewardBody {
             blind_factor,
             cap_address,
@@ -437,7 +459,7 @@ impl RewardNoteProofs {
 }
 
 /// Reward Transaction Errors.
-#[derive(Debug, Snafu, Serialize, Deserialize)]
+#[derive(Debug, Snafu, Serialize, Deserialize, PartialEq, Eq)]
 #[snafu(visibility(pub(crate)))]
 pub enum RewardError {
     /// An invalid view number
@@ -466,6 +488,18 @@ pub enum RewardError {
 
     /// RewardNote failed signature
     SignatureError {},
+
+    /// Bad uncollected reward proof
+    BadUncollectedRewardProof {},
+
+    /// Bad stake amount proof
+    BadStakeAmountProof {},
+
+    /// Bad staking key
+    BadStakingKey {},
+
+    /// Bad stake amount
+    BadStakeAmount {},
 }
 
 impl From<ark_serialize::SerializationError> for RewardError {
@@ -482,7 +516,7 @@ pub mod mock_eligibility {
     use super::*;
     use sha3::{Digest, Sha3_256};
 
-    /// check weather a staking key is elegible for rewards
+    /// check whether a staking key is elegible for rewards
     pub fn is_eligible(
         view_number: ConsensusTime,
         staking_key: &StakingKey,
@@ -817,5 +851,784 @@ impl Committable for CollectedRewardsHistory {
                 .var_size_bytes(&crate::util::canonical::serialize(delta).unwrap())
         }
         ret.finalize()
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+mod rewards_testing {
+    use super::*;
+    use crate::reward::mock_eligibility::{is_eligible, prove_eligibility};
+    use crate::universal_params::MERKLE_HEIGHT;
+    use std::ops::Add;
+
+    fn get_vrf_proof_and_view_number(
+        priv_key: &StakingPrivKey,
+        pub_key: &StakingKey,
+    ) -> (VrfProof, hotshot_types::data::ViewNumber) {
+        let mut view_number = hotshot_types::data::ViewNumber::genesis();
+        // with 600 runs we get ~2^{-100} failure pbb
+        let mut counter = 0;
+        let vrf_proof = loop {
+            if let Some(proof) = prove_eligibility(view_number.into(), priv_key) {
+                assert!(is_eligible(view_number.into(), pub_key, &proof));
+                break proof;
+            }
+            view_number = view_number.add(1);
+            counter += 1;
+            if counter > 600 {
+                panic!("test error: loop never returned");
+            }
+        };
+        (vrf_proof, view_number)
+    }
+
+    #[test]
+    fn test_eligibility_witness() {
+        let priv_key = StakingPrivKey::generate();
+        let pub_key = StakingKey::from_priv_key(&priv_key);
+        let bad_priv_key = StakingPrivKey::generate();
+        let bad_pub_key = StakingKey::from_priv_key(&bad_priv_key);
+
+        let (proof, view_number) = get_vrf_proof_and_view_number(&priv_key, &pub_key);
+
+        let mut witness = EligibilityWitness {
+            /// Staking public key
+            staking_key: pub_key.clone(),
+            /// View number for which the key was elected
+            time: view_number.into(),
+            /// Cryptographic proof
+            vrf_proof: proof,
+        };
+        assert!(witness.verify().is_ok());
+
+        witness.staking_key = bad_pub_key;
+        assert!(witness.verify().is_err());
+
+        witness.staking_key = pub_key;
+        witness.time = view_number.add(1).into();
+        assert!(witness.verify().is_err());
+        //with current mock_eligibility, we cannot change/test stake amount
+        //but we should be able to later
+    }
+
+    fn bad_num_leaves_test<R: CryptoRng + RngCore>(
+        rng: &mut R,
+        validator_state: &ValidatorState,
+        time: ConsensusTime,
+        priv_key: &StakingPrivKey,
+        cap_address: UserAddress,
+        stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+        vrf_proof: VrfProof,
+        collected_reward: CollectedRewards,
+    ) {
+        let (bad_leaves_reward_note, bad_leaves_aux_proofs) = CollectRewardNote::generate(
+            rng,
+            &validator_state.historical_stake_tables,
+            2,
+            Amount::from(100u64),
+            time,
+            1,
+            priv_key,
+            cap_address,
+            Amount::from(100u64),
+            stake_amount_proof,
+            uncollected_reward_proof,
+            vrf_proof,
+        )
+        .unwrap();
+
+        //note passes because num_leaves is only used to verify stake table commitments inclusion proof
+        assert!(bad_leaves_reward_note.verify().is_ok());
+        assert!(bad_leaves_aux_proofs
+            .verify(validator_state, collected_reward.clone())
+            .is_err());
+
+        match bad_leaves_aux_proofs
+            .verify(validator_state, collected_reward.clone())
+            .err()
+            .unwrap()
+        {
+            ValidationError::BadStakeTableCommitmentsProof {} => {}
+            _ => panic!(
+                "error type is wrong: {}",
+                bad_leaves_aux_proofs
+                    .verify(validator_state, collected_reward)
+                    .err()
+                    .unwrap()
+            ),
+        }
+    }
+    fn bad_priv_key_test<R: CryptoRng + RngCore>(
+        rng: &mut R,
+        validator_state: &ValidatorState,
+        time: ConsensusTime,
+        cap_address: UserAddress,
+        stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+        vrf_proof: VrfProof,
+        collected_reward: CollectedRewards,
+        reward_note: &CollectRewardNote,
+        aux_proofs: &RewardNoteProofs,
+    ) {
+        let bad_priv_key = StakingPrivKey::generate();
+        let bad_pub_key = StakingKey::from_priv_key(&bad_priv_key);
+        let note_error = CollectRewardNote::generate(
+            rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            &bad_priv_key,
+            cap_address,
+            Amount::from(100u64),
+            stake_amount_proof,
+            uncollected_reward_proof,
+            vrf_proof,
+        );
+
+        assert!(note_error.is_err());
+        assert_eq!(note_error.err().unwrap(), RewardError::BadStakingKey {});
+
+        let mut bad_reward_note = reward_note.clone();
+        bad_reward_note.body.vrf_witness.staking_key = bad_pub_key.clone();
+
+        assert!(bad_reward_note.verify().is_err());
+
+        assert!(aux_proofs.verify(validator_state, collected_reward).is_ok());
+        //proofs fail with bad key and bad collected_reward
+        let bad_key_collected_reward = CollectedRewards {
+            staking_key: bad_pub_key,
+            time,
+        };
+        assert!(aux_proofs
+            .verify(validator_state, bad_key_collected_reward)
+            .is_err());
+    }
+
+    fn bad_stake_amount_test<R: CryptoRng + RngCore>(
+        rng: &mut R,
+        validator_state: &ValidatorState,
+        time: ConsensusTime,
+        priv_key: &StakingPrivKey,
+        cap_address: UserAddress,
+        stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+        vrf_proof: VrfProof,
+    ) {
+        let note_error = CollectRewardNote::generate(
+            rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            priv_key,
+            cap_address,
+            //correct amount is 100
+            Amount::from(52u64),
+            stake_amount_proof,
+            uncollected_reward_proof,
+            vrf_proof,
+        );
+
+        assert!(note_error.is_err());
+        assert_eq!(note_error.err().unwrap(), RewardError::BadStakeAmount {});
+    }
+
+    fn bad_stake_amount_proof_test<R: CryptoRng + RngCore>(
+        rng: &mut R,
+        validator_state: &ValidatorState,
+        time: ConsensusTime,
+        priv_key: &StakingPrivKey,
+        cap_address: UserAddress,
+        stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+        vrf_proof: VrfProof,
+        collected_reward: CollectedRewards,
+        aux_proofs: &RewardNoteProofs,
+    ) {
+        let note_error = CollectRewardNote::generate(
+            rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            priv_key,
+            cap_address,
+            Amount::from(100u64),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof,
+            vrf_proof,
+        );
+
+        assert!(note_error.is_err());
+        assert_eq!(note_error.err().unwrap(), RewardError::BadStakingKey {});
+
+        let mut bad_aux_proofs = aux_proofs.clone();
+        bad_aux_proofs.stake_amount_proof = stake_amount_proof;
+
+        assert!(bad_aux_proofs
+            .verify(validator_state, collected_reward.clone())
+            .is_err());
+
+        match bad_aux_proofs
+            .verify(validator_state, collected_reward.clone())
+            .err()
+            .unwrap()
+        {
+            ValidationError::BadCollectedRewardProof {} => {}
+            _ => panic!(
+                "error type is wrong: {}",
+                bad_aux_proofs
+                    .verify(validator_state, collected_reward)
+                    .err()
+                    .unwrap()
+            ),
+        }
+    }
+
+    fn bad_vrf_proof_test<R: CryptoRng + RngCore>(
+        rng: &mut R,
+        validator_state: &ValidatorState,
+        time: ConsensusTime,
+        priv_key: &StakingPrivKey,
+        cap_address: UserAddress,
+        stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+        reward_note: &CollectRewardNote,
+        aux_proofs: &RewardNoteProofs,
+    ) {
+        let bad_priv_key = StakingPrivKey::generate();
+        let bad_pub_key = StakingKey::from_priv_key(&bad_priv_key);
+        let (bad_vrf_proof, bad_time) = get_vrf_proof_and_view_number(&bad_priv_key, &bad_pub_key);
+        //try to generate note with matching keys in bad_priv_key and bad_vrf_proof
+        let note_error = CollectRewardNote::generate(
+            rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            &bad_priv_key,
+            cap_address.clone(),
+            Amount::from(100u64),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            bad_vrf_proof.clone(),
+        );
+
+        assert!(note_error.is_err());
+        assert_eq!(note_error.err().unwrap(), RewardError::BadStakingKey {});
+
+        //try to generate note with good priv_key but non-matching key in vrf_proof
+        let note_error = CollectRewardNote::generate(
+            rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            priv_key,
+            cap_address,
+            Amount::from(100u64),
+            stake_amount_proof,
+            uncollected_reward_proof,
+            //Kaley todo: nonmatching instead of "bad"
+            bad_vrf_proof.clone(),
+        );
+
+        assert!(note_error.is_err());
+        assert_eq!(note_error.err().unwrap(), RewardError::SignatureError {});
+
+        let mut bad_reward_note = reward_note.clone();
+        bad_reward_note.signature = bad_vrf_proof;
+
+        //test with just bad proof
+        assert!(bad_reward_note.verify().is_err());
+        match bad_reward_note.verify().err().unwrap() {
+            RewardError::SignatureError {} => {}
+            _ => panic!(
+                "error type is wrong: {}",
+                bad_reward_note.verify().err().unwrap()
+            ),
+        }
+
+        //check with bad_time in CollectedReward
+        let bad_collected_reward = CollectedRewards {
+            staking_key: bad_pub_key,
+            time: bad_time.into(),
+        };
+        assert!(aux_proofs
+            .verify(validator_state, bad_collected_reward.clone())
+            .is_err());
+        match aux_proofs
+            .verify(validator_state, bad_collected_reward.clone())
+            .err()
+            .unwrap()
+        {
+            ValidationError::BadCollectedRewardProof {} => {}
+            _ => panic!(
+                "error type is wrong: {}",
+                aux_proofs
+                    .verify(validator_state, bad_collected_reward)
+                    .err()
+                    .unwrap()
+            ),
+        }
+    }
+
+    fn bad_time_test<R: CryptoRng + RngCore>(
+        rng: &mut R,
+        validator_state: &ValidatorState,
+        time: ConsensusTime,
+        priv_key: &StakingPrivKey,
+        cap_address: UserAddress,
+        stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+        vrf_proof: VrfProof,
+        collected_reward: CollectedRewards,
+        reward_note: &CollectRewardNote,
+        aux_proofs: &RewardNoteProofs,
+    ) {
+        let bad_time = ConsensusTime(time.0 + 1);
+        let note_error = CollectRewardNote::generate(
+            rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            bad_time,
+            1,
+            priv_key,
+            cap_address,
+            Amount::from(100u64),
+            stake_amount_proof,
+            uncollected_reward_proof,
+            vrf_proof,
+        );
+
+        assert!(note_error.is_err());
+
+        let mut bad_reward_note = reward_note.clone();
+        bad_reward_note.body.vrf_witness.time = bad_time;
+
+        assert!(bad_reward_note.verify().is_err());
+        match bad_reward_note.verify().err().unwrap() {
+            //time does not match vrf proof, so we get KeyNotEligible error from vrf verification
+            RewardError::KeyNotEligible { .. } => {}
+            _ => panic!(
+                "reward type is wrong: {}",
+                bad_reward_note.verify().err().unwrap()
+            ),
+        }
+
+        let mut bad_collected_reward = collected_reward;
+        bad_collected_reward.time = bad_time;
+        assert!(aux_proofs
+            .verify(validator_state, bad_collected_reward.clone())
+            .is_err());
+
+        match aux_proofs
+            .verify(validator_state, bad_collected_reward.clone())
+            .err()
+            .unwrap()
+        {
+            ValidationError::BadCollectedRewardProof {} => {}
+            _ => panic!(
+                "error type is wrong: {}",
+                aux_proofs
+                    .verify(validator_state, bad_collected_reward)
+                    .err()
+                    .unwrap(),
+            ),
+        }
+    }
+
+    fn previously_collected_reward_test<R: CryptoRng + RngCore>(
+        rng: &mut R,
+        validator_state: &ValidatorState,
+        time: ConsensusTime,
+        priv_key: &StakingPrivKey,
+        cap_address: UserAddress,
+        stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+        vrf_proof: VrfProof,
+        collected_reward: CollectedRewards,
+        aux_proofs: &RewardNoteProofs,
+    ) {
+        let note_error = CollectRewardNote::generate(
+            rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            priv_key,
+            cap_address,
+            Amount::from(100u64),
+            stake_amount_proof,
+            uncollected_reward_proof.clone(),
+            vrf_proof,
+        );
+
+        assert!(note_error.is_err());
+        let mut bad_aux_proofs = aux_proofs.clone();
+        bad_aux_proofs.uncollected_reward_proof = uncollected_reward_proof;
+
+        assert!(bad_aux_proofs
+            .verify(validator_state, collected_reward.clone())
+            .is_err());
+
+        match bad_aux_proofs
+            .verify(validator_state, collected_reward.clone())
+            .err()
+            .unwrap()
+        {
+            ValidationError::BadCollectedRewardProof { .. } => {}
+            ValidationError::RewardAlreadyCollected { .. } => {}
+            _ => panic!(
+                "error type is wrong: {}",
+                bad_aux_proofs
+                    .verify(validator_state, collected_reward)
+                    .err()
+                    .unwrap(),
+            ),
+        }
+    }
+
+    fn bad_historical_stake_tables_test<R: CryptoRng + RngCore>(
+        rng: &mut R,
+        validator_state: &ValidatorState,
+        time: ConsensusTime,
+        priv_key: &StakingPrivKey,
+        cap_address: UserAddress,
+        stake_amount_proof: KVMerkleProof<StakeTableHash>,
+        uncollected_reward_proof: KVMerkleProof<CollectedRewardsHash>,
+        vrf_proof: VrfProof,
+        collected_reward: CollectedRewards,
+    ) {
+        //generates note since the check against proofs is where a bad historical table is found
+        let (_reward_note, aux_proofs) = CollectRewardNote::generate(
+            rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            priv_key,
+            cap_address,
+            Amount::from(100u64),
+            stake_amount_proof,
+            uncollected_reward_proof,
+            vrf_proof,
+        )
+        .unwrap();
+
+        assert!(aux_proofs
+            .verify(validator_state, collected_reward.clone())
+            .is_err());
+        match aux_proofs
+            .verify(validator_state, collected_reward.clone())
+            .err()
+            .unwrap()
+        {
+            ValidationError::BadCollectedRewardProof { .. } => {}
+            _ => panic!(
+                "error type is wrong: {}",
+                aux_proofs
+                    .verify(validator_state, collected_reward)
+                    .err()
+                    .unwrap()
+            ),
+        }
+    }
+
+    #[test]
+    fn test_collect_reward_note() {
+        let mut rng = rand::thread_rng();
+        let priv_key = StakingPrivKey::generate();
+        let pub_key = StakingKey::from_priv_key(&priv_key);
+        let bad_priv_key = StakingPrivKey::generate();
+        let bad_pub_key = StakingKey::from_priv_key(&bad_priv_key);
+        let (vrf_proof, time) = get_vrf_proof_and_view_number(&priv_key, &pub_key);
+
+        let time = time.into();
+        let amount = Amount::from(100u64);
+
+        // Build stake table commitments frontier, history and new commitment
+        let mut stc_builder = crate::merkle_tree::FilledMTBuilder::<(
+            StakeTableCommitment,
+            Amount,
+            ConsensusTime,
+        )>::new(MERKLE_HEIGHT)
+        .unwrap();
+        let mut stake_table_mt =
+            crate::kv_merkle_tree::KVMerkleTree::<StakeTableHash>::EmptySubtree;
+        stake_table_mt.insert(pub_key.clone(), amount);
+        let stake_amount_proof = stake_table_mt.lookup(pub_key.clone()).unwrap().1;
+        let stake_table_commitment = stake_table_mt.hash();
+        stc_builder.push((StakeTableCommitment(stake_table_commitment), amount, time));
+        let stc_mt = stc_builder.build();
+
+        //Build collected rewards mt
+        let collected_reward = CollectedRewards {
+            staking_key: pub_key.clone(),
+            time,
+        };
+        let mut collected_rewards_mt =
+            crate::kv_merkle_tree::KVMerkleTree::<CollectedRewardsHash>::EmptySubtree;
+        let uncollected_reward_proof = collected_rewards_mt
+            .lookup(collected_reward.clone())
+            .unwrap()
+            .1;
+
+        let cap_address = UserPubKey::default().address();
+
+        let mut validator_state = ValidatorState {
+            historical_stake_tables_commitment: stc_mt.commitment(),
+            historical_stake_tables: stc_mt.frontier(),
+            block_height: 1,
+            ..ValidatorState::default()
+        };
+
+        let (reward_note, aux_proofs) = CollectRewardNote::generate(
+            &mut rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            &priv_key,
+            cap_address.clone(),
+            Amount::from(100u64),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+        )
+        .unwrap();
+
+        assert!(reward_note.verify().is_ok());
+        assert!(aux_proofs
+            .verify(&validator_state, collected_reward.clone())
+            .is_ok());
+
+        //Bad num_leaves
+        bad_num_leaves_test(
+            &mut rng,
+            &validator_state,
+            time,
+            &priv_key,
+            cap_address.clone(),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+            collected_reward.clone(),
+        );
+
+        //Can't test bad block height/amount until compute_reward_amount uses those values
+
+        bad_priv_key_test(
+            &mut rng,
+            &validator_state,
+            time,
+            cap_address.clone(),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+            collected_reward.clone(),
+            &reward_note,
+            &aux_proofs,
+        );
+
+        bad_stake_amount_test(
+            &mut rng,
+            &validator_state,
+            time,
+            &priv_key,
+            cap_address.clone(),
+            stake_amount_proof,
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+        );
+
+        //Bad stake_amount_proof: bad_pub_key not added to stake_table_mt
+        //2 bad proofs: noninclusion proof, nonmatching key proof
+        let noninclusion_stake_amount_proof = stake_table_mt.lookup(bad_pub_key.clone()).unwrap().1;
+        bad_stake_amount_proof_test(
+            &mut rng,
+            &validator_state,
+            time,
+            &bad_priv_key,
+            cap_address.clone(),
+            noninclusion_stake_amount_proof,
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+            CollectedRewards {
+                staking_key: bad_pub_key.clone(),
+                time,
+            },
+            &aux_proofs,
+        );
+
+        //add bad_pub_key to stake table to test valid proofs but mismatached keys in different proofs
+        stake_table_mt.insert(bad_pub_key.clone(), amount);
+        let bad_key_stake_amount_proof = stake_table_mt.lookup(bad_pub_key).unwrap().1;
+        //regenerate valid stake_amount_proof with new table
+        let stake_amount_proof = stake_table_mt.lookup(pub_key).unwrap().1;
+        let stake_table_commitment = stake_table_mt.hash();
+        // Build stake table commitments from scratch to simulate fixed-stake design
+        let mut stc_builder = crate::merkle_tree::FilledMTBuilder::<(
+            StakeTableCommitment,
+            Amount,
+            ConsensusTime,
+        )>::new(MERKLE_HEIGHT)
+        .unwrap();
+        stc_builder.push((StakeTableCommitment(stake_table_commitment), amount, time));
+        let stc_mt = stc_builder.build();
+        validator_state.historical_stake_tables = stc_mt.frontier();
+        validator_state.historical_stake_tables_commitment = stc_mt.commitment();
+
+        //rebuild valid reward_note and aux_proofs; make sure valid changes to the state pass validation
+        let (reward_note, aux_proofs) = CollectRewardNote::generate(
+            &mut rng,
+            &validator_state.historical_stake_tables,
+            1,
+            Amount::from(100u64),
+            time,
+            1,
+            &priv_key,
+            cap_address.clone(),
+            Amount::from(100u64),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+        )
+        .unwrap();
+
+        assert!(reward_note.verify().is_ok());
+        assert!(
+            aux_proofs
+                .verify(&validator_state, collected_reward.clone())
+                .is_ok(),
+            "error type: {:?}",
+            aux_proofs
+                .verify(&validator_state, collected_reward)
+                .err()
+                .unwrap()
+        );
+
+        //call with priv_key as parameter and in collected_reward, but bad_pub_key in bad_key_stake_amount_proof
+        bad_stake_amount_proof_test(
+            &mut rng,
+            &validator_state,
+            time,
+            &priv_key,
+            cap_address.clone(),
+            bad_key_stake_amount_proof,
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+            collected_reward.clone(),
+            &aux_proofs,
+        );
+
+        bad_vrf_proof_test(
+            &mut rng,
+            &validator_state,
+            time,
+            &priv_key,
+            cap_address.clone(),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            &reward_note,
+            &aux_proofs,
+        );
+
+        bad_time_test(
+            &mut rng,
+            &validator_state,
+            time,
+            &priv_key,
+            cap_address.clone(),
+            stake_amount_proof.clone(),
+            uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+            collected_reward.clone(),
+            &reward_note,
+            &aux_proofs,
+        );
+
+        //Bad uncollected_rewards_proof: insert into collected_rewards_mt and attempt to collect
+        collected_rewards_mt.insert(collected_reward.clone(), ());
+        let bad_uncollected_reward_proof = collected_rewards_mt
+            .lookup(collected_reward.clone())
+            .unwrap()
+            .1;
+        //call before updating collected_rewards in state: BadCollectedRewards error
+        previously_collected_reward_test(
+            &mut rng,
+            &validator_state,
+            time,
+            &priv_key,
+            cap_address.clone(),
+            stake_amount_proof.clone(),
+            bad_uncollected_reward_proof.clone(),
+            vrf_proof.clone(),
+            collected_reward.clone(),
+            &aux_proofs,
+        );
+
+        validator_state.collected_rewards.current = collected_rewards_mt.hash();
+
+        //call after updating collected_rewards: RewardAlreadyCollected error
+        previously_collected_reward_test(
+            &mut rng,
+            &validator_state,
+            time,
+            &priv_key,
+            cap_address.clone(),
+            stake_amount_proof.clone(),
+            bad_uncollected_reward_proof,
+            vrf_proof.clone(),
+            collected_reward.clone(),
+            &aux_proofs,
+        );
+
+        //generate new key and new stake table to create "bad" stake table (doesn't match generated proofs)
+        let bad_pub_key2 = StakingKey::from_priv_key(&StakingPrivKey::generate());
+        let mut bad_stake_table =
+            crate::kv_merkle_tree::KVMerkleTree::<StakeTableHash>::EmptySubtree;
+        bad_stake_table.insert(bad_pub_key2, Amount::from(10u64));
+        let bad_stake_table_commitment = bad_stake_table.hash();
+        let mut bad_stc_builder = crate::merkle_tree::FilledMTBuilder::<(
+            StakeTableCommitment,
+            Amount,
+            ConsensusTime,
+        )>::new(MERKLE_HEIGHT)
+        .unwrap();
+        bad_stc_builder.push((
+            StakeTableCommitment(bad_stake_table_commitment),
+            Amount::from(10u64),
+            time,
+        ));
+        let bad_stc_mt = bad_stc_builder.build();
+        validator_state.historical_stake_tables = bad_stc_mt.frontier();
+        validator_state.historical_stake_tables_commitment = bad_stc_mt.commitment();
+
+        bad_historical_stake_tables_test(
+            &mut rng,
+            &validator_state,
+            time,
+            &priv_key,
+            cap_address,
+            stake_amount_proof,
+            uncollected_reward_proof,
+            vrf_proof,
+            collected_reward,
+        );
+        //Not tested: bad stake_amount/amount: these don't do anything currently, waiting for compute_reward_amount finalization
+        //cap_address also not tested- what does "bad" cap_address mean?
     }
 }
