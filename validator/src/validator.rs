@@ -14,6 +14,7 @@
 
 use crate::*;
 use clap::Parser;
+use espresso_core::StakingKey;
 use espresso_esqs::full_node::{self, EsQS};
 use std::process::exit;
 
@@ -64,6 +65,10 @@ pub async fn init(
         eprintln!("{}", msg);
         exit(1);
     }
+    if options.num_nodes < MINIMUM_NODES {
+        eprintln!("Not enough nodes (need at least {})", MINIMUM_NODES);
+        exit(1);
+    }
 
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -74,8 +79,11 @@ pub async fn init(
 
     // Initialize the hotshot
     let keys = gen_keys(&options.consensus_opt, options.num_nodes);
-    let priv_key = keys[own_id].private.clone();
-    let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
+    let priv_key = keys[own_id].clone();
+    let known_nodes = keys
+        .into_iter()
+        .map(|sk| StakingKey::from_private(&sk))
+        .collect();
     let hotshot = init_validator(
         &options.node_opt,
         &options.consensus_opt,

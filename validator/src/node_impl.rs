@@ -12,20 +12,36 @@
 
 use core::fmt::Debug;
 use core::marker::PhantomData;
-use espresso_core::{committee::Committee, state::ValidatorState, PubKey};
+use espresso_core::{stake_table::VrfParam, state::ValidatorState};
 use hotshot::{
-    traits::{NetworkingImplementation, NodeImplementation, Storage},
+    traits::{
+        election::vrf::{VRFPubKey, VrfImpl},
+        NetworkingImplementation, NodeImplementation, Storage,
+    },
     types::Message,
 };
+use jf_primitives::{signatures::BLSSignatureScheme, vrf::blsvrf::BLSVRFScheme};
+use sha3::Sha3_256 as Hasher;
+
+pub type SignatureKey = VRFPubKey<BLSSignatureScheme<VrfParam>>;
+
+pub type Election =
+    VrfImpl<ValidatorState, BLSSignatureScheme<VrfParam>, BLSVRFScheme<VrfParam>, Hasher, VrfParam>;
 
 /// A lightweight node that handles validation for consensus, and nothing more.
 pub trait PLNet:
-    NetworkingImplementation<Message<ValidatorState, PubKey>, PubKey> + Clone + Debug + 'static
+    NetworkingImplementation<Message<ValidatorState, SignatureKey>, SignatureKey>
+    + Clone
+    + Debug
+    + 'static
 {
 }
 
 impl<
-        T: NetworkingImplementation<Message<ValidatorState, PubKey>, PubKey> + Clone + Debug + 'static,
+        T: NetworkingImplementation<Message<ValidatorState, SignatureKey>, SignatureKey>
+            + Clone
+            + Debug
+            + 'static,
     > PLNet for T
 {
 }
@@ -48,12 +64,8 @@ impl<NET: PLNet, STORE: PLStore> Debug for ValidatorNodeImpl<NET, STORE> {
 
 impl<NET: PLNet, STORE: PLStore> NodeImplementation for ValidatorNodeImpl<NET, STORE> {
     type StateType = ValidatorState;
-
     type Storage = STORE;
-
     type Networking = NET;
-
-    type Election = Committee<ValidatorState>;
-
-    type SignatureKey = PubKey;
+    type Election = Election;
+    type SignatureKey = SignatureKey;
 }

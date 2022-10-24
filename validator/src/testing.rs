@@ -16,8 +16,10 @@ use crate::{
 };
 use address_book::{error::AddressBookError, store::FileStore};
 use async_std::task::{block_on, spawn, JoinHandle};
+use espresso_core::StakingKey;
 use espresso_esqs::full_node::{self, EsQS};
 use futures::{channel::oneshot, future::join_all};
+use hotshot::types::SignatureKey;
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use rand_chacha::{rand_core::RngCore, ChaChaRng};
@@ -144,7 +146,10 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     println!("generating public keys");
     let start = Instant::now();
     let keys = gen_keys(&consensus_opt, MINIMUM_NODES);
-    let pub_keys = keys.iter().map(|key| key.public).collect::<Vec<_>>();
+    let pub_keys = keys
+        .iter()
+        .map(StakingKey::from_private)
+        .collect::<Vec<_>>();
     println!("generated public keys in {:?}", start.elapsed());
 
     let store = TempDir::new("minimal_test_network_store").unwrap();
@@ -154,7 +159,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         let genesis = genesis.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
-        let priv_key = keys[i].private.clone();
+        let priv_key = keys[i].clone();
 
         store_path.push(i.to_string());
         async move {

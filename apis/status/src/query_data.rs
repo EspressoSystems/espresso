@@ -13,7 +13,7 @@
 use core::time::Duration;
 use espresso_core::{
     state::{ElaboratedBlock, ValidatorState},
-    PubKey,
+    StakingKey,
 };
 use hotshot::data::QuorumCertificate;
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PeerInfo {
-    pub peer_id: PubKey,
+    pub peer_id: StakingKey,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

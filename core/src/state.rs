@@ -26,7 +26,6 @@ pub use crate::set_merkle_tree::*;
 pub use crate::tree_hash::committable_hash::*;
 pub use crate::tree_hash::*;
 pub use crate::util::canonical;
-pub use crate::{PrivKey, PubKey};
 pub use hotshot_types::data::ViewNumber as ConsensusTime;
 pub use state_comm::LedgerStateCommitment;
 

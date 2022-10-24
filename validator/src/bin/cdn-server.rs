@@ -11,7 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use espresso_core::state::PubKey;
+use espresso_validator::node_impl::SignatureKey;
+use hotshot::traits::election::vrf::VRFStakeTableConfig;
 use hotshot_centralized_server::{config::RoundConfig, NetworkConfig, Server};
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -44,7 +45,7 @@ async fn main() {
     };
     config.config.total_nodes = args.num_nodes;
     tracing::info!("starting CDN server on port {}", args.port);
-    Server::<PubKey>::new("0.0.0.0".parse().unwrap(), args.port)
+    Server::<SignatureKey, VRFStakeTableConfig>::new("0.0.0.0".parse().unwrap(), args.port)
         .await
         .with_round_config(RoundConfig::new(vec![config]))
         .run()

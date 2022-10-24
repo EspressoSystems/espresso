@@ -10,15 +10,16 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::ConsensusOpt;
+use crate::{node_impl::SignatureKey, ConsensusOpt};
 use async_std::{
     sync::{Arc, RwLock},
     task::sleep,
 };
 use async_trait::async_trait;
-use espresso_core::{state::ValidatorState, PubKey};
+use espresso_core::{state::ValidatorState, StakingKey};
 use hotshot::{
     traits::{
+        election::vrf::VRFStakeTableConfig,
         implementations::{CentralizedServerNetwork, Libp2pNetwork},
         NetworkError, NetworkingImplementation,
     },
@@ -40,14 +41,14 @@ use url::Url;
 
 #[derive(Clone, Debug)]
 pub enum HybridNetwork {
-    P2P(Libp2pNetwork<Message<ValidatorState, PubKey>, PubKey>),
-    Cdn(CentralizedServerNetwork<PubKey>),
+    P2P(Libp2pNetwork<Message<ValidatorState, SignatureKey>, SignatureKey>),
+    Cdn(CentralizedServerNetwork<SignatureKey, VRFStakeTableConfig>),
 }
 
 impl HybridNetwork {
     /// Create a new libp2p network.
     pub async fn new_p2p(
-        pubkey: PubKey,
+        pubkey: StakingKey,
         bs: Vec<(Option<PeerId>, Multiaddr)>,
         node_id: usize,
         node_type: NetworkNodeType,
@@ -92,7 +93,7 @@ impl HybridNetwork {
         Ok(Self::P2P(
             Libp2pNetwork::new(
                 config,
-                pubkey,
+                pubkey.into(),
                 Arc::new(RwLock::new(bs)),
                 consensus_opt.bootstrap_nodes.len(),
                 node_id,
@@ -103,11 +104,15 @@ impl HybridNetwork {
 
     /// Create a new Cdn-based network.
     pub async fn new_cdn(
-        known_nodes: Vec<PubKey>,
+        known_nodes: Vec<StakingKey>,
         server: Url,
         node_id: usize,
     ) -> Result<Self, NetworkError> {
-        let pub_key = known_nodes[node_id];
+        let known_nodes = known_nodes
+            .into_iter()
+            .map(SignatureKey::from)
+            .collect::<Vec<_>>();
+        let pub_key = known_nodes[node_id].clone();
         let num_nodes = known_nodes.len();
         let network = CentralizedServerNetwork::connect(
             known_nodes,
@@ -143,7 +148,7 @@ macro_rules! impl_networking {
     } =>
     {
         #[async_trait]
-        impl NetworkingImplementation<Message<ValidatorState, PubKey>, PubKey> for HybridNetwork {
+        impl NetworkingImplementation<Message<ValidatorState, SignatureKey>, SignatureKey> for HybridNetwork {
             $(
                 async fn $name
                     $(<$($type_param $(: $type_constraint)?),*>)?
@@ -151,10 +156,10 @@ macro_rules! impl_networking {
                 $(-> $result_type)? {
                     match self {
                         Self::P2P(p2p) =>
-                            NetworkingImplementation::<Message<ValidatorState, PubKey>, PubKey>::
+                            NetworkingImplementation::<Message<ValidatorState, SignatureKey>, SignatureKey>::
                                 $name(p2p, $($($param),*)?).await,
                         Self::Cdn(cdn) =>
-                            NetworkingImplementation::<Message<ValidatorState, PubKey>, PubKey>::
+                            NetworkingImplementation::<Message<ValidatorState, SignatureKey>, SignatureKey>::
                                 $name(cdn, $($($param),*)?).await,
                     }
                 }
@@ -167,19 +172,19 @@ impl_networking! {
     async fn ready(&self) -> bool;
     async fn broadcast_message(
         &self,
-        message: Message<ValidatorState, PubKey>,
+        message: Message<ValidatorState, SignatureKey>,
     ) -> Result<(), NetworkError>;
     async fn message_node(
         &self,
-        message: Message<ValidatorState, PubKey>,
-        recipient: PubKey,
+        message: Message<ValidatorState, SignatureKey>,
+        recipient: SignatureKey,
     ) -> Result<(), NetworkError>;
-    async fn broadcast_queue(&self,) -> Result<Vec<Message<ValidatorState, PubKey>>, NetworkError>;
-    async fn next_broadcast(&self) -> Result<Message<ValidatorState, PubKey>, NetworkError>;
-    async fn direct_queue(&self) -> Result<Vec<Message<ValidatorState, PubKey>>, NetworkError>;
-    async fn next_direct(&self) -> Result<Message<ValidatorState, PubKey>, NetworkError>;
-    async fn known_nodes(&self) -> Vec<PubKey>;
-    async fn network_changes(&self) -> Result<Vec<NetworkChange<PubKey>>, NetworkError>;
+    async fn broadcast_queue(&self,) -> Result<Vec<Message<ValidatorState, SignatureKey>>, NetworkError>;
+    async fn next_broadcast(&self) -> Result<Message<ValidatorState, SignatureKey>, NetworkError>;
+    async fn direct_queue(&self) -> Result<Vec<Message<ValidatorState, SignatureKey>>, NetworkError>;
+    async fn next_direct(&self) -> Result<Message<ValidatorState, SignatureKey>, NetworkError>;
+    async fn known_nodes(&self) -> Vec<SignatureKey>;
+    async fn network_changes(&self) -> Result<Vec<NetworkChange<SignatureKey>>, NetworkError>;
     async fn shut_down(&self) -> ();
     async fn put_record(
         &self,
@@ -190,5 +195,5 @@ impl_networking! {
         &self,
         key: impl Serialize + Send + Sync + 'static,
     ) -> Result<V, NetworkError>;
-    async fn notify_of_subsequent_leader(&self, pk: PubKey, cancelled: Arc<AtomicBool>);
+    async fn notify_of_subsequent_leader(&self, pk: SignatureKey, cancelled: Arc<AtomicBool>);
 }

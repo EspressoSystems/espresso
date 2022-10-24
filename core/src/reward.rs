@@ -25,6 +25,7 @@ use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
 use commit::Committable;
 use core::hash::Hash;
+use hotshot::types::SignatureKey;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::structs::{
     Amount, AssetDefinition, BlindFactor, FreezeFlag, RecordCommitment, RecordOpening,
@@ -105,7 +106,7 @@ impl CollectRewardNote {
         uncollected_reward_proof: CollectedRewardsProof,
         vrf_proof: VrfProof,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
-        let staking_key = StakingKey::from_priv_key(staking_priv_key);
+        let staking_key = staking_priv_key.into();
         let (body, proofs) = CollectRewardBody::generate(
             rng,
             historical_stake_tables_frontier,
@@ -125,7 +126,7 @@ impl CollectRewardNote {
         CanonicalSerialize::serialize(&body, &mut bytes).map_err(RewardError::from)?;
         let note = CollectRewardNote {
             body,
-            signature: StakingKey::sign(staking_priv_key, &bytes),
+            signature: StakingKey::sign(staking_priv_key, &bytes).into(),
         };
 
         Ok((note, proofs))
@@ -141,7 +142,7 @@ impl CollectRewardNote {
             .body
             .vrf_witness
             .staking_key
-            .validate(&self.signature, &bytes)
+            .validate(self.signature.as_ref(), &bytes)
         {
             Ok(())
         } else {
@@ -496,7 +497,7 @@ pub mod mock_eligibility {
         let vrf_value = hasher.finalize();
         // 2. validate proof
         let data = bincode::serialize(&view_number).unwrap();
-        if !staking_key.validate(proof, &data[..]) {
+        if !staking_key.validate(proof.as_ref(), &data[..]) {
             return false;
         }
         // mock eligibility return true ~10% of times
@@ -510,8 +511,8 @@ pub mod mock_eligibility {
     ) -> Option<VrfProof> {
         // 1. compute vrf proof
         let data = bincode::serialize(&view_number).unwrap();
-        let proof = StakingKey::sign(staking_priv_key, &data[..]);
-        let pub_key = StakingKey::from_priv_key(staking_priv_key);
+        let proof = StakingKey::sign(staking_priv_key, &data[..]).into();
+        let pub_key = staking_priv_key.into();
         // 2. check eligibility
         if is_eligible(view_number, &pub_key, &proof) {
             Some(proof)
@@ -522,15 +523,16 @@ pub mod mock_eligibility {
     #[cfg(test)]
     mod test_eligibility {
         use crate::reward::mock_eligibility::{is_eligible, prove_eligibility};
-        use crate::stake_table::{StakingKey, StakingPrivKey};
+        use crate::stake_table::StakingKey;
+        use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
         use std::ops::Add;
 
         #[test]
         fn test_reward_eligibility() {
+            let mut rng = ChaChaRng::from_seed([1; 32]);
             let mut view_number = hotshot_types::data::ViewNumber::genesis();
-            let priv_key = StakingPrivKey::generate();
-            let bad_pub_key = StakingKey::from_priv_key(&StakingPrivKey::generate());
-            let pub_key = StakingKey::from_priv_key(&priv_key);
+            let (pub_key, priv_key) = StakingKey::generate(&mut rng);
+            let (bad_pub_key, _) = StakingKey::generate(&mut rng);
             let mut found = 0;
             for _ in 0..600 {
                 // with 600 runs we get ~2^{-100} failure pbb

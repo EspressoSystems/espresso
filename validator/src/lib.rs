@@ -25,22 +25,23 @@ use espresso_core::reward::{
 use espresso_core::stake_table::StakingKey;
 use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof};
 use espresso_core::{
-    committee::Committee,
     genesis::GenesisNote,
     stake_table::{StakeTableHash, StakingPrivKey},
     state::{
         ChainVariables, ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState,
     },
     universal_params::VERIF_CRS,
-    PrivKey, PubKey,
 };
 use espresso_esqs::full_node_data_source::QueryData;
 use espresso_validator_api::data_source::ValidatorDataSource;
 use futures::{select, Future, FutureExt};
 use hotshot::types::{ed25519::Ed25519Priv, EventType};
 use hotshot::{
-    traits::implementations::MemoryStorage,
-    types::{HotShotHandle, SignatureKey},
+    traits::{
+        election::vrf::{VRFStakeTableConfig, VrfImpl, SORTITION_PARAMETER},
+        implementations::MemoryStorage,
+    },
+    types::{HotShotHandle, SignatureKey as _},
     HotShot, HotShotInitializer,
 };
 use hotshot_types::{ExecutionType, HotShotConfig};
@@ -52,9 +53,11 @@ use jf_utils::tagged_blob;
 use libp2p::identity::ed25519::SecretKey;
 use libp2p::{multiaddr, Multiaddr, PeerId};
 use libp2p_networking::network::NetworkNodeType;
-use node_impl::ValidatorNodeImpl;
+use node_impl::{SignatureKey, ValidatorNodeImpl};
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
 use snafu::Snafu;
+use static_assertions::const_assert;
+use std::convert::TryInto;
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::io::Read;
@@ -67,17 +70,30 @@ use tracing::{debug, event, Level};
 use url::Url;
 
 mod network;
-mod node_impl;
+pub mod node_impl;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod validator;
 
-pub const MINIMUM_NODES: usize = 6;
+pub const COMMITTEE_SIZE: u64 = SORTITION_PARAMETER;
+// More than 2/3 of the expected committee size is required to reach quorum.
+pub const QUORUM_THRESHOLD: u64 = 2 * COMMITTEE_SIZE / 3 + 1;
+// For the fixed-stake testnet, we arbitrarily assign each node enough stake so that at least 4
+// nodes are required for quorum.
+pub const STAKE_PER_NODE: u64 = QUORUM_THRESHOLD / 4 + 1;
+
+// We need enough nodes so that the total stake (i.e. `num_nodes * STAKE_PER_NODE`) is at least
+// `COMMITTEE_SIZE`, so `num_nodes >= COMMITTEE_SIZE / STAKE_PER_NODE`.
+pub const MINIMUM_NODES: usize = (COMMITTEE_SIZE / STAKE_PER_NODE) as usize + 1;
 pub const MINIMUM_BOOTSTRAP_NODES: usize = 5;
 pub const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 const DEFAULT_SECRET_KEY_SEED: [u8; 32] = [
     1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8,
 ];
+
+const_assert!(QUORUM_THRESHOLD < COMMITTEE_SIZE);
+const_assert!(MINIMUM_NODES as u64 * STAKE_PER_NODE >= COMMITTEE_SIZE);
+const_assert!(MINIMUM_NODES >= MINIMUM_BOOTSTRAP_NODES);
 
 /// Parse a (url|ip):[0-9]+ into a multiaddr
 pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
@@ -506,22 +522,32 @@ pub fn genesis(
 #[allow(clippy::too_many_arguments)]
 async fn init_hotshot(
     options: &NodeOpt,
-    known_nodes: Vec<PubKey>,
-    priv_key: PrivKey,
-    threshold: u64,
+    known_nodes: Vec<StakingKey>,
+    priv_key: StakingPrivKey,
     node_id: usize,
     networking: Network,
     genesis: GenesisNote,
     num_bootstrap: usize,
 ) -> Consensus {
     // Create the initial hotshot
-    let stake_table = known_nodes.iter().map(|key| (*key, 1)).collect();
-    let pub_key = known_nodes[node_id];
+    let known_nodes = known_nodes
+        .into_iter()
+        .map(SignatureKey::from)
+        .collect::<Vec<_>>();
+    let stake_distribution = known_nodes
+        .iter()
+        .map(|_| STAKE_PER_NODE.try_into().unwrap())
+        .collect::<Vec<_>>();
+    let pub_key = known_nodes[node_id].clone();
+    let vrf_config = VRFStakeTableConfig {
+        sortition_parameter: COMMITTEE_SIZE,
+        distribution: stake_distribution,
+    };
     let config = HotShotConfig {
         total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
-        threshold: NonZeroUsize::new(threshold as usize).unwrap(),
+        threshold: NonZeroUsize::new(QUORUM_THRESHOLD as usize).unwrap(),
         max_transactions: options.max_transactions,
-        known_nodes,
+        known_nodes: known_nodes.clone(),
         next_view_timeout: options.next_view_timeout.as_millis() as u64,
         timeout_ratio: options.timeout_ratio.into(),
         round_start_delay: options.round_start_delay.as_millis() as u64,
@@ -531,6 +557,7 @@ async fn init_hotshot(
         min_transactions: options.min_transactions,
         num_bootstrap,
         execution_type: ExecutionType::Continuous,
+        election_config: None,
     };
     debug!(?config);
 
@@ -552,14 +579,13 @@ async fn init_hotshot(
         }
     };
     let hotshot = HotShot::init(
-        config.known_nodes.clone(),
         pub_key,
         priv_key,
         node_id as u64,
         config,
         networking,
         MemoryStorage::new(),
-        Committee::new(stake_table),
+        VrfImpl::with_initial_stake(known_nodes, &vrf_config),
         initializer,
     )
     .await
@@ -609,48 +635,30 @@ pub async fn run_consensus<F: Send + Future>(mut consensus: Consensus, kill: F) 
 
 /// Generate a list of private and public keys for `consensus_opt.bootstrap_nodes.len()` bootstrap
 /// keys, with a given `consensus_opt.seed` seed.
-pub fn gen_bootstrap_keys(consensus_opt: &ConsensusOpt) -> Vec<KeyPair> {
-    let mut keys = Vec::with_capacity(consensus_opt.bootstrap_nodes.len());
-
-    for node_id in 0..consensus_opt.bootstrap_nodes.len() {
-        let private = PrivKey::generated_from_seed_indexed(
-            get_secret_key_seed(consensus_opt),
-            node_id as u64,
-        );
-        let public = PubKey::from_private(&private);
-
-        keys.push(KeyPair { public, private })
-    }
-    keys
+pub fn gen_bootstrap_keys(consensus_opt: &ConsensusOpt) -> Vec<StakingPrivKey> {
+    gen_keys(consensus_opt, consensus_opt.bootstrap_nodes.len())
 }
 
 /// Generate a list of private and public keys for the given number of nodes with a given
 /// `consensus_opt.seed` seed.
-pub fn gen_keys(consensus_opt: &ConsensusOpt, num_nodes: usize) -> Vec<KeyPair> {
-    let mut keys = Vec::with_capacity(num_nodes);
-
-    for node_id in 0..num_nodes {
-        let private = PrivKey::generated_from_seed_indexed(
-            get_secret_key_seed(consensus_opt),
-            node_id as u64,
-        );
-        let public = PubKey::from_private(&private);
-
-        keys.push(KeyPair { public, private })
-    }
-    keys
-}
-
-pub struct KeyPair {
-    pub public: PubKey,
-    pub private: PrivKey,
+pub fn gen_keys(consensus_opt: &ConsensusOpt, num_nodes: usize) -> Vec<StakingPrivKey> {
+    (0..num_nodes)
+        .into_iter()
+        .map(|node_id| {
+            StakingKey::generated_from_seed_indexed(
+                get_secret_key_seed(consensus_opt),
+                node_id as u64,
+            )
+            .1
+        })
+        .collect()
 }
 
 pub async fn init_validator(
     node_opt: &NodeOpt,
     consensus_opt: &ConsensusOpt,
-    priv_key: PrivKey,
-    pub_keys: Vec<PubKey>,
+    priv_key: StakingPrivKey,
+    pub_keys: Vec<StakingKey>,
     genesis: GenesisNote,
     own_id: usize,
 ) -> Consensus {
@@ -705,16 +713,13 @@ pub async fn init_validator(
         )
     };
 
-    // hotshot requires this threshold to be at least 2/3rd of the nodes for safety guarantee reasons
-    let threshold = ((pub_keys.len() as u64 * 2) / 3) + 1;
-
     let own_network = match node_opt.cdn.clone() {
         Some(cdn) if !node_opt.libp2p => Network::new_cdn(pub_keys.clone(), cdn, own_id)
             .await
             .unwrap(),
         _ => {
             let network = Network::new_p2p(
-                pub_keys[own_id],
+                pub_keys[own_id].clone(),
                 to_connect_addrs,
                 own_id,
                 node_type,
@@ -747,7 +752,6 @@ pub async fn init_validator(
         node_opt,
         known_nodes,
         priv_key,
-        threshold,
         own_id,
         own_network,
         genesis,
@@ -780,7 +784,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
     cap_address: &UserAddress,
     mut hotshot: Consensus,
 ) {
-    let staking_key = StakingKey::from_priv_key(staking_priv_key);
+    let staking_key = StakingKey::from_private(staking_priv_key);
     loop {
         let event = hotshot
             .next_event()
