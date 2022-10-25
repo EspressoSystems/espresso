@@ -14,7 +14,7 @@ use async_std::task::{sleep, spawn_blocking};
 use clap::Parser;
 use escargot::CargoBuild;
 use espresso_esqs::full_node;
-use espresso_validator::{NodeOpt, QUORUM_THRESHOLD, STAKE_PER_NODE};
+use espresso_validator::{div_ceil, NodeOpt, QUORUM_THRESHOLD, STAKE_PER_NODE};
 use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
@@ -313,7 +313,7 @@ async fn main() {
     let mut commitment = None;
     let mut succeeded_nodes = 0;
     let mut finished_nodes = 0;
-    let threshold = (QUORUM_THRESHOLD / STAKE_PER_NODE + 1) as usize;
+    let threshold = div_ceil!(QUORUM_THRESHOLD, STAKE_PER_NODE) as usize;
     let expect_failure = num_fail_nodes as usize > num_nodes - threshold;
     println!(
         "Waiting for validators to finish ({}/{}/{})",
@@ -464,7 +464,7 @@ mod test {
     #[async_std::test]
     async fn test_automation_libp2p() {
         automate(7, 5, 1, 3, true, true).await;
-        automate(7, 5, 4, 1, false, true).await;
+        automate(7, 5, 3, 1, false, true).await;
         automate(11, 2, 0, 0, true, true).await;
 
         // Disabling the following test cases to avoid exceeding the time limit.
@@ -476,7 +476,7 @@ mod test {
     #[async_std::test]
     async fn test_automation_cdn() {
         automate(7, 5, 1, 3, true, false).await;
-        automate(7, 5, 4, 1, false, false).await;
+        automate(7, 5, 3, 1, false, false).await;
         automate(11, 2, 0, 0, true, false).await;
     }
 }

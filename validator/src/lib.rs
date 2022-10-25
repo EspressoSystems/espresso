@@ -75,16 +75,23 @@ pub mod node_impl;
 pub mod testing;
 pub mod validator;
 
+#[macro_export]
+macro_rules! div_ceil {
+    ($num:expr, $den:expr) => {
+        ($num + $den - 1) / $den
+    };
+}
+
 pub const COMMITTEE_SIZE: u64 = SORTITION_PARAMETER;
 // More than 2/3 of the expected committee size is required to reach quorum.
 pub const QUORUM_THRESHOLD: u64 = 2 * COMMITTEE_SIZE / 3 + 1;
 // For the fixed-stake testnet, we arbitrarily assign each node enough stake so that at least 4
 // nodes are required for quorum.
-pub const STAKE_PER_NODE: u64 = QUORUM_THRESHOLD / 4 + 1;
+pub const STAKE_PER_NODE: u64 = QUORUM_THRESHOLD / 4;
 
 // We need enough nodes so that the total stake (i.e. `num_nodes * STAKE_PER_NODE`) is at least
 // `COMMITTEE_SIZE`, so `num_nodes >= COMMITTEE_SIZE / STAKE_PER_NODE`.
-pub const MINIMUM_NODES: usize = (COMMITTEE_SIZE / STAKE_PER_NODE) as usize + 1;
+pub const MINIMUM_NODES: usize = div_ceil!(COMMITTEE_SIZE, STAKE_PER_NODE) as usize;
 pub const MINIMUM_BOOTSTRAP_NODES: usize = 5;
 pub const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 const DEFAULT_SECRET_KEY_SEED: [u8; 32] = [
