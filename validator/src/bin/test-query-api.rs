@@ -213,7 +213,8 @@ async fn test(opt: &Args) {
     let test_indices = if opt.all {
         (0..num_blocks).into_iter().collect()
     } else {
-        // Check that we can query the 0th block and the last block.
+        // If we were not asked to check _all_ blocks, at least check that we can query the 0th
+        // block and the most recent block.
         vec![0, num_blocks - 1]
     };
 

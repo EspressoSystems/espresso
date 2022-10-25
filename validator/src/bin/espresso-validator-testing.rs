@@ -145,8 +145,9 @@ async fn generate_transactions(
         info!("Commitment: {}", hotshot.get_state().await.commit());
 
         if own_id == 0 {
-            // If we're the proposer, propose a transaction and wait for it to complete.
-            info!("  - Proposing a transaction");
+            // If we're the designated transaction submitter (i.e. node 0), submit a transaction and
+            // wait for it to complete.
+            info!("  - Submitting a transaction");
             let (new_state, mut txn) = generate_transaction(state, round).await;
             state = new_state;
             hotshot
@@ -166,7 +167,7 @@ async fn generate_transactions(
                     if let Some(leaf) = leaf_chain.last() {
                         if leaf.state.block_height > state.validator.block_height + 1 {
                             panic!(
-                                "missed a block, proposer is behind and cannot build a transaction"
+                                "missed a block, submitter is behind and cannot build a transaction"
                             );
                         }
                     }
@@ -184,7 +185,7 @@ async fn generate_transactions(
                             empty_blocks += 1;
                             info!("got empty block ({} since last commit)", empty_blocks);
                             if empty_blocks >= ValidatorState::HISTORY_SIZE {
-                                // If the transaction has expired due to empty blocks, propose a new
+                                // If the transaction has expired due to empty blocks, sumit a new
                                 // one. We could update the same one and fix all its nullifier
                                 // proofs, but for testing it doesn't matter and its simpler to just
                                 // build a new transaction.
