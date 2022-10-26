@@ -34,8 +34,8 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         name: Enable Rust Caching
 
-      - name: Install Dependencies
-        run: choco install cmake protoc
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
 
       - name: Check
         run: cargo check --workspace --all-targets
