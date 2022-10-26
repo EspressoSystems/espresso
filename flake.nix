@@ -210,7 +210,7 @@
           perfShell = pkgs.mkShell {
             shellHook = shellHook;
             buildInputs = with pkgs;
-              [ cargo-llvm-cov stableToolchain ] ++ rustDeps;
+              [ cargo-llvm-cov stableToolchain protobuf ] ++ rustDeps;
 
             RUST_LOG = "info,libp2p=off";
             ESPRESSO_FAUCET_TEST_DISABLE_TIMEOUT = "1";
