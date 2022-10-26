@@ -11,8 +11,9 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::state::{
-    state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction, EspressoTransaction,
-    EspressoTxnHelperProofs, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
+    state_comm::LedgerStateCommitment, ConsensusTime, ElaboratedBlock, ElaboratedTransaction,
+    EspressoTransaction, EspressoTxnHelperProofs, SetMerkleProof, SetMerkleTree, ValidationError,
+    ValidatorState,
 };
 use crate::util::canonical;
 use commit::{Commitment, Committable};
@@ -272,7 +273,7 @@ impl traits::Block for ElaboratedBlock {
     }
 
     fn add_transaction(&mut self, txn: Self::Transaction) -> Result<(), ValidationError> {
-        use hotshot::traits::BlockContents;
+        use hotshot::traits::Block;
         *self = self.add_transaction_raw(&txn)?;
         Ok(())
     }
@@ -281,11 +282,7 @@ impl traits::Block for ElaboratedBlock {
 impl traits::Validator for ValidatorState {
     type StateCommitment = LedgerStateCommitment;
     type Block = ElaboratedBlock;
-    type Proof = ();
-
-    fn next_block(&self) -> Self::Block {
-        ElaboratedBlock::default()
-    }
+    type Proof = ConsensusTime;
 
     fn block_height(&self) -> u64 {
         self.block_height
@@ -295,13 +292,17 @@ impl traits::Validator for ValidatorState {
         self.commit()
     }
 
+    fn next_block(&self) -> Self::Block {
+        ElaboratedBlock::new(self.commit())
+    }
+
     fn validate_and_apply(
         &mut self,
         block: Self::Block,
-        _proof: Self::Proof,
+        proof: Self::Proof,
     ) -> Result<(Vec<u64>, MerkleTree), ValidationError> {
         let outputs =
-            self.validate_and_apply(self.prev_commit_time + 1, block.block, block.proofs)?;
+            self.validate_and_apply(&proof, block.parent_state, block.block, block.proofs)?;
         Ok((outputs.uids, outputs.record_proofs))
     }
 }

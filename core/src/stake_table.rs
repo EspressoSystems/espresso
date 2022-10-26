@@ -11,89 +11,114 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::merkle_tree::{MerkleFrontier, MerkleLeafProof, MerkleTree, NodeValue};
-use crate::state::{CommitableHash, CommitableHashTag};
+use crate::state::{CommitableHash, CommitableHashTag, ConsensusTime};
 use crate::tree_hash::KVTreeHash;
 use crate::util::canonical;
-use crate::{PrivKey, PubKey};
 
 use crate::kv_merkle_tree::KVMerkleTree;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use commit::{Commitment, Committable};
-use espresso_macros::*;
-use hotshot_types::traits::signature_key::{EncodedSignature, SignatureKey};
+use derive_more::{AsRef, From, Into};
+use hotshot::traits::election::vrf;
+use hotshot_types::traits::signature_key::{EncodedPublicKey, EncodedSignature, SignatureKey};
 use jf_cap::structs::Amount;
+use jf_primitives::signatures::{BLSSignatureScheme, SignatureScheme as _};
 use jf_utils::tagged_blob;
+use rand::{CryptoRng, RngCore, SeedableRng};
+use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
+use sha3::{
+    digest::{Digest, Update},
+    Sha3_256,
+};
 use std::collections::VecDeque;
-use std::ops::Deref;
 
-/// PubKey used for stake table key
-#[tagged_blob("STAKING_KEY")]
-#[ser_test(random(random_for_test))]
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
-pub struct StakingKey(pub(crate) PubKey);
+pub use ark_bls12_381::Parameters as VrfParam;
 
-impl StakingKey {
-    /// Derive Staking Public key from Staking Private Key
-    pub fn from_priv_key(priv_key: &StakingPrivKey) -> Self {
-        Self(PubKey::from_private(&priv_key.0))
+type SignatureScheme = BLSSignatureScheme<VrfParam>;
+type VrfPubKey = vrf::VRFPubKey<SignatureScheme>;
+
+#[tagged_blob("STAKINGKEY")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, From, Into, AsRef)]
+pub struct StakingKey(VrfPubKey);
+
+/// Staking Private Key
+pub type StakingPrivKey = <VrfPubKey as SignatureKey>::PrivateKey;
+
+impl SignatureKey for StakingKey {
+    type PrivateKey = StakingPrivKey;
+
+    fn validate(&self, signature: &EncodedSignature, data: &[u8]) -> bool {
+        self.0.validate(signature, data)
     }
 
-    /// Sign a message using StakingPrivate Key
-    pub fn sign(priv_key: &StakingPrivKey, msg: &[u8]) -> StakingKeySignature {
-        StakingKeySignature(PubKey::sign(&priv_key.0, msg))
+    fn sign(private_key: &Self::PrivateKey, data: &[u8]) -> EncodedSignature {
+        <VrfPubKey as SignatureKey>::sign(private_key, data)
+    }
+
+    fn from_private(private_key: &Self::PrivateKey) -> Self {
+        <VrfPubKey as SignatureKey>::from_private(private_key).into()
+    }
+
+    fn to_bytes(&self) -> EncodedPublicKey {
+        self.0.to_bytes()
+    }
+
+    fn from_bytes(bytes: &EncodedPublicKey) -> Option<Self> {
+        <VrfPubKey as SignatureKey>::from_bytes(bytes).map(Self::from)
+    }
+
+    fn generated_from_seed_indexed(seed: [u8; 32], index: u64) -> (Self, Self::PrivateKey) {
+        // Generate a new seed which is deterministic but sensitive to `seed` and `index`:
+        // SHA256(seed || index).
+        let index_seed = Sha3_256::new_with_prefix(&seed)
+            .chain(index.to_le_bytes())
+            .finalize()
+            .into();
+        // Generate a key from the indexed seed.
+        let sk = SignatureScheme::key_gen(&(), &mut ChaChaRng::from_seed(index_seed)).unwrap();
+        (Self::from_private(&sk), sk)
     }
 }
 
-/// Staking Private Key
-pub struct StakingPrivKey(pub(crate) PrivKey);
+impl From<&StakingPrivKey> for StakingKey {
+    fn from(pk: &StakingPrivKey) -> Self {
+        Self::from_private(pk)
+    }
+}
 
-impl StakingPrivKey {
-    pub fn generate() -> Self {
-        Self(PrivKey::generate())
+impl StakingKey {
+    pub fn generate<R: CryptoRng + RngCore>(rng: &mut R) -> (Self, StakingPrivKey) {
+        let mut seed = [0; 32];
+        rng.fill_bytes(&mut seed);
+        Self::generated_from_seed_indexed(seed, 0)
     }
 }
 
 /// PubKey used for stake table key
 #[tagged_blob("STAKING_KEY_SIGNATURE")]
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq, From, Into, AsRef)]
 pub struct StakingKeySignature(pub(crate) EncodedSignature);
-
-impl StakingKey {
-    #[cfg(test)]
-    fn random_for_test(_rng: &mut rand_chacha::ChaChaRng) -> Self {
-        StakingKey(PubKey::from_private(&PrivKey::generate()))
-    }
-
-    /// validate a signature
-    pub fn validate(&self, signature: &StakingKeySignature, data: &[u8]) -> bool {
-        self.0.validate(&signature.0, data)
-    }
-}
 
 // cannot derive CanonicalSerialize because PubKey does not implement it
 impl CanonicalSerialize for StakingKey {
-    fn serialize<W: ark_serialize::Write>(
-        &self,
-        mut w: W,
-    ) -> Result<(), ark_serialize::SerializationError> {
-        let bytes = bincode::serialize(&self.0.to_bytes()).unwrap();
+    fn serialize<W: Write>(&self, mut w: W) -> Result<(), SerializationError> {
+        let bytes = self.to_bytes().0;
         CanonicalSerialize::serialize(&bytes, &mut w)?;
         Ok(())
     }
 
     fn serialized_size(&self) -> usize {
-        bincode::serialize(&self.0.to_bytes()).unwrap().len()
+        self.to_bytes().0.serialized_size()
     }
 }
 impl CanonicalDeserialize for StakingKey {
-    fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
+    fn deserialize<R>(mut r: R) -> Result<Self, SerializationError>
     where
-        R: ark_serialize::Read,
+        R: Read,
     {
         let bytes: Vec<u8> = CanonicalDeserialize::deserialize(&mut r)?;
-        let pubkey = bincode::deserialize(&bytes).unwrap();
-        Ok(Self(PubKey::from_bytes(&pubkey).unwrap()))
+        Self::from_bytes(&EncodedPublicKey(bytes)).ok_or(SerializationError::InvalidData)
     }
 }
 
@@ -107,10 +132,7 @@ impl commit::Committable for StakingKey {
 
 // cannot derive CanonicalSerialize because PubKey does not implement it
 impl CanonicalSerialize for StakingKeySignature {
-    fn serialize<W: ark_serialize::Write>(
-        &self,
-        mut w: W,
-    ) -> Result<(), ark_serialize::SerializationError> {
+    fn serialize<W: Write>(&self, mut w: W) -> Result<(), SerializationError> {
         CanonicalSerialize::serialize(&self.0 .0, &mut w)?;
         Ok(())
     }
@@ -119,33 +141,12 @@ impl CanonicalSerialize for StakingKeySignature {
     }
 }
 impl CanonicalDeserialize for StakingKeySignature {
-    fn deserialize<R>(mut r: R) -> Result<Self, ark_serialize::SerializationError>
+    fn deserialize<R>(mut r: R) -> Result<Self, SerializationError>
     where
-        R: ark_serialize::Read,
+        R: Read,
     {
         let bytes: Vec<u8> = CanonicalDeserialize::deserialize(&mut r)?;
         Ok(Self(EncodedSignature(bytes)))
-    }
-}
-
-/// HotShot View number
-#[derive(
-    Clone,
-    Debug,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-    Serialize,
-    Deserialize,
-)]
-pub struct ConsensusTime(pub(crate) u64);
-
-impl From<hotshot_types::data::ViewNumber> for ConsensusTime {
-    fn from(number: hotshot_types::data::ViewNumber) -> Self {
-        ConsensusTime(*number.deref())
     }
 }
 

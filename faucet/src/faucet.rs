@@ -789,7 +789,10 @@ async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionUID<Espr
         .await
         {
             if !matches!(result, Ok(TransactionStatus::Retired)) {
-                error!("record breakup transfer did not complete successfully");
+                error!(
+                    "record breakup transfer did not complete successfully ({:?})",
+                    result
+                );
             }
         }
     }

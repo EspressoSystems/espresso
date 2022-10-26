@@ -32,7 +32,7 @@ use async_tungstenite::async_std::connect_async;
 use clap::Parser;
 use commit::Committable;
 use espresso_availability_api::query_data::*;
-use espresso_core::{ledger::EspressoLedger, state::BlockCommitment};
+use espresso_core::ledger::EspressoLedger;
 use espresso_esqs::ApiError;
 use espresso_metastate_api::api::NullifierCheck;
 use futures::prelude::*;
@@ -59,6 +59,11 @@ struct Args {
     /// Port number of the query service.
     #[arg(short = 'P', long = "--port", default_value = "50000")]
     port: u16,
+
+    /// Test all blocks in the history.
+    ///
+    /// Without this flag, only a sample will be tested.
+    all: bool,
 }
 
 fn url_with_scheme(opt: &Args, scheme: impl Display, route: impl Display) -> Url {
@@ -85,10 +90,7 @@ async fn validate_committed_block(
     // Check well-formedness of the data.
     assert_eq!(ix, block.block_id);
     assert!(ix < num_blocks);
-    assert_eq!(
-        block.block_hash,
-        BlockCommitment(block.raw_block.block.commit()),
-    );
+    assert_eq!(block.block_hash, block.raw_block.commit().into(),);
 
     // Check that we get the same block if we query by other methods.
     assert_eq!(
@@ -208,14 +210,22 @@ async fn test(opt: &Args) {
     .await;
     assert_eq!(block_summaries.len() as u64, num_blocks);
 
+    let test_indices = if opt.all {
+        (0..num_blocks).into_iter().collect()
+    } else {
+        // If we were not asked to check _all_ blocks, at least check that we can query the 0th
+        // block and the most recent block.
+        vec![0, num_blocks - 1]
+    };
+
     // Check that we can query the 0th block and the last block.
-    for ix in [0, num_blocks - 1].iter() {
-        let block = get(opt, format!("/availability/getblock/{}", *ix)).await;
+    for ix in test_indices {
+        let block = get(opt, format!("/availability/getblock/{}", ix)).await;
         validate_committed_block(
             opt,
             &block,
-            &block_summaries[(num_blocks - 1 - *ix) as usize],
-            *ix,
+            &block_summaries[(num_blocks - 1 - ix) as usize],
+            ix,
             num_blocks,
         )
         .await;
@@ -348,6 +358,7 @@ mod test {
         test(&Args {
             host: "localhost".into(),
             port: network.query_api.port().unwrap(),
+            all: true,
         })
         .await
     }

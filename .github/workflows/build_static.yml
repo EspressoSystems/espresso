@@ -62,11 +62,11 @@ jobs:
       - name: Fix Git Security Issue
         run: git config --global --add safe.directory "$PWD"
 
-      # - name: Quick Test Static Build
-      #   timeout-minutes: 60
-      #   run: |
-      #     ulimit -n 4096
-      #     nix develop .#staticShell --option sandbox relaxed -c cargo run --profile=release-lto --bin multi-machine-automation -- --num-nodes 7 --num-txns 3 --verbose --reset-store-state
+      - name: Quick Test Static Build
+        timeout-minutes: 60
+        run: |
+          ulimit -n 4096
+          nix develop .#staticShell --option sandbox relaxed -c cargo run --profile=release-lto --bin multi-machine-automation -- --num-nodes 7 --num-txns 3 --cdn tcp://localhost:40000 --verbose --reset-store-state
 
       - name: Compile all executables
         timeout-minutes: 60

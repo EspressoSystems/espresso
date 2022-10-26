@@ -23,11 +23,13 @@ use atomic_store::{
 use espresso_availability_api::data_source::{
     AvailabilityDataSource, BlockAndAssociated, UpdateAvailabilityData,
 };
+use espresso_availability_api::query_data::EncodedPublicKey;
 use espresso_availability_api::query_data::{BlockQueryData, StateQueryData};
 use espresso_catchup_api::data_source::{CatchUpDataSource, UpdateCatchUpData};
 use espresso_core::ledger::EspressoLedger;
 use espresso_core::state::{
-    BlockCommitment, ElaboratedTransaction, SetMerkleProof, SetMerkleTree, TransactionCommitment,
+    ElaboratedBlockCommitment, ElaboratedTransaction, SetMerkleProof, SetMerkleTree,
+    TransactionCommitment, ValidatorState,
 };
 use espresso_metastate_api::{
     api as metastate,
@@ -36,7 +38,7 @@ use espresso_metastate_api::{
 use espresso_status_api::data_source::{StatusDataSource, UpdateStatusData};
 use espresso_status_api::query_data::ValidatorStatus;
 use espresso_validator_api::data_source::{ConsensusEvent, ValidatorDataSource};
-use hotshot::{data::QuorumCertificate, HotShotError, H_256};
+use hotshot::{data::QuorumCertificate, HotShotError};
 use itertools::izip;
 use jf_cap::structs::Nullifier;
 use jf_cap::MerkleTree;
@@ -54,9 +56,10 @@ pub type Consensus = Box<dyn ValidatorDataSource<Error = HotShotError> + Send + 
 pub struct QueryData {
     cached_blocks_start: usize,
     cached_blocks: Vec<BlockAndAssociated>,
-    index_by_block_hash: HashMap<BlockCommitment, u64>,
+    index_by_block_hash: HashMap<ElaboratedBlockCommitment, u64>,
     index_by_txn_hash: HashMap<TransactionCommitment, (u64, u64)>,
     index_by_last_record_id: BTreeMap<u64, u64>,
+    index_by_proposer_id: HashMap<EncodedPublicKey, Vec<u64>>,
     cached_events_start: usize,
     events: Vec<Option<LedgerEvent<EspressoLedger>>>,
     event_sender: broadcast::Sender<(usize, Option<LedgerEvent<EspressoLedger>>)>,
@@ -66,7 +69,7 @@ pub struct QueryData {
     query_storage: AtomicStore,
     block_storage: AppendLog<BincodeLoadStore<Option<BlockQueryData>>>,
     state_storage: AppendLog<BincodeLoadStore<Option<StateQueryData>>>,
-    qcert_storage: AppendLog<BincodeLoadStore<Option<QuorumCertificate<H_256>>>>,
+    qcert_storage: AppendLog<BincodeLoadStore<Option<QuorumCertificate<ValidatorState>>>>,
     event_storage: AppendLog<BincodeLoadStore<Option<LedgerEvent<EspressoLedger>>>>,
     status_storage: RollingLog<BincodeLoadStore<ValidatorStatus>>,
     consensus: Consensus,
@@ -87,8 +90,8 @@ impl Extract<StateQueryData> for BlockAndAssociated {
         &self.1
     }
 }
-impl Extract<QuorumCertificate<H_256>> for BlockAndAssociated {
-    fn extract(&self) -> &Option<QuorumCertificate<H_256>> {
+impl Extract<QuorumCertificate<ValidatorState>> for BlockAndAssociated {
+    fn extract(&self) -> &Option<QuorumCertificate<ValidatorState>> {
         &self.2
     }
 }
@@ -206,9 +209,9 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
 
     type QCertIterType = DynamicPersistenceIterator<
         'a,
-        QuorumCertificate<H_256>,
+        QuorumCertificate<ValidatorState>,
         BlockAndAssociated,
-        ALIter<'a, BincodeLoadStore<Option<QuorumCertificate<H_256>>>>,
+        ALIter<'a, BincodeLoadStore<Option<QuorumCertificate<ValidatorState>>>>,
     >;
 
     fn get_nth_block_iter(&self, n: usize) -> Self::BlockIterType {
@@ -232,7 +235,7 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
         }
         dynamic_persistence_iter(n, self.cached_blocks_start, &self.cached_blocks, iter)
     }
-    fn get_block_index_by_hash(&self, hash: BlockCommitment) -> Option<u64> {
+    fn get_block_index_by_hash(&self, hash: ElaboratedBlockCommitment) -> Option<u64> {
         self.index_by_block_hash.get(&hash).cloned()
     }
     fn get_txn_index_by_hash(&self, hash: TransactionCommitment) -> Option<(u64, u64)> {
@@ -290,6 +293,13 @@ impl<'a> AvailabilityDataSource for &'a QueryData {
             None
         }
     }
+    fn get_block_ids_by_proposer_id(&self, id: EncodedPublicKey) -> Vec<u64> {
+        if let Some(block_id) = self.index_by_proposer_id.get(&id) {
+            block_id.clone()
+        } else {
+            Vec::new()
+        }
+    }
 
     fn get_record_merkle_tree_at_block_index(&self, n: usize) -> Option<MerkleTree> {
         let apply = |state: &StateQueryData| {
@@ -334,6 +344,10 @@ impl UpdateAvailabilityData for QueryData {
             if let Some(block) = opt_block {
                 self.index_by_block_hash
                     .insert(block.block_hash, block.block_id);
+                self.index_by_proposer_id
+                    .entry(block.proposer_id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(block.block_id);
                 if block.record_count > 0 {
                     self.index_by_last_record_id
                         .insert(block.records_from + block.record_count - 1, block.block_id);
@@ -623,6 +637,7 @@ impl QueryData {
             index_by_block_hash: HashMap::new(),
             index_by_txn_hash: HashMap::new(),
             index_by_last_record_id: BTreeMap::new(),
+            index_by_proposer_id: HashMap::new(),
             cached_events_start: 0usize,
             events: Vec::new(),
             event_sender,
@@ -693,6 +708,7 @@ impl QueryData {
         let cached_blocks: Vec<BlockAndAssociated> = zipped_iters.collect();
         let mut index_by_txn_hash = HashMap::new();
         let mut index_by_last_record_id = BTreeMap::new();
+        let mut index_by_proposer_id = HashMap::new();
         let mut cached_nullifier_sets = BTreeMap::new();
         let mut running_nullifier_set = SetMerkleTree::default();
         let index_by_block_hash = block_storage
@@ -729,6 +745,10 @@ impl QueryData {
                         index_by_last_record_id
                             .insert(block.records_from + block.record_count - 1, block.block_id);
                     }
+                    index_by_proposer_id
+                        .entry(block.proposer_id)
+                        .or_insert_with(Vec::new)
+                        .push(block.block_id);
                     Some((block.block_hash, block.block_id))
                 }
             })
@@ -764,6 +784,7 @@ impl QueryData {
             index_by_block_hash,
             index_by_txn_hash,
             index_by_last_record_id,
+            index_by_proposer_id,
             cached_events_start,
             events,
             event_sender,

@@ -12,13 +12,14 @@
 
 use crate::{
     gen_keys, genesis, init_validator, open_data_source, run_consensus, ConsensusOpt, NodeOpt,
-    MINIMUM_NODES,
+    MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES,
 };
 use address_book::{error::AddressBookError, store::FileStore};
 use async_std::task::{block_on, spawn, JoinHandle};
-use espresso_core::state::ElaboratedBlock;
+use espresso_core::StakingKey;
 use espresso_esqs::full_node::{self, EsQS};
 use futures::{channel::oneshot, future::join_all};
+use hotshot::types::SignatureKey;
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use rand_chacha::{rand_core::RngCore, ChaChaRng};
@@ -123,7 +124,9 @@ impl Drop for TestNetwork {
 pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKey) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
-    let base_port = pick_unused_port().unwrap();
+    let bootstrap_ports = (0..MINIMUM_BOOTSTRAP_NODES)
+        .into_iter()
+        .map(|_| pick_unused_port().unwrap());
     let consensus_opt = ConsensusOpt {
         secret_key_seed: Some(seed.into()),
         replication_factor: 4,
@@ -135,7 +138,9 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         nonbootstrap_mesh_n_low: 8,
         nonbootstrap_mesh_outbound_min: 4,
         nonbootstrap_mesh_n: 12,
-        bootstrap_nodes: vec![Url::parse(&format!("localhost:{}", base_port)).unwrap()],
+        bootstrap_nodes: bootstrap_ports
+            .map(|p| format!("localhost:{}", p).parse().unwrap())
+            .collect(),
     };
 
     println!("generating public keys");
@@ -143,7 +148,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     let keys = gen_keys(&consensus_opt, MINIMUM_NODES);
     let pub_keys = keys
         .iter()
-        .map(|key| key.public.clone())
+        .map(StakingKey::from_private)
         .collect::<Vec<_>>();
     println!("generated public keys in {:?}", start.elapsed());
 
@@ -154,25 +159,25 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         let genesis = genesis.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
-        let priv_key = keys[i].private.clone();
+        let priv_key = keys[i].clone();
 
         store_path.push(i.to_string());
         async move {
             let node_opt = NodeOpt {
                 store_path: Some(store_path),
-                nonbootstrap_base_port: base_port as usize,
-                next_view_timeout: Duration::from_secs(10 * 60),
+                nonbootstrap_base_port: pick_unused_port().unwrap() as usize,
+                // Set fairly short view times (propose any transactions available after 5s, propose
+                // an empty block after 10s). In testing, we generally have low volumes, so we don't
+                // gain much from waiting longer to batch larger blocks, but with low views we get
+                // low latency and the tests run much faster.
+                min_propose_time: Duration::from_secs(5),
+                min_transactions: 1,
+                max_propose_time: Duration::from_secs(10),
+                next_view_timeout: Duration::from_secs(60),
                 ..NodeOpt::default()
             };
-            let consensus = init_validator(
-                &node_opt,
-                &consensus_opt,
-                priv_key,
-                pub_keys,
-                genesis.clone(),
-                i,
-            )
-            .await;
+            let consensus =
+                init_validator(&node_opt, &consensus_opt, priv_key, pub_keys, genesis, i).await;
             let data_source = open_data_source(
                 &node_opt,
                 i,
@@ -189,7 +194,6 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                         &full_node::Command::with_port(port),
                         data_source,
                         consensus.clone(),
-                        ElaboratedBlock::genesis(genesis),
                     )
                     .unwrap(),
                 )
