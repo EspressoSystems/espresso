@@ -1499,7 +1499,13 @@ impl ValidatorState {
             let mut stake_table = KVMerkleTree::<StakeTableHash>::default();
             for (key, amount) in txn.stake_table.iter() {
                 total_stake += *amount;
-                stake_table.insert(key.clone(), *amount);
+                // This unwrap will always succeed, since we are building the tree from scratch and
+                // the whole thing is in memory.
+                stake_table.insert(key.clone(), *amount).unwrap();
+            }
+            // After inserting all the keys, we can forget them all so we end up with a completely
+            // sparse Merkle tree.
+            for key in txn.stake_table.keys() {
                 stake_table.forget(key.clone());
             }
             //TOMORROW: this is bad

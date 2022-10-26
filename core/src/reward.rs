@@ -428,10 +428,7 @@ impl RewardNoteProofs {
                     stake_table_commitment.0, // this is stake table commitment in stake table set inclusion proof
                 )
                 .unwrap(); // safe unwrap, check never returns None
-            option_value.ok_or({
-                tracing::info!("bad staketalbeproof");
-                ValidationError::BadStakeTableProof {}
-            })?;
+            option_value.ok_or(ValidationError::BadStakeTableProof {})?;
         }
 
         Ok(RewardProofsValidationOutputs {
@@ -508,8 +505,8 @@ pub mod mock_eligibility {
         if !staking_key.validate(proof, &data[..]) {
             return false;
         }
-        // mock eligibility return true ~10% of times
-        vrf_value[0] < 25
+        // mock eligibility return true ~25% of times
+        vrf_value[0] < 64
     }
 
     /// Prove that staking key is eligible for reward on view number. Return None if key is not eligible
