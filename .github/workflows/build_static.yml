@@ -142,6 +142,12 @@ jobs:
         with:
           images: ghcr.io/espressosystems/espresso/random-wallet
 
+      - name: Generate CDN server docker metadata
+        uses: docker/metadata-action@v3
+        id: cdn-server
+        with:
+          images: ghcr.io/espressosystems/espresso/cdn-server
+
       - name: Build and push address book docker
         uses: docker/build-push-action@v3
         with:
@@ -181,3 +187,13 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.random-wallet.outputs.tags }}
           labels: ${{ steps.random-wallet.outputs.labels }}
+
+      - name: Build and push CDN server docker
+        uses: docker/build-push-action@v3
+        with:
+          context: ./
+          file: ./docker/cdn-server.Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.cdn-server.outputs.tags }}
+          labels: ${{ steps.cdn-server.outputs.labels }}
