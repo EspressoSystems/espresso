@@ -1502,6 +1502,11 @@ impl ValidatorState {
                 stake_table.insert(key.clone(), *amount);
                 stake_table.forget(key.clone());
             }
+            //TOMORROW: this is bad
+            tracing::info!(
+                "stake table from validate_and_apply: {:?}",
+                stake_table.hash()
+            );
             self.stake_table = stake_table;
             self.total_stake = total_stake;
             let mut stake_table_set =
@@ -1513,6 +1518,7 @@ impl ValidatorState {
             ));
             let stake_table_set_mt = stake_table_set.build();
             self.historical_stake_tables = stake_table_set_mt.frontier();
+            self.historical_stake_tables_commitment = stake_table_set_mt.commitment();
         }
 
         let mut record_merkle_builder = FilledMTBuilder::from_frontier(

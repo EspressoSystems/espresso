@@ -41,7 +41,7 @@ use seahorse::{
     transactions::Transaction,
     KeystoreBackend, KeystoreError,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use testing::MockNetwork;
 
@@ -354,6 +354,7 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
         let genesis = ElaboratedBlock::genesis(GenesisNote::new(
             ChainVariables::new(42, verif_crs),
             Arc::new(initial_grants.into_iter().map(|(ro, _)| ro).collect()),
+            BTreeMap::new(),
         ));
         ret.submit(genesis).unwrap();
         assert_eq!(ret.validator.record_merkle_commitment, records.commitment());

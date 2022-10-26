@@ -11,19 +11,20 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    gen_keys, genesis, init_validator, open_data_source, run_consensus, ConsensusOpt, NodeOpt,
-    MINIMUM_NODES,
+    gen_keys, genesis, init_validator, initialize_stake_table, open_data_source, run_consensus,
+    ConsensusOpt, NodeOpt, MINIMUM_NODES,
 };
 use address_book::{error::AddressBookError, store::FileStore};
+use async_std::task::sleep;
 use async_std::task::{block_on, spawn, JoinHandle};
 use espresso_core::state::ElaboratedBlock;
 use espresso_esqs::full_node::{self, EsQS};
+use futures::Future;
 use futures::{channel::oneshot, future::join_all};
 use jf_cap::keys::{UserAddress, UserPubKey};
 use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::{rand_core::RngCore, ChaChaRng};
-use std::collections::BTreeMap;
 use std::io;
 use std::iter;
 use std::mem::take;
@@ -154,7 +155,11 @@ pub async fn minimal_test_network(
     println!("generated public keys in {:?}", start.elapsed());
 
     let store = TempDir::new("minimal_test_network_store").unwrap();
-    let genesis = genesis(0, iter::once(faucet_pub_key), BTreeMap::new()); // TODO add a stake table
+    let genesis = genesis(
+        0,
+        iter::once(faucet_pub_key),
+        initialize_stake_table(pub_keys.clone()),
+    );
     let mut nodes_futures = vec![];
     for (i, key) in keys.iter().enumerate() {
         let consensus_opt = consensus_opt.clone();
@@ -227,4 +232,16 @@ pub async fn minimal_test_network(
         address_book: Some(address_book),
         _store: store,
     }
+}
+
+pub async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
+    let mut backoff = Duration::from_millis(100);
+    for _ in 0..13 {
+        if f().await {
+            return;
+        }
+        sleep(backoff).await;
+        backoff *= 2;
+    }
+    panic!("retry loop did not complete in {:?}", backoff);
 }

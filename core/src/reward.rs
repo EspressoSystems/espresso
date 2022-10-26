@@ -38,12 +38,13 @@ pub type VrfProof = StakingKeySignature;
 
 /// Compute the allowed stake amount given current state (e.g. circulating supply), view_number and stake amount
 /// Hard-coded to 0 for FST
+//TODO: @kaley add block rewards to compute_reward_amount
 pub fn compute_reward_amount(
     _block_height: u64,
     _stake: Amount,
     _total_staked_amount: Amount,
 ) -> Amount {
-    Amount::from(0u64)
+    Amount::from(1000u64)
 }
 
 /// Previously collected rewards are recorded in (StakingKey, view_number) pairs
@@ -131,6 +132,7 @@ impl CollectRewardNote {
 
     /// verifies a reward collect note
     pub fn verify(&self) -> Result<(), RewardError> {
+        tracing::info!("verifying reward note");
         self.body.verify()?;
         let size = CanonicalSerialize::serialized_size(&self.body);
         let mut bytes = Vec::with_capacity(size);
@@ -245,6 +247,7 @@ impl CollectRewardBody {
     }
 
     pub fn verify(&self) -> Result<(), RewardError> {
+        tracing::info!("verifying witness");
         self.vrf_witness.verify()
     }
 }
@@ -347,6 +350,7 @@ impl RewardNoteProofs {
         validator_state: &ValidatorState,
         claimed_reward: CollectedRewards, // staking key and time t
     ) -> Result<RewardProofsValidationOutputs, ValidationError> {
+        tracing::info!("verifying rewards proofs");
         let stake_table_commitment = self.stake_tables_set_leaf_proof.leaf.0 .0;
         let stake_table_total_stake = self.stake_tables_set_leaf_proof.leaf.0 .1;
         let time_in_proof = self.stake_tables_set_leaf_proof.leaf.0 .2;
@@ -355,6 +359,7 @@ impl RewardNoteProofs {
         //   Only time needs to be checked against claimed reward's time,
         //   Commitment in proof is used to check stake amount, and the total stake is returned for caller use.
         if claimed_reward.time != time_in_proof {
+            tracing::info!("bad collectedreward proof: time");
             return Err(ValidationError::BadCollectedRewardProof {});
         }
 
@@ -364,6 +369,8 @@ impl RewardNoteProofs {
             .get_leaf()
             .ok_or(ValidationError::BadCollectedRewardProof {})?;
         if staking_key_in_proof != claimed_reward.staking_key {
+            tracing::info!("bad collectedreward proof: key");
+
             return Err(ValidationError::BadCollectedRewardProof {});
         }
 
@@ -407,6 +414,7 @@ impl RewardNoteProofs {
                 }
             }
             if !found {
+                tracing::info!("bad staketablecommitments proof");
                 return Err(ValidationError::BadStakeTableCommitmentsProof {});
             }
         }
@@ -420,7 +428,10 @@ impl RewardNoteProofs {
                     stake_table_commitment.0, // this is stake table commitment in stake table set inclusion proof
                 )
                 .unwrap(); // safe unwrap, check never returns None
-            option_value.ok_or(ValidationError::BadStakeTableProof {})?;
+            option_value.ok_or({
+                tracing::info!("bad staketalbeproof");
+                ValidationError::BadStakeTableProof {}
+            })?;
         }
 
         Ok(RewardProofsValidationOutputs {

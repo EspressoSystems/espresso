@@ -477,6 +477,14 @@ pub fn genesis(
     )
 }
 
+/// Creates a btreemap for stake table
+pub fn initialize_stake_table(known_nodes: Vec<PubKey>) -> BTreeMap<StakingKey, Amount> {
+    known_nodes
+        .iter()
+        .map(|key| (key.clone().into(), 1u64.into()))
+        .collect()
+}
+
 /// Creates the initial state and hotshot for simulation.
 #[allow(clippy::too_many_arguments)]
 async fn init_hotshot(
@@ -495,7 +503,6 @@ async fn init_hotshot(
     CollectedRewardsSet,
 ) {
     // Create the initial hotshot
-    let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
     let pub_key = known_nodes[node_id].clone();
     let config = HotShotConfig {
         total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
@@ -522,8 +529,12 @@ async fn init_hotshot(
         )
     } else {
         debug!("Restoring from persisted session");
-        LWPersistence::load(storage_path, "validator").unwrap();
-        panic!("unimplemented") // TODO not storing CollectedRewardSet yet + catchup not implemented
+        let lw_persistence = LWPersistence::load(storage_path, "validator").unwrap();
+        if lw_persistence.load_latest_state().is_ok() {
+            panic!("unimplemented") // TODO not storing CollectedRewardSet yet + catchup not implemented
+        } else {
+            (lw_persistence, CollectedRewardsSet::EmptySubtree)
+        }
     };
     let stake_table_list = genesis.stake_table.clone();
     let genesis = ElaboratedBlock::genesis(genesis);
@@ -537,12 +548,16 @@ async fn init_hotshot(
             for (key, amount) in stake_table_list.iter() {
                 stake_table.insert(key.clone(), *amount);
             }
+            //TOMORROW: this is bad
+            tracing::info!("stake table from genesis: {:?}", stake_table.hash());
             let (amount, stake_proof) = stake_table
                 .lookup(StakingKey::from_priv_key(&priv_key.clone().into()))
                 .unwrap();
+            /*TODO KALEY: delete?
             for (key, _) in stake_table_list.iter() {
                 stake_table.forget(key.clone());
             }
+            */
 
             state
                 .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
@@ -571,7 +586,12 @@ async fn init_hotshot(
         networking,
         hotshot_storage,
         lw_persistence,
-        Committee::new(stake_table),
+        Committee::new(
+            stake_table_list
+                .into_iter()
+                .map(|(key, amount)| (key.into(), u128::from(amount) as u64))
+                .collect(),
+        ),
     )
     .await
     .unwrap();
@@ -850,11 +870,13 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
             for (blk, validator_state, qc) in
                 izip!(block.iter().rev(), state.iter().rev(), qcs.iter().rev())
             {
+                tracing::info!("Rewards daemon event: {:?}", blk);
                 let view_number = qc.view_number;
                 // 0. check if I'm elected
                 if let Some(vrf_proof) =
                     mock_eligibility::prove_eligibility(view_number.into(), &staking_priv_key)
                 {
+                    tracing::info!("Eligible for view {:?}", view_number);
                     let claimed_reward = CollectedRewards {
                         staking_key: staking_key.clone(),
                         time: view_number.into(),
@@ -865,7 +887,9 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
                     let (note, proof) = CollectRewardNote::generate(
                         &mut rng,
                         &validator_state.historical_stake_tables,
-                        validator_state.block_height - 1,
+                        validator_state
+                            .historical_stake_tables_commitment
+                            .num_leaves,
                         validator_state.total_stake,
                         view_number.into(),
                         validator_state.block_height,
