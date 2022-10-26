@@ -1,3 +1,0 @@
-(function() {var implementors = {};
-implementors["espresso_core"] = [{"text":"impl StatefulHandler&lt;H_256&gt; for <a class=\"struct\" href=\"espresso_core/lw_persistence/struct.LWPersistence.html\" title=\"struct espresso_core::lw_persistence::LWPersistence\">LWPersistence</a>","synthetic":false,"types":["espresso_core::lw_persistence::LWPersistence"]}];
-if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

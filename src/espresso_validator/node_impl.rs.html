@@ -69,19 +69,6 @@
 <span id="69">69</span>
 <span id="70">70</span>
 <span id="71">71</span>
-<span id="72">72</span>
-<span id="73">73</span>
-<span id="74">74</span>
-<span id="75">75</span>
-<span id="76">76</span>
-<span id="77">77</span>
-<span id="78">78</span>
-<span id="79">79</span>
-<span id="80">80</span>
-<span id="81">81</span>
-<span id="82">82</span>
-<span id="83">83</span>
-<span id="84">84</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -96,48 +83,43 @@
 
 <span class="kw">use</span> <span class="ident">core::fmt::Debug</span>;
 <span class="kw">use</span> <span class="ident">core::marker::PhantomData</span>;
-<span class="kw">use</span> <span class="ident">espresso_core</span>::{
-    <span class="ident">committee::Committee</span>,
-    <span class="ident">state</span>::{<span class="ident">ElaboratedBlock</span>, <span class="ident">ElaboratedTransaction</span>, <span class="ident">LWPersistence</span>, <span class="ident">ValidatorState</span>},
-    <span class="ident">PubKey</span>,
-};
+<span class="kw">use</span> <span class="ident">espresso_core</span>::{<span class="ident">stake_table::VrfParam</span>, <span class="ident">state::ValidatorState</span>};
 <span class="kw">use</span> <span class="ident">hotshot</span>::{
-    <span class="ident">traits</span>::{<span class="ident">NetworkingImplementation</span>, <span class="ident">NodeImplementation</span>, <span class="ident">Storage</span>},
+    <span class="ident">traits</span>::{
+        <span class="ident">election::vrf</span>::{<span class="ident">VRFPubKey</span>, <span class="ident">VrfImpl</span>},
+        <span class="ident">NetworkingImplementation</span>, <span class="ident">NodeImplementation</span>, <span class="ident">Storage</span>,
+    },
     <span class="ident">types::Message</span>,
-    <span class="ident">H_256</span>,
 };
+<span class="kw">use</span> <span class="ident">jf_primitives</span>::{<span class="ident">signatures::BLSSignatureScheme</span>, <span class="ident">vrf::blsvrf::BLSVRFScheme</span>};
+<span class="kw">use</span> <span class="ident">sha3::Sha3_256</span> <span class="kw">as</span> <span class="ident">Hasher</span>;
+
+<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">SignatureKey</span> <span class="op">=</span> <span class="ident">VRFPubKey</span><span class="op">&lt;</span><span class="ident">BLSSignatureScheme</span><span class="op">&lt;</span><span class="ident">VrfParam</span><span class="op">&gt;</span><span class="op">&gt;</span>;
+
+<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">Election</span> <span class="op">=</span>
+    <span class="ident">VrfImpl</span><span class="op">&lt;</span><span class="ident">ValidatorState</span>, <span class="ident">BLSSignatureScheme</span><span class="op">&lt;</span><span class="ident">VrfParam</span><span class="op">&gt;</span>, <span class="ident">BLSVRFScheme</span><span class="op">&lt;</span><span class="ident">VrfParam</span><span class="op">&gt;</span>, <span class="ident">Hasher</span>, <span class="ident">VrfParam</span><span class="op">&gt;</span>;
 
 <span class="doccomment">/// A lightweight node that handles validation for consensus, and nothing more.</span>
 <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">PLNet</span>:
-    <span class="ident">NetworkingImplementation</span><span class="op">&lt;</span>
-        <span class="ident">Message</span><span class="op">&lt;</span><span class="ident">ElaboratedBlock</span>, <span class="ident">ElaboratedTransaction</span>, <span class="ident">ValidatorState</span>, <span class="ident">PubKey</span>, <span class="ident">H_256</span><span class="op">&gt;</span>,
-        <span class="ident">PubKey</span>,
-    <span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>
+    <span class="ident">NetworkingImplementation</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&lt;</span><span class="ident">ValidatorState</span>, <span class="ident">SignatureKey</span><span class="op">&gt;</span>, <span class="ident">SignatureKey</span><span class="op">&gt;</span>
+    <span class="op">+</span> <span class="ident">Clone</span>
     <span class="op">+</span> <span class="ident">Debug</span>
     <span class="op">+</span> <span class="lifetime">&#39;static</span>
 {
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span>
-        <span class="ident">T</span>: <span class="ident">NetworkingImplementation</span><span class="op">&lt;</span>
-                <span class="ident">Message</span><span class="op">&lt;</span><span class="ident">ElaboratedBlock</span>, <span class="ident">ElaboratedTransaction</span>, <span class="ident">ValidatorState</span>, <span class="ident">PubKey</span>, <span class="ident">H_256</span><span class="op">&gt;</span>,
-                <span class="ident">PubKey</span>,
-            <span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>
+        <span class="ident">T</span>: <span class="ident">NetworkingImplementation</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&lt;</span><span class="ident">ValidatorState</span>, <span class="ident">SignatureKey</span><span class="op">&gt;</span>, <span class="ident">SignatureKey</span><span class="op">&gt;</span>
+            <span class="op">+</span> <span class="ident">Clone</span>
             <span class="op">+</span> <span class="ident">Debug</span>
             <span class="op">+</span> <span class="lifetime">&#39;static</span>,
     <span class="op">&gt;</span> <span class="ident">PLNet</span> <span class="kw">for</span> <span class="ident">T</span>
 {
 }
 
-<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">PLStore</span>:
-    <span class="ident">Storage</span><span class="op">&lt;</span><span class="ident">ElaboratedBlock</span>, <span class="ident">ValidatorState</span>, <span class="ident">H_256</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>
-{
-}
+<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">PLStore</span>: <span class="ident">Storage</span><span class="op">&lt;</span><span class="ident">ValidatorState</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span> <span class="op">+</span> <span class="lifetime">&#39;static</span> {}
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">Storage</span><span class="op">&lt;</span><span class="ident">ElaboratedBlock</span>, <span class="ident">ValidatorState</span>, <span class="ident">H_256</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span> <span class="op">+</span> <span class="lifetime">&#39;static</span><span class="op">&gt;</span> <span class="ident">PLStore</span>
-    <span class="kw">for</span> <span class="ident">T</span>
-{
-}
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">Storage</span><span class="op">&lt;</span><span class="ident">ValidatorState</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span> <span class="op">+</span> <span class="lifetime">&#39;static</span><span class="op">&gt;</span> <span class="ident">PLStore</span> <span class="kw">for</span> <span class="ident">T</span> {}
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ValidatorNodeImpl</span><span class="op">&lt;</span><span class="ident">NET</span>: <span class="ident">PLNet</span>, <span class="ident">STORE</span>: <span class="ident">PLStore</span><span class="op">&gt;</span> {
@@ -151,20 +133,12 @@
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">NET</span>: <span class="ident">PLNet</span>, <span class="ident">STORE</span>: <span class="ident">PLStore</span><span class="op">&gt;</span> <span class="ident">NodeImplementation</span><span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ValidatorNodeImpl</span><span class="op">&lt;</span><span class="ident">NET</span>, <span class="ident">STORE</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Block</span> <span class="op">=</span> <span class="ident">ElaboratedBlock</span>;
-
-    <span class="kw">type</span> <span class="ident">State</span> <span class="op">=</span> <span class="ident">ValidatorState</span>;
-
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">NET</span>: <span class="ident">PLNet</span>, <span class="ident">STORE</span>: <span class="ident">PLStore</span><span class="op">&gt;</span> <span class="ident">NodeImplementation</span> <span class="kw">for</span> <span class="ident">ValidatorNodeImpl</span><span class="op">&lt;</span><span class="ident">NET</span>, <span class="ident">STORE</span><span class="op">&gt;</span> {
+    <span class="kw">type</span> <span class="ident">StateType</span> <span class="op">=</span> <span class="ident">ValidatorState</span>;
     <span class="kw">type</span> <span class="ident">Storage</span> <span class="op">=</span> <span class="ident">STORE</span>;
-
     <span class="kw">type</span> <span class="ident">Networking</span> <span class="op">=</span> <span class="ident">NET</span>;
-
-    <span class="kw">type</span> <span class="ident">StatefulHandler</span> <span class="op">=</span> <span class="ident">LWPersistence</span>;
-
-    <span class="kw">type</span> <span class="ident">Election</span> <span class="op">=</span> <span class="ident">Committee</span><span class="op">&lt;</span>(), <span class="ident">H_256</span><span class="op">&gt;</span>;
-
-    <span class="kw">type</span> <span class="ident">SignatureKey</span> <span class="op">=</span> <span class="ident">PubKey</span>;
+    <span class="kw">type</span> <span class="ident">Election</span> <span class="op">=</span> <span class="ident">Election</span>;
+    <span class="kw">type</span> <span class="ident">SignatureKey</span> <span class="op">=</span> <span class="ident">SignatureKey</span>;
 }
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="espresso_validator" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>

@@ -312,6 +312,71 @@
 <span id="312">312</span>
 <span id="313">313</span>
 <span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -325,13 +390,13 @@
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">data_source</span>::{<span class="ident">AvailabilityDataSource</span>, <span class="ident">H_256</span>},
+    <span class="ident">data_source::AvailabilityDataSource</span>,
     <span class="ident">query_data</span>::{<span class="ident">BlockQueryData</span>, <span class="ident">BlockSummaryQueryData</span>, <span class="ident">RecordQueryData</span>, <span class="ident">StateQueryData</span>},
 };
 <span class="kw">use</span> <span class="ident">ark_serialize::CanonicalSerialize</span>;
 <span class="kw">use</span> <span class="ident">clap::Args</span>;
 <span class="kw">use</span> <span class="ident">derive_more::From</span>;
-<span class="kw">use</span> <span class="ident">espresso_core::state</span>::{<span class="ident">BlockCommitment</span>, <span class="ident">TransactionCommitment</span>};
+<span class="kw">use</span> <span class="ident">espresso_core::state</span>::{<span class="ident">ElaboratedBlockCommitment</span>, <span class="ident">TransactionCommitment</span>, <span class="ident">ValidatorState</span>};
 <span class="kw">use</span> <span class="ident">futures::FutureExt</span>;
 <span class="kw">use</span> <span class="ident">hotshot_types::data::QuorumCertificate</span>;
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
@@ -358,7 +423,7 @@
     <span class="attribute">#[<span class="ident">from</span>(<span class="ident">ignore</span>)]</span>
     <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;the requested block hash {} does not exist&quot;</span>, <span class="ident">hash</span>))]</span>
     <span class="ident">UnknownBlockHash</span> {
-        <span class="ident">hash</span>: <span class="ident">BlockCommitment</span>,
+        <span class="ident">hash</span>: <span class="ident">ElaboratedBlockCommitment</span>,
     },
 
     <span class="attribute">#[<span class="ident">from</span>(<span class="ident">ignore</span>)]</span>
@@ -464,6 +529,24 @@
         .<span class="ident">context</span>(<span class="ident">MissingBlockSnafu</span> { <span class="ident">block_id</span> })
 }
 
+<span class="kw">fn</span> <span class="ident">get_block_summaries</span><span class="op">&lt;</span><span class="ident">State</span>: <span class="ident">Clone</span><span class="op">&gt;</span>(
+    <span class="ident">state</span>: <span class="ident">State</span>,
+    <span class="ident">ids</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
+) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">BlockSummaryQueryData</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span>
+<span class="kw">where</span>
+    <span class="ident">State</span>: <span class="ident">AvailabilityDataSource</span>,
+{
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">summaries</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
+    <span class="kw">for</span> <span class="ident">id</span> <span class="kw">in</span> <span class="ident">ids</span> {
+        <span class="kw">let</span> <span class="ident">summary</span> <span class="op">=</span> <span class="ident">get_block_summary</span>(<span class="ident">state</span>.<span class="ident">clone</span>(), <span class="ident">id</span>, <span class="number">1</span>)<span class="question-mark">?</span>
+            .<span class="ident">first</span>()
+            .<span class="ident">ok_or</span>(<span class="ident">Error::MissingBlock</span> { <span class="ident">block_id</span>: <span class="ident">id</span> })<span class="question-mark">?</span>
+            .<span class="ident">clone</span>();
+        <span class="ident">summaries</span>.<span class="ident">push</span>(<span class="ident">summary</span>);
+    }
+    <span class="prelude-val">Ok</span>(<span class="ident">summaries</span>)
+}
+
 <span class="kw">fn</span> <span class="ident">get_state</span><span class="op">&lt;</span><span class="ident">State</span><span class="op">&gt;</span>(<span class="ident">state</span>: <span class="ident">State</span>, <span class="ident">block_id</span>: <span class="ident">u64</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">StateQueryData</span>, <span class="ident">Error</span><span class="op">&gt;</span>
 <span class="kw">where</span>
     <span class="ident">State</span>: <span class="ident">AvailabilityDataSource</span>,
@@ -475,7 +558,7 @@
         .<span class="ident">context</span>(<span class="ident">MissingStateSnafu</span> { <span class="ident">block_id</span> })
 }
 
-<span class="kw">fn</span> <span class="ident">get_qcert</span><span class="op">&lt;</span><span class="ident">State</span><span class="op">&gt;</span>(<span class="ident">state</span>: <span class="ident">State</span>, <span class="ident">block_id</span>: <span class="ident">u64</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span>
+<span class="kw">fn</span> <span class="ident">get_qcert</span><span class="op">&lt;</span><span class="ident">State</span><span class="op">&gt;</span>(<span class="ident">state</span>: <span class="ident">State</span>, <span class="ident">block_id</span>: <span class="ident">u64</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">ValidatorState</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span>
 <span class="kw">where</span>
     <span class="ident">State</span>: <span class="ident">AvailabilityDataSource</span>,
 {
@@ -504,12 +587,19 @@
         <span class="kw">let</span> <span class="ident">records_from</span> <span class="op">=</span> <span class="ident">block_data</span>.<span class="ident">records_from</span>;
         <span class="kw">let</span> <span class="ident">record_count</span> <span class="op">=</span> <span class="ident">block_data</span>.<span class="ident">record_count</span>;
         <span class="kw">let</span> <span class="ident">view_number</span> <span class="op">=</span> <span class="kw-2">*</span><span class="ident">qcert_data</span>.<span class="ident">view_number</span>.<span class="ident">deref</span>();
+        <span class="kw">let</span> <span class="ident">timestamp</span> <span class="op">=</span> <span class="ident">block_data</span>.<span class="ident">timestamp</span>;
+        <span class="kw">let</span> <span class="ident">proposer_id</span> <span class="op">=</span> <span class="ident">block_data</span>.<span class="ident">proposer_id</span>.<span class="number">0</span>;
+        <span class="kw">let</span> <span class="ident">block_hash</span> <span class="op">=</span> <span class="ident">block_data</span>.<span class="ident">block_hash</span>;
         <span class="ident">summaries</span>.<span class="ident">push</span>(<span class="ident">BlockSummaryQueryData</span> {
             <span class="ident">size</span>,
             <span class="ident">txn_count</span>,
             <span class="ident">records_from</span>,
             <span class="ident">record_count</span>,
             <span class="ident">view_number</span>,
+            <span class="ident">timestamp</span>,
+            <span class="ident">proposer_id</span>,
+            <span class="ident">block_id</span>: <span class="ident">id</span>,
+            <span class="ident">block_hash</span>,
         });
     }
     <span class="prelude-val">Ok</span>(<span class="ident">summaries</span>)
@@ -621,6 +711,46 @@
                 <span class="kw">let</span> <span class="ident">block_id</span> <span class="op">=</span> <span class="ident">req</span>.<span class="ident">integer_param</span>(<span class="string">&quot;block_id&quot;</span>)<span class="question-mark">?</span>;
                 <span class="kw">let</span> <span class="ident">count</span> <span class="op">=</span> <span class="ident">req</span>.<span class="ident">integer_param</span>(<span class="string">&quot;count&quot;</span>)<span class="question-mark">?</span>;
                 <span class="ident">get_block_summary</span>(<span class="ident">state</span>, <span class="ident">block_id</span>, <span class="ident">count</span>)
+            }
+            .<span class="ident">boxed</span>()
+        })<span class="question-mark">?</span>
+        .<span class="ident">get</span>(<span class="string">&quot;getproposals&quot;</span>, <span class="op">|</span><span class="ident">req</span>, <span class="ident">state</span><span class="op">|</span> {
+            <span class="kw">async</span> <span class="kw">move</span> {
+                <span class="kw">let</span> <span class="ident">proposer_id</span> <span class="op">=</span> <span class="ident">req</span>.<span class="ident">blob_param</span>(<span class="string">&quot;proposer&quot;</span>)<span class="question-mark">?</span>;
+                <span class="kw">let</span> <span class="ident">block_ids</span> <span class="op">=</span> <span class="ident">state</span>.<span class="ident">get_block_ids_by_proposer_id</span>(<span class="ident">proposer_id</span>);
+                <span class="kw">let</span> <span class="ident">take</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">count</span>) <span class="op">=</span> <span class="ident">req</span>.<span class="ident">opt_integer_param</span>(<span class="string">&quot;count&quot;</span>)<span class="question-mark">?</span> {
+                    <span class="ident">count</span>
+                } <span class="kw">else</span> {
+                    <span class="ident">block_ids</span>.<span class="ident">len</span>()
+                };
+                <span class="kw">let</span> <span class="ident">blocks</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">BlockQueryData</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">block_ids</span>
+                    .<span class="ident">into_iter</span>()
+                    .<span class="ident">rev</span>()
+                    .<span class="ident">take</span>(<span class="ident">take</span>)
+                    .<span class="ident">map</span>(<span class="op">|</span><span class="ident">id</span><span class="op">|</span> <span class="ident">get_block</span>(<span class="ident">state</span>, <span class="ident">id</span>))
+                    .<span class="ident">collect</span>();
+                <span class="ident">blocks</span>
+            }
+            .<span class="ident">boxed</span>()
+        })<span class="question-mark">?</span>
+        .<span class="ident">get</span>(<span class="string">&quot;getproposalssummary&quot;</span>, <span class="op">|</span><span class="ident">req</span>, <span class="ident">state</span><span class="op">|</span> {
+            <span class="kw">async</span> <span class="kw">move</span> {
+                <span class="kw">let</span> <span class="ident">proposer_id</span> <span class="op">=</span> <span class="ident">req</span>.<span class="ident">blob_param</span>(<span class="string">&quot;proposer&quot;</span>)<span class="question-mark">?</span>;
+                <span class="kw">let</span> <span class="ident">block_ids</span> <span class="op">=</span> <span class="ident">state</span>.<span class="ident">get_block_ids_by_proposer_id</span>(<span class="ident">proposer_id</span>);
+
+                <span class="kw">let</span> <span class="ident">take</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">count</span>) <span class="op">=</span> <span class="ident">req</span>.<span class="ident">opt_integer_param</span>(<span class="string">&quot;count&quot;</span>)<span class="question-mark">?</span> {
+                    <span class="ident">count</span>
+                } <span class="kw">else</span> {
+                    <span class="ident">block_ids</span>.<span class="ident">len</span>()
+                };
+                <span class="ident">get_block_summaries</span>(<span class="ident">state</span>, <span class="ident">block_ids</span>.<span class="ident">into_iter</span>().<span class="ident">rev</span>().<span class="ident">take</span>(<span class="ident">take</span>).<span class="ident">collect</span>())
+            }
+            .<span class="ident">boxed</span>()
+        })<span class="question-mark">?</span>
+        .<span class="ident">get</span>(<span class="string">&quot;countproposals&quot;</span>, <span class="op">|</span><span class="ident">req</span>, <span class="ident">state</span><span class="op">|</span> {
+            <span class="kw">async</span> <span class="kw">move</span> {
+                <span class="kw">let</span> <span class="ident">proposer_id</span> <span class="op">=</span> <span class="ident">req</span>.<span class="ident">blob_param</span>(<span class="string">&quot;proposer&quot;</span>)<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(<span class="ident">state</span>.<span class="ident">get_block_ids_by_proposer_id</span>(<span class="ident">proposer_id</span>).<span class="ident">len</span>())
             }
             .<span class="ident">boxed</span>()
         })<span class="question-mark">?</span>;

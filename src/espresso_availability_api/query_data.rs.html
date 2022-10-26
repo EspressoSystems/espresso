@@ -91,6 +91,16 @@
 <span id="91">91</span>
 <span id="92">92</span>
 <span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -103,21 +113,29 @@
 <span class="comment">// You should have received a copy of the GNU General Public License along with this program. If not,</span>
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
+<span class="kw">use</span> <span class="ident">ark_serialize</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">espresso_core::state</span>::{
-    <span class="ident">state_comm::LedgerStateCommitment</span>, <span class="ident">BlockCommitment</span>, <span class="ident">ElaboratedBlock</span>, <span class="ident">ElaboratedTransaction</span>,
-    <span class="ident">TransactionCommitment</span>, <span class="ident">ValidatorState</span>,
+    <span class="ident">state_comm::LedgerStateCommitment</span>, <span class="ident">ElaboratedBlock</span>, <span class="ident">ElaboratedBlockCommitment</span>,
+    <span class="ident">ElaboratedTransaction</span>, <span class="ident">TransactionCommitment</span>, <span class="ident">ValidatorState</span>,
 };
 <span class="kw">use</span> <span class="ident">jf_cap::structs::RecordCommitment</span>;
+<span class="kw">use</span> <span class="ident">jf_utils::tagged_blob</span>;
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
+
+<span class="attribute">#[<span class="ident">tagged_blob</span>(<span class="string">&quot;NODEID&quot;</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">CanonicalDeserialize</span>, <span class="ident">CanonicalSerialize</span>, <span class="ident">Hash</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>)]</span>
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">EncodedPublicKey</span>(<span class="kw">pub</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>);
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Serialize</span>, <span class="ident">Deserialize</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">BlockQueryData</span> {
     <span class="kw">pub</span> <span class="ident">raw_block</span>: <span class="ident">ElaboratedBlock</span>,
-    <span class="kw">pub</span> <span class="ident">block_hash</span>: <span class="ident">BlockCommitment</span>,
+    <span class="kw">pub</span> <span class="ident">block_hash</span>: <span class="ident">ElaboratedBlockCommitment</span>,
     <span class="kw">pub</span> <span class="ident">block_id</span>: <span class="ident">u64</span>,
     <span class="kw">pub</span> <span class="ident">records_from</span>: <span class="ident">u64</span>,
     <span class="kw">pub</span> <span class="ident">record_count</span>: <span class="ident">u64</span>,
     <span class="kw">pub</span> <span class="ident">txn_hashes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">TransactionCommitment</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span> <span class="ident">timestamp</span>: <span class="ident">i128</span>,
+    <span class="kw">pub</span> <span class="ident">proposer_id</span>: <span class="ident">EncodedPublicKey</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">BlockQueryData</span> {
@@ -172,8 +190,6 @@
     <span class="kw">pub</span> <span class="ident">continuation_event_index</span>: <span class="ident">u64</span>,
 }
 
-<span class="comment">// TODO !keyao Add proposer ID and timestamp to the block summary data.</span>
-<span class="comment">// Issue: https://github.com/EspressoSystems/espresso/issues/624.</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Serialize</span>, <span class="ident">Deserialize</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">BlockSummaryQueryData</span> {
     <span class="kw">pub</span> <span class="ident">size</span>: <span class="ident">usize</span>,
@@ -183,6 +199,10 @@
     <span class="doccomment">/// The total number of outputs in this block.</span>
     <span class="kw">pub</span> <span class="ident">record_count</span>: <span class="ident">u64</span>,
     <span class="kw">pub</span> <span class="ident">view_number</span>: <span class="ident">u64</span>,
+    <span class="kw">pub</span> <span class="ident">timestamp</span>: <span class="ident">i128</span>,
+    <span class="kw">pub</span> <span class="ident">proposer_id</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span> <span class="ident">block_hash</span>: <span class="ident">ElaboratedBlockCommitment</span>,
+    <span class="kw">pub</span> <span class="ident">block_id</span>: <span class="ident">u64</span>,
 }
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="espresso_availability_api" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>

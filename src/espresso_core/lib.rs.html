@@ -30,8 +30,6 @@
 <span id="30">30</span>
 <span id="31">31</span>
 <span id="32">32</span>
-<span id="33">33</span>
-<span id="34">34</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">deny</span>(<span class="ident">warnings</span>)]</span>
 <span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
@@ -45,7 +43,6 @@
 <span class="comment">// You should have received a copy of the GNU General Public License along with this program. If not,</span>
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
-<span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">committee</span>;
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">full_persistence</span>;
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">genesis</span>;
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">kv_merkle_tree</span>;
@@ -60,11 +57,10 @@
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">tree_hash</span>;
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">universal_params</span>;
 
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">stake_table</span>::{<span class="ident">StakingKey</span>, <span class="ident">StakingPrivKey</span>};
+
 <span class="kw">mod</span> <span class="ident">util</span>;
 
 <span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">espresso_macros</span>;
-
-<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">PubKey</span> <span class="op">=</span> <span class="ident">hotshot::types::ed25519::Ed25519Pub</span>;
-<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">PrivKey</span> <span class="op">=</span> <span class="ident">hotshot::types::ed25519::Ed25519Priv</span>;
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="espresso_core" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>

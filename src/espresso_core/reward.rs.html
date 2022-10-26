@@ -819,6 +819,10 @@
 <span id="819">819</span>
 <span id="820">820</span>
 <span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -834,16 +838,19 @@
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::kv_merkle_tree</span>::{<span class="ident">KVMerkleProof</span>, <span class="ident">KVMerkleTree</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::merkle_tree::MerkleFrontier</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table</span>::{
-    <span class="ident">ConsensusTime</span>, <span class="ident">StakeTableCommitment</span>, <span class="ident">StakeTableHash</span>, <span class="ident">StakeTableSetFrontier</span>, <span class="ident">StakingKey</span>,
-    <span class="ident">StakingKeySignature</span>, <span class="ident">StakingPrivKey</span>,
+    <span class="ident">StakeTableCommitment</span>, <span class="ident">StakeTableHash</span>, <span class="ident">StakeTableSetFrontier</span>, <span class="ident">StakingKey</span>, <span class="ident">StakingKeySignature</span>,
+    <span class="ident">StakingPrivKey</span>,
 };
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::state</span>::{<span class="ident">CommitableHash</span>, <span class="ident">CommitableHashTag</span>, <span class="ident">ValidationError</span>, <span class="ident">ValidatorState</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::state</span>::{
+    <span class="ident">CommitableHash</span>, <span class="ident">CommitableHashTag</span>, <span class="ident">ConsensusTime</span>, <span class="ident">ValidationError</span>, <span class="ident">ValidatorState</span>,
+};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::tree_hash::KVTreeHash</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::util::canonical</span>;
 <span class="kw">use</span> <span class="ident">ark_serialize</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">ark_std::rand</span>::{<span class="ident">CryptoRng</span>, <span class="ident">RngCore</span>};
 <span class="kw">use</span> <span class="ident">commit::Committable</span>;
 <span class="kw">use</span> <span class="ident">core::hash::Hash</span>;
+<span class="kw">use</span> <span class="ident">hotshot::types::SignatureKey</span>;
 <span class="kw">use</span> <span class="ident">jf_cap::keys</span>::{<span class="ident">UserAddress</span>, <span class="ident">UserPubKey</span>};
 <span class="kw">use</span> <span class="ident">jf_cap::structs</span>::{
     <span class="ident">Amount</span>, <span class="ident">AssetDefinition</span>, <span class="ident">BlindFactor</span>, <span class="ident">FreezeFlag</span>, <span class="ident">RecordCommitment</span>, <span class="ident">RecordOpening</span>,
@@ -924,7 +931,7 @@
         <span class="ident">uncollected_reward_proof</span>: <span class="ident">CollectedRewardsProof</span>,
         <span class="ident">vrf_proof</span>: <span class="ident">VrfProof</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="self">Self</span>, <span class="ident">RewardNoteProofs</span>), <span class="ident">RewardError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">staking_key</span> <span class="op">=</span> <span class="ident">StakingKey::from_priv_key</span>(<span class="ident">staking_priv_key</span>);
+        <span class="kw">let</span> <span class="ident">staking_key</span> <span class="op">=</span> <span class="ident">staking_priv_key</span>.<span class="ident">into</span>();
         <span class="kw">let</span> (<span class="ident">body</span>, <span class="ident">proofs</span>) <span class="op">=</span> <span class="ident">CollectRewardBody::generate</span>(
             <span class="ident">rng</span>,
             <span class="ident">historical_stake_tables_frontier</span>,
@@ -944,7 +951,7 @@
         <span class="ident">CanonicalSerialize::serialize</span>(<span class="kw-2">&amp;</span><span class="ident">body</span>, <span class="kw-2">&amp;mut</span> <span class="ident">bytes</span>).<span class="ident">map_err</span>(<span class="ident">RewardError::from</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">note</span> <span class="op">=</span> <span class="ident">CollectRewardNote</span> {
             <span class="ident">body</span>,
-            <span class="ident">signature</span>: <span class="ident">StakingKey::sign</span>(<span class="ident">staking_priv_key</span>, <span class="kw-2">&amp;</span><span class="ident">bytes</span>),
+            <span class="ident">signature</span>: <span class="ident">StakingKey::sign</span>(<span class="ident">staking_priv_key</span>, <span class="kw-2">&amp;</span><span class="ident">bytes</span>).<span class="ident">into</span>(),
         };
 
         <span class="prelude-val">Ok</span>((<span class="ident">note</span>, <span class="ident">proofs</span>))
@@ -960,7 +967,7 @@
             .<span class="ident">body</span>
             .<span class="ident">vrf_witness</span>
             .<span class="ident">staking_key</span>
-            .<span class="ident">validate</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">signature</span>, <span class="kw-2">&amp;</span><span class="ident">bytes</span>)
+            .<span class="ident">validate</span>(<span class="self">self</span>.<span class="ident">signature</span>.<span class="ident">as_ref</span>(), <span class="kw-2">&amp;</span><span class="ident">bytes</span>)
         {
             <span class="prelude-val">Ok</span>(())
         } <span class="kw">else</span> {
@@ -1315,7 +1322,7 @@
         <span class="kw">let</span> <span class="ident">vrf_value</span> <span class="op">=</span> <span class="ident">hasher</span>.<span class="ident">finalize</span>();
         <span class="comment">// 2. validate proof</span>
         <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">bincode::serialize</span>(<span class="kw-2">&amp;</span><span class="ident">view_number</span>).<span class="ident">unwrap</span>();
-        <span class="kw">if</span> <span class="op">!</span><span class="ident">staking_key</span>.<span class="ident">validate</span>(<span class="ident">proof</span>, <span class="kw-2">&amp;</span><span class="ident">data</span>[..]) {
+        <span class="kw">if</span> <span class="op">!</span><span class="ident">staking_key</span>.<span class="ident">validate</span>(<span class="ident">proof</span>.<span class="ident">as_ref</span>(), <span class="kw-2">&amp;</span><span class="ident">data</span>[..]) {
             <span class="kw">return</span> <span class="bool-val">false</span>;
         }
         <span class="comment">// mock eligibility return true ~10% of times</span>
@@ -1329,8 +1336,8 @@
     ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">VrfProof</span><span class="op">&gt;</span> {
         <span class="comment">// 1. compute vrf proof</span>
         <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">bincode::serialize</span>(<span class="kw-2">&amp;</span><span class="ident">view_number</span>).<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">proof</span> <span class="op">=</span> <span class="ident">StakingKey::sign</span>(<span class="ident">staking_priv_key</span>, <span class="kw-2">&amp;</span><span class="ident">data</span>[..]);
-        <span class="kw">let</span> <span class="ident">pub_key</span> <span class="op">=</span> <span class="ident">StakingKey::from_priv_key</span>(<span class="ident">staking_priv_key</span>);
+        <span class="kw">let</span> <span class="ident">proof</span> <span class="op">=</span> <span class="ident">StakingKey::sign</span>(<span class="ident">staking_priv_key</span>, <span class="kw-2">&amp;</span><span class="ident">data</span>[..]).<span class="ident">into</span>();
+        <span class="kw">let</span> <span class="ident">pub_key</span> <span class="op">=</span> <span class="ident">staking_priv_key</span>.<span class="ident">into</span>();
         <span class="comment">// 2. check eligibility</span>
         <span class="kw">if</span> <span class="ident">is_eligible</span>(<span class="ident">view_number</span>, <span class="kw-2">&amp;</span><span class="ident">pub_key</span>, <span class="kw-2">&amp;</span><span class="ident">proof</span>) {
             <span class="prelude-val">Some</span>(<span class="ident">proof</span>)
@@ -1341,21 +1348,22 @@
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
     <span class="kw">mod</span> <span class="ident">test_eligibility</span> {
         <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::reward::mock_eligibility</span>::{<span class="ident">is_eligible</span>, <span class="ident">prove_eligibility</span>};
-        <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table</span>::{<span class="ident">StakingKey</span>, <span class="ident">StakingPrivKey</span>};
+        <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table::StakingKey</span>;
+        <span class="kw">use</span> <span class="ident">rand_chacha</span>::{<span class="ident">rand_core::SeedableRng</span>, <span class="ident">ChaChaRng</span>};
         <span class="kw">use</span> <span class="ident">std::ops::Add</span>;
 
         <span class="attribute">#[<span class="ident">test</span>]</span>
         <span class="kw">fn</span> <span class="ident">test_reward_eligibility</span>() {
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">ChaChaRng::from_seed</span>([<span class="number">1</span>; <span class="number">32</span>]);
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">view_number</span> <span class="op">=</span> <span class="ident">hotshot_types::data::ViewNumber::genesis</span>();
-            <span class="kw">let</span> <span class="ident">priv_key</span> <span class="op">=</span> <span class="ident">StakingPrivKey::generate</span>();
-            <span class="kw">let</span> <span class="ident">bad_pub_key</span> <span class="op">=</span> <span class="ident">StakingKey::from_priv_key</span>(<span class="kw-2">&amp;</span><span class="ident">StakingPrivKey::generate</span>());
-            <span class="kw">let</span> <span class="ident">pub_key</span> <span class="op">=</span> <span class="ident">StakingKey::from_priv_key</span>(<span class="kw-2">&amp;</span><span class="ident">priv_key</span>);
+            <span class="kw">let</span> (<span class="ident">pub_key</span>, <span class="ident">priv_key</span>) <span class="op">=</span> <span class="ident">StakingKey::generate</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
+            <span class="kw">let</span> (<span class="ident">bad_pub_key</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="ident">StakingKey::generate</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">found</span> <span class="op">=</span> <span class="number">0</span>;
             <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="number">600</span> {
                 <span class="comment">// with 600 runs we get ~2^{-100} failure pbb</span>
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">proof</span>) <span class="op">=</span> <span class="ident">prove_eligibility</span>(<span class="ident">view_number</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">priv_key</span>) {
-                    <span class="macro">assert!</span>(<span class="ident">is_eligible</span>(<span class="ident">view_number</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">pub_key</span>, <span class="kw-2">&amp;</span><span class="ident">proof</span>));
-                    <span class="macro">assert!</span>(<span class="op">!</span><span class="ident">is_eligible</span>(<span class="ident">view_number</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">bad_pub_key</span>, <span class="kw-2">&amp;</span><span class="ident">proof</span>));
+                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">proof</span>) <span class="op">=</span> <span class="ident">prove_eligibility</span>(<span class="ident">view_number</span>, <span class="kw-2">&amp;</span><span class="ident">priv_key</span>) {
+                    <span class="macro">assert!</span>(<span class="ident">is_eligible</span>(<span class="ident">view_number</span>, <span class="kw-2">&amp;</span><span class="ident">pub_key</span>, <span class="kw-2">&amp;</span><span class="ident">proof</span>));
+                    <span class="macro">assert!</span>(<span class="op">!</span><span class="ident">is_eligible</span>(<span class="ident">view_number</span>, <span class="kw-2">&amp;</span><span class="ident">bad_pub_key</span>, <span class="kw-2">&amp;</span><span class="ident">proof</span>));
                     <span class="ident">found</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
                 }
                 <span class="ident">view_number</span> <span class="op">=</span> <span class="ident">view_number</span>.<span class="ident">add</span>(<span class="number">1</span>);

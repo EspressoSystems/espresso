@@ -304,6 +304,15 @@
 <span id="304">304</span>
 <span id="305">305</span>
 <span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -545,19 +554,28 @@
 
     <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">get_nullifier_proof</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">block_id</span>: <span class="ident">u64</span>,
+        <span class="ident">block_height</span>: <span class="ident">u64</span>,
         <span class="ident">set</span>: <span class="kw-2">&amp;mut</span> <span class="ident">SetMerkleTree</span>,
         <span class="ident">nullifier</span>: <span class="ident">Nullifier</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">bool</span>, <span class="ident">SetMerkleProof</span>), <span class="ident">KeystoreError</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">ret</span>) <span class="op">=</span> <span class="ident">set</span>.<span class="ident">contains</span>(<span class="ident">nullifier</span>) {
             <span class="prelude-val">Ok</span>(<span class="ident">ret</span>)
         } <span class="kw">else</span> {
-            <span class="kw">let</span> <span class="ident">NullifierCheck</span> { <span class="ident">proof</span>, <span class="ident">spent</span> } <span class="op">=</span> <span class="self">self</span>
-                .<span class="ident">get</span>(<span class="macro">format!</span>(
-                    <span class="string">&quot;/metastate/check_nullifier/{}/{}&quot;</span>,
-                    <span class="ident">block_id</span>, <span class="ident">nullifier</span>
-                ))
-                .<span class="kw">await</span><span class="question-mark">?</span>;
+            <span class="kw">let</span> (<span class="ident">spent</span>, <span class="ident">proof</span>) <span class="op">=</span> <span class="kw">if</span> <span class="ident">block_height</span> <span class="op">==</span> <span class="number">0</span> {
+                <span class="comment">// The nullifier set at block height 0 (i.e. before the genesis block) is always the</span>
+                <span class="comment">// default, empty set.</span>
+                <span class="macro">assert_eq!</span>(<span class="kw-2">*</span><span class="ident">set</span>, <span class="ident">SetMerkleTree::default</span>());
+                <span class="ident">set</span>.<span class="ident">contains</span>(<span class="ident">nullifier</span>).<span class="ident">unwrap</span>()
+            } <span class="kw">else</span> {
+                <span class="kw">let</span> <span class="ident">NullifierCheck</span> { <span class="ident">proof</span>, <span class="ident">spent</span> } <span class="op">=</span> <span class="self">self</span>
+                    .<span class="ident">get</span>(<span class="macro">format!</span>(
+                        <span class="string">&quot;/metastate/check_nullifier/{}/{}&quot;</span>,
+                        <span class="ident">block_height</span> <span class="op">-</span> <span class="number">1</span>,
+                        <span class="ident">nullifier</span>
+                    ))
+                    .<span class="kw">await</span><span class="question-mark">?</span>;
+                (<span class="ident">spent</span>, <span class="ident">proof</span>)
+            };
             <span class="ident">set</span>.<span class="ident">remember</span>(<span class="ident">nullifier</span>, <span class="ident">proof</span>.<span class="ident">clone</span>()).<span class="ident">unwrap</span>();
             <span class="prelude-val">Ok</span>((<span class="ident">spent</span>, <span class="ident">proof</span>))
         }

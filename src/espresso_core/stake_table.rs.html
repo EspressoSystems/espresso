@@ -253,6 +253,7 @@
 <span id="253">253</span>
 <span id="254">254</span>
 <span id="255">255</span>
+<span id="256">256</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -266,89 +267,114 @@
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::merkle_tree</span>::{<span class="ident">MerkleFrontier</span>, <span class="ident">MerkleLeafProof</span>, <span class="ident">MerkleTree</span>, <span class="ident">NodeValue</span>};
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::state</span>::{<span class="ident">CommitableHash</span>, <span class="ident">CommitableHashTag</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::state</span>::{<span class="ident">CommitableHash</span>, <span class="ident">CommitableHashTag</span>, <span class="ident">ConsensusTime</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::tree_hash::KVTreeHash</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::util::canonical</span>;
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">PrivKey</span>, <span class="ident">PubKey</span>};
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::kv_merkle_tree::KVMerkleTree</span>;
 <span class="kw">use</span> <span class="ident">ark_serialize</span>::{<span class="ident">CanonicalDeserialize</span>, <span class="ident">CanonicalSerialize</span>, <span class="ident">Read</span>, <span class="ident">SerializationError</span>, <span class="ident">Write</span>};
 <span class="kw">use</span> <span class="ident">commit</span>::{<span class="ident">Commitment</span>, <span class="ident">Committable</span>};
-<span class="kw">use</span> <span class="ident">espresso_macros</span>::<span class="kw-2">*</span>;
-<span class="kw">use</span> <span class="ident">hotshot_types::traits::signature_key</span>::{<span class="ident">EncodedSignature</span>, <span class="ident">SignatureKey</span>};
+<span class="kw">use</span> <span class="ident">derive_more</span>::{<span class="ident">AsRef</span>, <span class="ident">From</span>, <span class="ident">Into</span>};
+<span class="kw">use</span> <span class="ident">hotshot::traits::election::vrf</span>;
+<span class="kw">use</span> <span class="ident">hotshot_types::traits::signature_key</span>::{<span class="ident">EncodedPublicKey</span>, <span class="ident">EncodedSignature</span>, <span class="ident">SignatureKey</span>};
 <span class="kw">use</span> <span class="ident">jf_cap::structs::Amount</span>;
+<span class="kw">use</span> <span class="ident">jf_primitives::signatures</span>::{<span class="ident">BLSSignatureScheme</span>, <span class="ident">SignatureScheme</span> <span class="kw">as</span> <span class="kw">_</span>};
 <span class="kw">use</span> <span class="ident">jf_utils::tagged_blob</span>;
+<span class="kw">use</span> <span class="ident">rand</span>::{<span class="ident">CryptoRng</span>, <span class="ident">RngCore</span>, <span class="ident">SeedableRng</span>};
+<span class="kw">use</span> <span class="ident">rand_chacha::ChaChaRng</span>;
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
+<span class="kw">use</span> <span class="ident">sha3</span>::{
+    <span class="ident">digest</span>::{<span class="ident">Digest</span>, <span class="ident">Update</span>},
+    <span class="ident">Sha3_256</span>,
+};
 <span class="kw">use</span> <span class="ident">std::collections::VecDeque</span>;
-<span class="kw">use</span> <span class="ident">std::ops::Deref</span>;
 
-<span class="doccomment">/// PubKey used for stake table key</span>
-<span class="attribute">#[<span class="ident">tagged_blob</span>(<span class="string">&quot;STAKING_KEY&quot;</span>)]</span>
-<span class="attribute">#[<span class="ident">ser_test</span>(<span class="ident">random</span>(<span class="ident">random_for_test</span>))]</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Hash</span>, <span class="ident">Eq</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">StakingKey</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">PubKey</span>);
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">ark_bls12_381::Parameters</span> <span class="kw">as</span> <span class="ident">VrfParam</span>;
 
-<span class="kw">impl</span> <span class="ident">StakingKey</span> {
-    <span class="doccomment">/// Derive Staking Public key from Staking Private Key</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">from_priv_key</span>(<span class="ident">priv_key</span>: <span class="kw-2">&amp;</span><span class="ident">StakingPrivKey</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span>(<span class="ident">PubKey::from_private</span>(<span class="kw-2">&amp;</span><span class="ident">priv_key</span>.<span class="number">0</span>))
+<span class="kw">type</span> <span class="ident">SignatureScheme</span> <span class="op">=</span> <span class="ident">BLSSignatureScheme</span><span class="op">&lt;</span><span class="ident">VrfParam</span><span class="op">&gt;</span>;
+<span class="kw">type</span> <span class="ident">VrfPubKey</span> <span class="op">=</span> <span class="ident">vrf::VRFPubKey</span><span class="op">&lt;</span><span class="ident">SignatureScheme</span><span class="op">&gt;</span>;
+
+<span class="attribute">#[<span class="ident">tagged_blob</span>(<span class="string">&quot;STAKINGKEY&quot;</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>, <span class="ident">From</span>, <span class="ident">Into</span>, <span class="ident">AsRef</span>)]</span>
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">StakingKey</span>(<span class="ident">VrfPubKey</span>);
+
+<span class="doccomment">/// Staking Private Key</span>
+<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">StakingPrivKey</span> <span class="op">=</span> <span class="op">&lt;</span><span class="ident">VrfPubKey</span> <span class="kw">as</span> <span class="ident">SignatureKey</span><span class="op">&gt;</span><span class="ident">::PrivateKey</span>;
+
+<span class="kw">impl</span> <span class="ident">SignatureKey</span> <span class="kw">for</span> <span class="ident">StakingKey</span> {
+    <span class="kw">type</span> <span class="ident">PrivateKey</span> <span class="op">=</span> <span class="ident">StakingPrivKey</span>;
+
+    <span class="kw">fn</span> <span class="ident">validate</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">signature</span>: <span class="kw-2">&amp;</span><span class="ident">EncodedSignature</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="ident">bool</span> {
+        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">validate</span>(<span class="ident">signature</span>, <span class="ident">data</span>)
     }
 
-    <span class="doccomment">/// Sign a message using StakingPrivate Key</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">sign</span>(<span class="ident">priv_key</span>: <span class="kw-2">&amp;</span><span class="ident">StakingPrivKey</span>, <span class="ident">msg</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="ident">StakingKeySignature</span> {
-        <span class="ident">StakingKeySignature</span>(<span class="ident">PubKey::sign</span>(<span class="kw-2">&amp;</span><span class="ident">priv_key</span>.<span class="number">0</span>, <span class="ident">msg</span>))
+    <span class="kw">fn</span> <span class="ident">sign</span>(<span class="ident">private_key</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::PrivateKey</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="ident">EncodedSignature</span> {
+        <span class="op">&lt;</span><span class="ident">VrfPubKey</span> <span class="kw">as</span> <span class="ident">SignatureKey</span><span class="op">&gt;</span><span class="ident">::sign</span>(<span class="ident">private_key</span>, <span class="ident">data</span>)
+    }
+
+    <span class="kw">fn</span> <span class="ident">from_private</span>(<span class="ident">private_key</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::PrivateKey</span>) -&gt; <span class="self">Self</span> {
+        <span class="op">&lt;</span><span class="ident">VrfPubKey</span> <span class="kw">as</span> <span class="ident">SignatureKey</span><span class="op">&gt;</span><span class="ident">::from_private</span>(<span class="ident">private_key</span>).<span class="ident">into</span>()
+    }
+
+    <span class="kw">fn</span> <span class="ident">to_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">EncodedPublicKey</span> {
+        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">to_bytes</span>()
+    }
+
+    <span class="kw">fn</span> <span class="ident">from_bytes</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;</span><span class="ident">EncodedPublicKey</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+        <span class="op">&lt;</span><span class="ident">VrfPubKey</span> <span class="kw">as</span> <span class="ident">SignatureKey</span><span class="op">&gt;</span><span class="ident">::from_bytes</span>(<span class="ident">bytes</span>).<span class="ident">map</span>(<span class="ident"><span class="self">Self</span>::from</span>)
+    }
+
+    <span class="kw">fn</span> <span class="ident">generated_from_seed_indexed</span>(<span class="ident">seed</span>: [<span class="ident">u8</span>; <span class="number">32</span>], <span class="ident">index</span>: <span class="ident">u64</span>) -&gt; (<span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::PrivateKey</span>) {
+        <span class="comment">// Generate a new seed which is deterministic but sensitive to `seed` and `index`:</span>
+        <span class="comment">// SHA256(seed || index).</span>
+        <span class="kw">let</span> <span class="ident">index_seed</span> <span class="op">=</span> <span class="ident">Sha3_256::new_with_prefix</span>(<span class="kw-2">&amp;</span><span class="ident">seed</span>)
+            .<span class="ident">chain</span>(<span class="ident">index</span>.<span class="ident">to_le_bytes</span>())
+            .<span class="ident">finalize</span>()
+            .<span class="ident">into</span>();
+        <span class="comment">// Generate a key from the indexed seed.</span>
+        <span class="kw">let</span> <span class="ident">sk</span> <span class="op">=</span> <span class="ident">SignatureScheme::key_gen</span>(<span class="kw-2">&amp;</span>(), <span class="kw-2">&amp;mut</span> <span class="ident">ChaChaRng::from_seed</span>(<span class="ident">index_seed</span>)).<span class="ident">unwrap</span>();
+        (<span class="ident"><span class="self">Self</span>::from_private</span>(<span class="kw-2">&amp;</span><span class="ident">sk</span>), <span class="ident">sk</span>)
     }
 }
 
-<span class="doccomment">/// Staking Private Key</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">StakingPrivKey</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">PrivKey</span>);
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">StakingPrivKey</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">StakingKey</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">pk</span>: <span class="kw-2">&amp;</span><span class="ident">StakingPrivKey</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident"><span class="self">Self</span>::from_private</span>(<span class="ident">pk</span>)
+    }
+}
 
-<span class="kw">impl</span> <span class="ident">StakingPrivKey</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">generate</span>() -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span>(<span class="ident">PrivKey::generate</span>())
+<span class="kw">impl</span> <span class="ident">StakingKey</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">generate</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">CryptoRng</span> <span class="op">+</span> <span class="ident">RngCore</span><span class="op">&gt;</span>(<span class="ident">rng</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; (<span class="self">Self</span>, <span class="ident">StakingPrivKey</span>) {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">seed</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">32</span>];
+        <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">seed</span>);
+        <span class="ident"><span class="self">Self</span>::generated_from_seed_indexed</span>(<span class="ident">seed</span>, <span class="number">0</span>)
     }
 }
 
 <span class="doccomment">/// PubKey used for stake table key</span>
 <span class="attribute">#[<span class="ident">tagged_blob</span>(<span class="string">&quot;STAKING_KEY_SIGNATURE&quot;</span>)]</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Hash</span>, <span class="ident">Eq</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Hash</span>, <span class="ident">Eq</span>, <span class="ident">From</span>, <span class="ident">Into</span>, <span class="ident">AsRef</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">StakingKeySignature</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">EncodedSignature</span>);
-
-<span class="kw">impl</span> <span class="ident">StakingKey</span> {
-    <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">random_for_test</span>(<span class="ident">_rng</span>: <span class="kw-2">&amp;mut</span> <span class="ident">rand_chacha::ChaChaRng</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">StakingKey</span>(<span class="ident">PubKey::from_private</span>(<span class="kw-2">&amp;</span><span class="ident">PrivKey::generate</span>()))
-    }
-
-    <span class="doccomment">/// validate a signature</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">validate</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">signature</span>: <span class="kw-2">&amp;</span><span class="ident">StakingKeySignature</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">validate</span>(<span class="kw-2">&amp;</span><span class="ident">signature</span>.<span class="number">0</span>, <span class="ident">data</span>)
-    }
-}
 
 <span class="comment">// cannot derive CanonicalSerialize because PubKey does not implement it</span>
 <span class="kw">impl</span> <span class="ident">CanonicalSerialize</span> <span class="kw">for</span> <span class="ident">StakingKey</span> {
-    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">ark_serialize::Write</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="kw-2">mut</span> <span class="ident">w</span>: <span class="ident">W</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">ark_serialize::SerializationError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="ident">bincode::serialize</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>.<span class="ident">to_bytes</span>()).<span class="ident">unwrap</span>();
+    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">w</span>: <span class="ident">W</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SerializationError</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">to_bytes</span>().<span class="number">0</span>;
         <span class="ident">CanonicalSerialize::serialize</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>, <span class="kw-2">&amp;mut</span> <span class="ident">w</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
     <span class="kw">fn</span> <span class="ident">serialized_size</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="ident">bincode::serialize</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>.<span class="ident">to_bytes</span>()).<span class="ident">unwrap</span>().<span class="ident">len</span>()
+        <span class="self">self</span>.<span class="ident">to_bytes</span>().<span class="number">0</span>.<span class="ident">serialized_size</span>()
     }
 }
 <span class="kw">impl</span> <span class="ident">CanonicalDeserialize</span> <span class="kw">for</span> <span class="ident">StakingKey</span> {
-    <span class="kw">fn</span> <span class="ident">deserialize</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">r</span>: <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">ark_serialize::SerializationError</span><span class="op">&gt;</span>
+    <span class="kw">fn</span> <span class="ident">deserialize</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">r</span>: <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SerializationError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">ark_serialize::Read</span>,
+        <span class="ident">R</span>: <span class="ident">Read</span>,
     {
         <span class="kw">let</span> <span class="ident">bytes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">CanonicalDeserialize::deserialize</span>(<span class="kw-2">&amp;mut</span> <span class="ident">r</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">pubkey</span> <span class="op">=</span> <span class="ident">bincode::deserialize</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>).<span class="ident">unwrap</span>();
-        <span class="prelude-val">Ok</span>(<span class="self">Self</span>(<span class="ident">PubKey::from_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">pubkey</span>).<span class="ident">unwrap</span>()))
+        <span class="ident"><span class="self">Self</span>::from_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">EncodedPublicKey</span>(<span class="ident">bytes</span>)).<span class="ident">ok_or</span>(<span class="ident">SerializationError::InvalidData</span>)
     }
 }
 
@@ -362,10 +388,7 @@
 
 <span class="comment">// cannot derive CanonicalSerialize because PubKey does not implement it</span>
 <span class="kw">impl</span> <span class="ident">CanonicalSerialize</span> <span class="kw">for</span> <span class="ident">StakingKeySignature</span> {
-    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">ark_serialize::Write</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="kw-2">mut</span> <span class="ident">w</span>: <span class="ident">W</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">ark_serialize::SerializationError</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">w</span>: <span class="ident">W</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SerializationError</span><span class="op">&gt;</span> {
         <span class="ident">CanonicalSerialize::serialize</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span> .<span class="number">0</span>, <span class="kw-2">&amp;mut</span> <span class="ident">w</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
@@ -374,33 +397,12 @@
     }
 }
 <span class="kw">impl</span> <span class="ident">CanonicalDeserialize</span> <span class="kw">for</span> <span class="ident">StakingKeySignature</span> {
-    <span class="kw">fn</span> <span class="ident">deserialize</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">r</span>: <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">ark_serialize::SerializationError</span><span class="op">&gt;</span>
+    <span class="kw">fn</span> <span class="ident">deserialize</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">r</span>: <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SerializationError</span><span class="op">&gt;</span>
     <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">ark_serialize::Read</span>,
+        <span class="ident">R</span>: <span class="ident">Read</span>,
     {
         <span class="kw">let</span> <span class="ident">bytes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">CanonicalDeserialize::deserialize</span>(<span class="kw-2">&amp;mut</span> <span class="ident">r</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">Self</span>(<span class="ident">EncodedSignature</span>(<span class="ident">bytes</span>)))
-    }
-}
-
-<span class="doccomment">/// HotShot View number</span>
-<span class="attribute">#[<span class="ident">derive</span>(
-    <span class="ident">Clone</span>,
-    <span class="ident">Debug</span>,
-    <span class="ident">Copy</span>,
-    <span class="ident">PartialEq</span>,
-    <span class="ident">Eq</span>,
-    <span class="ident">Hash</span>,
-    <span class="ident">CanonicalSerialize</span>,
-    <span class="ident">CanonicalDeserialize</span>,
-    <span class="ident">Serialize</span>,
-    <span class="ident">Deserialize</span>,
-)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ConsensusTime</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">u64</span>);
-
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">hotshot_types::data::ViewNumber</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ConsensusTime</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">number</span>: <span class="ident">hotshot_types::data::ViewNumber</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ConsensusTime</span>(<span class="kw-2">*</span><span class="ident">number</span>.<span class="ident">deref</span>())
     }
 }
 

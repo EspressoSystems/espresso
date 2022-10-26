@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":[["LWPersistence",""]]};
+window.SIDEBAR_ITEMS = {"constant":[["LEAF_STORAGE_COUNT",""]],"struct":[["LWPersistence",""]]};

@@ -44,8 +44,6 @@
 <span id="44">44</span>
 <span id="45">45</span>
 <span id="46">46</span>
-<span id="47">47</span>
-<span id="48">48</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -58,36 +56,34 @@
 <span class="comment">// You should have received a copy of the GNU General Public License along with this program. If not,</span>
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::query_data</span>::{<span class="ident">BlockQueryData</span>, <span class="ident">StateQueryData</span>};
-<span class="kw">use</span> <span class="ident">espresso_core::state</span>::{<span class="ident">BlockCommitment</span>, <span class="ident">TransactionCommitment</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::query_data</span>::{<span class="ident">BlockQueryData</span>, <span class="ident">EncodedPublicKey</span>, <span class="ident">StateQueryData</span>};
+<span class="kw">use</span> <span class="ident">espresso_core::state</span>::{<span class="ident">ElaboratedBlockCommitment</span>, <span class="ident">TransactionCommitment</span>, <span class="ident">ValidatorState</span>};
 <span class="kw">use</span> <span class="ident">hotshot_types::data::QuorumCertificate</span>;
 <span class="kw">use</span> <span class="ident">jf_cap::MerkleTree</span>;
 <span class="kw">use</span> <span class="ident">std::error::Error</span>;
 <span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
 
-<span class="comment">// this goes away in the very near future, and I don&#39;t want a dangling dependency when we only need the types.</span>
-<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">H_256</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">32</span>;
-
 <span class="kw">pub</span> <span class="kw">type</span> <span class="ident">BlockAndAssociated</span> <span class="op">=</span> (
     <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockQueryData</span><span class="op">&gt;</span>,
     <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">StateQueryData</span><span class="op">&gt;</span>,
-    <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">ValidatorState</span><span class="op">&gt;</span><span class="op">&gt;</span>,
 );
 
 <span class="doccomment">/// Trait to be implemented on &amp;&#39;a DataSource for lifetime management purposes</span>
 <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">AvailabilityDataSource</span> {
     <span class="kw">type</span> <span class="ident">BlockIterType</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BlockQueryData</span><span class="op">&gt;</span><span class="op">&gt;</span>;
     <span class="kw">type</span> <span class="ident">StateIterType</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">StateQueryData</span><span class="op">&gt;</span><span class="op">&gt;</span>;
-    <span class="kw">type</span> <span class="ident">QCertIterType</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>;
+    <span class="kw">type</span> <span class="ident">QCertIterType</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">ValidatorState</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>;
     <span class="kw">fn</span> <span class="ident">get_nth_block_iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">n</span>: <span class="ident">usize</span>) -&gt; <span class="ident"><span class="self">Self</span>::BlockIterType</span>;
     <span class="kw">fn</span> <span class="ident">get_nth_state_iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">n</span>: <span class="ident">usize</span>) -&gt; <span class="ident"><span class="self">Self</span>::StateIterType</span>;
     <span class="kw">fn</span> <span class="ident">get_nth_qcert_iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">n</span>: <span class="ident">usize</span>) -&gt; <span class="ident"><span class="self">Self</span>::QCertIterType</span>;
-    <span class="kw">fn</span> <span class="ident">get_block_index_by_hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">hash</span>: <span class="ident">BlockCommitment</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">get_block_index_by_hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">hash</span>: <span class="ident">ElaboratedBlockCommitment</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>;
     <span class="kw">fn</span> <span class="ident">get_txn_index_by_hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">hash</span>: <span class="ident">TransactionCommitment</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">u64</span>, <span class="ident">u64</span>)<span class="op">&gt;</span>;
     <span class="kw">fn</span> <span class="ident">get_record_index_by_uid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">uid</span>: <span class="ident">u64</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">u64</span>, <span class="ident">u64</span>, <span class="ident">u64</span>)<span class="op">&gt;</span>; <span class="comment">// None if OOB</span>
                                                                             <span class="comment">// it should be possible to implement this one in terms of the above,</span>
                                                                             <span class="comment">// leaving more compact and/or performant solutions as optional</span>
     <span class="kw">fn</span> <span class="ident">get_record_merkle_tree_at_block_index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">n</span>: <span class="ident">usize</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">MerkleTree</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">get_block_ids_by_proposer_id</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">id</span>: <span class="ident">EncodedPublicKey</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>;
 }
 
 <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">UpdateAvailabilityData</span> {

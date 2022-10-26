@@ -63,6 +63,13 @@
 <span id="63">63</span>
 <span id="64">64</span>
 <span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -78,15 +85,15 @@
 <span class="kw">use</span> <span class="ident">core::time::Duration</span>;
 <span class="kw">use</span> <span class="ident">espresso_core</span>::{
     <span class="ident">state</span>::{<span class="ident">ElaboratedBlock</span>, <span class="ident">ValidatorState</span>},
-    <span class="ident">PubKey</span>,
+    <span class="ident">StakingKey</span>,
 };
-<span class="kw">use</span> <span class="ident">hotshot</span>::{<span class="ident">data::QuorumCertificate</span>, <span class="ident">H_256</span>};
+<span class="kw">use</span> <span class="ident">hotshot::data::QuorumCertificate</span>;
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
 <span class="kw">use</span> <span class="ident">std::collections::HashMap</span>;
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">Deserialize</span>, <span class="ident">Serialize</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">PeerInfo</span> {
-    <span class="kw">pub</span> <span class="ident">peer_id</span>: <span class="ident">PubKey</span>,
+    <span class="kw">pub</span> <span class="ident">peer_id</span>: <span class="ident">StakingKey</span>,
 }
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">Default</span>, <span class="ident">Deserialize</span>, <span class="ident">Serialize</span>)]</span>
@@ -116,7 +123,14 @@
     <span class="kw">pub</span> <span class="ident">peer_list</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">PeerInfo</span><span class="op">&gt;</span>,
     <span class="comment">// TBD; these are going to correspond to active views, possibly want to also retain recent views?</span>
     <span class="comment">// We may or may not want a seperate map of QuorumCertificates for `qc/:index` endpoint.</span>
-    <span class="kw">pub</span> <span class="ident">pending_blocks</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">u64</span>, (<span class="ident">ElaboratedBlock</span>, <span class="ident">ValidatorState</span>, <span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span>)<span class="op">&gt;</span>,
+    <span class="kw">pub</span> <span class="ident">pending_blocks</span>: <span class="ident">HashMap</span><span class="op">&lt;</span>
+        <span class="ident">u64</span>,
+        (
+            <span class="ident">ElaboratedBlock</span>,
+            <span class="ident">ValidatorState</span>,
+            <span class="ident">QuorumCertificate</span><span class="op">&lt;</span><span class="ident">ValidatorState</span><span class="op">&gt;</span>,
+        ),
+    <span class="op">&gt;</span>,
     <span class="kw">pub</span> <span class="ident">latest_block_id</span>: <span class="ident">u64</span>, <span class="comment">// id of latest block to reach DECIDE</span>
     <span class="kw">pub</span> <span class="ident">mempool_info</span>: <span class="ident">MempoolInfo</span>,
     <span class="kw">pub</span> <span class="ident">proposed_block_count</span>: <span class="ident">u64</span>,

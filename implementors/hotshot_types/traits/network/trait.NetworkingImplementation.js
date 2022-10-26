@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["espresso_validator"] = [{"text":"impl NetworkingImplementation&lt;Message&lt;<a class=\"struct\" href=\"espresso_core/state/struct.ValidatorState.html\" title=\"struct espresso_core::state::ValidatorState\">ValidatorState</a>, VRFPubKey&lt;BLSSignatureScheme&lt;Parameters&gt;&gt;&gt;, VRFPubKey&lt;BLSSignatureScheme&lt;Parameters&gt;&gt;&gt; for <a class=\"enum\" href=\"espresso_validator/network/enum.HybridNetwork.html\" title=\"enum espresso_validator::network::HybridNetwork\">HybridNetwork</a>","synthetic":false,"types":["espresso_validator::network::HybridNetwork"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

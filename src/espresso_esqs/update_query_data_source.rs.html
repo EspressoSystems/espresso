@@ -266,49 +266,6 @@
 <span id="266">266</span>
 <span id="267">267</span>
 <span id="268">268</span>
-<span id="269">269</span>
-<span id="270">270</span>
-<span id="271">271</span>
-<span id="272">272</span>
-<span id="273">273</span>
-<span id="274">274</span>
-<span id="275">275</span>
-<span id="276">276</span>
-<span id="277">277</span>
-<span id="278">278</span>
-<span id="279">279</span>
-<span id="280">280</span>
-<span id="281">281</span>
-<span id="282">282</span>
-<span id="283">283</span>
-<span id="284">284</span>
-<span id="285">285</span>
-<span id="286">286</span>
-<span id="287">287</span>
-<span id="288">288</span>
-<span id="289">289</span>
-<span id="290">290</span>
-<span id="291">291</span>
-<span id="292">292</span>
-<span id="293">293</span>
-<span id="294">294</span>
-<span id="295">295</span>
-<span id="296">296</span>
-<span id="297">297</span>
-<span id="298">298</span>
-<span id="299">299</span>
-<span id="300">300</span>
-<span id="301">301</span>
-<span id="302">302</span>
-<span id="303">303</span>
-<span id="304">304</span>
-<span id="305">305</span>
-<span id="306">306</span>
-<span id="307">307</span>
-<span id="308">308</span>
-<span id="309">309</span>
-<span id="310">310</span>
-<span id="311">311</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -331,12 +288,11 @@
 <span class="kw">use</span> <span class="ident">commit::Committable</span>;
 <span class="kw">use</span> <span class="ident">espresso_availability_api</span>::{
     <span class="ident">data_source::UpdateAvailabilityData</span>,
-    <span class="ident">query_data</span>::{<span class="ident">BlockQueryData</span>, <span class="ident">StateQueryData</span>},
+    <span class="ident">query_data</span>::{<span class="ident">BlockQueryData</span>, <span class="ident">EncodedPublicKey</span>, <span class="ident">StateQueryData</span>},
 };
 <span class="kw">use</span> <span class="ident">espresso_catchup_api::data_source::UpdateCatchUpData</span>;
 <span class="kw">use</span> <span class="ident">espresso_core::state</span>::{
-    <span class="ident">BlockCommitment</span>, <span class="ident">ElaboratedBlock</span>, <span class="ident">EspressoTransaction</span>, <span class="ident">EspressoTxnHelperProofs</span>,
-    <span class="ident">TransactionCommitment</span>, <span class="ident">ValidatorState</span>,
+    <span class="ident">EspressoTransaction</span>, <span class="ident">EspressoTxnHelperProofs</span>, <span class="ident">TransactionCommitment</span>, <span class="ident">ValidatorState</span>,
 };
 <span class="kw">use</span> <span class="ident">espresso_metastate_api::data_source::UpdateMetaStateData</span>;
 <span class="kw">use</span> <span class="ident">espresso_status_api::data_source::UpdateStatusData</span>;
@@ -345,14 +301,11 @@
     <span class="ident">task</span>::{<span class="ident">SpawnError</span>, <span class="ident">SpawnExt</span>},
     <span class="ident">Stream</span>, <span class="ident">StreamExt</span>,
 };
-<span class="kw">use</span> <span class="ident">hotshot::data</span>::{<span class="ident">BlockHash</span>, <span class="ident">LeafHash</span>, <span class="ident">QuorumCertificate</span>, <span class="ident">Stage</span>, <span class="ident">VecQuorumCertificate</span>};
-<span class="kw">use</span> <span class="ident">hotshot::H_256</span>;
-<span class="kw">use</span> <span class="ident">hotshot_types::data::ViewNumber</span>;
 <span class="kw">use</span> <span class="ident">itertools::izip</span>;
 <span class="kw">use</span> <span class="ident">reef::traits::Transaction</span>;
 <span class="kw">use</span> <span class="ident">seahorse::events::LedgerEvent</span>;
 
-<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">HotShotEvent</span> <span class="op">=</span> <span class="ident">hotshot::types::EventType</span><span class="op">&lt;</span><span class="ident">ElaboratedBlock</span>, <span class="ident">ValidatorState</span>, <span class="ident">H_256</span><span class="op">&gt;</span>;
+<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">HotShotEvent</span> <span class="op">=</span> <span class="ident">hotshot::types::EventType</span><span class="op">&lt;</span><span class="ident">ValidatorState</span><span class="op">&gt;</span>;
 
 <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">UpdateQueryDataSourceTypes</span> {
     <span class="kw">type</span> <span class="ident">CU</span>: <span class="ident">UpdateCatchUpData</span> <span class="op">+</span> <span class="ident">Sized</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span>;
@@ -389,9 +342,8 @@
         <span class="ident">meta_state_store</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">RwLock</span><span class="op">&lt;</span><span class="ident">TYPES::MS</span><span class="op">&gt;</span><span class="op">&gt;</span>,
         <span class="ident">status_store</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">RwLock</span><span class="op">&lt;</span><span class="ident">TYPES::ST</span><span class="op">&gt;</span><span class="op">&gt;</span>,
         <span class="ident">event_handler</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">RwLock</span><span class="op">&lt;</span><span class="ident">TYPES::EH</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-        <span class="ident">genesis</span>: <span class="ident">ElaboratedBlock</span>,
     ) -&gt; <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">RwLock</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">instance</span> <span class="op">=</span> <span class="self">Self</span> {
+        <span class="kw">let</span> <span class="ident">instance</span> <span class="op">=</span> <span class="ident">Arc::new</span>(<span class="ident">RwLock::new</span>(<span class="self">Self</span> {
             <span class="ident">catchup_store</span>,
             <span class="ident">availability_store</span>,
             <span class="ident">meta_state_store</span>,
@@ -399,28 +351,7 @@
             <span class="ident">event_handler</span>,
             <span class="ident">validator_state</span>: <span class="ident">Default::default</span>(),
             <span class="ident">_event_task</span>: <span class="prelude-val">None</span>,
-        };
-
-        <span class="comment">// HotShot does not currently support genesis nicely. It should automatically commit and</span>
-        <span class="comment">// broadcast a `Decide` event for the genesis block, but it doesn&#39;t. For now, we broadcast a</span>
-        <span class="comment">// `Commit` event for the genesis block ourselves.</span>
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">genesis_state</span> <span class="op">=</span> <span class="ident">ValidatorState::default</span>();
-        <span class="ident">genesis_state</span>
-            .<span class="ident">validate_and_apply</span>(<span class="number">0</span>, <span class="ident">genesis</span>.<span class="ident">block</span>.<span class="ident">clone</span>(), <span class="ident">genesis</span>.<span class="ident">proofs</span>.<span class="ident">clone</span>())
-            .<span class="ident">unwrap</span>();
-        <span class="ident">block_on</span>(<span class="ident">instance</span>.<span class="ident">update</span>(<span class="ident">HotShotEvent::Decide</span> {
-            <span class="ident">block</span>: <span class="ident">Arc::new</span>(<span class="macro">vec!</span>[<span class="ident">genesis</span>]),
-            <span class="ident">state</span>: <span class="ident">Arc::new</span>(<span class="macro">vec!</span>[<span class="ident">genesis_state</span>]),
-            <span class="ident">qcs</span>: <span class="ident">Arc::new</span>(<span class="macro">vec!</span>[<span class="ident">VecQuorumCertificate</span> {
-                <span class="ident">block_hash</span>: <span class="ident">Default::default</span>(),
-                <span class="ident">view_number</span>: <span class="ident">ViewNumber::genesis</span>(),
-                <span class="ident">stage</span>: <span class="ident">Stage::Decide</span>,
-                <span class="ident">signatures</span>: <span class="ident">Default::default</span>(),
-                <span class="ident">genesis</span>: <span class="ident">Default::default</span>(),
-            }]),
         }));
-
-        <span class="kw">let</span> <span class="ident">instance</span> <span class="op">=</span> <span class="ident">Arc::new</span>(<span class="ident">RwLock::new</span>(<span class="ident">instance</span>));
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">task_handle</span>) <span class="op">=</span> <span class="ident">launch_updates</span>(<span class="ident">event_source</span>, <span class="ident">instance</span>.<span class="ident">clone</span>()) {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">edit_handle</span> <span class="op">=</span> <span class="ident">block_on</span>(<span class="ident">instance</span>.<span class="ident">write</span>());
             <span class="ident">edit_handle</span>.<span class="ident">_event_task</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">task_handle</span>);
@@ -429,20 +360,17 @@
     }
 
     <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">update</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">event</span>: <span class="ident">HotShotEvent</span>) {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="ident">HotShotEvent::Decide</span> { <span class="ident">block</span>, <span class="ident">state</span>, <span class="ident">qcs</span> } <span class="op">=</span> <span class="ident">event</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">num_txns</span> <span class="op">=</span> <span class="number">0usize</span>;
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">num_records</span> <span class="op">=</span> <span class="number">0usize</span>;
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">num_nullifiers</span> <span class="op">=</span> <span class="number">0usize</span>;
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cumulative_size</span> <span class="op">=</span> <span class="number">0usize</span>;
-
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">state</span>) <span class="op">=</span> <span class="ident">state</span>.<span class="ident">first</span>() {
+        <span class="kw">if</span> <span class="kw">let</span> <span class="ident">HotShotEvent::Decide</span> { <span class="ident">leaf_chain</span> } <span class="op">=</span> <span class="ident">event</span> {
+            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">leaf</span>) <span class="op">=</span> <span class="ident">leaf_chain</span>.<span class="ident">last</span>() {
                 <span class="comment">// HotShot can give us a leaf chain that does not follow immediately from our last</span>
                 <span class="comment">// saved state, if it skipped ahead for liveness reasons. Insert missing blocks as</span>
-                <span class="comment">// placeholders for each missing leaf. These could potentially be filled in</span>
-                <span class="comment">// asynchronously by querying another full node.</span>
+                <span class="comment">// placeholders for each missing leaf between our last saved state and the oldest</span>
+                <span class="comment">// leaf in the new chain. These could potentially be filled in asynchronously by</span>
+                <span class="comment">// querying another full node.</span>
                 <span class="kw">let</span> <span class="ident">expected_block_height</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">validator_state</span>.<span class="ident">block_height</span> <span class="op">+</span> <span class="number">1</span>;
-                <span class="kw">if</span> <span class="ident">state</span>.<span class="ident">block_height</span> <span class="op">&gt;</span> <span class="ident">expected_block_height</span> {
-                    <span class="kw">let</span> <span class="ident">num_placeholders</span> <span class="op">=</span> (<span class="ident">state</span>.<span class="ident">block_height</span> <span class="op">-</span> <span class="ident">expected_block_height</span>) <span class="kw">as</span> <span class="ident">usize</span>;
+                <span class="kw">if</span> <span class="ident">leaf</span>.<span class="ident">state</span>.<span class="ident">block_height</span> <span class="op">&gt;</span> <span class="ident">expected_block_height</span> {
+                    <span class="kw">let</span> <span class="ident">num_placeholders</span> <span class="op">=</span>
+                        (<span class="ident">leaf</span>.<span class="ident">state</span>.<span class="ident">block_height</span> <span class="op">-</span> <span class="ident">expected_block_height</span>) <span class="kw">as</span> <span class="ident">usize</span>;
                     <span class="macro">tracing::warn!</span>(
                         <span class="string">&quot;HotShot event stream skipped blocks, appending {} placeholders&quot;</span>,
                         <span class="ident">num_placeholders</span>
@@ -456,9 +384,12 @@
                 }
             }
 
-            <span class="kw">for</span> (<span class="kw-2">mut</span> <span class="ident">block</span>, <span class="ident">state</span>, <span class="ident">qcert</span>) <span class="kw">in</span>
-                <span class="macro">izip!</span>(<span class="ident">block</span>.<span class="ident">iter</span>().<span class="ident">cloned</span>(), <span class="ident">state</span>.<span class="ident">iter</span>(), <span class="ident">qcs</span>.<span class="ident">iter</span>().<span class="ident">cloned</span>()).<span class="ident">rev</span>()
-            {
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cumulative_size</span> <span class="op">=</span> <span class="number">0usize</span>;
+            <span class="kw">for</span> <span class="ident">leaf</span> <span class="kw">in</span> <span class="ident">leaf_chain</span>.<span class="ident">iter</span>().<span class="ident">rev</span>() {
+                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">block</span> <span class="op">=</span> <span class="ident">leaf</span>.<span class="ident">deltas</span>.<span class="ident">clone</span>();
+                <span class="kw">let</span> <span class="ident">state</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">leaf</span>.<span class="ident">state</span>;
+                <span class="kw">let</span> <span class="ident">qcert</span> <span class="op">=</span> <span class="ident">leaf</span>.<span class="ident">justify_qc</span>.<span class="ident">clone</span>();
+
                 <span class="comment">// Grab metadata for the new block from the state it is applying to.</span>
                 <span class="kw">let</span> <span class="ident">block_index</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">validator_state</span>.<span class="ident">block_height</span>;
                 <span class="kw">let</span> <span class="ident">nullifier_proofs</span> <span class="op">=</span> <span class="self">self</span>
@@ -479,7 +410,6 @@
                     <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">TransactionCommitment</span>(<span class="ident">txn</span>.<span class="ident">commit</span>());
                     <span class="ident">txn_hashes</span>.<span class="ident">push</span>(<span class="ident">hash</span>);
                 }
-                <span class="ident">num_txns</span> <span class="op">+</span><span class="op">=</span> <span class="ident">block</span>.<span class="ident">block</span>.<span class="number">0</span>.<span class="ident">len</span>();
                 <span class="ident">cumulative_size</span> <span class="op">+</span><span class="op">=</span> <span class="ident">block</span>.<span class="ident">serialized_size</span>();
                 <span class="kw">let</span> <span class="ident">continuation_event_index</span>;
 
@@ -501,7 +431,7 @@
                         <span class="ident">block</span>: <span class="ident">block</span>.<span class="ident">clone</span>(),
                         <span class="ident">block_id</span>: <span class="ident">block_index</span> <span class="kw">as</span> <span class="ident">u64</span>,
                         <span class="ident">state_comm</span>: <span class="self">self</span>.<span class="ident">validator_state</span>.<span class="ident">commit</span>(),
-                        <span class="ident">proof</span>: (),
+                        <span class="ident">proof</span>: <span class="ident">leaf</span>.<span class="ident">view_number</span>,
                     })];
 
                     <span class="comment">// Construct the Memos events for this block.</span>
@@ -537,27 +467,18 @@
                     <span class="ident">first_uid</span> <span class="op">-</span> <span class="ident">records_from</span>
                 };
 
-                <span class="ident">num_records</span> <span class="op">+</span><span class="op">=</span> <span class="ident">record_count</span> <span class="kw">as</span> <span class="ident">usize</span>;
-                <span class="ident">num_nullifiers</span> <span class="op">+</span><span class="op">=</span> <span class="ident">block</span>
-                    .<span class="ident">block</span>
-                    .<span class="number">0</span>
-                    .<span class="ident">iter</span>()
-                    .<span class="ident">map</span>(<span class="op">|</span><span class="ident">txn</span><span class="op">|</span> <span class="ident">txn</span>.<span class="ident">input_len</span>())
-                    .<span class="ident">sum</span>::<span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>();
-
                 {
-                    <span class="kw">let</span> <span class="ident">qcert_block_hash</span>: [<span class="ident">u8</span>; <span class="ident">H_256</span>] <span class="op">=</span>
-                        <span class="ident">qcert</span>.<span class="ident">block_hash</span>.<span class="ident">try_into</span>().<span class="ident">unwrap_or</span>([<span class="number">0u8</span>; <span class="ident">H_256</span>]);
-                    <span class="kw">let</span> <span class="ident">block_hash</span> <span class="op">=</span> <span class="ident">BlockHash</span>::<span class="op">&lt;</span><span class="ident">H_256</span><span class="op">&gt;</span><span class="ident">::from_array</span>(<span class="ident">qcert_block_hash</span>);
                     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">availability_store</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">availability_store</span>.<span class="ident">write</span>().<span class="kw">await</span>;
                     <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="ident">availability_store</span>.<span class="ident">append_blocks</span>(<span class="macro">vec!</span>[(
                         <span class="prelude-val">Some</span>(<span class="ident">BlockQueryData</span> {
                             <span class="ident">raw_block</span>: <span class="ident">block</span>.<span class="ident">clone</span>(),
-                            <span class="ident">block_hash</span>: <span class="ident">BlockCommitment</span>(<span class="ident">block</span>.<span class="ident">block</span>.<span class="ident">commit</span>()),
+                            <span class="ident">block_hash</span>: <span class="ident">block</span>.<span class="ident">commit</span>().<span class="ident">into</span>(),
                             <span class="ident">block_id</span>: <span class="ident">block_index</span> <span class="kw">as</span> <span class="ident">u64</span>,
                             <span class="ident">records_from</span>,
                             <span class="ident">record_count</span>,
                             <span class="ident">txn_hashes</span>,
+                            <span class="ident">timestamp</span>: <span class="ident">leaf</span>.<span class="ident">timestamp</span>,
+                            <span class="ident">proposer_id</span>: <span class="ident">EncodedPublicKey</span>(<span class="ident">leaf</span>.<span class="ident">proposer_id</span>.<span class="ident">clone</span>().<span class="number">0</span>),
                         }),
                         <span class="prelude-val">Some</span>(<span class="ident">StateQueryData</span> {
                             <span class="ident">state</span>: <span class="ident">state</span>.<span class="ident">clone</span>(),
@@ -565,14 +486,7 @@
                             <span class="ident">block_id</span>: <span class="ident">block_index</span> <span class="kw">as</span> <span class="ident">u64</span>,
                             <span class="ident">continuation_event_index</span>,
                         }),
-                        <span class="prelude-val">Some</span>(<span class="ident">QuorumCertificate</span> {
-                            <span class="ident">block_hash</span>,
-                            <span class="ident">leaf_hash</span>: <span class="ident">LeafHash::default</span>(),
-                            <span class="ident">view_number</span>: <span class="ident">qcert</span>.<span class="ident">view_number</span>,
-                            <span class="ident">stage</span>: <span class="ident">qcert</span>.<span class="ident">stage</span>,
-                            <span class="ident">signatures</span>: <span class="ident">qcert</span>.<span class="ident">signatures</span>,
-                            <span class="ident">genesis</span>: <span class="ident">qcert</span>.<span class="ident">genesis</span>,
-                        }),
+                        <span class="prelude-val">Some</span>(<span class="ident">qcert</span>),
                     )]) {
                         <span class="macro">tracing::warn!</span>(<span class="string">&quot;append_blocks returned error {}&quot;</span>, <span class="ident">e</span>);
                     }
@@ -590,11 +504,11 @@
             <span class="ident">status_store</span>
                 .<span class="ident">edit_status</span>(<span class="op">|</span><span class="ident">vs</span><span class="op">|</span> {
                     <span class="ident">vs</span>.<span class="ident">latest_block_id</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">validator_state</span>.<span class="ident">block_height</span> <span class="kw">as</span> <span class="ident">u64</span> <span class="op">-</span> <span class="number">1</span>;
-                    <span class="ident">vs</span>.<span class="ident">decided_block_count</span> <span class="op">+</span><span class="op">=</span> <span class="ident">block</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>;
-                    <span class="ident">vs</span>.<span class="ident">cumulative_txn_count</span> <span class="op">+</span><span class="op">=</span> <span class="ident">num_txns</span> <span class="kw">as</span> <span class="ident">u64</span>;
+                    <span class="ident">vs</span>.<span class="ident">decided_block_count</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">validator_state</span>.<span class="ident">block_height</span> <span class="kw">as</span> <span class="ident">u64</span>;
+                    <span class="ident">vs</span>.<span class="ident">cumulative_txn_count</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">validator_state</span>.<span class="ident">transaction_count</span> <span class="kw">as</span> <span class="ident">u64</span>;
                     <span class="ident">vs</span>.<span class="ident">cumulative_size</span> <span class="op">+</span><span class="op">=</span> <span class="ident">cumulative_size</span> <span class="kw">as</span> <span class="ident">u64</span>;
-                    <span class="ident">vs</span>.<span class="ident">record_count</span> <span class="op">+</span><span class="op">=</span> <span class="ident">num_records</span> <span class="kw">as</span> <span class="ident">u64</span>;
-                    <span class="ident">vs</span>.<span class="ident">nullifier_count</span> <span class="op">+</span><span class="op">=</span> <span class="ident">num_nullifiers</span> <span class="kw">as</span> <span class="ident">u64</span>;
+                    <span class="ident">vs</span>.<span class="ident">record_count</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">validator_state</span>.<span class="ident">record_merkle_commitment</span>.<span class="ident">num_leaves</span>;
+                    <span class="ident">vs</span>.<span class="ident">nullifier_count</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">validator_state</span>.<span class="ident">nullifiers_count</span>() <span class="kw">as</span> <span class="ident">u64</span>;
                     <span class="prelude-val">Ok</span>(())
                 })
                 .<span class="ident">unwrap</span>();

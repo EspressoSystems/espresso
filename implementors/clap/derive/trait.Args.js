@@ -1,5 +1,6 @@
 (function() {var implementors = {};
 implementors["address_book"] = [{"text":"impl Args for <a class=\"struct\" href=\"address_book/struct.Args.html\" title=\"struct address_book::Args\">Args</a>","synthetic":false,"types":["address_book::Args"]}];
+implementors["cdn_server"] = [{"text":"impl Args for <a class=\"struct\" href=\"cdn_server/struct.Args.html\" title=\"struct cdn_server::Args\">Args</a>","synthetic":false,"types":["cdn_server::Args"]}];
 implementors["espresso_availability_api"] = [{"text":"impl Args for <a class=\"struct\" href=\"espresso_availability_api/api/struct.Options.html\" title=\"struct espresso_availability_api::api::Options\">Options</a>","synthetic":false,"types":["espresso_availability_api::api::Options"]}];
 implementors["espresso_catchup_api"] = [{"text":"impl Args for <a class=\"struct\" href=\"espresso_catchup_api/api/struct.Options.html\" title=\"struct espresso_catchup_api::api::Options\">Options</a>","synthetic":false,"types":["espresso_catchup_api::api::Options"]}];
 implementors["espresso_esqs"] = [{"text":"impl Args for <a class=\"struct\" href=\"espresso_esqs/full_node/struct.Options.html\" title=\"struct espresso_esqs::full_node::Options\">Options</a>","synthetic":false,"types":["espresso_esqs::full_node::Options"]}];

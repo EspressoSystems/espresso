@@ -617,6 +617,14 @@
 <span id="617">617</span>
 <span id="618">618</span>
 <span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
 <span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
@@ -633,7 +641,8 @@
 <span class="kw">use</span> <span class="ident">async_std::task</span>::{<span class="ident">block_on</span>, <span class="ident">spawn_blocking</span>};
 <span class="kw">use</span> <span class="ident">escargot::CargoBuild</span>;
 <span class="kw">use</span> <span class="ident">espresso_esqs::ApiError</span>;
-<span class="kw">use</span> <span class="ident">espresso_validator</span>::{<span class="ident">testing::AddressBook</span>, <span class="ident">MINIMUM_NODES</span>};
+<span class="kw">use</span> <span class="ident">espresso_validator</span>::{<span class="ident">testing::AddressBook</span>, <span class="ident">MINIMUM_BOOTSTRAP_NODES</span>, <span class="ident">MINIMUM_NODES</span>};
+<span class="kw">use</span> <span class="ident">itertools::Itertools</span>;
 <span class="kw">use</span> <span class="ident">jf_cap::keys::UserPubKey</span>;
 <span class="kw">use</span> <span class="ident">portpicker::pick_unused_port</span>;
 <span class="kw">use</span> <span class="ident">regex::Regex</span>;
@@ -875,7 +884,10 @@
             <span class="ident">MINIMUM_NODES</span>,
             <span class="ident">server_ports</span>.<span class="ident">len</span>()
         );
-        <span class="kw">let</span> <span class="ident">bootstrap_port</span> <span class="op">=</span> <span class="ident">pick_unused_port</span>().<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">bootstrap_ports</span> <span class="op">=</span> (<span class="number">0</span>..<span class="ident">MINIMUM_BOOTSTRAP_NODES</span>)
+            .<span class="ident">into_iter</span>()
+            .<span class="ident">map</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">pick_unused_port</span>().<span class="ident">unwrap</span>())
+            .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
         <span class="kw">let</span> <span class="ident">ret</span> <span class="op">=</span> <span class="ident">block_on</span>(<span class="ident">futures::future::join_all</span>(
             <span class="ident">server_ports</span>.<span class="ident">iter</span>().<span class="ident">enumerate</span>().<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">i</span>, <span class="ident">port</span>)<span class="op">|</span> {
                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">v</span> <span class="op">=</span> <span class="ident">Validator::new</span>(
@@ -883,7 +895,7 @@
                     <span class="ident">pub_key</span>.<span class="ident">clone</span>(),
                     <span class="ident">i</span>,
                     <span class="kw-2">*</span><span class="ident">port</span>,
-                    <span class="ident">bootstrap_port</span>,
+                    <span class="ident">bootstrap_ports</span>.<span class="ident">clone</span>(),
                 );
                 <span class="kw">async</span> <span class="kw">move</span> {
                     <span class="ident">v</span>.<span class="ident">open</span>(<span class="ident">server_ports</span>.<span class="ident">len</span>()).<span class="kw">await</span><span class="question-mark">?</span>;
@@ -1075,7 +1087,7 @@
     <span class="ident">store_path</span>: <span class="ident">PathBuf</span>,
     <span class="ident">pub_key</span>: <span class="ident">UserPubKey</span>,
     <span class="ident">server_port</span>: <span class="ident">u16</span>,
-    <span class="ident">bootstrap_port</span>: <span class="ident">u16</span>,
+    <span class="ident">bootstrap_ports</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u16</span><span class="op">&gt;</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">Validator</span> {
@@ -1096,7 +1108,7 @@
         <span class="ident">pub_key</span>: <span class="ident">UserPubKey</span>,
         <span class="ident">id</span>: <span class="ident">usize</span>,
         <span class="ident">server_port</span>: <span class="ident">u16</span>,
-        <span class="ident">bootstrap_port</span>: <span class="ident">u16</span>,
+        <span class="ident">bootstrap_ports</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u16</span><span class="op">&gt;</span>,
     ) -&gt; <span class="self">Self</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">store_path</span> <span class="op">=</span> <span class="ident">store_dir</span>.<span class="ident">to_path_buf</span>();
         <span class="ident">store_path</span>.<span class="ident">push</span>(<span class="macro">format!</span>(<span class="string">&quot;store_for_{}&quot;</span>, <span class="ident">id</span>));
@@ -1111,7 +1123,7 @@
             <span class="ident">store_path</span>,
             <span class="ident">pub_key</span>,
             <span class="ident">server_port</span>,
-            <span class="ident">bootstrap_port</span>,
+            <span class="ident">bootstrap_ports</span>,
         }
     }
 
@@ -1124,7 +1136,11 @@
         <span class="kw">let</span> <span class="ident">pub_key</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">pub_key</span>.<span class="ident">clone</span>();
         <span class="kw">let</span> <span class="ident">id</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">id</span>;
         <span class="kw">let</span> <span class="ident">server_port</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">server_port</span>;
-        <span class="kw">let</span> <span class="ident">bootstrap_port</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">bootstrap_port</span>;
+        <span class="kw">let</span> <span class="ident">bootstrap_nodes</span> <span class="op">=</span> <span class="self">self</span>
+            .<span class="ident">bootstrap_ports</span>
+            .<span class="ident">iter</span>()
+            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">p</span><span class="op">|</span> <span class="macro">format!</span>(<span class="string">&quot;localhost:{}&quot;</span>, <span class="ident">p</span>))
+            .<span class="ident">join</span>(<span class="string">&quot;,&quot;</span>);
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">child</span> <span class="op">=</span> <span class="ident">spawn_blocking</span>(<span class="kw">move</span> <span class="op">|</span><span class="op">|</span> {
             <span class="ident">cargo_run</span>(<span class="string">&quot;espresso-validator&quot;</span>, <span class="string">&quot;espresso-validator&quot;</span>)
@@ -1158,7 +1174,7 @@
                     <span class="string">&quot;--nonbootstrap-mesh-n&quot;</span>,
                     <span class="string">&quot;12&quot;</span>,
                     <span class="string">&quot;--bootstrap-nodes&quot;</span>,
-                    <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;localhost:{}&quot;</span>, <span class="ident">bootstrap_port</span>),
+                    <span class="kw-2">&amp;</span><span class="ident">bootstrap_nodes</span>,
                     <span class="string">&quot;esqs&quot;</span>,
                 ])
                 .<span class="ident">env</span>(<span class="string">&quot;ESPRESSO_ESQS_PORT&quot;</span>, <span class="ident">server_port</span>.<span class="ident">to_string</span>())

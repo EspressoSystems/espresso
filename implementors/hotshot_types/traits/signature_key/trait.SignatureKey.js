@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["espresso_core"] = [{"text":"impl SignatureKey for <a class=\"struct\" href=\"espresso_core/stake_table/struct.StakingKey.html\" title=\"struct espresso_core::stake_table::StakingKey\">StakingKey</a>","synthetic":false,"types":["espresso_core::stake_table::StakingKey"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
