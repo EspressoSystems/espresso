@@ -27,16 +27,17 @@
 
 use ark_serialize::CanonicalSerialize;
 use async_std::future::timeout;
+use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use clap::Parser;
 use commit::Committable;
 use espresso_availability_api::query_data::*;
-use espresso_core::{ledger::EspressoLedger, state::BlockCommitment};
+use espresso_core::ledger::EspressoLedger;
+use espresso_esqs::ApiError;
 use espresso_metastate_api::api::NullifierCheck;
 use futures::prelude::*;
 use hotshot_types::data::ViewNumber;
 use itertools::izip;
-use net::client::*;
 use reef::traits::Transaction;
 use seahorse::{events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnafu, KeystoreError};
 use serde::Deserialize;
@@ -45,7 +46,7 @@ use std::fmt::Display;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::time::Duration;
-use surf::Url;
+use surf_disco::Url;
 use tempdir::TempDir;
 use tracing::{event, Level};
 
@@ -58,6 +59,11 @@ struct Args {
     /// Port number of the query service.
     #[arg(short = 'P', long = "--port", default_value = "50000")]
     port: u16,
+
+    /// Test all blocks in the history.
+    ///
+    /// Without this flag, only a sample will be tested.
+    all: bool,
 }
 
 fn url_with_scheme(opt: &Args, scheme: impl Display, route: impl Display) -> Url {
@@ -71,9 +77,7 @@ fn url(opt: &Args, route: impl Display) -> Url {
 async fn get<T: for<'de> Deserialize<'de>, S: Display>(opt: &Args, route: S) -> T {
     let url = url(opt, route);
     event!(Level::INFO, "GET {}", url);
-    response_body(&mut surf::get(url).send().await.unwrap())
-        .await
-        .unwrap()
+    surf_disco::get::<T, ApiError>(url).send().await.unwrap()
 }
 
 async fn validate_committed_block(
@@ -86,10 +90,7 @@ async fn validate_committed_block(
     // Check well-formedness of the data.
     assert_eq!(ix, block.block_id);
     assert!(ix < num_blocks);
-    assert_eq!(
-        block.block_hash,
-        BlockCommitment(block.raw_block.block.commit()),
-    );
+    assert_eq!(block.block_hash, block.raw_block.commit().into(),);
 
     // Check that we get the same block if we query by other methods.
     assert_eq!(
@@ -168,6 +169,7 @@ struct UnencryptedKeystoreLoader {
     dir: TempDir,
 }
 
+#[async_trait]
 impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
     type Meta = ();
 
@@ -175,12 +177,15 @@ impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
         self.dir.path().into()
     }
 
-    fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
+    async fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
         let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
         Ok(((), key))
     }
 
-    fn load(&mut self, _meta: &mut Self::Meta) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
+    async fn load(
+        &mut self,
+        _meta: &mut Self::Meta,
+    ) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
         KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
     }
 }
@@ -205,14 +210,22 @@ async fn test(opt: &Args) {
     .await;
     assert_eq!(block_summaries.len() as u64, num_blocks);
 
+    let test_indices = if opt.all {
+        (0..num_blocks).into_iter().collect()
+    } else {
+        // If we were not asked to check _all_ blocks, at least check that we can query the 0th
+        // block and the most recent block.
+        vec![0, num_blocks - 1]
+    };
+
     // Check that we can query the 0th block and the last block.
-    for ix in [0, num_blocks - 1].iter() {
-        let block = get(opt, format!("/availability/getblock/{}", *ix)).await;
+    for ix in test_indices {
+        let block = get(opt, format!("/availability/getblock/{}", ix)).await;
         validate_committed_block(
             opt,
             &block,
-            &block_summaries[(num_blocks - 1 - *ix) as usize],
-            *ix,
+            &block_summaries[(num_blocks - 1 - ix) as usize],
+            ix,
             num_blocks,
         )
         .await;
@@ -345,6 +358,7 @@ mod test {
         test(&Args {
             host: "localhost".into(),
             port: network.query_api.port().unwrap(),
+            all: true,
         })
         .await
     }

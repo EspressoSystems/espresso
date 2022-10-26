@@ -33,6 +33,7 @@
 
 use address_book::error::AddressBookError;
 use async_std::task::sleep;
+use async_trait::async_trait;
 use clap::Parser;
 use derive_more::Deref;
 use espresso_client::{ledger_state::TransactionUID, network::NetworkBackend, RecordAmount};
@@ -179,6 +180,7 @@ struct TrivialKeystoreLoader {
     pub key_tree: KeyTree,
 }
 
+#[async_trait]
 impl KeystoreLoader<EspressoLedger> for TrivialKeystoreLoader {
     type Meta = ();
 
@@ -186,11 +188,11 @@ impl KeystoreLoader<EspressoLedger> for TrivialKeystoreLoader {
         self.dir.clone()
     }
 
-    fn create(&mut self) -> Result<((), KeyTree), KeystoreError<EspressoLedger>> {
+    async fn create(&mut self) -> Result<((), KeyTree), KeystoreError<EspressoLedger>> {
         Ok(((), self.key_tree.clone()))
     }
 
-    fn load(&mut self, _meta: &mut ()) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
+    async fn load(&mut self, _meta: &mut ()) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
         Ok(self.key_tree.clone())
     }
 }
@@ -211,7 +213,7 @@ async fn get_peers(url: &Url) -> Result<Vec<UserPubKey>, AddressBookError> {
 async fn get_native_from_faucet(keystore: &mut Keystore, pub_key: &UserPubKey, url: &Url) {
     // Request native asset for the keystore.
     loop {
-        match surf_disco::post::<(), FaucetError>(url.join("request_fee_assets").unwrap())
+        match surf_disco::post::<(), FaucetError>(url.join("api/request_fee_assets").unwrap())
             .body_binary(pub_key)
             .unwrap()
             .send()

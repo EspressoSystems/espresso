@@ -10,29 +10,17 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <https://www.gnu.org/licenses/>.
 
-name: update-flake-lock
+[meta]
+NAME = "fauceet"
+DESCRIPTION = "Espresso Testnet Faucet"
+FORMAT_VERSION = "0.1.0"
 
-on:
-  workflow_dispatch: # allows manual triggering
-  schedule:
-    - cron: '0 0 * * 0' # runs weekly on Sunday at 00:00
+[route.request_fee_assets]
+PATH = ["/request_fee_assets"]
+METHOD = "POST"
+DOC = """
+Request a grant of Espresso fee tokens for a given address.
 
-jobs:
-  lockfile:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v18
-
-      - uses: cachix/cachix-action@v11
-        with:
-          name: espresso-systems-private
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
-
-      - name: Update flake.lock
-        uses: DeterminateSystems/update-flake-lock@v14
-        with:
-          pr-title: "Weekly PR to bump flake.nix" # Title of PR to be created
+The request payload should be the `UserPubKey` bundle requesting the assets, formatted as a JSON
+string (starting with "USERPUBKEY").
+"""

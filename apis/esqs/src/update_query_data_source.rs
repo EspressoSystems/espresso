@@ -20,12 +20,11 @@ use async_std::task::block_on;
 use commit::Committable;
 use espresso_availability_api::{
     data_source::UpdateAvailabilityData,
-    query_data::{BlockQueryData, StateQueryData},
+    query_data::{BlockQueryData, EncodedPublicKey, StateQueryData},
 };
 use espresso_catchup_api::data_source::UpdateCatchUpData;
 use espresso_core::state::{
-    BlockCommitment, ElaboratedBlock, EspressoTransaction, EspressoTxnHelperProofs,
-    TransactionCommitment, ValidatorState,
+    EspressoTransaction, EspressoTxnHelperProofs, TransactionCommitment, ValidatorState,
 };
 use espresso_metastate_api::data_source::UpdateMetaStateData;
 use espresso_status_api::data_source::UpdateStatusData;
@@ -34,14 +33,11 @@ use futures::{
     task::{SpawnError, SpawnExt},
     Stream, StreamExt,
 };
-use hotshot::data::{BlockHash, LeafHash, QuorumCertificate, Stage, VecQuorumCertificate};
-use hotshot::H_256;
-use hotshot_types::data::ViewNumber;
 use itertools::izip;
 use reef::traits::Transaction;
 use seahorse::events::LedgerEvent;
 
-pub type HotShotEvent = hotshot::types::EventType<ElaboratedBlock, ValidatorState, H_256>;
+pub type HotShotEvent = hotshot::types::EventType<ValidatorState>;
 
 pub trait UpdateQueryDataSourceTypes {
     type CU: UpdateCatchUpData + Sized + Send + Sync;
@@ -78,9 +74,8 @@ where
         meta_state_store: Arc<RwLock<TYPES::MS>>,
         status_store: Arc<RwLock<TYPES::ST>>,
         event_handler: Arc<RwLock<TYPES::EH>>,
-        genesis: ElaboratedBlock,
     ) -> Arc<RwLock<Self>> {
-        let mut instance = Self {
+        let instance = Arc::new(RwLock::new(Self {
             catchup_store,
             availability_store,
             meta_state_store,
@@ -88,28 +83,7 @@ where
             event_handler,
             validator_state: Default::default(),
             _event_task: None,
-        };
-
-        // HotShot does not currently support genesis nicely. It should automatically commit and
-        // broadcast a `Decide` event for the genesis block, but it doesn't. For now, we broadcast a
-        // `Commit` event for the genesis block ourselves.
-        let mut genesis_state = ValidatorState::default();
-        genesis_state
-            .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
-            .unwrap();
-        block_on(instance.update(HotShotEvent::Decide {
-            block: Arc::new(vec![genesis]),
-            state: Arc::new(vec![genesis_state]),
-            qcs: Arc::new(vec![VecQuorumCertificate {
-                block_hash: Default::default(),
-                view_number: ViewNumber::genesis(),
-                stage: Stage::Decide,
-                signatures: Default::default(),
-                genesis: Default::default(),
-            }]),
         }));
-
-        let instance = Arc::new(RwLock::new(instance));
         if let Ok(task_handle) = launch_updates(event_source, instance.clone()) {
             let mut edit_handle = block_on(instance.write());
             edit_handle._event_task = Some(task_handle);
@@ -118,20 +92,17 @@ where
     }
 
     async fn update(&mut self, event: HotShotEvent) {
-        if let HotShotEvent::Decide { block, state, qcs } = event {
-            let mut num_txns = 0usize;
-            let mut num_records = 0usize;
-            let mut num_nullifiers = 0usize;
-            let mut cumulative_size = 0usize;
-
-            if let Some(state) = state.first() {
+        if let HotShotEvent::Decide { leaf_chain } = event {
+            if let Some(leaf) = leaf_chain.last() {
                 // HotShot can give us a leaf chain that does not follow immediately from our last
                 // saved state, if it skipped ahead for liveness reasons. Insert missing blocks as
-                // placeholders for each missing leaf. These could potentially be filled in
-                // asynchronously by querying another full node.
+                // placeholders for each missing leaf between our last saved state and the oldest
+                // leaf in the new chain. These could potentially be filled in asynchronously by
+                // querying another full node.
                 let expected_block_height = self.validator_state.block_height + 1;
-                if state.block_height > expected_block_height {
-                    let num_placeholders = (state.block_height - expected_block_height) as usize;
+                if leaf.state.block_height > expected_block_height {
+                    let num_placeholders =
+                        (leaf.state.block_height - expected_block_height) as usize;
                     tracing::warn!(
                         "HotShot event stream skipped blocks, appending {} placeholders",
                         num_placeholders
@@ -145,9 +116,12 @@ where
                 }
             }
 
-            for (mut block, state, qcert) in
-                izip!(block.iter().cloned(), state.iter(), qcs.iter().cloned()).rev()
-            {
+            let mut cumulative_size = 0usize;
+            for leaf in leaf_chain.iter().rev() {
+                let mut block = leaf.deltas.clone();
+                let state = &leaf.state;
+                let qcert = leaf.justify_qc.clone();
+
                 // Grab metadata for the new block from the state it is applying to.
                 let block_index = self.validator_state.block_height;
                 let nullifier_proofs = self
@@ -168,7 +142,6 @@ where
                     let hash = TransactionCommitment(txn.commit());
                     txn_hashes.push(hash);
                 }
-                num_txns += block.block.0.len();
                 cumulative_size += block.serialized_size();
                 let continuation_event_index;
 
@@ -190,6 +163,7 @@ where
                         block: block.clone(),
                         block_id: block_index as u64,
                         state_comm: self.validator_state.commit(),
+                        proof: leaf.view_number,
                     })];
 
                     // Construct the Memos events for this block.
@@ -225,27 +199,18 @@ where
                     first_uid - records_from
                 };
 
-                num_records += record_count as usize;
-                num_nullifiers += block
-                    .block
-                    .0
-                    .iter()
-                    .map(|txn| txn.input_len())
-                    .sum::<usize>();
-
                 {
-                    let qcert_block_hash: [u8; H_256] =
-                        qcert.block_hash.try_into().unwrap_or([0u8; H_256]);
-                    let block_hash = BlockHash::<H_256>::from_array(qcert_block_hash);
                     let mut availability_store = self.availability_store.write().await;
                     if let Err(e) = availability_store.append_blocks(vec![(
                         Some(BlockQueryData {
                             raw_block: block.clone(),
-                            block_hash: BlockCommitment(block.block.commit()),
+                            block_hash: block.commit().into(),
                             block_id: block_index as u64,
                             records_from,
                             record_count,
                             txn_hashes,
+                            timestamp: leaf.timestamp,
+                            proposer_id: EncodedPublicKey(leaf.proposer_id.clone().0),
                         }),
                         Some(StateQueryData {
                             state: state.clone(),
@@ -253,14 +218,7 @@ where
                             block_id: block_index as u64,
                             continuation_event_index,
                         }),
-                        Some(QuorumCertificate {
-                            block_hash,
-                            leaf_hash: LeafHash::default(),
-                            view_number: qcert.view_number,
-                            stage: qcert.stage,
-                            signatures: qcert.signatures,
-                            genesis: qcert.genesis,
-                        }),
+                        Some(qcert),
                     )]) {
                         tracing::warn!("append_blocks returned error {}", e);
                     }
@@ -278,11 +236,11 @@ where
             status_store
                 .edit_status(|vs| {
                     vs.latest_block_id = self.validator_state.block_height as u64 - 1;
-                    vs.decided_block_count += block.len() as u64;
-                    vs.cumulative_txn_count += num_txns as u64;
+                    vs.decided_block_count = self.validator_state.block_height as u64;
+                    vs.cumulative_txn_count = self.validator_state.transaction_count as u64;
                     vs.cumulative_size += cumulative_size as u64;
-                    vs.record_count += num_records as u64;
-                    vs.nullifier_count += num_nullifiers as u64;
+                    vs.record_count = self.validator_state.record_merkle_commitment.num_leaves;
+                    vs.nullifier_count = self.validator_state.nullifiers_count() as u64;
                     Ok(())
                 })
                 .unwrap();

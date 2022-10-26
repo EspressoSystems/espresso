@@ -19,45 +19,45 @@ use async_std::sync::{Arc, RwLock};
 use clap::{Args, Parser};
 use cld::ClDuration;
 use dirs::data_local_dir;
-use espresso_core::reward::{mock_eligibility, CollectRewardNote};
+use espresso_core::reward::{
+    mock_eligibility, CollectRewardNote, CollectedRewards, CollectedRewardsSet,
+};
+use espresso_core::stake_table::StakingKey;
 use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof};
 use espresso_core::{
-    committee::Committee,
     genesis::GenesisNote,
     stake_table::{StakeTableHash, StakingPrivKey},
     state::{
-        ChainVariables, ElaboratedBlock, ElaboratedTransaction, LWPersistence, NullifierHistory,
-        SetMerkleTree, ValidatorState,
+        ChainVariables, ElaboratedBlock, ElaboratedTransaction, LWPersistence, ValidatorState,
     },
-    testing::{MultiXfrRecordSpec, MultiXfrTestState},
     universal_params::VERIF_CRS,
-    PrivKey, PubKey,
 };
 use espresso_esqs::full_node_data_source::QueryData;
+use espresso_validator_api::data_source::ValidatorDataSource;
 use futures::{select, Future, FutureExt};
-use hotshot::traits::implementations::Libp2pNetwork;
-use hotshot::traits::NetworkError;
-use hotshot::types::ed25519::{Ed25519Priv, Ed25519Pub};
-use hotshot::types::EventType;
+use hotshot::types::{ed25519::Ed25519Priv, EventType};
 use hotshot::{
-    traits::implementations::AtomicStorage,
-    types::{HotShotHandle, Message, SignatureKey},
-    HotShot, HotShotConfig, H_256,
+    traits::{
+        election::vrf::{VRFStakeTableConfig, VrfImpl, SORTITION_PARAMETER},
+        implementations::MemoryStorage,
+    },
+    types::{HotShotHandle, SignatureKey as _},
+    HotShot, HotShotInitializer,
 };
-use jf_cap::keys::UserAddress;
+use hotshot_types::{ExecutionType, HotShotConfig};
 use jf_cap::{
-    keys::UserPubKey,
+    keys::{UserAddress, UserPubKey},
     structs::{Amount, AssetDefinition, FreezeFlag, RecordOpening},
 };
 use jf_utils::tagged_blob;
 use libp2p::identity::ed25519::SecretKey;
-use libp2p::identity::Keypair;
 use libp2p::{multiaddr, Multiaddr, PeerId};
-use libp2p_networking::network::{MeshParams, NetworkNodeConfigBuilder, NetworkNodeType};
-use node_impl::ValidatorNodeImpl;
+use libp2p_networking::network::NetworkNodeType;
+use node_impl::{SignatureKey, ValidatorNodeImpl};
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
 use snafu::Snafu;
-use std::collections::HashSet;
+use static_assertions::const_assert;
+use std::convert::TryInto;
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::io::Read;
@@ -66,19 +66,41 @@ use std::path::{Path, PathBuf};
 use std::str;
 use std::str::FromStr;
 use std::time::Duration;
-use surf::Url;
 use tracing::{debug, event, Level};
+use url::Url;
 
-mod node_impl;
+mod network;
+pub mod node_impl;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+pub mod validator;
 
-pub const MINIMUM_NODES: usize = 6;
+#[macro_export]
+macro_rules! div_ceil {
+    ($num:expr, $den:expr) => {
+        ($num + $den - 1) / $den
+    };
+}
 
-const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
+pub const COMMITTEE_SIZE: u64 = SORTITION_PARAMETER;
+// More than 2/3 of the expected committee size is required to reach quorum.
+pub const QUORUM_THRESHOLD: u64 = 2 * COMMITTEE_SIZE / 3 + 1;
+// For the fixed-stake testnet, we arbitrarily assign each node enough stake so that at least 4
+// nodes are required for quorum.
+pub const STAKE_PER_NODE: u64 = QUORUM_THRESHOLD / 4;
+
+// We need enough nodes so that the total stake (i.e. `num_nodes * STAKE_PER_NODE`) is at least
+// `COMMITTEE_SIZE`, so `num_nodes >= COMMITTEE_SIZE / STAKE_PER_NODE`.
+pub const MINIMUM_NODES: usize = div_ceil!(COMMITTEE_SIZE, STAKE_PER_NODE) as usize;
+pub const MINIMUM_BOOTSTRAP_NODES: usize = 5;
+pub const GENESIS_SEED: [u8; 32] = [0x7au8; 32];
 const DEFAULT_SECRET_KEY_SEED: [u8; 32] = [
     1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8,
 ];
+
+const_assert!(QUORUM_THRESHOLD < COMMITTEE_SIZE);
+const_assert!(MINIMUM_NODES as u64 * STAKE_PER_NODE >= COMMITTEE_SIZE);
+const_assert!(MINIMUM_NODES >= MINIMUM_BOOTSTRAP_NODES);
 
 /// Parse a (url|ip):[0-9]+ into a multiaddr
 pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
@@ -98,11 +120,6 @@ pub fn parse_url(s: &str) -> Result<Multiaddr, multiaddr::Error> {
         Multiaddr::from_str(&format!("/ip4/{}/tcp/{}", ip, port))
     }
 }
-
-type PLNetwork = Libp2pNetwork<
-    Message<ElaboratedBlock, ElaboratedTransaction, ValidatorState, Ed25519Pub, H_256>,
-    Ed25519Pub,
->;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ratio {
@@ -182,11 +199,31 @@ pub struct NodeOpt {
     #[arg(long, default_value = "9000")]
     pub nonbootstrap_base_port: usize,
 
+    /// URL for a CDN server to use for optimistic communication.
+    ///
+    /// Note that the configuration provided by the CDN will override consensus-level configuration
+    /// specified in these options.
+    #[arg(long, env = "ESPRESSO_CDN_SERVER_URL")]
+    pub cdn: Option<Url>,
+
+    /// Use in conjunction with --cdn to use libp2p for consensus networking.
+    ///
+    /// The centralized server will still be used for orchestration (e.g. synchronizing startup), as
+    /// opposed to the default configuration (with netiher --cdn nor --libp2p) where libp2p
+    /// networking is used without any orchestration.
+    #[arg(long, requires = "cdn", env = "ESPRESSO_VALIDATOR_LIBP2P")]
+    pub libp2p: bool,
+
     /// Minimum time to wait for submitted transactions before proposing a block.
     ///
     /// Increasing this trades off latency for throughput: the rate of new block proposals gets
     /// slower, but each block is proportionally larger. Because of batch verification, larger
     /// blocks should lead to increased throughput.
+    ///
+    /// `min-propose-time` is set to 0s by default, since minimum block size can be controlled using
+    /// `min-transactions`, which is a more intentional, declarative setting. You may still wish to
+    /// set a non-zero `min-propose-time` to allow for larger blocks in higher volumes while setting
+    /// `min-transactions` to something small to handle low-volume conditions.
     #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
@@ -197,21 +234,39 @@ pub struct NodeOpt {
 
     /// Maximum time to wait for submitted transactions before proposing a block.
     ///
-    /// If a validator has not received any transactions after `min-propose-time`, it will wait up
-    /// to `max-propose-time` before giving up and submitting an empty block.
+    /// If a validator has not received `min-transactions` after `min-propose-time`, it will wait up
+    /// to `max-propose-time` before giving up and submitting a block with whatever transactions it
+    /// does have.
     #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME",
-        default_value = "10s",
+        default_value = "30s",
         value_parser = parse_duration
     )]
     pub max_propose_time: Duration,
+
+    /// Minimum number of transactions to include in a block, if possible.
+    ///
+    /// After `min-propose-time`, a leader will propose a block as soon as it has at least
+    /// `min-transactions`. Note that a block with fewer than `min-transactions` may still be
+    /// proposed, if `min-transactions` are not submitted before `max-propose-time`.
+    ///
+    /// The default is 1, because a non-zero value of `min-transactions` is required in order for
+    /// `max-propose-time` to have any effect -- if `min-transactions = 0`, then an empty block will
+    /// be proposed each view after `min-propose-time`. Setting `min-transactions` to 1 limits the
+    /// number of empty blocks proposed while still allowing a block to be proposed as soon as any
+    /// transaction has been received. In a setting where high volume is expected most of the time,
+    /// you might set this greater than 1 to encourage larger blocks and better throughput, while
+    /// setting `max-propose-time` very large to handle low-volume conditions without affecting
+    /// latency in high-volume conditions.
+    #[clap(long, env = "ESPRESSO_VALIDATOR_MIN_TRANSACTIONS", default_value = "1")]
+    pub min_transactions: usize,
 
     /// Base duration for next-view timeout.
     #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT",
-        default_value = "100s",
+        default_value = "60s",
         value_parser = parse_duration
     )]
     pub next_view_timeout: Duration,
@@ -435,8 +490,9 @@ fn get_secret_key_seed(consensus_opt: &ConsensusOpt) -> [u8; 32] {
         .into()
 }
 
-type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
-pub type Consensus = HotShotHandle<ValidatorNodeImpl<PLNetwork, PLStorage>, H_256>;
+type Network = network::HybridNetwork;
+type Storage = MemoryStorage<ValidatorState>;
+pub type Consensus = HotShotHandle<ValidatorNodeImpl<Network, Storage>>;
 
 pub fn genesis(
     chain_id: u16,
@@ -469,73 +525,46 @@ pub fn genesis(
     )
 }
 
-pub fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
-    let mut state = MultiXfrTestState::initialize(
-        GENESIS_SEED,
-        10,
-        10,
-        (
-            MultiXfrRecordSpec {
-                asset_def_ix: 0,
-                owner_key_ix: 0,
-                asset_amount: 100,
-            },
-            vec![
-                MultiXfrRecordSpec {
-                    asset_def_ix: 1,
-                    owner_key_ix: 0,
-                    asset_amount: 50,
-                },
-                MultiXfrRecordSpec {
-                    asset_def_ix: 0,
-                    owner_key_ix: 0,
-                    asset_amount: 70,
-                },
-            ],
-        ),
-    )
-    .unwrap();
-
-    // [GenesisNote] doesn't support a non-empty nullifiers set, so we clear the nullifiers set in
-    // our test state. This effectively "unspends" the records which were used to set up the initial
-    // state. This is fine for testing purposes.
-    state.nullifiers = SetMerkleTree::default();
-    state.validator.past_nullifiers = NullifierHistory::default();
-
-    let genesis = GenesisNote::new(
-        ChainVariables::new(42, VERIF_CRS.clone()),
-        Arc::new(state.records().collect()),
-    );
-    (genesis, state)
-}
-
 /// Creates the initial state and hotshot for simulation.
 #[allow(clippy::too_many_arguments)]
 async fn init_hotshot(
     options: &NodeOpt,
-    known_nodes: Vec<PubKey>,
-    priv_key: PrivKey,
-    threshold: u64,
+    known_nodes: Vec<StakingKey>,
+    priv_key: StakingPrivKey,
     node_id: usize,
-    networking: PLNetwork,
+    networking: Network,
     genesis: GenesisNote,
     num_bootstrap: usize,
 ) -> Consensus {
     // Create the initial hotshot
-    let stake_table = known_nodes.iter().map(|key| (key.clone(), 1)).collect();
+    let known_nodes = known_nodes
+        .into_iter()
+        .map(SignatureKey::from)
+        .collect::<Vec<_>>();
+    let stake_distribution = known_nodes
+        .iter()
+        .map(|_| STAKE_PER_NODE.try_into().unwrap())
+        .collect::<Vec<_>>();
     let pub_key = known_nodes[node_id].clone();
+    let vrf_config = VRFStakeTableConfig {
+        sortition_parameter: COMMITTEE_SIZE,
+        distribution: stake_distribution,
+    };
     let config = HotShotConfig {
         total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
-        threshold: NonZeroUsize::new(threshold as usize).unwrap(),
+        threshold: NonZeroUsize::new(QUORUM_THRESHOLD as usize).unwrap(),
         max_transactions: options.max_transactions,
-        known_nodes,
+        known_nodes: known_nodes.clone(),
         next_view_timeout: options.next_view_timeout.as_millis() as u64,
         timeout_ratio: options.timeout_ratio.into(),
         round_start_delay: options.round_start_delay.as_millis() as u64,
         start_delay: options.start_delay.as_millis() as u64,
         propose_min_round_time: options.min_propose_time,
         propose_max_round_time: options.max_propose_time,
+        min_transactions: options.min_transactions,
         num_bootstrap,
+        execution_type: ExecutionType::Continuous,
+        election_config: None,
     };
     debug!(?config);
 
@@ -548,43 +577,27 @@ async fn init_hotshot(
         debug!("Restoring from persisted session");
         LWPersistence::load(storage_path, "validator").unwrap()
     };
-    let genesis = ElaboratedBlock::genesis(genesis);
-    let state = lw_persistence.load_latest_state().unwrap_or_else(|_| {
-        // HotShot does not currently support genesis nicely. It should take a genesis block and
-        // apply it to the default state. However, it currently takes the genesis block _and_ the
-        // resulting state. This means we must apply the genesis block to the default state
-        // ourselves.
-        let mut state = ValidatorState::default();
-        state
-            .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
-            .unwrap();
-        state
-    });
-
-    let hotshot_storage_path = [storage_path, Path::new("hotshot")]
-        .iter()
-        .collect::<PathBuf>();
-    let hotshot_storage = if options.reset_store_state {
-        AtomicStorage::create(&hotshot_storage_path).unwrap()
-    } else {
-        AtomicStorage::open(&hotshot_storage_path).unwrap()
+    let initializer = match lw_persistence.load_latest_leaf() {
+        Ok(leaf) => HotShotInitializer::from_reload(leaf),
+        Err(_) => {
+            // If we have reset the store state, or if there are no past leaves in storage, restart
+            // from genesis.
+            HotShotInitializer::from_genesis(ElaboratedBlock::genesis(genesis)).unwrap()
+        }
     };
-
     let hotshot = HotShot::init(
-        genesis.clone(),
-        config.known_nodes.clone(),
         pub_key,
         priv_key,
         node_id as u64,
         config,
-        state,
         networking,
-        hotshot_storage,
-        lw_persistence,
-        Committee::new(stake_table),
+        MemoryStorage::new(),
+        VrfImpl::with_initial_stake(known_nodes, &vrf_config),
+        initializer,
     )
     .await
     .unwrap();
+    lw_persistence.launch(hotshot.clone().into_stream());
 
     debug!("Hotshot online!");
     hotshot
@@ -603,12 +616,12 @@ pub async fn run_consensus<F: Send + Future>(mut consensus: Consensus, kill: F) 
             event = event_future => {
                 match event {
                     Ok(event) => match event.event {
-                        EventType::Decide { state, block: _, qcs: _ } => {
-                            if let Some(state) = state.last() {
-                                tracing::debug!(". - Committed state {}", state.commit());
+                        EventType::Decide { leaf_chain } => {
+                            if let Some(leaf) = leaf_chain.last() {
+                                tracing::debug!(". - Committed state {}", leaf.state.commit());
                             }
                         }
-                        EventType::ViewTimeout { view_number } => {
+                        EventType::NextLeaderViewTimeout { view_number } => {
                             tracing::debug!("  - Round {:?} timed out.", view_number);
                         }
                         EventType::Error { error } => {
@@ -629,102 +642,30 @@ pub async fn run_consensus<F: Send + Future>(mut consensus: Consensus, kill: F) 
 
 /// Generate a list of private and public keys for `consensus_opt.bootstrap_nodes.len()` bootstrap
 /// keys, with a given `consensus_opt.seed` seed.
-pub fn gen_bootstrap_keys(consensus_opt: &ConsensusOpt) -> Vec<KeyPair> {
-    let mut keys = Vec::with_capacity(consensus_opt.bootstrap_nodes.len());
-
-    for node_id in 0..consensus_opt.bootstrap_nodes.len() {
-        let private = PrivKey::generated_from_seed_indexed(
-            get_secret_key_seed(consensus_opt),
-            node_id as u64,
-        );
-        let public = PubKey::from_private(&private);
-
-        keys.push(KeyPair { public, private })
-    }
-    keys
+pub fn gen_bootstrap_keys(consensus_opt: &ConsensusOpt) -> Vec<StakingPrivKey> {
+    gen_keys(consensus_opt, consensus_opt.bootstrap_nodes.len())
 }
 
 /// Generate a list of private and public keys for the given number of nodes with a given
 /// `consensus_opt.seed` seed.
-pub fn gen_keys(consensus_opt: &ConsensusOpt, num_nodes: usize) -> Vec<KeyPair> {
-    let mut keys = Vec::with_capacity(num_nodes);
-
-    for node_id in 0..num_nodes {
-        let private = PrivKey::generated_from_seed_indexed(
-            get_secret_key_seed(consensus_opt),
-            node_id as u64,
-        );
-        let public = PubKey::from_private(&private);
-
-        keys.push(KeyPair { public, private })
-    }
-    keys
-}
-
-pub struct KeyPair {
-    pub public: PubKey,
-    pub private: PrivKey,
-}
-
-/// Create a new libp2p network.
-#[allow(clippy::too_many_arguments)]
-pub async fn new_libp2p_network(
-    pubkey: Ed25519Pub,
-    bs: Vec<(Option<PeerId>, Multiaddr)>,
-    node_id: usize,
-    node_type: NetworkNodeType,
-    bound_addr: Multiaddr,
-    identity: Option<Keypair>,
-    consensus_opt: &ConsensusOpt,
-) -> Result<PLNetwork, NetworkError> {
-    let mut config_builder = NetworkNodeConfigBuilder::default();
-    // NOTE we may need to change this as we scale
-    config_builder.replication_factor(NonZeroUsize::new(consensus_opt.replication_factor).unwrap());
-    // `to_connect_addrs` is an empty field that will be removed. We will pass `bs` into
-    // `Libp2pNetwork::new` as the addresses to connect.
-    config_builder.to_connect_addrs(HashSet::new());
-    config_builder.node_type(node_type);
-    config_builder.bound_addr(Some(bound_addr));
-
-    if let Some(identity) = identity {
-        config_builder.identity(identity);
-    }
-
-    let mesh_params = match node_type {
-        NetworkNodeType::Bootstrap => MeshParams {
-            mesh_n_high: consensus_opt.bootstrap_mesh_n_high,
-            mesh_n_low: consensus_opt.bootstrap_mesh_n_low,
-            mesh_outbound_min: consensus_opt.bootstrap_mesh_outbound_min,
-            mesh_n: consensus_opt.bootstrap_mesh_n,
-        },
-        NetworkNodeType::Regular => MeshParams {
-            mesh_n_high: consensus_opt.nonbootstrap_mesh_n_high,
-            mesh_n_low: consensus_opt.nonbootstrap_mesh_n_low,
-            mesh_outbound_min: consensus_opt.nonbootstrap_mesh_outbound_min,
-            mesh_n: consensus_opt.nonbootstrap_mesh_n,
-        },
-        NetworkNodeType::Conductor => unreachable!(),
-    };
-
-    config_builder.mesh_params(Some(mesh_params));
-
-    let config = config_builder.build().unwrap();
-
-    Libp2pNetwork::new(
-        config,
-        pubkey,
-        Arc::new(RwLock::new(bs)),
-        consensus_opt.bootstrap_nodes.len(),
-        node_id,
-    )
-    .await
+pub fn gen_keys(consensus_opt: &ConsensusOpt, num_nodes: usize) -> Vec<StakingPrivKey> {
+    (0..num_nodes)
+        .into_iter()
+        .map(|node_id| {
+            StakingKey::generated_from_seed_indexed(
+                get_secret_key_seed(consensus_opt),
+                node_id as u64,
+            )
+            .1
+        })
+        .collect()
 }
 
 pub async fn init_validator(
     node_opt: &NodeOpt,
     consensus_opt: &ConsensusOpt,
-    priv_key: PrivKey,
-    pub_keys: Vec<PubKey>,
+    priv_key: StakingPrivKey,
+    pub_keys: Vec<StakingKey>,
     genesis: GenesisNote,
     own_id: usize,
 ) -> Consensus {
@@ -779,20 +720,35 @@ pub async fn init_validator(
         )
     };
 
-    // hotshot requires this threshold to be at least 2/3rd of the nodes for safety guarantee reasons
-    let threshold = ((pub_keys.len() as u64 * 2) / 3) + 1;
+    let own_network = match node_opt.cdn.clone() {
+        Some(cdn) if !node_opt.libp2p => Network::new_cdn(pub_keys.clone(), cdn, own_id)
+            .await
+            .unwrap(),
+        _ => {
+            let network = Network::new_p2p(
+                pub_keys[own_id].clone(),
+                to_connect_addrs,
+                own_id,
+                node_type,
+                parse_url(&format!("0.0.0.0:{:?}", port)).unwrap(),
+                own_identity,
+                consensus_opt,
+            )
+            .await
+            .unwrap();
 
-    let own_network = new_libp2p_network(
-        pub_keys[own_id].clone(),
-        to_connect_addrs,
-        own_id,
-        node_type,
-        parse_url(&format!("0.0.0.0:{:?}", port)).unwrap(),
-        own_identity,
-        consensus_opt,
-    )
-    .await
-    .unwrap();
+            if let Some(cdn) = node_opt.cdn.clone() {
+                // If there is a centralized server, use it as a barrier, so we don't proceed beyond
+                // this point until all nodes have reached this point and connected to the server.
+                // We will still use the libp2p network for consensus itself.
+                Network::new_cdn(pub_keys.clone(), cdn, own_id)
+                    .await
+                    .unwrap();
+            }
+
+            network
+        }
+    };
 
     let known_nodes = pub_keys.clone();
 
@@ -803,7 +759,6 @@ pub async fn init_validator(
         node_opt,
         known_nodes,
         priv_key,
-        threshold,
         own_id,
         own_network,
         genesis,
@@ -831,37 +786,46 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
     rng: &mut R,
     stake_proof: KVMerkleProof<StakeTableHash>,
     stake_amount: Amount,
+    mut collected_rewards: CollectedRewardsSet,
     staking_priv_key: &StakingPrivKey,
     cap_address: &UserAddress,
     mut hotshot: Consensus,
 ) {
+    let staking_key = StakingKey::from_private(staking_priv_key);
     loop {
         let event = hotshot
             .next_event()
             .await
             .expect("HotShot unexpectedly closed");
-        if let EventType::Decide {
-            block: _,
-            state,
-            qcs,
-        } = event.event
-        {
-            for (validator_state, qc) in state.iter().rev().zip(qcs.iter().rev()) {
-                let view_number = qc.view_number;
+        if let EventType::Decide { leaf_chain } = event.event {
+            for leaf in leaf_chain.iter().rev() {
+                let validator_state = &leaf.state;
+                let blk = &leaf.deltas;
+                let view_number = leaf.justify_qc.view_number;
+
                 // 0. check if I'm elected
                 if let Some(vrf_proof) =
-                    mock_eligibility::prove_eligibility(view_number.into(), staking_priv_key)
+                    mock_eligibility::prove_eligibility(view_number, staking_priv_key)
                 {
+                    let claimed_reward = CollectedRewards {
+                        staking_key: staking_key.clone(),
+                        time: view_number,
+                    };
+                    let uncollected_reward_proof =
+                        collected_rewards.lookup(claimed_reward).unwrap().1;
                     // 1. generate collect reward transaction
                     let (note, proof) = CollectRewardNote::generate(
                         rng,
-                        validator_state,
+                        &validator_state.historical_stake_tables,
+                        validator_state.block_height - 1,
+                        validator_state.total_stake,
                         view_number,
                         validator_state.block_height,
                         staking_priv_key,
                         cap_address.clone(),
                         stake_amount,
                         stake_proof.clone(),
+                        uncollected_reward_proof,
                         vrf_proof,
                     )
                     .expect("Failed to create Collect Reward Note");
@@ -875,9 +839,21 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                     hotshot
                         .submit_transaction(elaborated_tx)
                         .await
-                        .expect("Failed to submit reward transaction")
+                        .expect("Failed to submit reward transaction");
 
-                    // 3. Check block if contain stake transfer transaction and update stake proof
+                    // 3. update collected_reward_set
+                    for txn in blk.block.0.iter() {
+                        if let EspressoTransaction::Reward(note) = txn {
+                            let staking_key = note.staking_key();
+                            let collected_reward = CollectedRewards {
+                                staking_key,
+                                time: view_number,
+                            };
+                            collected_rewards.insert(collected_reward, ());
+                        }
+                    }
+
+                    // 4. Check block if contain stake transfer transaction and update stake proof
                     // TODO we haven't implemented stake transfer yet
                 }
             }

@@ -237,6 +237,7 @@ information to the console. When you want to stop the test, just hit Ctrl+C in t
 There is no public deployment of Espresso yet, but you can build and run a testnet locally. The
 Espresso system is a combination of a number of interacting services, including:
 * Validators (at least 5 are required, but you can have as many as you want)
+* An optional CDN (currently just a single server) for faster communication between validators
 * An Espresso Query Service (EsQS) (can run alongside a validator)
 * A faucet service (testnet only)
 * An address book
@@ -275,7 +276,12 @@ To go back to using the images from the registry run `docker compose pull`.
 The static dev shell is currently not supported on `aarch64` (for example M1
 Macs).
 
-Note: the Docker compose setup includes two instances of the [random wallet test](#random-wallet-test),
+By default, the Docker compose setup runs with a CDN for fast communication between validators. This
+demonstrates the optimistic case of the HotShot consensus protocol, where optimistic responsiveness
+allows consensus to proceed as fast as the network allows. You can also run a network using the
+slower, decentralized libp2p networking implementation, by setting `ESPRESSO_VALIDATOR_LIBP2P=1`.
+
+The Docker compose setup also includes four instances of the [random wallet test](#random-wallet-test),
 a service that attaches to the network and randomly generates transactions as a stress test.
 
 ## Running the services manually
@@ -297,25 +303,31 @@ Each service can be configured using command line arguments, but it is easier if
 environment variables which can be shared by all of the services. Set the following environment
 variables in each terminal where you intend to start a service:
 ```bash
-export ESPRESSO_VALIDATOR_QUERY_PORT="50077"
+export ESPRESSO_ESQS_PORT="50077"
 export ESPRESSO_ADDRESS_BOOK_PORT="50078"
 export ESPRESSO_ADDRESS_BOOK_URL="http://localhost:$ESPRESSO_ADDRESS_BOOK_PORT"
-export ESPRESSO_ESQS_URL="http://localhost:$ESPRESSO_VALIDATOR_QUERY_PORT"
-export ESPRESSO_SUBMIT_URL="http://localhost:$ESPRESSO_VALIDATOR_QUERY_PORT"
+export ESPRESSO_ESQS_URL="http://localhost:$ESPRESSO_ESQS_PORT"
+export ESPRESSO_SUBMIT_URL="http://localhost:$ESPRESSO_ESQS_PORT"
 export ESPRESSO_FAUCET_WALLET_MNEMONIC="$ESPRESSO_FAUCET_MANAGER_MNEMONIC"
 export ESPRESSO_FAUCET_PORT="50079"
 export ESPRESSO_FAUCET_URL="http://localhost:$ESPRESSO_FAUCET_PORT"
 ```
 These are the minimum environment variables required to allow all the services to discover each
 other. There are other variables which allow you to tune various aspects of the system. They are
-listed in the table below.
+listed in the table below. In particular, if you'd like to run a CDN for optimized consensus
+throughput, you must also set:
+```bash
+export ESPRESSO_CDN_SERVER_PORT="50080"
+export ESPRESSO_CDN_SERVER_URL="http://local:$ESPRESSO_CDN_SERVER_PORT"
+```
 
-Now we are ready to start the services. First, the validators. The validator executable is in
-`target/release/espresso-validator`. You must use `--full` for _exactly_ one of the validators.
-(Since earlier we configured all validators to run their web servers on the same port with
-`ESPRESSO_VALIDATOR_QUERY_PORT=50077`, it will cause problems if more than one validator is running a web
-server. You can also set `ESPRESSO_VALIDATOR_QUERY_PORT` to something unique for each validator and use
-`--full` for all of them, if you want.) You may also want to use `--reset-store-state` for all of
+Now we are ready to start the services. If you are running a CDN, it must be started first. Run
+`target/release/cdn-server`. Then, the validators. The validator executable is in
+`target/release/espresso-validator`. You must use the sub-command `esqs` for _exactly_ one of the 
+validators. (Since earlier we configured all validators to run their web servers on the same port
+with `ESPRESSO_ESQS_PORT=50077`, it will cause problems if more than one validator is running a web
+server. You can also set `ESPRESSO_ESQS_PORT` to something unique for each validator and use
+`esqs` for all of them, if you want.) You may also want to use `--reset-store-state` for all of
 the validators, if you have run a local testnet before and your intention is to overwrite that
 ledger with a fresh one.
 

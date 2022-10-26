@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-nix develop .#staticShell -c cargo build --release
+nix develop .#staticShell -c cargo build --profile=release-lto
 
 # Needed sudo to make this run on Ubuntu 20.04.4LTS and docker 20.10.14, build a224086349
 sudo docker build . -f docker/address-book.Dockerfile -t ghcr.io/espressosystems/espresso/address-book:main

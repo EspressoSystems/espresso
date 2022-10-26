@@ -137,6 +137,74 @@ Returns a list of
     "records_from": integer, // The UID of the first output of this block
     "record_count": integer, // The total number of outputs in this block
     "view_number": integer,
+    "timestamp": Integer,
+    "proposer_id": TaggedBase64,
+    "block_id": Integer,
+    "block_hash": TaggedBase64,
 }
 ```
+"""
+
+[route.countproposals]
+PATH = ["countproposals/:proposer_id"]
+":proposer_id" = "TaggedBase64"
+DOC = """
+Get the number of commited blocks proposed by `proposer_id`
+
+Returns 
+```
+{
+    "count": Integer,
+}
+```
+
+"""
+
+[route.getproposals]
+PATH = ["getproposals/:proposer_id", "getproposals/:proposer_id/:count"]
+":proposer_id" = "TaggedBase64"
+":count" = "Integer"
+DOC = """
+Get the block data of `count` blocks from the proposer with `proposer_id`, starting
+backwards from the most recent block from this proposer. If the proposer has proposed less
+blocks than count, return all the blocks from the proposer.
+
+Returns a list of 
+```
+{
+    "raw_block": ElaboratedBlock,
+    "block_hash": TaggedBase64,
+    "block_id": integer,
+    "records_from": integer, // The UID of the first output of this block
+    "record_count": integer, // The total number of outputs in this block
+    "txn_hashes": TaggedBase64,
+}
+```
+
+"""
+
+[route.getproposalssummary]
+PATH = ["getproposals/summary/:proposer_id", "getproposals/summary/:proposer_id/:count"]
+":proposer_id" = "TaggedBase64"
+":count" = "Integer"
+DOC = """
+Get the block info of `count` blocks from the proposer with `proposer_id`, starting
+backwards from the most recent block from this proposer. If the proposer has proposed less
+blocks than count, return all the block ids.
+
+Returns a list of 
+```
+{
+    "size": integer,
+    "txn_count": integer,
+    "records_from": integer, // The UID of the first output of this block
+    "record_count": integer, // The total number of outputs in this block
+    "view_number": integer,
+    "timestamp": Integer,
+    "proposer_id": TaggedBase64,
+    "block_id": Integer,
+    "block_hash": TaggedBase64,
+}
+```
+
 """

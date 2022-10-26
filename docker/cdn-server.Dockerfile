@@ -10,29 +10,15 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <https://www.gnu.org/licenses/>.
 
-name: update-flake-lock
+FROM ubuntu:jammy
 
-on:
-  workflow_dispatch: # allows manual triggering
-  schedule:
-    - cron: '0 0 * * 0' # runs weekly on Sunday at 00:00
+RUN apt-get update \
+&&  apt-get install -y curl wait-for-it \
+&&  rm -rf /var/lib/apt/lists/*
 
-jobs:
-  lockfile:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+COPY target/x86_64-unknown-linux-musl/release/cdn-server /bin/cdn-server
+RUN chmod +x /bin/cdn-server
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@v18
+ENV ESPRESSO_CDN_SERVER_PORT=50000
 
-      - uses: cachix/cachix-action@v11
-        with:
-          name: espresso-systems-private
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
-
-      - name: Update flake.lock
-        uses: DeterminateSystems/update-flake-lock@v14
-        with:
-          pr-title: "Weekly PR to bump flake.nix" # Title of PR to be created
+CMD [ "/bin/cdn-server"]

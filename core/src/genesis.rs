@@ -15,9 +15,12 @@ use crate::{
     universal_params::MERKLE_HEIGHT,
     util::canonical,
 };
+use arbitrary::{Arbitrary, Unstructured};
+use arbitrary_wrappers::ArbitraryRecordOpening;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use async_std::sync::Arc;
 use commit::{Commitment, Committable, RawCommitmentBuilder};
+use espresso_macros::ser_test;
 use jf_cap::{
     structs::{RecordCommitment, RecordOpening},
     MerkleTree,
@@ -31,6 +34,7 @@ use serde::{Deserialize, Serialize};
 /// is the only transaction in the genesis block, block number 0. In this case, it has the effect of
 /// setting the chain variables to `chain` and seeding the record set with commitments to
 /// `faucet_records`.
+#[ser_test(arbitrary)]
 #[derive(
     Clone,
     Debug,
@@ -53,6 +57,19 @@ impl Committable for GenesisNote {
             .field("chain", self.chain.commit())
             .var_size_bytes(&canonical::serialize(&self.faucet_records).unwrap())
             .finalize()
+    }
+}
+
+impl<'a> Arbitrary<'a> for GenesisNote {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            chain: u.arbitrary()?,
+            faucet_records: ArcSer::new(
+                u.arbitrary_iter::<ArbitraryRecordOpening>()?
+                    .map(|ro| Ok(ro?.into()))
+                    .collect::<Result<_, _>>()?,
+            ),
+        })
     }
 }
 

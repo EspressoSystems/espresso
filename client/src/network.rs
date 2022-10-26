@@ -239,19 +239,28 @@ impl<'a> KeystoreBackend<'a, EspressoLedger> for NetworkBackend<'a> {
 
     async fn get_nullifier_proof(
         &self,
-        block_id: u64,
+        block_height: u64,
         set: &mut SetMerkleTree,
         nullifier: Nullifier,
     ) -> Result<(bool, SetMerkleProof), KeystoreError<EspressoLedger>> {
         if let Some(ret) = set.contains(nullifier) {
             Ok(ret)
         } else {
-            let NullifierCheck { proof, spent } = self
-                .get(format!(
-                    "/metastate/check_nullifier/{}/{}",
-                    block_id, nullifier
-                ))
-                .await?;
+            let (spent, proof) = if block_height == 0 {
+                // The nullifier set at block height 0 (i.e. before the genesis block) is always the
+                // default, empty set.
+                assert_eq!(*set, SetMerkleTree::default());
+                set.contains(nullifier).unwrap()
+            } else {
+                let NullifierCheck { proof, spent } = self
+                    .get(format!(
+                        "/metastate/check_nullifier/{}/{}",
+                        block_height - 1,
+                        nullifier
+                    ))
+                    .await?;
+                (spent, proof)
+            };
             set.remember(nullifier, proof.clone()).unwrap();
             Ok((spent, proof))
         }

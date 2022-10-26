@@ -15,7 +15,8 @@ use async_std::task::{block_on, spawn_blocking};
 use cld::ClDuration;
 use escargot::CargoBuild;
 use espresso_esqs::ApiError;
-use espresso_validator::{testing::AddressBook, MINIMUM_NODES};
+use espresso_validator::{testing::AddressBook, MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES};
+use itertools::Itertools;
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use regex::Regex;
@@ -258,7 +259,10 @@ impl CliClient {
             MINIMUM_NODES,
             server_ports.len()
         );
-        let bootstrap_port = pick_unused_port().unwrap();
+        let bootstrap_ports = (0..MINIMUM_BOOTSTRAP_NODES)
+            .into_iter()
+            .map(|_| pick_unused_port().unwrap())
+            .collect::<Vec<_>>();
         let ret = block_on(futures::future::join_all(
             server_ports.iter().enumerate().map(|(i, port)| {
                 let mut v = Validator::new(
@@ -266,7 +270,7 @@ impl CliClient {
                     pub_key.clone(),
                     i,
                     *port,
-                    bootstrap_port,
+                    bootstrap_ports.clone(),
                 );
                 async move {
                     v.open(server_ports.len()).await?;
@@ -458,7 +462,7 @@ pub struct Validator {
     store_path: PathBuf,
     pub_key: UserPubKey,
     server_port: u16,
-    bootstrap_port: u16,
+    bootstrap_ports: Vec<u16>,
 }
 
 impl Validator {
@@ -479,7 +483,7 @@ impl Validator {
         pub_key: UserPubKey,
         id: usize,
         server_port: u16,
-        bootstrap_port: u16,
+        bootstrap_ports: Vec<u16>,
     ) -> Self {
         let mut store_path = store_dir.to_path_buf();
         store_path.push(format!("store_for_{}", id));
@@ -494,7 +498,7 @@ impl Validator {
             store_path,
             pub_key,
             server_port,
-            bootstrap_port,
+            bootstrap_ports,
         }
     }
 
@@ -507,7 +511,11 @@ impl Validator {
         let pub_key = self.pub_key.clone();
         let id = self.id;
         let server_port = self.server_port;
-        let bootstrap_port = self.bootstrap_port;
+        let bootstrap_nodes = self
+            .bootstrap_ports
+            .iter()
+            .map(|p| format!("localhost:{}", p))
+            .join(",");
 
         let mut child = spawn_blocking(move || {
             cargo_run("espresso-validator", "espresso-validator")
@@ -541,7 +549,7 @@ impl Validator {
                     "--nonbootstrap-mesh-n",
                     "12",
                     "--bootstrap-nodes",
-                    &format!("localhost:{}", bootstrap_port),
+                    &bootstrap_nodes,
                     "esqs",
                 ])
                 .env("ESPRESSO_ESQS_PORT", server_port.to_string())

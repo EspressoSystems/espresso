@@ -13,15 +13,15 @@
 use core::time::Duration;
 use espresso_core::{
     state::{ElaboratedBlock, ValidatorState},
-    PubKey,
+    StakingKey,
 };
-use hotshot::{data::QuorumCertificate, H_256};
+use hotshot::data::QuorumCertificate;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PeerInfo {
-    pub peer_id: PubKey,
+    pub peer_id: StakingKey,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -51,7 +51,14 @@ pub struct ValidatorStatus {
     pub peer_list: Vec<PeerInfo>,
     // TBD; these are going to correspond to active views, possibly want to also retain recent views?
     // We may or may not want a seperate map of QuorumCertificates for `qc/:index` endpoint.
-    pub pending_blocks: HashMap<u64, (ElaboratedBlock, ValidatorState, QuorumCertificate<H_256>)>,
+    pub pending_blocks: HashMap<
+        u64,
+        (
+            ElaboratedBlock,
+            ValidatorState,
+            QuorumCertificate<ValidatorState>,
+        ),
+    >,
     pub latest_block_id: u64, // id of latest block to reach DECIDE
     pub mempool_info: MempoolInfo,
     pub proposed_block_count: u64,

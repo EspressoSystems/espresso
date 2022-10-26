@@ -16,7 +16,7 @@ RUN apt-get update \
 &&  apt-get install -y curl wait-for-it \
 &&  rm -rf /var/lib/apt/lists/*
 
-COPY target/x86_64-unknown-linux-musl/release/espresso-validator /bin/espresso-validator
+COPY target/x86_64-unknown-linux-musl/release-lto/espresso-validator /bin/espresso-validator
 RUN chmod +x /bin/espresso-validator
 
 # Set file locations.
@@ -29,6 +29,18 @@ EXPOSE $ESPRESSO_ESQS_PORT
 
 # Set a default number of nodes.
 ENV ESPRESSO_VALIDATOR_NUM_NODES=10
+
+# Set up view timing for optimal performance in high volume conditions. We set a fairly long minimum
+# propose time to wait to build up a large block before proposing.
+ENV ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME=30s
+# We set the minimum block size to 1, limiting the number of empty blocks but allowing us to propose
+# a block immediately after the minimum propose time, keeping latency low in low-volume cases.
+ENV ESPRESSO_VALIDATOR_MIN_TRANSACTIONS=1
+# Max propose time is very large. Since min transactions is 1, this only affects the proposal of
+# empty blocks, and we want few of those.
+ENV ESPRESSO_VALIDATOR_MAX_PROPOSE_TIME=5m
+# The view timeout is slightly larger than the max propose time, to allow votes to propagate.
+ENV ESPRESSO_VALIDATOR_NEXT_VIEW_TIMEOUT=5m30s
 
 # Set parameters for consensus connections.
 ENV ESPRESSO_VALIDATOR_REPLICATION_FACTOR=5

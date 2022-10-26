@@ -11,11 +11,12 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+use crate::stake_table::{StakeTableMap, StakeTableSetMT};
 use crate::state::*;
 use crate::universal_params::{MERKLE_HEIGHT, PROVER_CRS, UNIVERSAL_PARAM, VERIF_CRS};
 use arbitrary::Arbitrary;
 use core::iter::once;
-use hotshot::traits::{BlockContents, State};
+use hotshot::traits::{Block, State};
 use jf_cap::{
     keys::UserKeyPair,
     mint::MintNote,
@@ -200,6 +201,10 @@ impl MultiXfrTestState {
         *now = Instant::now();
     }
 
+    pub fn next_view(&self) -> ConsensusTime {
+        self.validator.prev_commit_time + 1
+    }
+
     /// Creates test state with initial records.
     ///
     /// Notes: `initial_records` must have at least one record, which is the first element of the tuple, `MultiXfrRecordSpec`.
@@ -319,7 +324,7 @@ impl MultiXfrTestState {
                 t,
                 StakeTableMap::EmptySubtree,
                 Amount::from(0u64),
-                StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+                StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
             ),
             outer_timer: timer,
             inner_timer: Instant::now(),
@@ -482,7 +487,8 @@ impl MultiXfrTestState {
 
             keys_in_block.clear();
             ret.validate_and_apply(
-                core::mem::take(&mut setup_block),
+                setup_block,
+                &(ret.validator.prev_commit_time + 1),
                 0.0,
                 TxnPrintInfo::new_no_time(0, 0),
             )
@@ -492,7 +498,8 @@ impl MultiXfrTestState {
         }
 
         ret.validate_and_apply(
-            core::mem::take(&mut setup_block),
+            setup_block,
+            &(ret.validator.prev_commit_time + 1),
             0.0,
             TxnPrintInfo::new_no_time(0, 0),
         )
@@ -872,7 +879,7 @@ impl MultiXfrTestState {
                     &[out_rec1, out_rec2],
                     fee_info,
                     if expire {
-                        self.validator.prev_commit_time + 1
+                        self.validator.block_height + 1
                     } else {
                         2u64.pow(jf_cap::constants::MAX_TIMESTAMP_LEN as u32) - 1
                     },
@@ -1033,7 +1040,7 @@ impl MultiXfrTestState {
             &[out_rec1],
             fee_info,
             if expire {
-                self.validator.prev_commit_time + 1
+                self.validator.block_height + 1
             } else {
                 2u64.pow(jf_cap::constants::MAX_TIMESTAMP_LEN as u32) - 1
             },
@@ -1127,17 +1134,19 @@ impl MultiXfrTestState {
     pub fn validate_and_apply(
         &mut self,
         blk: ElaboratedBlock,
+        now: &ConsensusTime,
         generation_time: f32,
         print_info: TxnPrintInfo,
     ) -> Result<(), ValidationError> {
         Self::update_timer(&mut self.inner_timer, |_| ());
 
         self.validator.validate_block_check(
-            self.validator.prev_commit_time + 1,
+            now,
+            blk.parent_state,
             blk.block.clone(),
             blk.proofs.clone(),
         )?;
-        let new_state = self.validator.append(&blk).unwrap();
+        let new_state = self.validator.append(&blk, now).unwrap();
 
         for n in blk
             .block
@@ -1232,6 +1241,7 @@ pub fn crypto_rng_from_seed(seed: [u8; 32]) -> ChaChaRng {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stake_table::{StakeTableMap, StakeTableSetMT};
     use async_std::sync::Arc;
     use commit::Committable;
     use jf_cap::structs::{NoteType, Nullifier};
@@ -1349,7 +1359,7 @@ mod tests {
                 println!("Block {}/{} txns generated: {}s", i + 1, num_txs, t)
             });
 
-            let mut blk = ElaboratedBlock::default();
+            let mut blk = state.validator.next_block();
             for tx in txns {
                 let kixs = tx.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
                 let _ = state.try_add_transaction(
@@ -1362,7 +1372,12 @@ mod tests {
             }
 
             state
-                .validate_and_apply(blk, generation_time, TxnPrintInfo::new_no_time(i, num_txs))
+                .validate_and_apply(
+                    blk,
+                    &state.next_view(),
+                    generation_time,
+                    TxnPrintInfo::new_no_time(i, num_txs),
+                )
                 .unwrap();
         }
     }
@@ -1416,7 +1431,7 @@ mod tests {
         let validator = |xfrs: &[_], freezes: &[_]| {
             let record_merkle_tree = MerkleTree::new(MERKLE_HEIGHT).unwrap();
             let stake_table_map = StakeTableMap::EmptySubtree;
-            let stake_table_commitments_mt = StakeTableCommMT::new(MERKLE_HEIGHT).unwrap();
+            let stake_table_commitments_mt = StakeTableSetMT::new(MERKLE_HEIGHT).unwrap();
             ValidatorState::new(
                 ChainVariables::new(
                     42,
@@ -1474,7 +1489,7 @@ mod tests {
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
             StakeTableMap::EmptySubtree,
             Amount::from(0u64),
-            StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+            StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
         );
         let mut v2 = v1.clone();
 
@@ -1534,7 +1549,7 @@ mod tests {
         // against an updated nullifier set.
         for (i, tx) in txns.into_iter().enumerate() {
             let kixs = tx.keys_and_memos.into_iter().map(|(kix, _)| kix).collect();
-            let mut blk = ElaboratedBlock::default();
+            let mut blk = state.validator.next_block();
             let _ = state.try_add_transaction(
                 &mut blk,
                 tx.transaction,
@@ -1542,7 +1557,12 @@ mod tests {
                 kixs,
                 TxnPrintInfo::new_no_time(i, 2),
             );
-            let res = state.validate_and_apply(blk, 0.0, TxnPrintInfo::new_no_time(i, 2));
+            let res = state.validate_and_apply(
+                blk,
+                &state.next_view(),
+                0.0,
+                TxnPrintInfo::new_no_time(i, 2),
+            );
             if i == 0 || !double_spend {
                 res.unwrap();
             } else {
@@ -1629,7 +1649,7 @@ mod tests {
             t,
             StakeTableMap::EmptySubtree,
             Amount::from(0u64),
-            StakeTableCommMT::new(MERKLE_HEIGHT).unwrap(),
+            StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
         );
 
         println!("Validator set up: {}s", now.elapsed().as_secs_f32());
@@ -1709,7 +1729,8 @@ mod tests {
 
         let new_uids = validator
             .validate_and_apply(
-                1,
+                &(validator.prev_commit_time + 1),
+                validator.commit(),
                 Block(vec![EspressoTransaction::CAP(TransactionNote::Transfer(
                     Box::new(txn1),
                 ))]),

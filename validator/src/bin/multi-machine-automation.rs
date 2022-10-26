@@ -14,7 +14,7 @@ use async_std::task::{sleep, spawn_blocking};
 use clap::Parser;
 use escargot::CargoBuild;
 use espresso_esqs::full_node;
-use espresso_validator::NodeOpt;
+use espresso_validator::{div_ceil, NodeOpt, QUORUM_THRESHOLD, STAKE_PER_NODE};
 use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
@@ -23,8 +23,8 @@ use std::time::Duration;
 
 #[derive(Parser)]
 #[command(
-    name = "Multi-machine consensus",
-    about = "Simulates consensus among multiple machines"
+    name = "Multi-machine consensus automation",
+    about = "Automates the consensus among multiple machines"
 )]
 struct Options {
     #[command(flatten)]
@@ -47,13 +47,11 @@ struct Options {
 
     /// Number of transactions to generate.
     ///
-    /// If not provided, the validator will wait for externally submitted transactions.
+    /// If this option is provided, runs the `espresso-validator-testing` executable to generate
+    /// transactions. Otherwise, runs the `espresso-validator` executable and waits for externally
+    /// submitted transactions.
     #[arg(long, short, conflicts_with("faucet-pub-key"))]
-    pub num_txn: Option<u64>,
-
-    /// Wait for web server to exit after transactions complete.
-    #[arg(long, short)]
-    pub wait: bool,
+    pub num_txns: Option<u64>,
 
     /// Options for the new EsQS.
     #[command(subcommand)]
@@ -64,14 +62,14 @@ struct Options {
 
     /// Number of nodes to run only `fail_after_txn` rounds.
     ///
-    /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
+    /// If not provided, all nodes will keep running till `num_txns` rounds are completed.
     #[arg(long)]
     num_fail_nodes: Option<usize>,
 
     /// Number of rounds that all nodes will be running, after which `num_fail_nodes` nodes will be
     /// killed.
     ///
-    /// If not provided, all nodes will keep running till `num_txn` rounds are completed.
+    /// If not provided, all nodes will keep running till `num_txns` rounds are completed.
     #[arg(long, requires("num-fail-nodes"))]
     fail_after_txn: Option<usize>,
 }
@@ -126,6 +124,21 @@ async fn main() {
         args.push("--store-path");
         args.push(&store_path);
     }
+    let cdn;
+    if let Some(url) = &options.node_opt.cdn {
+        if url.host_str() != Some("localhost") {
+            panic!(
+                "for automated local testing, CDN host must be `localhost' \
+                (note that a scheme is required for URL parsing, e.g. tcp://localhost:80)"
+            );
+        }
+        cdn = url.to_string();
+        args.push("--cdn");
+        args.push(&cdn);
+    }
+    if options.node_opt.libp2p {
+        args.push("--libp2p");
+    }
     let min_propose_time = format!("{}ms", options.node_opt.min_propose_time.as_millis());
     args.push("--min-propose-time");
     args.push(&min_propose_time);
@@ -159,9 +172,9 @@ async fn main() {
         args.push(pub_key);
     }
 
-    let num_txn_str = match options.num_txn {
-        Some(num_txn) => num_txn.to_string(),
-        None => "".to_string(),
+    let (num_txn_str, exe) = match options.num_txns {
+        Some(num_txns) => (num_txns.to_string(), "espresso-validator-testing"),
+        None => ("".to_string(), "espresso-validator"),
     };
     let (num_fail_nodes, fail_after_txn_str) = match options.num_fail_nodes {
         Some(num_fail_nodes) => {
@@ -179,6 +192,48 @@ async fn main() {
         None => (0, "".to_string()),
     };
 
+    // Start a CDN server if one is required.
+    let cdn = options.node_opt.cdn.as_ref().map(|url| {
+        let port = url.port_or_known_default().unwrap().to_string();
+        let num_nodes = options.num_nodes.to_string();
+        let mut cdn_args = vec!["-p", &port, "-n", &num_nodes];
+        if !options.node_opt.libp2p {
+            // If we're not using libp2p (we're just using the CDN for networking) we don't need a
+            // long startup delay, because as soon as all the nodes join the CDN, the network is
+            // ready.
+            cdn_args.push("--start-delay");
+            cdn_args.push("5s");
+        }
+        if options.verbose {
+            println!("cdn-server {}", cdn_args.join(" "));
+        }
+        let mut process = cargo_run("cdn-server")
+            .args(cdn_args)
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Failed to start the CDN");
+        let mut stdout = BufReader::new(process.stdout.take().unwrap());
+        let verbose = options.verbose;
+
+        // Collect output from the process as it runs. If we don't do this eagerly, the CDN can
+        // block when its output pipe fills up causing deadlock.
+        spawn_blocking(move || loop {
+            let mut line = String::new();
+            if stdout
+                .read_line(&mut line)
+                .expect("Failed to read stdout for CDN")
+                == 0
+            {
+                break;
+            }
+            if verbose {
+                print!("[CDN] {}", line);
+            }
+        });
+
+        process
+    });
+
     // Start the consensus for each node.
     let first_fail_id = num_nodes - num_fail_nodes;
     let mut processes: Vec<_> = (0..num_nodes)
@@ -190,10 +245,10 @@ async fn main() {
             this_args.push("--num-nodes");
             this_args.push(&num_nodes_str);
             if id >= first_fail_id {
-                this_args.push("--num-txn");
+                this_args.push("--num-txns");
                 this_args.push(&fail_after_txn_str);
             } else if !num_txn_str.is_empty() {
-                this_args.push("--num-txn");
+                this_args.push("--num-txns");
                 this_args.push(&num_txn_str);
             }
             let mut esqs_args = vec![];
@@ -212,11 +267,11 @@ async fn main() {
                 this_args.push(arg);
             }
             if options.verbose {
-                println!("espresso-validator {}", this_args.join(" "));
+                println!("{} {}", exe, this_args.join(" "));
             }
             (
                 id,
-                cargo_run("espresso-validator")
+                cargo_run(exe)
                     .args(this_args)
                     .stdout(Stdio::piped())
                     .spawn()
@@ -258,9 +313,12 @@ async fn main() {
     let mut commitment = None;
     let mut succeeded_nodes = 0;
     let mut finished_nodes = 0;
-    let threshold = ((num_nodes * 2) / 3) + 1;
+    let threshold = div_ceil!(QUORUM_THRESHOLD, STAKE_PER_NODE) as usize;
     let expect_failure = num_fail_nodes as usize > num_nodes - threshold;
-    println!("Waiting for validators to finish");
+    println!(
+        "Waiting for validators to finish ({}/{}/{})",
+        num_nodes, num_fail_nodes, threshold
+    );
     while succeeded_nodes < threshold && finished_nodes < num_nodes {
         // If the consensus is expected to fail, not all processes will complete.
         if expect_failure && (finished_nodes >= num_fail_nodes as usize) {
@@ -275,7 +333,7 @@ async fn main() {
             match p.try_wait() {
                 Ok(Some(_)) => {
                     // Check whether the commitments are the same.
-                    if options.num_txn.is_some() {
+                    if options.num_txns.is_some() {
                         let lines = output.await;
                         if id < first_fail_id as usize {
                             for line in lines {
@@ -324,6 +382,10 @@ async fn main() {
         p.wait()
             .unwrap_or_else(|_| panic!("Failed to wait for node {} to exit", id));
     }
+    if let Some(mut p) = cdn {
+        p.kill().expect("Failed to kill CDN");
+        p.wait().expect("failed to wait for CDN to exit");
+    }
 
     // Check whether the number of succeeded nodes meets the threshold.
     assert!(succeeded_nodes >= threshold);
@@ -333,57 +395,88 @@ async fn main() {
 #[cfg(all(test, feature = "slow-tests"))]
 mod test {
     use super::*;
+    use portpicker::pick_unused_port;
     use std::time::Instant;
 
     async fn automate(
         num_nodes: u64,
-        num_txn: u64,
+        num_txns: u64,
         num_fail_nodes: u64,
         fail_after_txn: u64,
         expect_success: bool,
+        libp2p: bool,
     ) {
         println!(
             "Testing {} txns with {}/{} nodes failed after txn {}",
-            num_txn, num_fail_nodes, num_nodes, fail_after_txn
+            num_txns, num_fail_nodes, num_nodes, fail_after_txn
         );
+        // Views slow down as we add more nodes. This is a safe formula that allows ample time
+        // without overly slowing down the test.
         let num_nodes = &num_nodes.to_string();
-        let num_txn = &num_txn.to_string();
+        let num_txns = &num_txns.to_string();
         let num_fail_nodes = &num_fail_nodes.to_string();
         let fail_after_txn = &fail_after_txn.to_string();
-        let args = vec![
+        let cdn_port = pick_unused_port().unwrap();
+        let cdn_url = &format!("tcp://localhost:{}", cdn_port);
+        let mut args = vec![
+            "--cdn",
+            cdn_url,
             "--num-nodes",
             num_nodes,
-            "--num-txn",
-            num_txn,
+            "--num-txns",
+            num_txns,
             "--num-fail-nodes",
             num_fail_nodes,
             "--fail-after-txn",
             fail_after_txn,
+            // Set the shortest possible rounds. Since we only propose one transaction at a time in
+            // this test, we want the leader to propose a block as soon as they get a transaction.
+            "--min-propose-time",
+            "0s",
+            "--min-transactions",
+            "1",
+            // Set a fairly short timeout for proposing empty blocks. Each transaction we propose
+            // requires 2 empty blocks to be committed.
+            "--max-propose-time",
+            "10s",
+            "--next-view-timeout",
+            "30s",
             "--reset-store-state",
             "--verbose",
         ];
+        if libp2p {
+            args.push("--libp2p");
+        }
         let now = Instant::now();
-        let status = cargo_run("multi_machine_automation")
+        let status = cargo_run("multi-machine-automation")
             .args(args)
             .status()
             .expect("Failed to execute the multi-machine automation");
         println!(
             "Completed {} txns in {} s",
-            num_txn,
+            num_txns,
             now.elapsed().as_secs_f32()
         );
         assert_eq!(expect_success, status.success());
     }
 
+    // This test is disabled until the libp2p networking implementation is fixed.
     #[async_std::test]
-    async fn test_automation() {
-        automate(7, 5, 1, 3, true).await;
-        automate(7, 5, 3, 1, false).await;
-        automate(11, 2, 0, 0, true).await;
+    async fn test_automation_libp2p() {
+        automate(7, 5, 1, 3, true, true).await;
+        automate(7, 5, 3, 1, false, true).await;
+        automate(11, 2, 0, 0, true, true).await;
 
         // Disabling the following test cases to avoid exceeding the time limit.
         // automate(5, 0, 0, true).await;
         // automate(5, 2, 2, true).await;
         // automate(50, 2, 10, true).await;
+    }
+
+    #[async_std::test]
+    async fn test_automation_cdn() {
+        automate(7, 5, 1, 3, true, false).await;
+        automate(7, 5, 3, 1, false, false).await;
+        automate(11, 2, 0, 0, true, false).await;
     }
 }

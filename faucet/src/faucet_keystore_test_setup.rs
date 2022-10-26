@@ -55,10 +55,7 @@ async fn main() -> Result<(), std::io::Error> {
 
     eprintln!("Faucet manager mnemonic: {}", mnemonic);
     eprintln!("Faucet manager encryption key: {}", pub_key);
-    eprintln!(
-        "Faucet manager address: {}",
-        net::UserAddress(pub_key.address())
-    );
+    eprintln!("Faucet manager address: {}", pub_key.address());
 
     println!("export ESPRESSO_FAUCET_MANAGER_MNEMONIC=\"{}\"", mnemonic);
     println!("export ESPRESSO_FAUCET_PUB_KEY=\"{}\"", pub_key);

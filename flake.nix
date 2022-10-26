@@ -43,7 +43,7 @@
         os = (builtins.elemAt (builtins.elemAt info 3) 0);
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        rust_version = "1.63.0";
+        rust_version = "1.64.0";
         stableToolchain = pkgs.rust-bin.stable.${rust_version}.minimal.override {
           extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
         };
@@ -196,6 +196,7 @@
               fenix.packages.${system}.rust-analyzer
               nixWithFlakes
               nixpkgs-fmt
+              protobuf
               git
               mdbook # make-doc, documentation generation
               stableToolchain
@@ -230,7 +231,7 @@
             OPENSSL_LIB_DIR = "${opensslMusl.dev}/lib/";
             CARGO_BUILD_TARGET = "${arch}-unknown-${os}-musl";
             buildInputs = with pkgs;
-              [ stableMuslRustToolchain fd cmake ];
+              [ protobuf stableMuslRustToolchain fd cmake ];
             meta.broken = if "${os}" == "darwin" then true else false;
 
             RUST_LOG = "info,libp2p=off";

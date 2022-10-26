@@ -22,7 +22,7 @@ COPY address-book/config/app.toml /root/.local/share/espresso/address-book/app.t
 COPY address-book/config /config
 COPY address-book/api /api
 
-COPY target/x86_64-unknown-linux-musl/release/address-book /bin/address-book
+COPY target/x86_64-unknown-linux-musl/release-lto/address-book /bin/address-book
 RUN chmod +x /bin/address-book
 
 ENV ESPRESSO_ADDRESS_BOOK_STORE_PATH=/store

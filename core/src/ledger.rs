@@ -11,13 +11,13 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::state::{
-    state_comm::LedgerStateCommitment, ElaboratedBlock, ElaboratedTransaction, EspressoTransaction,
-    EspressoTxnHelperProofs, SetMerkleProof, SetMerkleTree, ValidationError, ValidatorState,
+    state_comm::LedgerStateCommitment, ConsensusTime, ElaboratedBlock, ElaboratedTransaction,
+    EspressoTransaction, EspressoTxnHelperProofs, SetMerkleProof, SetMerkleTree, ValidationError,
+    ValidatorState,
 };
 use crate::util::canonical;
 use commit::{Commitment, Committable};
 use itertools::izip;
-use itertools::MultiUnzip;
 use jf_cap::structs::RecordOpening;
 use jf_cap::MerkleTree;
 use jf_cap::{
@@ -262,18 +262,6 @@ impl traits::Block for ElaboratedBlock {
     type Transaction = ElaboratedTransaction;
     type Error = ValidationError;
 
-    fn new(txns: Vec<Self::Transaction>) -> Self {
-        let (txns, proofs, memos): (Vec<EspressoTransaction>, Vec<_>, Vec<_>) = txns
-            .into_iter()
-            .map(|txn| (txn.txn, txn.proofs, txn.memos))
-            .multiunzip();
-        Self {
-            block: crate::state::Block(txns),
-            proofs,
-            memos,
-        }
-    }
-
     fn txns(&self) -> Vec<Self::Transaction> {
         izip!(&self.block.0, &self.proofs, &self.memos)
             .map(|(txn, proofs, memos)| ElaboratedTransaction {
@@ -285,7 +273,7 @@ impl traits::Block for ElaboratedBlock {
     }
 
     fn add_transaction(&mut self, txn: Self::Transaction) -> Result<(), ValidationError> {
-        use hotshot::traits::BlockContents;
+        use hotshot::traits::Block;
         *self = self.add_transaction_raw(&txn)?;
         Ok(())
     }
@@ -294,20 +282,27 @@ impl traits::Block for ElaboratedBlock {
 impl traits::Validator for ValidatorState {
     type StateCommitment = LedgerStateCommitment;
     type Block = ElaboratedBlock;
+    type Proof = ConsensusTime;
 
-    fn now(&self) -> u64 {
-        self.prev_commit_time
+    fn block_height(&self) -> u64 {
+        self.block_height
     }
 
     fn commit(&self) -> Self::StateCommitment {
         self.commit()
     }
 
+    fn next_block(&self) -> Self::Block {
+        ElaboratedBlock::new(self.commit())
+    }
+
     fn validate_and_apply(
         &mut self,
         block: Self::Block,
+        proof: Self::Proof,
     ) -> Result<(Vec<u64>, MerkleTree), ValidationError> {
-        let outputs = self.validate_and_apply(self.now() + 1, block.block, block.proofs)?;
+        let outputs =
+            self.validate_and_apply(&proof, block.parent_state, block.block, block.proofs)?;
         Ok((outputs.uids, outputs.record_proofs))
     }
 }
