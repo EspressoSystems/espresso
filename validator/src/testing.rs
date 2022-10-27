@@ -12,26 +12,61 @@
 
 use crate::{
     gen_keys, genesis, init_validator, open_data_source, run_consensus, ConsensusOpt, NodeOpt,
-    MINIMUM_NODES,
+    MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES,
 };
 use address_book::{error::AddressBookError, store::FileStore};
 use async_std::task::sleep;
 use async_std::task::{block_on, spawn, JoinHandle};
-use espresso_core::state::ElaboratedBlock;
+use async_trait::async_trait;
+use espresso_core::ledger::EspressoLedger;
+use espresso_core::StakingKey;
 use espresso_esqs::full_node::{self, EsQS};
 use futures::Future;
 use futures::{channel::oneshot, future::join_all};
-use jf_cap::keys::{UserAddress, UserPubKey};
+use hotshot::types::SignatureKey;
+use jf_cap::keys::UserAddress;
+use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::{rand_core::RngCore, ChaChaRng};
+use seahorse::hd::KeyTree;
+use seahorse::loader::KeystoreLoader;
+use seahorse::KeySnafu;
+use seahorse::KeystoreError;
+use snafu::ResultExt;
 use std::io;
 use std::mem::take;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use surf_disco::Url;
 use tempdir::TempDir;
 
 mod rewards;
+
+pub struct UnencryptedKeystoreLoader {
+    pub dir: TempDir,
+}
+
+#[async_trait]
+impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
+    type Meta = ();
+
+    fn location(&self) -> PathBuf {
+        self.dir.path().into()
+    }
+
+    async fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
+        let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
+        Ok(((), key))
+    }
+
+    async fn load(
+        &mut self,
+        _meta: &mut Self::Meta,
+    ) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
+        KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
+    }
+}
 pub struct TestNode {
     esqs: Option<EsQS>,
     kill: oneshot::Sender<()>,
@@ -130,7 +165,9 @@ pub async fn minimal_test_network(
 ) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
-    let base_port = pick_unused_port().unwrap();
+    let bootstrap_ports = (0..MINIMUM_BOOTSTRAP_NODES)
+        .into_iter()
+        .map(|_| pick_unused_port().unwrap());
     let consensus_opt = ConsensusOpt {
         secret_key_seed: Some(seed.into()),
         replication_factor: 4,
@@ -142,7 +179,9 @@ pub async fn minimal_test_network(
         nonbootstrap_mesh_n_low: 8,
         nonbootstrap_mesh_outbound_min: 4,
         nonbootstrap_mesh_n: 12,
-        bootstrap_nodes: vec![Url::parse(&format!("localhost:{}", base_port)).unwrap()],
+        bootstrap_nodes: bootstrap_ports
+            .map(|p| format!("localhost:{}", p).parse().unwrap())
+            .collect(),
     };
 
     println!("generating public keys");
@@ -150,7 +189,7 @@ pub async fn minimal_test_network(
     let keys = gen_keys(&consensus_opt, MINIMUM_NODES);
     let pub_keys = keys
         .iter()
-        .map(|key| key.public.clone())
+        .map(StakingKey::from_private)
         .collect::<Vec<_>>();
     println!("generated public keys in {:?}", start.elapsed());
 
@@ -161,7 +200,7 @@ pub async fn minimal_test_network(
         let consensus_opt = consensus_opt.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
-        let priv_key = key.private.clone();
+        let priv_key = key.clone();
         let facuet_pub_key = faucet_pub_key.clone();
         let rewards_address = rewards_address.clone();
 
@@ -170,8 +209,15 @@ pub async fn minimal_test_network(
         let future = async move {
             let node_opt = NodeOpt {
                 store_path: Some(store_path),
-                nonbootstrap_base_port: base_port as usize,
-                next_view_timeout: Duration::from_secs(10 * 60),
+                nonbootstrap_base_port: pick_unused_port().unwrap() as usize,
+                // Set fairly short view times (propose any transactions available after 5s, propose
+                // an empty block after 10s). In testing, we generally have low volumes, so we don't
+                // gain much from waiting longer to batch larger blocks, but with low views we get
+                // low latency and the tests run much faster.
+                min_propose_time: Duration::from_secs(5),
+                min_transactions: 1,
+                max_propose_time: Duration::from_secs(10),
+                next_view_timeout: Duration::from_secs(60),
                 faucet_pub_key: vec![facuet_pub_key],
                 rewards_address,
                 ..NodeOpt::new(MINIMUM_NODES)
@@ -183,7 +229,7 @@ pub async fn minimal_test_network(
                 &consensus_opt,
                 priv_key,
                 pub_keys,
-                genesis.clone(),
+                genesis,
                 i,
             )
             .await;
@@ -203,7 +249,6 @@ pub async fn minimal_test_network(
                         &full_node::Command::with_port(port),
                         data_source,
                         consensus.clone(),
-                        ElaboratedBlock::genesis(genesis),
                     )
                     .unwrap(),
                 )

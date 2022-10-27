@@ -14,7 +14,7 @@
 
 use crate::*;
 use clap::Parser;
-use espresso_core::state::ElaboratedBlock;
+use espresso_core::StakingKey;
 use espresso_esqs::full_node::{self, EsQS};
 use std::process::exit;
 
@@ -57,6 +57,10 @@ pub async fn init<R: CryptoRng + RngCore + Send + 'static>(
         eprintln!("{}", msg);
         exit(1);
     }
+    if options.node_opt.num_nodes < MINIMUM_NODES {
+        eprintln!("Not enough nodes (need at least {})", MINIMUM_NODES);
+        exit(1);
+    }
 
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -67,15 +71,18 @@ pub async fn init<R: CryptoRng + RngCore + Send + 'static>(
 
     // Initialize the hotshot
     let keys = gen_keys(&options.consensus_opt, options.node_opt.num_nodes);
-    let priv_key = keys[own_id].private.clone();
-    let known_nodes = keys.into_iter().map(|pair| pair.public).collect();
+    let priv_key = keys[own_id].clone();
+    let known_nodes = keys
+        .into_iter()
+        .map(|sk| StakingKey::from_private(&sk))
+        .collect();
     let hotshot = init_validator(
         rng,
         &options.node_opt,
         &options.consensus_opt,
         priv_key,
         known_nodes,
-        genesis.clone(),
+        genesis,
         own_id,
     )
     .await;
@@ -84,12 +91,7 @@ pub async fn init<R: CryptoRng + RngCore + Send + 'static>(
 
     // Start an EsQS server if requested.
     if let Some(esqs) = &options.esqs {
-        Some(EsQS::new(
-            esqs,
-            data_source,
-            hotshot.clone(),
-            ElaboratedBlock::genesis(genesis),
-        )?)
+        Some(EsQS::new(esqs, data_source, hotshot.clone())?)
     } else {
         None
     };

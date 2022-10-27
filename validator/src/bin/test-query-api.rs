@@ -27,27 +27,23 @@
 
 use ark_serialize::CanonicalSerialize;
 use async_std::future::timeout;
-use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use clap::Parser;
 use commit::Committable;
 use espresso_availability_api::query_data::*;
-use espresso_core::{ledger::EspressoLedger, state::BlockCommitment};
+use espresso_core::ledger::EspressoLedger;
 use espresso_esqs::ApiError;
 use espresso_metastate_api::api::NullifierCheck;
 use futures::prelude::*;
 use hotshot_types::data::ViewNumber;
 use itertools::izip;
 use reef::traits::Transaction;
-use seahorse::{events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnafu, KeystoreError};
+use seahorse::events::LedgerEvent;
 use serde::Deserialize;
-use snafu::ResultExt;
 use std::fmt::Display;
 use std::ops::Deref;
-use std::path::PathBuf;
 use std::time::Duration;
 use surf_disco::Url;
-use tempdir::TempDir;
 use tracing::{event, Level};
 
 #[derive(Parser)]
@@ -59,6 +55,11 @@ struct Args {
     /// Port number of the query service.
     #[arg(short = 'P', long = "--port", default_value = "50000")]
     port: u16,
+
+    /// Test all blocks in the history.
+    ///
+    /// Without this flag, only a sample will be tested.
+    all: bool,
 }
 
 fn url_with_scheme(opt: &Args, scheme: impl Display, route: impl Display) -> Url {
@@ -85,10 +86,7 @@ async fn validate_committed_block(
     // Check well-formedness of the data.
     assert_eq!(ix, block.block_id);
     assert!(ix < num_blocks);
-    assert_eq!(
-        block.block_hash,
-        BlockCommitment(block.raw_block.block.commit()),
-    );
+    assert_eq!(block.block_hash, block.raw_block.commit().into(),);
 
     // Check that we get the same block if we query by other methods.
     assert_eq!(
@@ -163,31 +161,6 @@ async fn validate_committed_block(
     assert_eq!(summary.view_number, *view_number.deref());
 }
 
-struct UnencryptedKeystoreLoader {
-    dir: TempDir,
-}
-
-#[async_trait]
-impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
-    type Meta = ();
-
-    fn location(&self) -> PathBuf {
-        self.dir.path().into()
-    }
-
-    async fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
-        let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
-        Ok(((), key))
-    }
-
-    async fn load(
-        &mut self,
-        _meta: &mut Self::Meta,
-    ) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
-        KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
-    }
-}
-
 async fn test(opt: &Args) {
     let num_blocks = get::<u64, _>(opt, "/status/latest_block_id").await + 1;
 
@@ -208,14 +181,22 @@ async fn test(opt: &Args) {
     .await;
     assert_eq!(block_summaries.len() as u64, num_blocks);
 
+    let test_indices = if opt.all {
+        (0..num_blocks).into_iter().collect()
+    } else {
+        // If we were not asked to check _all_ blocks, at least check that we can query the 0th
+        // block and the most recent block.
+        vec![0, num_blocks - 1]
+    };
+
     // Check that we can query the 0th block and the last block.
-    for ix in [0, num_blocks - 1].iter() {
-        let block = get(opt, format!("/availability/getblock/{}", *ix)).await;
+    for ix in test_indices {
+        let block = get(opt, format!("/availability/getblock/{}", ix)).await;
         validate_committed_block(
             opt,
             &block,
-            &block_summaries[(num_blocks - 1 - *ix) as usize],
-            *ix,
+            &block_summaries[(num_blocks - 1 - ix) as usize],
+            ix,
             num_blocks,
         )
         .await;
@@ -277,17 +258,16 @@ mod test {
     use super::*;
     use espresso_client::{network::NetworkBackend, Keystore};
     use espresso_core::universal_params::UNIVERSAL_PARAM;
-    use espresso_validator::testing::{minimal_test_network, retry};
+    use espresso_validator::testing::{minimal_test_network, UnencryptedKeystoreLoader};
     use jf_cap::{keys::UserKeyPair, structs::AssetCode};
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+    use tempdir::TempDir;
     use tracing_test::traced_test;
 
     #[cfg(feature = "slow-tests")]
     #[async_std::test]
     #[traced_test]
     async fn test_query_api() {
-        use jf_cap::keys::UserAddress;
-
         let mut rng = ChaChaRng::from_seed([1; 32]);
         let faucet_key_pair = UserKeyPair::generate(&mut rng);
         let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key(), None).await;
@@ -350,8 +330,8 @@ mod test {
         test(&Args {
             host: "localhost".into(),
             port: network.query_api.port().unwrap(),
+            all: true,
         })
         .await
     }
-
 }

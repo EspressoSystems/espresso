@@ -11,17 +11,17 @@
 // see <https://www.gnu.org/licenses/>.
 
 use async_trait::async_trait;
-use espresso_core::state::{ElaboratedBlock, ElaboratedTransaction, ValidatorState};
+use espresso_core::state::{ElaboratedTransaction, ValidatorState};
 use futures::stream::{unfold, BoxStream, StreamExt};
 use hotshot::{
     traits::NodeImplementation,
     types::{EventType, HotShotHandle},
-    HotShotError, H_256,
+    HotShotError,
 };
 use std::error::Error;
 use std::fmt::Debug;
 
-pub type ConsensusEvent = EventType<ElaboratedBlock, ValidatorState, H_256>;
+pub type ConsensusEvent = EventType<ValidatorState>;
 
 #[async_trait]
 pub trait ValidatorDataSource {
@@ -44,9 +44,9 @@ pub trait ValidatorDataSource {
 }
 
 #[async_trait]
-impl<N> ValidatorDataSource for HotShotHandle<N, H_256>
+impl<N> ValidatorDataSource for HotShotHandle<N>
 where
-    N: NodeImplementation<H_256, Block = ElaboratedBlock, State = ValidatorState>,
+    N: NodeImplementation<StateType = ValidatorState>,
 {
     type Error = HotShotError;
 

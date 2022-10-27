@@ -14,7 +14,8 @@
 use async_std::task::{block_on, spawn_blocking};
 use escargot::CargoBuild;
 use espresso_esqs::ApiError;
-use espresso_validator::{testing::AddressBook, MINIMUM_NODES};
+use espresso_validator::{testing::AddressBook, MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES};
+use itertools::Itertools;
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use regex::Regex;
@@ -46,6 +47,7 @@ pub fn cli_test(test: impl Fn(&mut CliClient) -> Result<(), String>) {
 pub struct CliClient {
     validators: Vec<Validator>,
     keystores: Vec<Keystore>,
+    cdn: Cdn,
     address_book: AddressBook,
     variables: HashMap<String, String>,
     prev_output: Vec<String>,
@@ -65,16 +67,18 @@ impl CliClient {
         let pub_key = bincode::deserialize(&fs::read(&pub_key_path).unwrap()).unwrap();
 
         // Set each validator's port for the web sever.
-        let mut server_ports = [0; 6];
+        let mut server_ports = [0; MINIMUM_NODES];
         for p in &mut server_ports {
             *p = pick_unused_port().ok_or_else(|| "no available ports".to_owned())?;
         }
 
+        let cdn = Cdn::init()?;
         let mut state = Self {
             keystores: Default::default(),
             variables: Default::default(),
             prev_output: Default::default(),
-            validators: Self::start_validators(tmp_dir.path(), pub_key, &server_ports)?,
+            validators: Self::start_validators(tmp_dir.path(), pub_key, &server_ports, &cdn.url())?,
+            cdn,
             address_book: block_on(AddressBook::init()),
             server_port: server_ports[0],
             _tmp_dir: tmp_dir,
@@ -249,6 +253,7 @@ impl CliClient {
         store_dir: &Path,
         pub_key: UserPubKey,
         server_ports: &[u16],
+        cdn_url: &Url,
     ) -> Result<Vec<Validator>, String> {
         assert!(
             server_ports.len() >= MINIMUM_NODES,
@@ -256,7 +261,10 @@ impl CliClient {
             MINIMUM_NODES,
             server_ports.len()
         );
-        let bootstrap_port = pick_unused_port().unwrap();
+        let bootstrap_ports = (0..MINIMUM_BOOTSTRAP_NODES)
+            .into_iter()
+            .map(|_| pick_unused_port().unwrap())
+            .collect::<Vec<_>>();
         let ret = block_on(futures::future::join_all(
             server_ports.iter().enumerate().map(|(i, port)| {
                 let mut v = Validator::new(
@@ -264,7 +272,8 @@ impl CliClient {
                     pub_key.clone(),
                     i,
                     *port,
-                    bootstrap_port,
+                    bootstrap_ports.clone(),
+                    cdn_url.clone(),
                 );
                 async move {
                     v.open(server_ports.len()).await?;
@@ -456,7 +465,8 @@ pub struct Validator {
     store_path: PathBuf,
     pub_key: UserPubKey,
     server_port: u16,
-    bootstrap_port: u16,
+    bootstrap_ports: Vec<u16>,
+    cdn_url: Url,
 }
 
 impl Validator {
@@ -477,7 +487,8 @@ impl Validator {
         pub_key: UserPubKey,
         id: usize,
         server_port: u16,
-        bootstrap_port: u16,
+        bootstrap_ports: Vec<u16>,
+        cdn_url: Url,
     ) -> Self {
         let mut store_path = store_dir.to_path_buf();
         store_path.push(format!("store_for_{}", id));
@@ -492,7 +503,8 @@ impl Validator {
             store_path,
             pub_key,
             server_port,
-            bootstrap_port,
+            bootstrap_ports,
+            cdn_url,
         }
     }
 
@@ -505,7 +517,12 @@ impl Validator {
         let pub_key = self.pub_key.clone();
         let id = self.id;
         let server_port = self.server_port;
-        let bootstrap_port = self.bootstrap_port;
+        let bootstrap_nodes = self
+            .bootstrap_ports
+            .iter()
+            .map(|p| format!("localhost:{}", p))
+            .join(",");
+        let cdn = self.cdn_url.to_string();
 
         let mut child = spawn_blocking(move || {
             cargo_run("espresso-validator", "espresso-validator")
@@ -519,6 +536,11 @@ impl Validator {
                     &num_nodes.to_string(),
                     "--faucet-pub-key",
                     &pub_key.to_string(),
+                    // Set a fairly short timeout for proposing empty blocks. Since these tests
+                    // mostly propose transactions serially, each transaction we propose requires 2
+                    // empty blocks to be committed.
+                    "--max-propose-time",
+                    "10s",
                     // NOTE these are arbitrarily chosen.
                     "--replication-factor",
                     "4",
@@ -539,7 +561,9 @@ impl Validator {
                     "--nonbootstrap-mesh-n",
                     "12",
                     "--bootstrap-nodes",
-                    &format!("localhost:{}", bootstrap_port),
+                    &bootstrap_nodes,
+                    "--cdn",
+                    &cdn,
                     "esqs",
                 ])
                 .env("ESPRESSO_ESQS_PORT", server_port.to_string())
@@ -587,6 +611,54 @@ impl Validator {
 impl Drop for Validator {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+pub struct Cdn {
+    process: Child,
+    port: u16,
+}
+
+impl Cdn {
+    fn init() -> Result<Self, String> {
+        let port = pick_unused_port().ok_or_else(|| "no available ports".to_string())?;
+        let mut process = cargo_run("espresso-validator", "cdn-server")?
+            .args([
+                "-p",
+                &port.to_string(),
+                "-n",
+                &MINIMUM_NODES.to_string(),
+                "--start-delay",
+                "5s",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+            .map_err(err)?;
+
+        // Spawn a detached task to consume the CDN server's stdout. If we don't do this, the server
+        // will eventually fill up its output pipe and block.
+        let lines = BufReader::new(process.stdout.take().unwrap()).lines();
+        spawn_blocking(move || {
+            for line in lines {
+                match line {
+                    Ok(line) => println!("[cdn]{}", line),
+                    Err(err) => println!("[cdn] {}", err),
+                }
+            }
+        });
+
+        Ok(Self { process, port })
+    }
+
+    pub fn url(&self) -> Url {
+        format!("tcp://localhost:{}", self.port).parse().unwrap()
+    }
+}
+
+impl Drop for Cdn {
+    fn drop(&mut self) {
+        self.process.kill().ok();
+        self.process.wait().ok();
     }
 }
 

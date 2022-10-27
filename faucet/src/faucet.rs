@@ -789,7 +789,10 @@ async fn break_up_records(state: &FaucetState) -> Option<Vec<TransactionUID<Espr
         .await
         {
             if !matches!(result, Ok(TransactionStatus::Retired)) {
-                error!("record breakup transfer did not complete successfully");
+                error!(
+                    "record breakup transfer did not complete successfully ({:?})",
+                    result
+                );
             }
         }
     }
@@ -942,7 +945,6 @@ mod test {
     use espresso_client::{hd::KeyTree, loader::CreateLoader};
     use espresso_validator::testing::minimal_test_network;
     use futures::{future::join_all, Future};
-    use jf_cap::keys::UserAddress;
     use jf_cap::structs::AssetDefinition;
     use portpicker::pick_unused_port;
     use primitive_types::U256;
