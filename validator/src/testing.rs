@@ -11,8 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    gen_keys, genesis, init_validator, initialize_stake_table, open_data_source, run_consensus,
-    ConsensusOpt, NodeOpt, MINIMUM_NODES,
+    gen_keys, genesis, init_validator, open_data_source, run_consensus, ConsensusOpt, NodeOpt,
+    MINIMUM_NODES,
 };
 use address_book::{error::AddressBookError, store::FileStore};
 use async_std::task::sleep;
@@ -26,12 +26,12 @@ use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::{rand_core::RngCore, ChaChaRng};
 use std::io;
-use std::iter;
 use std::mem::take;
 use std::time::{Duration, Instant};
 use surf_disco::Url;
 use tempdir::TempDir;
 
+mod rewards;
 pub struct TestNode {
     esqs: Option<EsQS>,
     kill: oneshot::Sender<()>,
@@ -126,7 +126,7 @@ impl Drop for TestNetwork {
 pub async fn minimal_test_network(
     rng: &mut ChaChaRng,
     faucet_pub_key: UserPubKey,
-    reward_address: UserAddress,
+    rewards_address: Option<UserAddress>,
 ) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
@@ -155,36 +155,34 @@ pub async fn minimal_test_network(
     println!("generated public keys in {:?}", start.elapsed());
 
     let store = TempDir::new("minimal_test_network_store").unwrap();
-    let genesis = genesis(
-        0,
-        iter::once(faucet_pub_key),
-        initialize_stake_table(pub_keys.clone()),
-    );
+
     let mut nodes_futures = vec![];
     for (i, key) in keys.iter().enumerate() {
         let consensus_opt = consensus_opt.clone();
-        let genesis = genesis.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
         let priv_key = key.private.clone();
+        let facuet_pub_key = faucet_pub_key.clone();
+        let rewards_address = rewards_address.clone();
 
         store_path.push(i.to_string());
-        let reward_address_cloned = reward_address.clone();
         let new_rng = ChaChaRng::from_rng(&mut *rng).unwrap();
         let future = async move {
             let node_opt = NodeOpt {
                 store_path: Some(store_path),
                 nonbootstrap_base_port: base_port as usize,
                 next_view_timeout: Duration::from_secs(10 * 60),
-                ..NodeOpt::default()
+                faucet_pub_key: vec![facuet_pub_key],
+                rewards_address,
+                ..NodeOpt::new(MINIMUM_NODES)
             };
+            let genesis = genesis(&node_opt, &consensus_opt);
             let consensus = init_validator(
                 new_rng,
                 &node_opt,
                 &consensus_opt,
                 priv_key,
                 pub_keys,
-                reward_address_cloned,
                 genesis.clone(),
                 i,
             )

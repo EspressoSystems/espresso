@@ -444,6 +444,9 @@ pub enum ValidationError {
 
     /// verification error for stake table commitments proof
     BadStakeTableCommitmentsProof {},
+
+    /// Error when calculating block fees
+    BadFeeCalculation {},
 }
 
 pub(crate) mod ser_display {
@@ -506,6 +509,7 @@ impl Clone for ValidationError {
             RewardAmountTooLarge => RewardAmountTooLarge,
             BadStakeTableProof {} => BadStakeTableProof {},
             BadStakeTableCommitmentsProof {} => BadStakeTableCommitmentsProof {},
+            BadFeeCalculation {} => BadFeeCalculation {},
         }
     }
 }
@@ -978,7 +982,7 @@ pub mod state_comm {
         pub past_record_merkle_roots: Commitment<RecordMerkleHistory>,
         pub past_nullifiers: Commitment<NullifierHistory>,
         pub prev_block: Commitment<Block>,
-        pub stake_table: Commitment<StakeTableCommitment>,
+        pub stake_table_root: Commitment<StakeTableCommitment>,
         pub total_stake: Commitment<CommittableAmount>,
         pub historical_stake_tables: Commitment<CommittableStakeTableSetFrontier>,
         pub past_stc_merkle_roots: Commitment<StakeTableSetHistory>,
@@ -1006,7 +1010,7 @@ pub mod state_comm {
                 .field("past_record_merkle_roots", self.past_record_merkle_roots)
                 .field("past_nullifiers", self.past_nullifiers)
                 .field("prev_block", self.prev_block)
-                .field("stake_table", self.stake_table)
+                .field("stake_table_root", self.stake_table_root)
                 .field("total_stake", self.total_stake)
                 .field("stake_table_commitments", self.historical_stake_tables)
                 .field("past_stc_merkle_roots", self.past_stc_merkle_roots)
@@ -1164,8 +1168,8 @@ pub struct ValidatorState {
     /// Nullifiers from recent blocks, which allows validating slightly out-of-date-transactions
     pub past_nullifiers: NullifierHistory,
     pub prev_block: BlockCommitment,
-    /// Staking table. For fixed-stake, this will be the same each round
-    pub stake_table: StakeTableMap,
+    /// Staking table root. For fixed-stake, this will be the same each round
+    pub stake_table_root: StakeTableCommitment,
     /// Total amount staked for the current table
     pub total_stake: Amount,
     /// Keeps track of previous stake tables and their total stake
@@ -1189,7 +1193,7 @@ impl Default for ValidatorState {
         Self::new(
             ChainVariables::default(),
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
-            StakeTableMap::EmptySubtree,
+            StakeTableCommitment(StakeTableMap::EmptySubtree.hash()),
             Amount::from(0u64),
             StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
         )
@@ -1207,7 +1211,7 @@ impl ValidatorState {
     pub fn new(
         chain: ChainVariables,
         record_merkle_frontier: MerkleTree,
-        stake_table_map: StakeTableMap,
+        stake_table_map_root: StakeTableCommitment,
         total_stake: Amount,
         stake_table_commitments_mt: StakeTableSetMT,
     ) -> Self {
@@ -1223,7 +1227,7 @@ impl ValidatorState {
             )),
             past_nullifiers: NullifierHistory::default(),
             prev_block: BlockCommitment(Block::default().commit()),
-            stake_table: stake_table_map,
+            stake_table_root: stake_table_map_root,
             total_stake,
             historical_stake_tables: stake_table_commitments_mt.frontier(),
             past_historial_stake_table_merkle_roots: StakeTableSetHistory(VecDeque::with_capacity(
@@ -1248,7 +1252,7 @@ impl ValidatorState {
             past_record_merkle_roots: self.past_record_merkle_roots.commit(),
             past_nullifiers: self.past_nullifiers.commit(),
             prev_block: self.prev_block.0,
-            stake_table: StakeTableCommitment(self.stake_table.hash()).commit(),
+            stake_table_root: self.stake_table_root.commit(),
             total_stake: CommittableAmount::from(self.total_stake).commit(),
             historical_stake_tables: CommittableStakeTableSetFrontier(
                 self.historical_stake_tables.clone(),
@@ -1492,7 +1496,6 @@ impl ValidatorState {
             .expect("failed to append nullifiers after validation");
 
         // If this is a genesis block, apply system parameter updates.
-        // TODO: update total_stake when stake table is added to genesis note
         if let Some(EspressoTransaction::Genesis(txn)) = txns.0.get(0) {
             self.chain = txn.chain.clone();
             let mut total_stake = Amount::from(0u128);
@@ -1508,17 +1511,13 @@ impl ValidatorState {
             for key in txn.stake_table.keys() {
                 stake_table.forget(key.clone());
             }
-            //TOMORROW: this is bad
-            tracing::info!(
-                "stake table from validate_and_apply: {:?}",
-                stake_table.hash()
-            );
-            self.stake_table = stake_table;
+
+            self.stake_table_root = StakeTableCommitment(stake_table.hash());
             self.total_stake = total_stake;
             let mut stake_table_set =
                 crate::merkle_tree::FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
             stake_table_set.push((
-                StakeTableCommitment(self.stake_table.hash()),
+                self.stake_table_root,
                 self.total_stake,
                 ViewNumber::genesis().into(),
             ));
@@ -1564,7 +1563,7 @@ impl ValidatorState {
             .expect("failed to restore stake table commitments merkle tree from frontier");
 
         historial_stake_tables_builder.push((
-            StakeTableCommitment(self.stake_table.hash()),
+            self.stake_table_root,
             self.total_stake,
             ConsensusTime(now),
         ));

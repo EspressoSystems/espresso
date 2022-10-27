@@ -196,6 +196,7 @@ pub struct NodeOpt {
     #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
+        //TODO Kaley: nonzero min propose time to prevent rewards txn submission explosion
         default_value = "0s",
         value_parser = parse_duration
     )]
@@ -251,6 +252,29 @@ pub struct NodeOpt {
         default_value = "10000"
     )]
     pub max_transactions: NonZeroUsize,
+
+    /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
+    /// bootstrap nodes.
+    #[arg(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
+    pub num_nodes: usize,
+
+    /// Unique identifier for this instance of Espresso.
+    #[arg(long, env = "ESPRESSO_VALIDATOR_CHAIN_ID", default_value = "0")]
+    pub chain_id: u16,
+
+    /// Public key which should own a faucet record in the genesis block.
+    ///
+    /// For each given public key, the ledger will be initialized with a record of 2^32 native
+    /// tokens, owned by the public key.
+    ///
+    /// This option may be passed multiple times to initialize the ledger with multiple native
+    /// token records.
+    #[arg(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ',')]
+    pub faucet_pub_key: Vec<UserPubKey>,
+
+    /// CAP Address to send rewards to
+    #[arg(long, env = "ESPRESSO_VALIDATOR_REWARDS_ADDRESS")]
+    pub rewards_address: Option<UserAddress>,
 }
 
 #[derive(Clone, Debug, Snafu)]
@@ -267,9 +291,9 @@ pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
         })
 }
 
-impl Default for NodeOpt {
-    fn default() -> Self {
-        Self::parse_from(std::iter::empty::<String>())
+impl NodeOpt {
+    fn new(num_nodes: usize) -> Self {
+        Self::parse_from(vec!["--", "--num-nodes", &num_nodes.to_string()])
     }
 }
 
@@ -444,15 +468,13 @@ fn get_secret_key_seed(consensus_opt: &ConsensusOpt) -> [u8; 32] {
 type PLStorage = AtomicStorage<ElaboratedBlock, ValidatorState, H_256>;
 pub type Consensus = HotShotHandle<ValidatorNodeImpl<PLNetwork, PLStorage>, H_256>;
 
-pub fn genesis(
-    chain_id: u16,
-    faucet_pub_keys: impl IntoIterator<Item = UserPubKey>,
-    stake_table: BTreeMap<StakingKey, Amount>,
-) -> GenesisNote {
+pub fn genesis(node_opt: &NodeOpt, consensus_opt: &ConsensusOpt) -> GenesisNote {
     let mut rng = ChaChaRng::from_seed(GENESIS_SEED);
 
     // Process the initial native token records for the faucet.
-    let faucet_records = faucet_pub_keys
+    let faucet_records = node_opt
+        .faucet_pub_key
+        .clone()
         .into_iter()
         .map(|pub_key| {
             // Create the initial grant.
@@ -470,10 +492,13 @@ pub fn genesis(
             )
         })
         .collect();
+
+    // generate keys
+    let known_nodes = gen_keys(consensus_opt, node_opt.num_nodes);
     GenesisNote::new(
-        ChainVariables::new(chain_id, VERIF_CRS.clone()),
+        ChainVariables::new(node_opt.chain_id, VERIF_CRS.clone()),
         Arc::new(faucet_records),
-        stake_table,
+        initialize_stake_table(known_nodes.into_iter().map(|key| key.public).collect()),
     )
 }
 
@@ -548,16 +573,10 @@ async fn init_hotshot(
             for (key, amount) in stake_table_list.iter() {
                 stake_table.insert(key.clone(), *amount);
             }
-            //TOMORROW: this is bad
-            tracing::info!("stake table from genesis: {:?}", stake_table.hash());
+
             let (amount, stake_proof) = stake_table
                 .lookup(StakingKey::from_priv_key(&priv_key.clone().into()))
                 .unwrap();
-            /*TODO KALEY: delete?
-            for (key, _) in stake_table_list.iter() {
-                stake_table.forget(key.clone());
-            }
-            */
 
             state
                 .validate_and_apply(0, genesis.block.clone(), genesis.proofs.clone())
@@ -736,7 +755,6 @@ pub async fn init_validator<R: CryptoRng + RngCore + Send + 'static>(
     consensus_opt: &ConsensusOpt,
     priv_key: PrivKey,
     pub_keys: Vec<PubKey>,
-    reward_address: UserAddress,
     genesis: GenesisNote,
     own_id: usize,
 ) -> Consensus {
@@ -823,15 +841,18 @@ pub async fn init_validator<R: CryptoRng + RngCore + Send + 'static>(
     )
     .await;
 
-    spawn(collect_reward_daemon(
-        rng,
-        stake_proof,
-        stake_amount,
-        collected_rewards,
-        StakingPrivKey::from(priv_key),
-        reward_address,
-        hotshot.clone(),
-    ));
+    if let Some(rewards_address) = node_opt.rewards_address.clone() {
+        tracing::info!("spawning reward daemon: {:?}", rewards_address);
+        spawn(collect_reward_daemon(
+            rng,
+            stake_proof,
+            stake_amount,
+            collected_rewards,
+            StakingPrivKey::from(priv_key),
+            rewards_address,
+            hotshot.clone(),
+        ));
+    }
 
     hotshot
 }
@@ -870,13 +891,12 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
             for (blk, validator_state, qc) in
                 izip!(block.iter().rev(), state.iter().rev(), qcs.iter().rev())
             {
-                tracing::info!("Rewards daemon event: {:?}", blk);
+                tracing::debug!("event received {:?}", blk);
                 let view_number = qc.view_number;
                 // 0. check if I'm elected
                 if let Some(vrf_proof) =
                     mock_eligibility::prove_eligibility(view_number.into(), &staking_priv_key)
                 {
-                    tracing::info!("Eligible for view {:?}", view_number);
                     let claimed_reward = CollectedRewards {
                         staking_key: staking_key.clone(),
                         time: view_number.into(),

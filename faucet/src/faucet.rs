@@ -942,6 +942,7 @@ mod test {
     use espresso_client::{hd::KeyTree, loader::CreateLoader};
     use espresso_validator::testing::minimal_test_network;
     use futures::{future::join_all, Future};
+    use jf_cap::keys::UserAddress;
     use jf_cap::structs::AssetDefinition;
     use portpicker::pick_unused_port;
     use primitive_types::U256;
@@ -1071,7 +1072,7 @@ mod test {
             .derive_sub_tree("keystore".as_bytes())
             .derive_sub_tree("user".as_bytes())
             .derive_user_key_pair(&0u64.to_le_bytes());
-        let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key()).await;
+        let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key(), None).await;
 
         // Initiate a faucet server with the mnemonic associated with the faucet key pair.
         let faucet_dir = TempDir::new("espresso_keystore_faucet").unwrap();

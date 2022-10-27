@@ -11,6 +11,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+use crate::stake_table::StakeTableCommitment;
 use crate::stake_table::{StakeTableMap, StakeTableSetMT};
 use crate::state::*;
 use crate::universal_params::{MERKLE_HEIGHT, PROVER_CRS, UNIVERSAL_PARAM, VERIF_CRS};
@@ -318,7 +319,7 @@ impl MultiXfrTestState {
             validator: ValidatorState::new(
                 ChainVariables::new(42, VERIF_CRS.clone()),
                 t,
-                StakeTableMap::EmptySubtree,
+                StakeTableCommitment(StakeTableMap::EmptySubtree.hash()),
                 Amount::from(0u64),
                 StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
             ),
@@ -1443,7 +1444,7 @@ mod tests {
                     }),
                 ),
                 record_merkle_tree,
-                stake_table_map,
+                StakeTableCommitment(stake_table_map.hash()),
                 Amount::from(0u64),
                 stake_table_commitments_mt,
             )
@@ -1474,7 +1475,7 @@ mod tests {
         let mut v1 = ValidatorState::new(
             ChainVariables::new(42, VERIF_CRS.clone()),
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
-            StakeTableMap::EmptySubtree,
+            StakeTableCommitment(StakeTableMap::EmptySubtree.hash()),
             Amount::from(0u64),
             StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
         );
@@ -1629,7 +1630,7 @@ mod tests {
         let mut validator = ValidatorState::new(
             ChainVariables::new(42, VERIF_CRS.clone()),
             t,
-            StakeTableMap::EmptySubtree,
+            StakeTableCommitment(StakeTableMap::EmptySubtree.hash()),
             Amount::from(0u64),
             StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
         );

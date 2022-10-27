@@ -272,8 +272,7 @@ async fn main() {
     test(&Args::parse()).await
 }
 
-//#[cfg(all(test, feature = "slow-tests"))]
-#[cfg(test)]
+#[cfg(all(test, feature = "slow-tests"))]
 mod test {
     use super::*;
     use espresso_client::{network::NetworkBackend, Keystore};
@@ -287,9 +286,11 @@ mod test {
     #[async_std::test]
     #[traced_test]
     async fn test_query_api() {
+        use jf_cap::keys::UserAddress;
+
         let mut rng = ChaChaRng::from_seed([1; 32]);
         let faucet_key_pair = UserKeyPair::generate(&mut rng);
-        let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key()).await;
+        let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key(), None).await;
 
         // Create two wallets and transfer from one to the other, to populate the ledger.
         let mut loader1 = UnencryptedKeystoreLoader {
@@ -353,79 +354,4 @@ mod test {
         .await
     }
 
-    #[async_std::test]
-    // #[traced_test]
-    async fn test_rewards_balance() {
-        //todo: remove this before commiting KALEY
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-            .init();
-        let mut rng = ChaChaRng::from_seed([1; 32]);
-        let faucet_key_pair = UserKeyPair::generate(&mut rng);
-        let rewards_address_keypair = UserKeyPair::generate(&mut rng);
-        let network = minimal_test_network(
-            &mut rng,
-            faucet_key_pair.pub_key(),
-            rewards_address_keypair.address(),
-        )
-        .await;
-
-        //create wallet (with rewards_address_keypair?)
-        //create rewards txn
-        //submit rewards txn
-        //wait until wallet balances increases
-        let mut loader1 = UnencryptedKeystoreLoader {
-            dir: TempDir::new("rewards_test").unwrap(),
-        };
-        let mut keystore1 = Keystore::new(
-            NetworkBackend::new(
-                &UNIVERSAL_PARAM,
-                network.query_api.clone(),
-                network.address_book_api.clone(),
-                network.submit_api.clone(),
-            )
-            .await
-            .unwrap(),
-            &mut loader1,
-        )
-        .await
-        .unwrap();
-
-        keystore1
-            .add_sending_account(
-                rewards_address_keypair.clone(),
-                "rewards addr".into(),
-                Default::default(),
-            )
-            .await
-            .unwrap();
-        keystore1
-            .add_sending_account(faucet_key_pair.clone(), "faucet".into(), Default::default())
-            .await
-            .unwrap();
-
-        keystore1
-            .await_key_scan(&faucet_key_pair.address())
-            .await
-            .unwrap();
-
-        let receipt = keystore1
-            .transfer(
-                None,
-                &AssetCode::native(),
-                &[(faucet_key_pair.pub_key(), 100)],
-                1,
-            )
-            .await
-            .unwrap();
-        keystore1.await_transaction(&receipt).await.unwrap();
-
-        retry(|| async {
-            keystore1
-                .balance_breakdown(&rewards_address_keypair.address(), &AssetCode::native())
-                .await
-                > 0.into()
-        })
-        .await;
-    }
 }

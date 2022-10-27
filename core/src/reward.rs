@@ -38,7 +38,7 @@ pub type VrfProof = StakingKeySignature;
 
 /// Compute the allowed stake amount given current state (e.g. circulating supply), view_number and stake amount
 /// Hard-coded to 0 for FST
-//TODO: @kaley add block rewards to compute_reward_amount
+//TODO: !kaley add block fees to compute_reward_amount
 pub fn compute_reward_amount(
     _block_height: u64,
     _stake: Amount,
@@ -132,7 +132,6 @@ impl CollectRewardNote {
 
     /// verifies a reward collect note
     pub fn verify(&self) -> Result<(), RewardError> {
-        tracing::info!("verifying reward note");
         self.body.verify()?;
         let size = CanonicalSerialize::serialized_size(&self.body);
         let mut bytes = Vec::with_capacity(size);
@@ -240,14 +239,13 @@ impl CollectRewardBody {
         let body = CollectRewardBody {
             blind_factor,
             cap_address,
-            reward_amount: allowed_reward, // TODO allow fees, need to subtract fee from reward_amouint
+            reward_amount: allowed_reward, // TODO allow fees, need to subtract fee from reward_amount
             vrf_witness,
         };
         Ok((body, rewards_proofs))
     }
 
     pub fn verify(&self) -> Result<(), RewardError> {
-        tracing::info!("verifying witness");
         self.vrf_witness.verify()
     }
 }
@@ -336,6 +334,7 @@ pub struct RewardNoteProofs {
 /// i) digest for which uncollected reward proof was verified against,
 /// ii) Stake owned by the staking key at time of reward eligibility
 /// iii) Total staked in stake table at time of reward eligibility
+/// iv) Total fees for block for which staking key is claiming reward
 pub struct RewardProofsValidationOutputs {
     pub(crate) collected_reward_digest: CollectedRewardsDigest,
     pub(crate) key_stake: Amount,
@@ -350,7 +349,6 @@ impl RewardNoteProofs {
         validator_state: &ValidatorState,
         claimed_reward: CollectedRewards, // staking key and time t
     ) -> Result<RewardProofsValidationOutputs, ValidationError> {
-        tracing::info!("verifying rewards proofs");
         let stake_table_commitment = self.stake_tables_set_leaf_proof.leaf.0 .0;
         let stake_table_total_stake = self.stake_tables_set_leaf_proof.leaf.0 .1;
         let time_in_proof = self.stake_tables_set_leaf_proof.leaf.0 .2;
@@ -359,7 +357,6 @@ impl RewardNoteProofs {
         //   Only time needs to be checked against claimed reward's time,
         //   Commitment in proof is used to check stake amount, and the total stake is returned for caller use.
         if claimed_reward.time != time_in_proof {
-            tracing::info!("bad collectedreward proof: time");
             return Err(ValidationError::BadCollectedRewardProof {});
         }
 
@@ -369,8 +366,6 @@ impl RewardNoteProofs {
             .get_leaf()
             .ok_or(ValidationError::BadCollectedRewardProof {})?;
         if staking_key_in_proof != claimed_reward.staking_key {
-            tracing::info!("bad collectedreward proof: key");
-
             return Err(ValidationError::BadCollectedRewardProof {});
         }
 
@@ -414,7 +409,6 @@ impl RewardNoteProofs {
                 }
             }
             if !found {
-                tracing::info!("bad staketablecommitments proof");
                 return Err(ValidationError::BadStakeTableCommitmentsProof {});
             }
         }

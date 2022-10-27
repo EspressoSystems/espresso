@@ -26,10 +26,8 @@ use espresso_core::{
 };
 use espresso_validator::{validator::*, *};
 use hotshot::types::EventType;
-use jf_cap::keys::UserAddress;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
-use std::collections::BTreeMap;
 use std::time::Duration;
 use tagged_base64::TaggedBase64;
 use tracing::info;
@@ -48,7 +46,10 @@ struct Options {
     pub num_txns: u64,
 }
 
-fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
+fn genesis_for_test(
+    node_opt: &NodeOpt,
+    consensus_opt: &ConsensusOpt,
+) -> (GenesisNote, MultiXfrTestState) {
     let mut state = MultiXfrTestState::initialize(
         GENESIS_SEED,
         10,
@@ -81,10 +82,12 @@ fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
     state.nullifiers = SetMerkleTree::default();
     state.validator.past_nullifiers = NullifierHistory::default();
 
+    // generate keys
+    let known_nodes = gen_keys(consensus_opt, node_opt.num_nodes);
     let genesis = GenesisNote::new(
         ChainVariables::new(42, VERIF_CRS.clone()),
         Arc::new(state.records().collect()),
-        BTreeMap::new(), // TODO add stake table
+        initialize_stake_table(known_nodes.into_iter().map(|key| key.public).collect()),
     );
     (genesis, state)
 }
@@ -260,14 +263,11 @@ async fn generate_transactions(
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::parse();
     let id = options.validator_opt.id;
-    let (genesis, state) = genesis_for_test();
-    let hotshot = init(
-        ChaChaRng::from_entropy(),
-        genesis,
-        options.validator_opt,
-        UserAddress::default(),
-    )
-    .await?;
+    let (genesis, state) = genesis_for_test(
+        &options.validator_opt.node_opt,
+        &options.validator_opt.consensus_opt,
+    );
+    let hotshot = init(ChaChaRng::from_entropy(), genesis, options.validator_opt).await?;
     generate_transactions(options.num_txns, id, hotshot, state).await;
     Ok(())
 }
