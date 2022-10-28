@@ -1207,6 +1207,11 @@ impl From<GenericArray<u8, U32>> for VrfSeed {
         Self(array.into())
     }
 }
+impl From<VrfSeed> for GenericArray<u8, U32> {
+    fn from(vrf_seed: VrfSeed) -> Self {
+        GenericArray::from(vrf_seed.0)
+    }
+}
 
 impl Default for ChainVariables {
     fn default() -> Self {
@@ -1588,8 +1593,12 @@ impl ValidatorState {
                 };
 
                 // verify eligibility reward txn (CollectRewardNote)
-                txn.verify()
-                    .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
+                txn.verify(
+                    self.chain.committee_size,
+                    self.chain.vrf_seed,
+                    (u128::from(self.total_stake) as u64).try_into().unwrap(),
+                )
+                .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
 
                 // check helper proofs (RewardNoteProofs)
                 let extracted_data = pfs.verify(self, latest_reward.clone())?;

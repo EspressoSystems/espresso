@@ -871,6 +871,7 @@ pub fn open_data_source(
     }))
 }
 
+//TODO !kaley: also needed in state.rs
 fn amount_to_nonzerou64(amt: Amount) -> NonZeroU64 {
     (u128::from(amt) as u64).try_into().unwrap()
 }

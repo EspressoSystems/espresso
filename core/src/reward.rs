@@ -17,7 +17,7 @@ use crate::stake_table::{
     StakingPrivKey,
 };
 use crate::state::{
-    CommitableHash, CommitableHashTag, ConsensusTime, ValidationError, ValidatorState,
+    CommitableHash, CommitableHashTag, ConsensusTime, ValidationError, ValidatorState, VrfSeed,
 };
 use crate::tree_hash::KVTreeHash;
 pub use crate::util::canonical;
@@ -131,8 +131,13 @@ impl CollectRewardNote {
     }
 
     /// verifies a reward collect note
-    pub fn verify(&self) -> Result<(), RewardError> {
-        self.body.verify()?;
+    pub fn verify(
+        &self,
+        committee_size: u64,
+        vrf_seed: VrfSeed,
+        total_stake: NonZeroU64,
+    ) -> Result<(), RewardError> {
+        self.body.verify(committee_size, vrf_seed, total_stake)?;
         let size = CanonicalSerialize::serialized_size(&self.body);
         let mut bytes = Vec::with_capacity(size);
         CanonicalSerialize::serialize(&self.body, &mut bytes).map_err(RewardError::from)?;
@@ -238,8 +243,14 @@ impl CollectRewardBody {
         Ok((body, rewards_proofs))
     }
 
-    pub fn verify(&self) -> Result<(), RewardError> {
-        self.eligibility_witness.verify()
+    pub fn verify(
+        &self,
+        committee_size: u64,
+        vrf_seed: VrfSeed,
+        total_stake: NonZeroU64,
+    ) -> Result<(), RewardError> {
+        self.eligibility_witness
+            .verify(committee_size, vrf_seed, total_stake)
     }
 }
 
@@ -282,8 +293,20 @@ pub struct EligibilityWitness {
 }
 
 impl EligibilityWitness {
-    pub fn verify(&self) -> Result<(), RewardError> {
-        if mock_eligibility::is_eligible(self.time, &self.staking_key, &self.vrf_proof) {
+    pub fn verify(
+        &self,
+        committee_size: u64,
+        vrf_seed: VrfSeed,
+        total_stake: NonZeroU64,
+    ) -> Result<(), RewardError> {
+        if mock_eligibility::check_eligibility(
+            committee_size,
+            &vrf_seed.into(),
+            self.time,
+            self.num_seats.try_into().unwrap(),
+            total_stake,
+            self,
+        ) {
             Ok(())
         } else {
             Err(RewardError::KeyNotEligible {
@@ -481,11 +504,14 @@ pub mod mock_eligibility {
     use super::*;
     use sha3::{Digest, Sha3_256};
 
-    /// check weather a staking key is elegible for rewards
-    pub fn is_eligible(
+    /// check whether a staking key is eligible for rewards
+    pub fn check_eligibility(
+        _sorition_parameter: u64,
+        _vrf_seed: &[u8; 32],
         view_number: ConsensusTime,
-        staking_key: &StakingKey,
-        proof: &VrfProof,
+        _stake_amount: NonZeroU64,
+        _total_stake: NonZeroU64,
+        proof: &EligibilityWitness,
     ) -> bool {
         // 1. compute vrf value = Hash ( vrf_proof)
         let mut hasher = Sha3_256::new();
@@ -493,7 +519,10 @@ pub mod mock_eligibility {
         let vrf_value = hasher.finalize();
         // 2. validate proof
         let data = bincode::serialize(&view_number).unwrap();
-        if !staking_key.validate(proof.as_ref(), &data[..]) {
+        if !proof
+            .staking_key
+            .validate(proof.vrf_proof.as_ref(), &data[..])
+        {
             return false;
         }
         // mock eligibility return true ~25% of times
@@ -503,33 +532,42 @@ pub mod mock_eligibility {
     /// Prove that staking key is eligible for reward on view number. Return None if key is not eligible
     pub fn prove_eligibility<R: CryptoRng>(
         _rng: R,
-        _sortition_parameter: u64,
-        _vrf_seed: VrfSeed,
+        sortition_parameter: u64,
+        vrf_seed: VrfSeed,
         view_number: ConsensusTime,
         private_key: &StakingPrivKey,
-        _stake_amount: NonZeroU64,
-        _total_stake: NonZeroU64,
+        stake_amount: NonZeroU64,
+        total_stake: NonZeroU64,
     ) -> Option<EligibilityWitness> {
         // 1. compute vrf proof
         let data = bincode::serialize(&view_number).unwrap();
         let proof = StakingKey::sign(private_key, &data[..]).into();
         let pub_key = private_key.into();
         // 2. check eligibility
-        if is_eligible(view_number, &pub_key, &proof) {
-            Some(EligibilityWitness {
-                staking_key: pub_key,
-                vrf_proof: proof,
-                time: view_number,
-                num_seats: 1,
-            })
+        let eligibility_witness = EligibilityWitness {
+            staking_key: pub_key,
+            vrf_proof: proof,
+            time: view_number,
+            num_seats: 1,
+        };
+        if check_eligibility(
+            sortition_parameter,
+            &vrf_seed.into(),
+            view_number,
+            stake_amount,
+            total_stake,
+            &eligibility_witness,
+        ) {
+            Some(eligibility_witness)
         } else {
             None
         }
     }
     #[cfg(test)]
     mod test_eligibility {
-        use crate::reward::mock_eligibility::{is_eligible, prove_eligibility};
+        use crate::reward::mock_eligibility::{check_eligibility, prove_eligibility};
         use crate::stake_table::StakingKey;
+        use crate::state::VrfSeed;
         use hotshot::traits::election::vrf::SORTITION_PARAMETER;
         use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
         use std::num::NonZeroU64;
@@ -539,12 +577,12 @@ pub mod mock_eligibility {
         fn test_reward_eligibility() {
             let mut rng = ChaChaRng::from_seed([1; 32]);
             let mut view_number = hotshot_types::data::ViewNumber::genesis();
-            let (pub_key, priv_key) = StakingKey::generate(&mut rng);
+            let (_pub_key, priv_key) = StakingKey::generate(&mut rng);
             let (bad_pub_key, _) = StakingKey::generate(&mut rng);
             let mut found = 0;
             for _ in 0..600 {
                 // with 600 runs we get ~2^{-100} failure pbb
-                if let Some(proof) = prove_eligibility(
+                if let Some(mut proof) = prove_eligibility(
                     &mut rng,
                     SORTITION_PARAMETER,
                     Default::default(),
@@ -553,8 +591,24 @@ pub mod mock_eligibility {
                     NonZeroU64::new(1).unwrap(),
                     NonZeroU64::new(10).unwrap(),
                 ) {
-                    assert!(is_eligible(view_number, &pub_key, &proof.vrf_proof));
-                    assert!(!is_eligible(view_number, &bad_pub_key, &proof.vrf_proof));
+                    assert!(check_eligibility(
+                        SORTITION_PARAMETER,
+                        &VrfSeed::default().into(),
+                        view_number,
+                        NonZeroU64::new(1).unwrap(),
+                        NonZeroU64::new(10).unwrap(),
+                        &proof
+                    ));
+                    proof.staking_key = bad_pub_key.clone();
+                    assert!(!check_eligibility(
+                        SORTITION_PARAMETER,
+                        &VrfSeed::default().into(),
+                        view_number,
+                        NonZeroU64::new(1).unwrap(),
+                        NonZeroU64::new(10).unwrap(),
+                        &proof
+                    ));
+
                     found += 1;
                 }
                 view_number = view_number.add(1);
