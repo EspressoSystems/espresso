@@ -17,6 +17,7 @@ use crate::state::*;
 use crate::universal_params::{MERKLE_HEIGHT, PROVER_CRS, UNIVERSAL_PARAM, VERIF_CRS};
 use arbitrary::Arbitrary;
 use core::iter::once;
+use hotshot::traits::election::vrf::SORTITION_PARAMETER;
 use hotshot::traits::{Block, State};
 use jf_cap::{
     keys::UserKeyPair,
@@ -321,7 +322,7 @@ impl MultiXfrTestState {
             nullifiers, /*asset_defs,*/
             record_merkle_tree: t.clone(),
             validator: ValidatorState::new(
-                ChainVariables::new(42, VERIF_CRS.clone()),
+                ChainVariables::new(42, VERIF_CRS.clone(), SORTITION_PARAMETER),
                 t,
                 StakeTableCommitment(StakeTableMap::EmptySubtree.hash()),
                 Amount::from(0u64),
@@ -1455,6 +1456,7 @@ mod tests {
                         }))
                         .unwrap(),
                     }),
+                    SORTITION_PARAMETER,
                 ),
                 record_merkle_tree,
                 StakeTableCommitment(stake_table_map.hash()),
@@ -1486,7 +1488,7 @@ mod tests {
     fn test_record_history_commit_hash() {
         // Check that ValidatorStates with different record histories have different commits.
         let mut v1 = ValidatorState::new(
-            ChainVariables::new(42, VERIF_CRS.clone()),
+            ChainVariables::new(42, VERIF_CRS.clone(), SORTITION_PARAMETER),
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
             StakeTableCommitment(StakeTableMap::EmptySubtree.hash()),
             Amount::from(0u64),
@@ -1646,7 +1648,7 @@ mod tests {
 
         let mut keystore_merkle_tree = t.clone();
         let mut validator = ValidatorState::new(
-            ChainVariables::new(42, VERIF_CRS.clone()),
+            ChainVariables::new(42, VERIF_CRS.clone(), SORTITION_PARAMETER),
             t,
             StakeTableCommitment(StakeTableMap::EmptySubtree.hash()),
             Amount::from(0u64),

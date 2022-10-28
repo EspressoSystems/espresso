@@ -85,7 +85,7 @@ fn genesis_for_test(
     // generate keys
     let known_nodes = gen_keys(consensus_opt, node_opt.num_nodes);
     let genesis = GenesisNote::new(
-        ChainVariables::new(42, VERIF_CRS.clone()),
+        ChainVariables::new(42, VERIF_CRS.clone(), COMMITTEE_SIZE),
         Arc::new(state.records().collect()),
         initialize_stake_table(
             known_nodes

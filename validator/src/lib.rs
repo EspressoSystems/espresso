@@ -66,6 +66,7 @@ use std::convert::TryInto;
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::io::Read;
+use std::num::NonZeroU64;
 use std::num::{NonZeroUsize, ParseIntError};
 use std::path::{Path, PathBuf};
 use std::str;
@@ -551,7 +552,7 @@ pub fn genesis(node_opt: &NodeOpt, consensus_opt: &ConsensusOpt) -> GenesisNote 
     // generate keys
     let known_nodes = gen_keys(consensus_opt, node_opt.num_nodes);
     GenesisNote::new(
-        ChainVariables::new(node_opt.chain_id, VERIF_CRS.clone()),
+        ChainVariables::new(node_opt.chain_id, VERIF_CRS.clone(), COMMITTEE_SIZE),
         Arc::new(faucet_records),
         initialize_stake_table(
             known_nodes
@@ -589,11 +590,7 @@ async fn init_hotshot(
     // Create the initial hotshot
     let stake_distribution = known_nodes
         .iter()
-        .map(|key| {
-            (u128::from(genesis.stake_table[key]) as u64)
-                .try_into()
-                .unwrap()
-        })
+        .map(|key| amount_to_nonzerou64(genesis.stake_table[key]))
         .collect::<Vec<_>>();
 
     let known_nodes = known_nodes
@@ -603,7 +600,7 @@ async fn init_hotshot(
 
     let pub_key = known_nodes[node_id].clone();
     let vrf_config = VRFStakeTableConfig {
-        sortition_parameter: COMMITTEE_SIZE,
+        sortition_parameter: genesis.chain.committee_size,
         distribution: stake_distribution,
     };
     let config = HotShotConfig {
@@ -874,6 +871,10 @@ pub fn open_data_source(
     }))
 }
 
+fn amount_to_nonzerou64(amt: Amount) -> NonZeroU64 {
+    (u128::from(amt) as u64).try_into().unwrap()
+}
+
 #[allow(dead_code)] // FIXME use this function in main
 async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
     mut rng: R,
@@ -898,9 +899,15 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
                 let view_number = leaf.justify_qc.view_number;
 
                 // 0. check if I'm elected
-                if let Some(vrf_proof) =
-                    mock_eligibility::prove_eligibility(view_number, &staking_priv_key)
-                {
+                if let Some(vrf_proof) = mock_eligibility::prove_eligibility(
+                    &mut rng,
+                    validator_state.chain.committee_size,
+                    validator_state.chain.vrf_seed,
+                    view_number,
+                    &staking_priv_key,
+                    amount_to_nonzerou64(stake_amount),
+                    amount_to_nonzerou64(validator_state.total_stake),
+                ) {
                     let claimed_reward = CollectedRewards {
                         staking_key: staking_key.clone(),
                         time: view_number,
@@ -915,7 +922,6 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
                             .historical_stake_tables_commitment
                             .num_leaves,
                         validator_state.total_stake,
-                        view_number,
                         validator_state.block_height,
                         &staking_priv_key,
                         cap_address.clone(),

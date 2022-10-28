@@ -12,8 +12,10 @@
 // see <https://www.gnu.org/licenses/>.
 
 use espresso_macros::*;
+use generic_array::GenericArray;
 use jf_cap::structs::{Amount, ReceiverMemo};
 use jf_cap::Signature;
+use sha3::Sha3_256;
 
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
@@ -44,7 +46,7 @@ use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
-use derive_more::{From, Into};
+use derive_more::{AsRef, From, Into};
 use hotshot::traits::{Block as ConsensusBlock, State as ConsensusState};
 use jf_cap::{
     errors::TxnApiError, structs::Nullifier, txn_batch_verify, MerkleCommitment, MerkleFrontier,
@@ -54,12 +56,15 @@ use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
 use serde::{Deserialize, Serialize};
+use sha3::digest::Update;
+use sha3::Digest;
 use snafu::Snafu;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::iter::once;
 use std::sync::Arc;
+use typenum::U32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 /// A transaction tht can be either a CAP transaction or a collect reward transaction
@@ -1164,11 +1169,48 @@ pub struct ChainVariables {
 
     /// Plonk verifier keys.
     pub verif_crs: ArcSer<VerifierKeySet>,
+
+    /// VRF seed for checking rewards
+    pub vrf_seed: VrfSeed,
+
+    /// Committee size
+    pub committee_size: u64,
+}
+
+#[tagged_blob("VRFSEED")]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Copy, AsRef, Arbitrary, From, Into, Default,
+)]
+pub struct VrfSeed([u8; 32]);
+
+impl CanonicalSerialize for VrfSeed {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer
+            .write_all(self.as_ref())
+            .map_err(SerializationError::from)
+    }
+    fn serialized_size(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl CanonicalDeserialize for VrfSeed {
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut buf = [0; 32];
+        reader.read_exact(&mut buf)?;
+        Ok(Self(buf))
+    }
+}
+
+impl From<GenericArray<u8, U32>> for VrfSeed {
+    fn from(array: GenericArray<u8, U32>) -> Self {
+        Self(array.into())
+    }
 }
 
 impl Default for ChainVariables {
     fn default() -> Self {
-        Self::new(0, VERIF_CRS.clone())
+        Self::new(0, VERIF_CRS.clone(), 0)
     }
 }
 
@@ -1180,6 +1222,8 @@ impl Committable for ChainVariables {
             .u64_field("protocol_version_patch", self.protocol_version.2 as u64)
             .u64_field("chain_id", self.chain_id as u64)
             .var_size_bytes(&canonical::serialize(&self.verif_crs).unwrap())
+            .fixed_size_bytes(self.vrf_seed.as_ref())
+            .u64_field("committee size", self.committee_size)
             .finalize()
     }
 }
@@ -1190,6 +1234,8 @@ impl<'a> Arbitrary<'a> for ChainVariables {
             protocol_version: u.arbitrary()?,
             chain_id: u.arbitrary()?,
             verif_crs: VERIF_CRS.clone().into(),
+            vrf_seed: u.arbitrary()?,
+            committee_size: u.arbitrary()?,
         })
     }
 }
@@ -1209,7 +1255,7 @@ impl Hash for ChainVariables {
 }
 
 impl ChainVariables {
-    pub fn new(chain_id: u16, verif_crs: Arc<VerifierKeySet>) -> Self {
+    pub fn new(chain_id: u16, verif_crs: Arc<VerifierKeySet>, committee_size: u64) -> Self {
         Self {
             protocol_version: (
                 env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
@@ -1218,6 +1264,12 @@ impl ChainVariables {
             ),
             chain_id,
             verif_crs: verif_crs.into(),
+            //TODO: placeholder until beacon designed
+            vrf_seed: Sha3_256::new()
+                .chain(chain_id.to_le_bytes())
+                .finalize()
+                .into(),
+            committee_size,
         }
     }
 }
