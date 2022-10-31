@@ -36,7 +36,7 @@ use tracing::info;
 )]
 struct Options {
     #[command(flatten)]
-    validator_opt: ValidatorOpt,
+    node_opt: NodeOpt,
 
     /// Number of transactions to generate.
     #[arg(long, short)]
@@ -292,9 +292,9 @@ async fn generate_transactions(
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::parse();
-    let id = options.validator_opt.id;
+    let id = options.node_opt.id;
     let (genesis, state) = genesis_for_test();
-    let hotshot = init(genesis, options.validator_opt).await?;
+    let hotshot = init(genesis, options.node_opt).await?;
     generate_transactions(options.num_txns, id, hotshot, state).await;
     Ok(())
 }

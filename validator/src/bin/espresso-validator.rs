@@ -24,7 +24,7 @@ use jf_cap::keys::UserPubKey;
 )]
 struct Options {
     #[command(flatten)]
-    validator_opt: ValidatorOpt,
+    node_opt: NodeOpt,
 
     /// Public key which should own a faucet record in the genesis block.
     ///
@@ -40,8 +40,8 @@ struct Options {
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::parse();
-    let genesis = genesis(options.validator_opt.chain_id, options.faucet_pub_key);
-    let hotshot = init(genesis, options.validator_opt).await?;
+    let genesis = genesis(options.node_opt.chain_id, options.faucet_pub_key);
+    let hotshot = init(genesis, options.node_opt).await?;
     run_consensus(hotshot, pending::<()>()).await;
     Ok(())
 }

@@ -13,91 +13,38 @@
 #![deny(warnings)]
 
 use crate::*;
-use clap::Parser;
 use espresso_core::StakingKey;
-use espresso_esqs::full_node::{self, EsQS};
+use espresso_esqs::full_node::EsQS;
 use std::process::exit;
 
-/// Command line arguments for a validator.
-#[derive(Parser)]
-pub struct ValidatorOpt {
-    #[command(flatten)]
-    node_opt: NodeOpt,
-
-    #[command(flatten)]
-    consensus_opt: ConsensusOpt,
-
-    /// Id of the current node.
-    ///
-    /// If the node ID is 0, it will propose and try to add transactions.
-    #[arg(long, short, env = "ESPRESSO_VALIDATOR_ID", requires("num-nodes"))]
-    pub id: usize,
-
-    /// Location of the current node.
-    ///
-    /// If not provided, the IP address will be used for dashboard display.
-    #[clap(long, env = "ESPRESSO_VALIDATOR_LOCATION")]
-    pub location: Option<String>,
-
-    /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
-    /// bootstrap nodes.
-    #[arg(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
-    pub num_nodes: usize,
-
-    /// Whether to color log output with ANSI color codes.
-    #[arg(long, env = "ESPRESSO_COLORED_LOGS")]
-    pub colored_logs: bool,
-
-    /// Unique identifier for this instance of Espresso.
-    #[arg(long, env = "ESPRESSO_VALIDATOR_CHAIN_ID", default_value = "0")]
-    pub chain_id: u16,
-
-    #[command(subcommand)]
-    pub esqs: Option<full_node::Command>,
-}
-
 /// Initiate the hotshot
-pub async fn init(
-    genesis: GenesisNote,
-    options: ValidatorOpt,
-) -> Result<Consensus, std::io::Error> {
-    if let Err(msg) = options.node_opt.check() {
+pub async fn init(genesis: GenesisNote, node_opt: NodeOpt) -> Result<Consensus, std::io::Error> {
+    if let Err(msg) = node_opt.check() {
         eprintln!("{}", msg);
         exit(1);
     }
-    if options.num_nodes < MINIMUM_NODES {
+    if node_opt.num_nodes < MINIMUM_NODES {
         eprintln!("Not enough nodes (need at least {})", MINIMUM_NODES);
         exit(1);
     }
 
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_ansi(options.colored_logs)
+        .with_ansi(node_opt.colored_logs)
         .init();
 
-    let own_id = options.id;
-
     // Initialize the hotshot
-    let keys = gen_keys(&options.consensus_opt, options.num_nodes);
-    let priv_key = keys[own_id].clone();
+    let keys = gen_keys(node_opt.secret_key_seed, node_opt.num_nodes);
+    let priv_key = keys[node_opt.id].clone();
     let known_nodes = keys
         .into_iter()
         .map(|sk| StakingKey::from_private(&sk))
         .collect();
-    let hotshot = init_validator(
-        &options.node_opt,
-        &options.consensus_opt,
-        priv_key,
-        known_nodes,
-        genesis,
-        own_id,
-    )
-    .await;
-    let data_source =
-        open_data_source(&options.node_opt, own_id, options.location, hotshot.clone());
+    let hotshot = init_validator(&node_opt, priv_key, known_nodes, genesis).await;
+    let data_source = open_data_source(&node_opt, hotshot.clone());
 
     // Start an EsQS server if requested.
-    if let Some(esqs) = &options.esqs {
+    if let Some(esqs) = &node_opt.esqs {
         Some(EsQS::new(esqs, data_source, hotshot.clone())?)
     } else {
         None

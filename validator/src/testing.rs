@@ -11,7 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    gen_keys, genesis, init_validator, open_data_source, run_consensus, ConsensusOpt, NodeOpt,
+    gen_keys, genesis, init_validator, open_data_source, run_consensus, NodeOpt,
     MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES,
 };
 use address_book::{error::AddressBookError, store::FileStore};
@@ -127,25 +127,10 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     let bootstrap_ports = (0..MINIMUM_BOOTSTRAP_NODES)
         .into_iter()
         .map(|_| pick_unused_port().unwrap());
-    let consensus_opt = ConsensusOpt {
-        secret_key_seed: Some(seed.into()),
-        replication_factor: 4,
-        bootstrap_mesh_n_high: 50,
-        bootstrap_mesh_n_low: 10,
-        bootstrap_mesh_outbound_min: 4,
-        bootstrap_mesh_n: 15,
-        nonbootstrap_mesh_n_high: 15,
-        nonbootstrap_mesh_n_low: 8,
-        nonbootstrap_mesh_outbound_min: 4,
-        nonbootstrap_mesh_n: 12,
-        bootstrap_nodes: bootstrap_ports
-            .map(|p| format!("localhost:{}", p).parse().unwrap())
-            .collect(),
-    };
 
     println!("generating public keys");
     let start = Instant::now();
-    let keys = gen_keys(&consensus_opt, MINIMUM_NODES);
+    let keys = gen_keys(Some(seed.into()), MINIMUM_NODES);
     let pub_keys = keys
         .iter()
         .map(StakingKey::from_private)
@@ -155,7 +140,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     let store = TempDir::new("minimal_test_network_store").unwrap();
     let genesis = genesis(0, iter::once(faucet_pub_key));
     let nodes = join_all((0..MINIMUM_NODES).into_iter().map(|i| {
-        let consensus_opt = consensus_opt.clone();
+        let bootstrap_ports = bootstrap_ports.clone();
         let genesis = genesis.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
@@ -164,6 +149,8 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         store_path.push(i.to_string());
         async move {
             let node_opt = NodeOpt {
+                id: i,
+                location: Some("My location".to_string()),
                 store_path: Some(store_path),
                 nonbootstrap_base_port: pick_unused_port().unwrap() as usize,
                 // Set fairly short view times (propose any transactions available after 5s, propose
@@ -174,16 +161,23 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 min_transactions: 1,
                 max_propose_time: Duration::from_secs(10),
                 next_view_timeout: Duration::from_secs(60),
+                secret_key_seed: Some(seed.into()),
+                replication_factor: 4,
+                bootstrap_mesh_n_high: 50,
+                bootstrap_mesh_n_low: 10,
+                bootstrap_mesh_outbound_min: 4,
+                bootstrap_mesh_n: 15,
+                nonbootstrap_mesh_n_high: 15,
+                nonbootstrap_mesh_n_low: 8,
+                nonbootstrap_mesh_outbound_min: 4,
+                nonbootstrap_mesh_n: 12,
+                bootstrap_nodes: bootstrap_ports
+                    .map(|p| format!("localhost:{}", p).parse().unwrap())
+                    .collect(),
                 ..NodeOpt::default()
             };
-            let consensus =
-                init_validator(&node_opt, &consensus_opt, priv_key, pub_keys, genesis, i).await;
-            let data_source = open_data_source(
-                &node_opt,
-                i,
-                Some("My location".to_string()),
-                consensus.clone(),
-            );
+            let consensus = init_validator(&node_opt, priv_key, pub_keys, genesis).await;
+            let data_source = open_data_source(&node_opt, consensus.clone());
 
             // If applicable, run a query service.
             let esqs = if i == 0 {

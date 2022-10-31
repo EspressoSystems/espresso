@@ -53,10 +53,6 @@ struct Options {
     #[arg(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txns: Option<u64>,
 
-    /// Options for the new EsQS.
-    #[command(subcommand)]
-    pub esqs: Option<full_node::Command>,
-
     #[arg(long, short)]
     verbose: bool,
 
@@ -252,7 +248,7 @@ async fn main() {
                 this_args.push(&num_txn_str);
             }
             let mut esqs_args = vec![];
-            if let Some(full_node::Command::Esqs(opt)) = &options.esqs {
+            if let Some(full_node::Command::Esqs(opt)) = &options.node_opt.esqs {
                 esqs_args = vec!["esqs".to_string(), "-p".to_string(), opt.port.to_string()];
                 if let Some(path) = &opt.metastate.api_path {
                     esqs_args.push("--metastate-api-path".to_string());

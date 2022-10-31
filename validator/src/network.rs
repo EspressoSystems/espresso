@@ -10,7 +10,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-use crate::{node_impl::SignatureKey, ConsensusOpt};
+use crate::{node_impl::SignatureKey, NodeOpt};
 use async_std::{
     sync::{Arc, RwLock},
     task::sleep,
@@ -50,16 +50,14 @@ impl HybridNetwork {
     pub async fn new_p2p(
         pubkey: StakingKey,
         bs: Vec<(Option<PeerId>, Multiaddr)>,
-        node_id: usize,
         node_type: NetworkNodeType,
         bound_addr: Multiaddr,
         identity: Option<Keypair>,
-        consensus_opt: &ConsensusOpt,
+        node_opt: &NodeOpt,
     ) -> Result<Self, NetworkError> {
         let mut config_builder = NetworkNodeConfigBuilder::default();
         // NOTE we may need to change this as we scale
-        config_builder
-            .replication_factor(NonZeroUsize::new(consensus_opt.replication_factor).unwrap());
+        config_builder.replication_factor(NonZeroUsize::new(node_opt.replication_factor).unwrap());
         // `to_connect_addrs` is an empty field that will be removed. We will pass `bs` into
         // `Libp2pNetwork::new` as the addresses to connect.
         config_builder.to_connect_addrs(HashSet::new());
@@ -72,16 +70,16 @@ impl HybridNetwork {
 
         let mesh_params = match node_type {
             NetworkNodeType::Bootstrap => MeshParams {
-                mesh_n_high: consensus_opt.bootstrap_mesh_n_high,
-                mesh_n_low: consensus_opt.bootstrap_mesh_n_low,
-                mesh_outbound_min: consensus_opt.bootstrap_mesh_outbound_min,
-                mesh_n: consensus_opt.bootstrap_mesh_n,
+                mesh_n_high: node_opt.bootstrap_mesh_n_high,
+                mesh_n_low: node_opt.bootstrap_mesh_n_low,
+                mesh_outbound_min: node_opt.bootstrap_mesh_outbound_min,
+                mesh_n: node_opt.bootstrap_mesh_n,
             },
             NetworkNodeType::Regular => MeshParams {
-                mesh_n_high: consensus_opt.nonbootstrap_mesh_n_high,
-                mesh_n_low: consensus_opt.nonbootstrap_mesh_n_low,
-                mesh_outbound_min: consensus_opt.nonbootstrap_mesh_outbound_min,
-                mesh_n: consensus_opt.nonbootstrap_mesh_n,
+                mesh_n_high: node_opt.nonbootstrap_mesh_n_high,
+                mesh_n_low: node_opt.nonbootstrap_mesh_n_low,
+                mesh_outbound_min: node_opt.nonbootstrap_mesh_outbound_min,
+                mesh_n: node_opt.nonbootstrap_mesh_n,
             },
             NetworkNodeType::Conductor => unreachable!(),
         };
@@ -95,8 +93,8 @@ impl HybridNetwork {
                 config,
                 pubkey.into(),
                 Arc::new(RwLock::new(bs)),
-                consensus_opt.bootstrap_nodes.len(),
-                node_id,
+                node_opt.bootstrap_nodes.len(),
+                node_opt.id,
             )
             .await?,
         ))

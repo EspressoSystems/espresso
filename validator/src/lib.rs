@@ -16,7 +16,7 @@
 use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
 use async_std::sync::{Arc, RwLock};
-use clap::{Args, Parser};
+use clap::Parser;
 use cld::ClDuration;
 use dirs::data_local_dir;
 use espresso_core::reward::{
@@ -32,6 +32,7 @@ use espresso_core::{
     },
     universal_params::VERIF_CRS,
 };
+use espresso_esqs::full_node::{self};
 use espresso_esqs::full_node_data_source::QueryData;
 use espresso_validator_api::data_source::ValidatorDataSource;
 use futures::{select, Future, FutureExt};
@@ -167,20 +168,24 @@ impl FromStr for Ratio {
     }
 }
 
-#[derive(Debug, Parser)]
+/// Options for validator nodes, including node-specific options, consensus options, and other
+/// options that are consistent among nodes.
+#[derive(Parser)]
 pub struct NodeOpt {
-    /// Whether to reset the persisted state.
+    //
+    // 1. Node-specific options.
+    //
+    /// Id of the current node.
     ///
-    /// If the path to a node's persistence files doesn't exist, its persisted state will be reset
-    /// regardless of this argument.
-    #[arg(long, short)]
-    pub reset_store_state: bool,
+    /// If the node ID is 0, it will propose and try to add transactions.
+    #[arg(long, short, env = "ESPRESSO_VALIDATOR_ID", requires("num-nodes"))]
+    pub id: usize,
 
-    /// Path to persistence files for all nodes.
+    /// Location of the current node.
     ///
-    /// Persistence files will be nested under the specified directory.
-    #[arg(long, short, env = "ESPRESSO_VALIDATOR_STORE_PATH")]
-    pub store_path: Option<PathBuf>,
+    /// If not provided, the IP address will be used for dashboard display.
+    #[clap(long, env = "ESPRESSO_VALIDATOR_LOCATION")]
+    pub location: Option<String>,
 
     /// Port of the current node if it's non-bootstrap.
     ///
@@ -190,6 +195,101 @@ pub struct NodeOpt {
     /// `--bootstrap-nodes`.
     #[arg(long, env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT")]
     pub nonbootstrap_port: Option<u16>,
+
+    /// Whether to reset the persisted state.
+    ///
+    /// If the path to a node's persistence files doesn't exist, its persisted state will be reset
+    /// regardless of this argument.
+    #[arg(long, short)]
+    pub reset_store_state: bool,
+
+    //
+    // 2. Consensus options for all nodes.
+    // The default values of `replication_factor` and mesh parameters for bootstrap and non-bootstrap
+    // nodes are set arbitrarily. They should increase as the number of nodes increases, and must meet
+    // the following requirements.
+    // * `mesh_outbound_min <= mesh_n_low <= mesh_n <= mesh_n_high`.
+    // * `mesh_outbound_min <= mesh_n / 2`.
+    //
+    /// Seed number used to generate secret key set for all nodes.
+    #[arg(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
+    pub secret_key_seed: Option<SecretKeySeed>,
+    #[arg(
+        long,
+        env = "ESPRESSO_VALIDATOR_REPLICATION_FACTOR",
+        default_value = "5"
+    )]
+    pub replication_factor: usize,
+    #[arg(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH",
+        default_value = "50"
+    )]
+    pub bootstrap_mesh_n_high: usize,
+    #[arg(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW",
+        default_value = "10"
+    )]
+    pub bootstrap_mesh_n_low: usize,
+    #[arg(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN",
+        default_value = "5"
+    )]
+    pub bootstrap_mesh_outbound_min: usize,
+    #[arg(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N",
+        default_value = "15"
+    )]
+    pub bootstrap_mesh_n: usize,
+    #[arg(
+        long,
+        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH",
+        default_value = "15"
+    )]
+    pub nonbootstrap_mesh_n_high: usize,
+    #[arg(
+        long,
+        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW",
+        default_value = "8"
+    )]
+    pub nonbootstrap_mesh_n_low: usize,
+    #[arg(
+        long,
+        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN",
+        default_value = "4"
+    )]
+    pub nonbootstrap_mesh_outbound_min: usize,
+    #[arg(
+        long,
+        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N",
+        default_value = "12"
+    )]
+    pub nonbootstrap_mesh_n: usize,
+    /// URLs of the bootstrap nodes, in the format of `<host>:<port>`.
+    #[arg(
+        long,
+        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_NODES",
+        default_value = "localhost:9000,localhost:9001,localhost:9002,localhost:9003,localhost:9004,localhost:9005,localhost:9006",
+        value_delimiter = ','
+    )]
+    pub bootstrap_nodes: Vec<Url>,
+
+    //
+    // 3. Other options for all nodes.
+    //
+    /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
+    /// bootstrap nodes.
+    #[arg(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
+    pub num_nodes: usize,
+
+    /// Path to persistence files for all nodes.
+    ///
+    /// Persistence files will be nested under the specified directory.
+    #[arg(long, short, env = "ESPRESSO_VALIDATOR_STORE_PATH")]
+    pub store_path: Option<PathBuf>,
 
     /// The base port for the non-bootstrap nodes.
     ///
@@ -300,6 +400,17 @@ pub struct NodeOpt {
         default_value = "10000"
     )]
     pub max_transactions: NonZeroUsize,
+
+    /// Whether to color log output with ANSI color codes.
+    #[arg(long, env = "ESPRESSO_COLORED_LOGS")]
+    pub colored_logs: bool,
+
+    /// Unique identifier for this instance of Espresso.
+    #[arg(long, env = "ESPRESSO_VALIDATOR_CHAIN_ID", default_value = "0")]
+    pub chain_id: u16,
+
+    #[command(subcommand)]
+    pub esqs: Option<full_node::Command>,
 }
 
 #[derive(Clone, Debug, Snafu)]
@@ -375,88 +486,6 @@ impl From<SecretKeySeed> for [u8; 32] {
     }
 }
 
-/// Options for the validator connections during the consensus.
-///
-/// All validators should have the same consensus options.
-///
-/// The default values of `replication_factor` and mesh parameters for bootstrap and non-bootstrap
-/// nodes are set arbitrarily. They should increase as the number of nodes increases, and must meet
-/// the following requirements.
-/// 1. `mesh_outbound_min <= mesh_n_low <= mesh_n <= mesh_n_high`.
-/// 2. `mesh_outbound_min <= mesh_n / 2`.
-#[derive(Clone, Debug, Args)]
-pub struct ConsensusOpt {
-    /// Seed number used to generate secret key set for all nodes.
-    #[arg(long, env = "ESPRESSO_VALIDATOR_SECRET_KEY_SEED")]
-    pub secret_key_seed: Option<SecretKeySeed>,
-
-    #[arg(
-        long,
-        env = "ESPRESSO_VALIDATOR_REPLICATION_FACTOR",
-        default_value = "5"
-    )]
-    pub replication_factor: usize,
-
-    #[arg(
-        long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH",
-        default_value = "50"
-    )]
-    pub bootstrap_mesh_n_high: usize,
-    #[arg(
-        long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW",
-        default_value = "10"
-    )]
-    pub bootstrap_mesh_n_low: usize,
-    #[arg(
-        long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN",
-        default_value = "5"
-    )]
-    pub bootstrap_mesh_outbound_min: usize,
-    #[arg(
-        long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N",
-        default_value = "15"
-    )]
-    pub bootstrap_mesh_n: usize,
-
-    #[arg(
-        long,
-        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH",
-        default_value = "15"
-    )]
-    pub nonbootstrap_mesh_n_high: usize,
-    #[arg(
-        long,
-        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW",
-        default_value = "8"
-    )]
-    pub nonbootstrap_mesh_n_low: usize,
-    #[arg(
-        long,
-        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN",
-        default_value = "4"
-    )]
-    pub nonbootstrap_mesh_outbound_min: usize,
-    #[arg(
-        long,
-        env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N",
-        default_value = "12"
-    )]
-    pub nonbootstrap_mesh_n: usize,
-
-    /// URLs of the bootstrap nodes, in the format of `<host>:<port>`.
-    #[arg(
-        long,
-        env = "ESPRESSO_VALIDATOR_BOOTSTRAP_NODES",
-        default_value = "localhost:9000,localhost:9001,localhost:9002,localhost:9003,localhost:9004,localhost:9005,localhost:9006",
-        value_delimiter = ','
-    )]
-    pub bootstrap_nodes: Vec<Url>,
-}
-
 /// Returns the project directory.
 pub fn project_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -476,17 +505,15 @@ fn default_store_path(node_id: usize) -> PathBuf {
 ///
 /// The returned path can be passed to `reset_store_dir` to remove the contents, if the
 /// `--reset-store-state` argument is true.
-fn get_store_dir(options: &NodeOpt, node_id: usize) -> PathBuf {
-    options
+fn get_store_dir(node_opt: &NodeOpt) -> PathBuf {
+    node_opt
         .store_path
         .clone()
-        .unwrap_or_else(|| default_store_path(node_id))
+        .unwrap_or_else(|| default_store_path(node_opt.id))
 }
 
-fn get_secret_key_seed(consensus_opt: &ConsensusOpt) -> [u8; 32] {
-    consensus_opt
-        .secret_key_seed
-        .unwrap_or(SecretKeySeed(DEFAULT_SECRET_KEY_SEED))
+fn get_secret_key_seed(seed: Option<SecretKeySeed>) -> [u8; 32] {
+    seed.unwrap_or(SecretKeySeed(DEFAULT_SECRET_KEY_SEED))
         .into()
 }
 
@@ -528,13 +555,11 @@ pub fn genesis(
 /// Creates the initial state and hotshot for simulation.
 #[allow(clippy::too_many_arguments)]
 async fn init_hotshot(
-    options: &NodeOpt,
+    node_opt: &NodeOpt,
     known_nodes: Vec<StakingKey>,
     priv_key: StakingPrivKey,
-    node_id: usize,
     networking: Network,
     genesis: GenesisNote,
-    num_bootstrap: usize,
 ) -> Consensus {
     // Create the initial hotshot
     let known_nodes = known_nodes
@@ -545,7 +570,7 @@ async fn init_hotshot(
         .iter()
         .map(|_| STAKE_PER_NODE.try_into().unwrap())
         .collect::<Vec<_>>();
-    let pub_key = known_nodes[node_id].clone();
+    let pub_key = known_nodes[node_opt.id].clone();
     let vrf_config = VRFStakeTableConfig {
         sortition_parameter: COMMITTEE_SIZE,
         distribution: stake_distribution,
@@ -553,24 +578,24 @@ async fn init_hotshot(
     let config = HotShotConfig {
         total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
         threshold: NonZeroUsize::new(QUORUM_THRESHOLD as usize).unwrap(),
-        max_transactions: options.max_transactions,
+        max_transactions: node_opt.max_transactions,
         known_nodes: known_nodes.clone(),
-        next_view_timeout: options.next_view_timeout.as_millis() as u64,
-        timeout_ratio: options.timeout_ratio.into(),
-        round_start_delay: options.round_start_delay.as_millis() as u64,
-        start_delay: options.start_delay.as_millis() as u64,
-        propose_min_round_time: options.min_propose_time,
-        propose_max_round_time: options.max_propose_time,
-        min_transactions: options.min_transactions,
-        num_bootstrap,
+        next_view_timeout: node_opt.next_view_timeout.as_millis() as u64,
+        timeout_ratio: node_opt.timeout_ratio.into(),
+        round_start_delay: node_opt.round_start_delay.as_millis() as u64,
+        start_delay: node_opt.start_delay.as_millis() as u64,
+        propose_min_round_time: node_opt.min_propose_time,
+        propose_max_round_time: node_opt.max_propose_time,
+        min_transactions: node_opt.min_transactions,
+        num_bootstrap: node_opt.bootstrap_nodes.len(),
         execution_type: ExecutionType::Continuous,
         election_config: None,
     };
     debug!(?config);
 
-    let storage = get_store_dir(options, node_id);
+    let storage = get_store_dir(node_opt);
     let storage_path = Path::new(&storage);
-    let lw_persistence = if options.reset_store_state {
+    let lw_persistence = if node_opt.reset_store_state {
         debug!("Initializing new session");
         LWPersistence::new(storage_path, "validator").unwrap()
     } else {
@@ -588,7 +613,7 @@ async fn init_hotshot(
     let hotshot = HotShot::init(
         pub_key,
         priv_key,
-        node_id as u64,
+        node_opt.id as u64,
         config,
         networking,
         MemoryStorage::new(),
@@ -640,43 +665,32 @@ pub async fn run_consensus<F: Send + Future>(mut consensus: Consensus, kill: F) 
     }
 }
 
-/// Generate a list of private and public keys for `consensus_opt.bootstrap_nodes.len()` bootstrap
-/// keys, with a given `consensus_opt.seed` seed.
-pub fn gen_bootstrap_keys(consensus_opt: &ConsensusOpt) -> Vec<StakingPrivKey> {
-    gen_keys(consensus_opt, consensus_opt.bootstrap_nodes.len())
-}
-
-/// Generate a list of private and public keys for the given number of nodes with a given
-/// `consensus_opt.seed` seed.
-pub fn gen_keys(consensus_opt: &ConsensusOpt, num_nodes: usize) -> Vec<StakingPrivKey> {
+/// Generate a list of private and public keys for the given number of nodes with a given seed.
+pub fn gen_keys(seed: Option<SecretKeySeed>, num_nodes: usize) -> Vec<StakingPrivKey> {
     (0..num_nodes)
         .into_iter()
         .map(|node_id| {
-            StakingKey::generated_from_seed_indexed(
-                get_secret_key_seed(consensus_opt),
-                node_id as u64,
-            )
-            .1
+            StakingKey::generated_from_seed_indexed(get_secret_key_seed(seed), node_id as u64).1
         })
         .collect()
 }
 
 pub async fn init_validator(
     node_opt: &NodeOpt,
-    consensus_opt: &ConsensusOpt,
     priv_key: StakingPrivKey,
     pub_keys: Vec<StakingKey>,
     genesis: GenesisNote,
-    own_id: usize,
 ) -> Consensus {
-    debug!("Current node: {}", own_id);
+    debug!("Current node: {}", node_opt.id);
 
-    let num_bootstrap = consensus_opt.bootstrap_nodes.len();
+    let num_bootstrap = node_opt.bootstrap_nodes.len();
 
     let mut bootstrap_nodes = vec![];
     for i in 0..num_bootstrap {
-        let priv_key =
-            Ed25519Priv::generated_from_seed_indexed(get_secret_key_seed(consensus_opt), i as u64);
+        let priv_key = Ed25519Priv::generated_from_seed_indexed(
+            get_secret_key_seed(node_opt.secret_key_seed),
+            i as u64,
+        );
         let libp2p_priv_key = SecretKey::from_bytes(&mut priv_key.to_bytes()[0..32]).unwrap();
         bootstrap_nodes.push(libp2p_priv_key);
     }
@@ -685,7 +699,7 @@ pub async fn init_validator(
         .into_iter()
         .enumerate()
         .map(|(idx, kp)| {
-            let multiaddr = parse_url(consensus_opt.bootstrap_nodes[idx].as_str()).unwrap();
+            let multiaddr = parse_url(node_opt.bootstrap_nodes[idx].as_str()).unwrap();
             (libp2p::identity::Keypair::Ed25519(kp.into()), multiaddr)
         })
         .take(num_bootstrap)
@@ -697,11 +711,11 @@ pub async fn init_validator(
         .map(|(kp, ma)| (Some(PeerId::from_public_key(&kp.public())), ma))
         .collect();
 
-    let (node_type, own_identity, port) = if own_id < num_bootstrap {
+    let (node_type, own_identity, port) = if node_opt.id < num_bootstrap {
         (
             NetworkNodeType::Bootstrap,
-            Some(bootstrap_priv[own_id].0.clone()),
-            consensus_opt.bootstrap_nodes[own_id]
+            Some(bootstrap_priv[node_opt.id].0.clone()),
+            node_opt.bootstrap_nodes[node_opt.id]
                 .as_str()
                 .split_once(':')
                 .unwrap()
@@ -715,24 +729,23 @@ pub async fn init_validator(
             None,
             match &node_opt.nonbootstrap_port {
                 Some(port) => *port,
-                None => (node_opt.nonbootstrap_base_port + own_id) as u16,
+                None => (node_opt.nonbootstrap_base_port + node_opt.id) as u16,
             },
         )
     };
 
     let own_network = match node_opt.cdn.clone() {
-        Some(cdn) if !node_opt.libp2p => Network::new_cdn(pub_keys.clone(), cdn, own_id)
+        Some(cdn) if !node_opt.libp2p => Network::new_cdn(pub_keys.clone(), cdn, node_opt.id)
             .await
             .unwrap(),
         _ => {
             let network = Network::new_p2p(
-                pub_keys[own_id].clone(),
+                pub_keys[node_opt.id].clone(),
                 to_connect_addrs,
-                own_id,
                 node_type,
                 parse_url(&format!("0.0.0.0:{:?}", port)).unwrap(),
                 own_identity,
-                consensus_opt,
+                node_opt,
             )
             .await
             .unwrap();
@@ -741,7 +754,7 @@ pub async fn init_validator(
                 // If there is a centralized server, use it as a barrier, so we don't proceed beyond
                 // this point until all nodes have reached this point and connected to the server.
                 // We will still use the libp2p network for consensus itself.
-                Network::new_cdn(pub_keys.clone(), cdn, own_id)
+                Network::new_cdn(pub_keys.clone(), cdn, node_opt.id)
                     .await
                     .unwrap();
             }
@@ -755,29 +768,15 @@ pub async fn init_validator(
     debug!("All nodes connected to network");
 
     // Initialize the state and hotshot
-    init_hotshot(
-        node_opt,
-        known_nodes,
-        priv_key,
-        own_id,
-        own_network,
-        genesis,
-        num_bootstrap,
-    )
-    .await
+    init_hotshot(node_opt, known_nodes, priv_key, own_network, genesis).await
 }
 
-pub fn open_data_source(
-    options: &NodeOpt,
-    id: usize,
-    location: Option<String>,
-    consensus: Consensus,
-) -> Arc<RwLock<QueryData>> {
-    let storage = get_store_dir(options, id);
-    Arc::new(RwLock::new(if options.reset_store_state {
-        QueryData::new(&storage, Box::new(consensus), location).unwrap()
+pub fn open_data_source(node_opt: &NodeOpt, consensus: Consensus) -> Arc<RwLock<QueryData>> {
+    let storage = get_store_dir(node_opt);
+    Arc::new(RwLock::new(if node_opt.reset_store_state {
+        QueryData::new(&storage, Box::new(consensus), node_opt.location.clone()).unwrap()
     } else {
-        QueryData::load(&storage, Box::new(consensus), location).unwrap()
+        QueryData::load(&storage, Box::new(consensus), node_opt.location.clone()).unwrap()
     }))
 }
 
