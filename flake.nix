@@ -217,6 +217,7 @@
             ESPRESSO_FAUCET_TEST_DISABLE_TIMEOUT = "1";
             SEAHORSE_TEST_TXN_HISTORY_TIME_TOLERANCE = "30";
             ESPRESSO_CLI_TEST_CONNECTION_TIMEOUT = "30m";
+            ESPRESSO_MULTI_MACHINE_TEST_VIEW_TIMEOUT = "5m";
           };
 
           staticShell = pkgs.mkShell {

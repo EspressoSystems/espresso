@@ -418,6 +418,11 @@ mod test {
         let fail_after_txn = &fail_after_txn.to_string();
         let cdn_port = pick_unused_port().unwrap();
         let cdn_url = &format!("tcp://localhost:{}", cdn_port);
+        // Set a fairly short view timeout by default (so that tests with leader failure don't take
+        // too long) but allow this to be overridden in the environment, so that we can test a slow
+        // target (like the coverage target) and still complete views within the timeout.
+        let next_view_timeout = env::var("ESPRESSO_MULTI_MACHINE_TEST_VIEW_TIMEOUT")
+            .unwrap_or_else(|_| "30s".to_string());
         let mut args = vec![
             "--cdn",
             cdn_url,
@@ -440,7 +445,7 @@ mod test {
             "--max-propose-time",
             "10s",
             "--next-view-timeout",
-            "30s",
+            &next_view_timeout,
             "--reset-store-state",
             "--verbose",
         ];
