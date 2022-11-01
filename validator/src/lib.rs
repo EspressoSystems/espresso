@@ -178,7 +178,7 @@ pub struct NodeOpt {
     /// Id of the current node.
     ///
     /// If the node ID is 0, it will propose and try to add transactions.
-    #[arg(long, short, env = "ESPRESSO_VALIDATOR_ID", requires("num-nodes"))]
+    #[arg(long, short, env = "ESPRESSO_VALIDATOR_ID")]
     pub id: usize,
 
     /// Location of the current node.

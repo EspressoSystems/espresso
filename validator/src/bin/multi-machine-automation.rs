@@ -30,11 +30,6 @@ struct Options {
     #[command(flatten)]
     node_opt: NodeOpt,
 
-    /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of
-    /// non-bootstrap nodes.
-    #[arg(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
-    pub num_nodes: usize,
-
     /// Public key which should own a faucet record in the genesis block.
     ///
     /// For each given public key, the ledger will be initialized with a record of 2^32 native
@@ -156,7 +151,7 @@ async fn main() {
     let max_transactions = options.node_opt.max_transactions.to_string();
     args.push("--max-transactions");
     args.push(&max_transactions);
-    let num_nodes_str = options.num_nodes.to_string();
+    let num_nodes_str = options.node_opt.num_nodes.to_string();
     let num_nodes = num_nodes_str.parse::<usize>().unwrap();
     let faucet_pub_keys = options
         .faucet_pub_key
@@ -191,7 +186,7 @@ async fn main() {
     // Start a CDN server if one is required.
     let cdn = options.node_opt.cdn.as_ref().map(|url| {
         let port = url.port_or_known_default().unwrap().to_string();
-        let num_nodes = options.num_nodes.to_string();
+        let num_nodes = options.node_opt.num_nodes.to_string();
         let mut cdn_args = vec!["-p", &port, "-n", &num_nodes];
         if !options.node_opt.libp2p {
             // If we're not using libp2p (we're just using the CDN for networking) we don't need a
@@ -237,6 +232,7 @@ async fn main() {
             let mut this_args = args.clone();
             let id_str = id.to_string();
             this_args.push("--id");
+            // Use `id_str` rather than `node_opt.id` since the latter is arbitrarily set as 0.
             this_args.push(&id_str);
             this_args.push("--num-nodes");
             this_args.push(&num_nodes_str);
@@ -415,6 +411,10 @@ mod test {
         let cdn_port = pick_unused_port().unwrap();
         let cdn_url = &format!("tcp://localhost:{}", cdn_port);
         let mut args = vec![
+            // Set an arbitrary ID. The automation code will use IDs from 0 to `num_nodes - 1` to
+            // run the validator executable.
+            "--id",
+            "0",
             "--cdn",
             cdn_url,
             "--num-nodes",
