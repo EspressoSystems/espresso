@@ -35,10 +35,11 @@ use tracing::info;
     about = "Runs a validator for a given rounds of consensus for testing purposes."
 )]
 struct Options {
+    /// Node with `node_opt.id = 0` will be the transaction submitter.
     #[command(flatten)]
     node_opt: NodeOpt,
 
-    /// Number of transactions to generate.
+    /// Number of successful transactions to submit.
     #[arg(long, short)]
     pub num_txns: u64,
 }
@@ -189,7 +190,7 @@ async fn generate_transactions(
                                 // one. We could update the same one and fix all its nullifier
                                 // proofs, but for testing it doesn't matter and its simpler to just
                                 // build a new transaction.
-                                info!("transaction expired, proposing a new one");
+                                info!("transaction expired, submitting a new one");
                                 (state, txn) = generate_transaction(state, round).await;
                                 hotshot
                                     .submit_transaction(txn.transaction.clone())

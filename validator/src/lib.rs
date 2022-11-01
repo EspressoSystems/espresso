@@ -176,8 +176,6 @@ pub struct NodeOpt {
     // 1. Node-specific options.
     //
     /// Id of the current node.
-    ///
-    /// If the node ID is 0, it will propose and try to add transactions.
     #[arg(long, short, env = "ESPRESSO_VALIDATOR_ID")]
     pub id: usize,
 
@@ -435,6 +433,12 @@ impl Default for NodeOpt {
 
 impl NodeOpt {
     pub fn check(&self) -> Result<(), String> {
+        if self.num_nodes < MINIMUM_NODES {
+            return Err(format!(
+                "number of nodes must not be less than {}",
+                MINIMUM_NODES
+            ));
+        }
         if self.max_propose_time < self.min_propose_time {
             return Err("max propose time must not be less than min propose time".into());
         }

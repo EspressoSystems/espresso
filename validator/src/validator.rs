@@ -23,10 +23,6 @@ pub async fn init(genesis: GenesisNote, node_opt: NodeOpt) -> Result<Consensus, 
         eprintln!("{}", msg);
         exit(1);
     }
-    if node_opt.num_nodes < MINIMUM_NODES {
-        eprintln!("Not enough nodes (need at least {})", MINIMUM_NODES);
-        exit(1);
-    }
 
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
