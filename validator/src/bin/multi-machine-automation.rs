@@ -88,6 +88,7 @@ async fn main() {
     // to construct a command line for each child, so the child processes shouldn't get their
     // options from the environment. Clear the environment variables corresponding to each option
     // that we will set explicitly in the command line.
+    env::remove_var("ESPRESSO_VALIDATOR_ID");
     env::remove_var("ESPRESSO_VALIDATOR_SECRET_KEY_SEED");
     env::remove_var("ESPRESSO_VALIDATOR_BOOTSTRAP_NODES");
     env::remove_var("ESPRESSO_VALIDATOR_PUB_KEY_PATH");

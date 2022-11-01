@@ -425,9 +425,15 @@ pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
         })
 }
 
-impl Default for NodeOpt {
-    fn default() -> Self {
-        Self::parse_from(std::iter::empty::<String>())
+impl NodeOpt {
+    pub fn new(id: usize, num_nodes: usize) -> Self {
+        Self::parse_from(vec![
+            "--",
+            "--id",
+            &id.to_string(),
+            "--num-nodes",
+            &num_nodes.to_string(),
+        ])
     }
 }
 
