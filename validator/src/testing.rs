@@ -145,7 +145,6 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
         let priv_key = keys[i].clone();
-        println!("here 148");
 
         store_path.push(i.to_string());
         async move {
@@ -176,7 +175,6 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                     .collect(),
                 ..NodeOpt::new(i, MINIMUM_NODES)
             };
-            println!("here 181");
 
             let consensus = init_validator(&node_opt, priv_key, pub_keys, genesis).await;
             let data_source = open_data_source(&node_opt, consensus.clone());
