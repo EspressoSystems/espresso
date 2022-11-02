@@ -575,7 +575,7 @@ pub mod mock_eligibility {
                 ) {
                     assert!(check_eligibility(
                         SORTITION_PARAMETER,
-                        &VrfSeed::default().into(),
+                        &VrfSeed::default(),
                         view_number,
                         NonZeroU64::new(1).unwrap(),
                         NonZeroU64::new(10).unwrap(),
@@ -584,7 +584,7 @@ pub mod mock_eligibility {
                     proof.staking_key = bad_pub_key.clone();
                     assert!(!check_eligibility(
                         SORTITION_PARAMETER,
-                        &VrfSeed::default().into(),
+                        &VrfSeed::default(),
                         view_number,
                         NonZeroU64::new(1).unwrap(),
                         NonZeroU64::new(10).unwrap(),
