@@ -218,6 +218,7 @@
             SEAHORSE_TEST_TXN_HISTORY_TIME_TOLERANCE = "30";
             ESPRESSO_CLI_TEST_CONNECTION_TIMEOUT = "30m";
             ESPRESSO_MULTI_MACHINE_TEST_VIEW_TIMEOUT = "5m";
+            ESPRESSO_MULTI_MACHINE_TEST_MAX_PROPOSE_TIME = "2m";
           };
 
           staticShell = pkgs.mkShell {
