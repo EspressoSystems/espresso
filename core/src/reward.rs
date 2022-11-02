@@ -40,14 +40,10 @@ use std::num::NonZeroU64;
 /// Proof for Vrf output
 pub type VrfProof = StakingKeySignature;
 
-/// Compute the allowed stake amount given current state (e.g. circulating supply), view_number and stake amount
+/// Compute the allowed stake amount given committee size, view_number and number of votes
 /// Hard-coded to 0 for FST
 //TODO: !kaley add block fees to compute_reward_amount
-pub fn compute_reward_amount(
-    _block_height: u64,
-    _votes: Amount,
-    _committee_size: Amount,
-) -> Amount {
+pub fn compute_reward_amount(_block_height: u64, _votes: u64, _committee_size: u64) -> Amount {
     Amount::from(1000u64)
 }
 
@@ -98,11 +94,10 @@ impl CollectRewardNote {
         rng: &mut R,
         historical_stake_tables_frontier: &StakeTableSetFrontier,
         historical_stake_tables_num_leaves: u64,
-        committee_size: Amount,
+        committee_size: u64,
         block_height: u64,
         staking_priv_key: &StakingPrivKey,
         cap_address: UserAddress,
-        num_votes: Amount,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
         uncollected_reward_proof: CollectedRewardsProof,
         eligibility_witness: EligibilityWitness,
@@ -114,7 +109,6 @@ impl CollectRewardNote {
             committee_size,
             block_height,
             cap_address,
-            num_votes,
             stake_amount_proof,
             uncollected_reward_proof,
             eligibility_witness,
@@ -156,6 +150,11 @@ impl CollectRewardNote {
     /// returns staking for which reward is being claimed
     pub fn staking_key(&self) -> StakingKey {
         self.body.eligibility_witness.staking_key.clone()
+    }
+
+    /// returns number of votes validator had for reward being claimed
+    pub fn num_votes(&self) -> u64 {
+        self.body.eligibility_witness.num_seats
     }
 
     /// returns time for which reward is being claimed
@@ -210,15 +209,15 @@ impl CollectRewardBody {
         rng: &mut R,
         historical_stake_tables_frontier: &StakeTableSetFrontier,
         historical_stake_tables_num_leaves: u64,
-        committee_size: Amount,
+        committee_size: u64,
         block_height: u64,
         cap_address: UserAddress,
-        num_votes: Amount,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
         uncollected_reward_proof: CollectedRewardsProof,
         eligibility_witness: EligibilityWitness,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
-        let allowed_reward = compute_reward_amount(block_height, num_votes, committee_size);
+        let allowed_reward =
+            compute_reward_amount(block_height, eligibility_witness.num_seats, committee_size);
         let blind_factor = BlindFactor::rand(rng);
         let rewards_proofs = {
             // assemble reward proofs
@@ -301,7 +300,7 @@ impl EligibilityWitness {
     ) -> Result<(), RewardError> {
         if mock_eligibility::check_eligibility(
             committee_size,
-            &vrf_seed.into(),
+            &vrf_seed,
             self.time,
             self.num_seats.try_into().unwrap(),
             total_stake,
@@ -346,19 +345,6 @@ pub struct RewardNoteProofs {
     leaf_proof_pos: u64,
 }
 
-/// RewardNote fields extracted data from proof
-/// returned by RewardNoteProof::verify
-/// It contains
-/// i) digest for which uncollected reward proof was verified against,
-/// ii) Stake owned by the staking key at time of reward eligibility
-/// iii) Total staked in stake table at time of reward eligibility
-/// iv) Total fees for block for which staking key is claiming reward
-pub struct RewardProofsValidationOutputs {
-    pub(crate) collected_reward_digest: CollectedRewardsDigest,
-    pub(crate) num_votes: Amount,
-    pub(crate) committee_size: Amount,
-}
-
 impl RewardNoteProofs {
     /// Checks proofs in RewardNoteProofs against ValidatorState
     /// On success, return RewardProofExtractedData
@@ -366,9 +352,9 @@ impl RewardNoteProofs {
         &self,
         validator_state: &ValidatorState,
         claimed_reward: CollectedRewards, // staking key and time t
-    ) -> Result<RewardProofsValidationOutputs, ValidationError> {
+    ) -> Result<CollectedRewardsDigest, ValidationError> {
         let stake_table_commitment = self.stake_tables_set_leaf_proof.leaf.0 .0;
-        let committee_size = self.stake_tables_set_leaf_proof.leaf.0 .1;
+        let _total_staked_amount = self.stake_tables_set_leaf_proof.leaf.0 .1;
         let time_in_proof = self.stake_tables_set_leaf_proof.leaf.0 .2;
         // 0. check public input matched proof data
         // 0.i) stake table proof leaf should contain correct commitment, total staked, and time.
@@ -379,7 +365,7 @@ impl RewardNoteProofs {
         }
 
         // 0.ii) staking key must be checked against claimed reward's staking key
-        let (staking_key_in_proof, key_staked_amount) = self
+        let (staking_key_in_proof, _key_staked_amount) = self
             .stake_amount_proof
             .get_leaf()
             .ok_or(ValidationError::BadCollectedRewardProof {})?;
@@ -443,11 +429,7 @@ impl RewardNoteProofs {
             option_value.ok_or(ValidationError::BadStakeTableProof {})?;
         }
 
-        Ok(RewardProofsValidationOutputs {
-            collected_reward_digest: root,
-            num_votes: key_staked_amount,
-            committee_size,
-        })
+        Ok(root)
     }
 
     /// retrieves proof that reward hasn't been collected
@@ -507,7 +489,7 @@ pub mod mock_eligibility {
     /// check whether a staking key is eligible for rewards
     pub fn check_eligibility(
         _sorition_parameter: u64,
-        _vrf_seed: &[u8; 32],
+        _vrf_seed: &VrfSeed,
         view_number: ConsensusTime,
         _stake_amount: NonZeroU64,
         _total_stake: NonZeroU64,
@@ -552,7 +534,7 @@ pub mod mock_eligibility {
         };
         if check_eligibility(
             sortition_parameter,
-            &vrf_seed.into(),
+            &vrf_seed,
             view_number,
             stake_amount,
             total_stake,

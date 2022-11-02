@@ -63,6 +63,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::iter::once;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use typenum::U32;
 
@@ -1596,18 +1597,18 @@ impl ValidatorState {
                 txn.verify(
                     self.chain.committee_size,
                     self.chain.vrf_seed,
-                    (u128::from(self.total_stake) as u64).try_into().unwrap(),
+                    amount_to_nonzerou64(self.total_stake),
                 )
                 .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
 
                 // check helper proofs (RewardNoteProofs)
-                let extracted_data = pfs.verify(self, latest_reward.clone())?;
+                let reward_digest = pfs.verify(self, latest_reward.clone())?;
 
                 //check reward amount
                 let max_reward = crate::reward::compute_reward_amount(
                     self.block_height,
-                    extracted_data.num_votes,
-                    extracted_data.committee_size,
+                    txn.num_votes(),
+                    self.chain.committee_size,
                 );
                 if txn.reward_amount() > max_reward {
                     return Err(ValidationError::RewardAmountTooLarge);
@@ -1624,7 +1625,7 @@ impl ValidatorState {
                 verified_rewards_proofs.push((
                     latest_reward,
                     pfs.get_uncollected_reward_proof(),
-                    extracted_data.collected_reward_digest,
+                    reward_digest,
                 ));
             }
         }
@@ -1684,11 +1685,6 @@ impl ValidatorState {
                 // This unwrap will always succeed, since we are building the tree from scratch and
                 // the whole thing is in memory.
                 stake_table.insert(key.clone(), *amount).unwrap();
-            }
-            // After inserting all the keys, we can forget them all so we end up with a completely
-            // sparse Merkle tree.
-            for key in txn.stake_table.keys() {
-                stake_table.forget(key.clone());
             }
 
             self.stake_table_root = StakeTableCommitment(stake_table.hash());
@@ -1805,6 +1801,11 @@ impl ValidatorState {
         }
         record_merkle_builder.build()
     }
+}
+
+/// converts Amount to NonZeroU64
+pub fn amount_to_nonzerou64(amt: Amount) -> NonZeroU64 {
+    (u128::from(amt) as u64).try_into().unwrap()
 }
 
 /// The Arbitrary trait is used for randomized (fuzz) testing.

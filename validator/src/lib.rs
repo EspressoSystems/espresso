@@ -13,8 +13,6 @@
 #![deny(warnings)]
 #![allow(clippy::format_push_string)]
 
-extern crate core;
-
 use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
 use async_std::sync::{Arc, RwLock};
@@ -27,7 +25,9 @@ use espresso_core::reward::{
     mock_eligibility, CollectRewardNote, CollectedRewards, CollectedRewardsSet,
 };
 use espresso_core::stake_table::StakingKey;
-use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof};
+use espresso_core::state::{
+    amount_to_nonzerou64, EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof,
+};
 use espresso_core::{
     genesis::GenesisNote,
     stake_table::{StakeTableHash, StakingPrivKey},
@@ -62,11 +62,9 @@ use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
 use snafu::Snafu;
 use static_assertions::const_assert;
 use std::collections::BTreeMap;
-use std::convert::TryInto;
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::io::Read;
-use std::num::NonZeroU64;
 use std::num::{NonZeroUsize, ParseIntError};
 use std::path::{Path, PathBuf};
 use std::str;
@@ -226,14 +224,13 @@ pub struct NodeOpt {
     /// slower, but each block is proportionally larger. Because of batch verification, larger
     /// blocks should lead to increased throughput.
     ///
-    /// `min-propose-time` is set to 0s by default, since minimum block size can be controlled using
+    /// `min-propose-time` is set to 1s by default, since minimum block size can be controlled using
     /// `min-transactions`, which is a more intentional, declarative setting. You may still wish to
     /// set a non-zero `min-propose-time` to allow for larger blocks in higher volumes while setting
-    /// `min-transactions` to something small to handle low-volume conditions.
+    /// `min-transactions` to something small to handle low-volume conditions. Setting this to 0s can cause rewards collection transactions to blow up many reward transactions are submitted at the same time
     #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
-        //TODO Kaley: nonzero min propose time to prevent rewards txn submission explosion
         default_value = "1s",
         value_parser = parse_duration
     )]
@@ -871,11 +868,6 @@ pub fn open_data_source(
     }))
 }
 
-//TODO !kaley: also needed in state.rs
-fn amount_to_nonzerou64(amt: Amount) -> NonZeroU64 {
-    (u128::from(amt) as u64).try_into().unwrap()
-}
-
 #[allow(dead_code)] // FIXME use this function in main
 async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
     mut rng: R,
@@ -922,11 +914,10 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
                         validator_state
                             .historical_stake_tables_commitment
                             .num_leaves,
-                        validator_state.total_stake,
+                        validator_state.chain.committee_size,
                         validator_state.block_height,
                         &staking_priv_key,
                         cap_address.clone(),
-                        stake_amount,
                         stake_proof.clone(),
                         uncollected_reward_proof,
                         vrf_proof,

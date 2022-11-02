@@ -356,6 +356,7 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
         let genesis = ElaboratedBlock::genesis(GenesisNote::new(
             ChainVariables::new(42, verif_crs, COMMITTEE_SIZE),
             Arc::new(initial_grants.into_iter().map(|(ro, _)| ro).collect()),
+            //The mock ledger does not simulate staking or rewards, so it doesn't matter what stake table we use. We use the empty stake table for simplicity.
             BTreeMap::new(),
         ));
         ret.submit(genesis).unwrap();
