@@ -1606,8 +1606,8 @@ impl ValidatorState {
                 //check reward amount
                 let max_reward = crate::reward::compute_reward_amount(
                     self.block_height,
-                    extracted_data.key_stake,
-                    extracted_data.stake_table_total_stake,
+                    extracted_data.num_votes,
+                    extracted_data.committee_size,
                 );
                 if txn.reward_amount() > max_reward {
                     return Err(ValidationError::RewardAmountTooLarge);

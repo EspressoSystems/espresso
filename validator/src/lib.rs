@@ -234,7 +234,7 @@ pub struct NodeOpt {
         long,
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
         //TODO Kaley: nonzero min propose time to prevent rewards txn submission explosion
-        default_value = "0s",
+        default_value = "1s",
         value_parser = parse_duration
     )]
     pub min_propose_time: Duration,

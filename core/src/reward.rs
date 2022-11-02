@@ -45,8 +45,8 @@ pub type VrfProof = StakingKeySignature;
 //TODO: !kaley add block fees to compute_reward_amount
 pub fn compute_reward_amount(
     _block_height: u64,
-    _stake: Amount,
-    _total_staked_amount: Amount,
+    _votes: Amount,
+    _committee_size: Amount,
 ) -> Amount {
     Amount::from(1000u64)
 }
@@ -98,11 +98,11 @@ impl CollectRewardNote {
         rng: &mut R,
         historical_stake_tables_frontier: &StakeTableSetFrontier,
         historical_stake_tables_num_leaves: u64,
-        total_staked_amount: Amount,
+        committee_size: Amount,
         block_height: u64,
         staking_priv_key: &StakingPrivKey,
         cap_address: UserAddress,
-        stake_amount: Amount,
+        num_votes: Amount,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
         uncollected_reward_proof: CollectedRewardsProof,
         eligibility_witness: EligibilityWitness,
@@ -111,10 +111,10 @@ impl CollectRewardNote {
             rng,
             historical_stake_tables_frontier,
             historical_stake_tables_num_leaves,
-            total_staked_amount,
+            committee_size,
             block_height,
             cap_address,
-            stake_amount,
+            num_votes,
             stake_amount_proof,
             uncollected_reward_proof,
             eligibility_witness,
@@ -210,15 +210,15 @@ impl CollectRewardBody {
         rng: &mut R,
         historical_stake_tables_frontier: &StakeTableSetFrontier,
         historical_stake_tables_num_leaves: u64,
-        total_staked_amount: Amount,
+        committee_size: Amount,
         block_height: u64,
         cap_address: UserAddress,
-        stake_amount: Amount,
+        num_votes: Amount,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
         uncollected_reward_proof: CollectedRewardsProof,
         eligibility_witness: EligibilityWitness,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
-        let allowed_reward = compute_reward_amount(block_height, stake_amount, total_staked_amount);
+        let allowed_reward = compute_reward_amount(block_height, num_votes, committee_size);
         let blind_factor = BlindFactor::rand(rng);
         let rewards_proofs = {
             // assemble reward proofs
@@ -355,8 +355,8 @@ pub struct RewardNoteProofs {
 /// iv) Total fees for block for which staking key is claiming reward
 pub struct RewardProofsValidationOutputs {
     pub(crate) collected_reward_digest: CollectedRewardsDigest,
-    pub(crate) key_stake: Amount,
-    pub(crate) stake_table_total_stake: Amount,
+    pub(crate) num_votes: Amount,
+    pub(crate) committee_size: Amount,
 }
 
 impl RewardNoteProofs {
@@ -368,7 +368,7 @@ impl RewardNoteProofs {
         claimed_reward: CollectedRewards, // staking key and time t
     ) -> Result<RewardProofsValidationOutputs, ValidationError> {
         let stake_table_commitment = self.stake_tables_set_leaf_proof.leaf.0 .0;
-        let stake_table_total_stake = self.stake_tables_set_leaf_proof.leaf.0 .1;
+        let committee_size = self.stake_tables_set_leaf_proof.leaf.0 .1;
         let time_in_proof = self.stake_tables_set_leaf_proof.leaf.0 .2;
         // 0. check public input matched proof data
         // 0.i) stake table proof leaf should contain correct commitment, total staked, and time.
@@ -445,8 +445,8 @@ impl RewardNoteProofs {
 
         Ok(RewardProofsValidationOutputs {
             collected_reward_digest: root,
-            key_stake: key_staked_amount,
-            stake_table_total_stake,
+            num_votes: key_staked_amount,
+            committee_size,
         })
     }
 
