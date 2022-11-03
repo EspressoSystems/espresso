@@ -18,7 +18,11 @@ use espresso_esqs::full_node::EsQS;
 use std::process::exit;
 
 /// Initiate the hotshot
-pub async fn init(genesis: GenesisNote, node_opt: NodeOpt) -> Result<Consensus, std::io::Error> {
+pub async fn init<R: CryptoRng + RngCore + Send + 'static>(
+    rng: R,
+    genesis: GenesisNote,
+    node_opt: NodeOpt,
+) -> Result<Consensus, std::io::Error> {
     if let Err(msg) = node_opt.check() {
         eprintln!("{}", msg);
         exit(1);
@@ -36,7 +40,7 @@ pub async fn init(genesis: GenesisNote, node_opt: NodeOpt) -> Result<Consensus, 
         .into_iter()
         .map(|sk| StakingKey::from_private(&sk))
         .collect();
-    let hotshot = init_validator(&node_opt, priv_key, known_nodes, genesis).await;
+    let hotshot = init_validator(rng, &node_opt, priv_key, known_nodes, genesis).await;
     let data_source = open_data_source(&node_opt, hotshot.clone());
 
     // Start an EsQS server if requested.

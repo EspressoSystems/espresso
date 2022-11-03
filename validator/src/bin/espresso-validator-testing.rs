@@ -17,6 +17,7 @@ use async_std::{
     task::{sleep, spawn_blocking},
 };
 use clap::Parser;
+use espresso_core::StakingKey;
 use espresso_core::{
     genesis::GenesisNote,
     state::{ChainVariables, SetMerkleTree, ValidatorState},
@@ -25,7 +26,10 @@ use espresso_core::{
     universal_params::VERIF_CRS,
 };
 use espresso_validator::{validator::*, *};
+use hotshot::types::SignatureKey;
 use hotshot::{traits::State, types::EventType};
+use rand::SeedableRng;
+use rand_chacha::ChaChaRng;
 use std::time::Duration;
 use tracing::info;
 
@@ -44,7 +48,7 @@ struct Options {
     pub num_txns: u64,
 }
 
-fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
+fn genesis_for_test(node_opt: &NodeOpt) -> (GenesisNote, MultiXfrTestState) {
     let mut state = MultiXfrTestState::initialize(
         GENESIS_SEED,
         10,
@@ -75,9 +79,18 @@ fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
     // our test state. This effectively "unspends" the records which were used to set up the initial
     // state. This is fine for testing purposes.
     state.nullifiers = SetMerkleTree::default();
+
+    // generate keys
+    let known_nodes = gen_keys(node_opt.secret_key_seed, node_opt.num_nodes);
     let genesis = GenesisNote::new(
-        ChainVariables::new(42, VERIF_CRS.clone()),
+        ChainVariables::new(42, VERIF_CRS.clone(), COMMITTEE_SIZE),
         Arc::new(state.records().collect()),
+        initialize_stake_table(
+            known_nodes
+                .into_iter()
+                .map(|key| StakingKey::from_private(&key))
+                .collect(),
+        ),
     );
     state.validator = ValidatorState::genesis(genesis.clone());
     (genesis, state)
@@ -294,8 +307,8 @@ async fn generate_transactions(
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::parse();
     let id = options.node_opt.id;
-    let (genesis, state) = genesis_for_test();
-    let hotshot = init(genesis, options.node_opt).await?;
+    let (genesis, state) = genesis_for_test(&options.node_opt);
+    let hotshot = init(ChaChaRng::from_entropy(), genesis, options.node_opt).await?;
     generate_transactions(options.num_txns, id, hotshot, state).await;
     Ok(())
 }

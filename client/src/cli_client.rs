@@ -671,7 +671,6 @@ fn cargo_run(package: impl AsRef<str>, bin: impl AsRef<str>) -> Result<Command, 
         .package(package.as_ref())
         .bin(bin.as_ref())
         .current_release()
-        .current_target()
         .run()
         .map_err(err)?
         .command())

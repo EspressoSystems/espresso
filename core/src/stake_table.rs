@@ -16,6 +16,7 @@ use crate::tree_hash::KVTreeHash;
 use crate::util::canonical;
 
 use crate::kv_merkle_tree::KVMerkleTree;
+use arbitrary::Arbitrary;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use commit::{Commitment, Committable};
 use derive_more::{AsRef, From, Into};
@@ -44,6 +45,26 @@ pub struct StakingKey(VrfPubKey);
 
 /// Staking Private Key
 pub type StakingPrivKey = <VrfPubKey as SignatureKey>::PrivateKey;
+
+impl PartialOrd for StakingKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.to_bytes().partial_cmp(&other.to_bytes())
+    }
+}
+
+impl Ord for StakingKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.to_bytes().cmp(&other.to_bytes())
+    }
+}
+
+impl<'a> Arbitrary<'a> for StakingKey {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let seed = u.arbitrary()?;
+        let index = u.arbitrary()?;
+        Ok(Self::generated_from_seed_indexed(seed, index).0)
+    }
+}
 
 impl SignatureKey for StakingKey {
     type PrivateKey = StakingPrivKey;
