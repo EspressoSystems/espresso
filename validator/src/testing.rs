@@ -127,6 +127,7 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     let bootstrap_ports = (0..MINIMUM_BOOTSTRAP_NODES)
         .into_iter()
         .map(|_| pick_unused_port().unwrap());
+    let nonbootstrap_base_port = pick_unused_port().unwrap() as usize;
 
     println!("generating public keys");
     let start = Instant::now();
@@ -150,8 +151,8 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         async move {
             let node_opt = NodeOpt {
                 location: Some("My location".to_string()),
+                nonbootstrap_base_port,
                 store_path: Some(store_path),
-                nonbootstrap_base_port: pick_unused_port().unwrap() as usize,
                 // Set fairly short view times (propose any transactions available after 5s, propose
                 // an empty block after 10s). In testing, we generally have low volumes, so we don't
                 // gain much from waiting longer to batch larger blocks, but with low views we get

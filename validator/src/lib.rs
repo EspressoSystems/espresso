@@ -189,7 +189,7 @@ pub struct NodeOpt {
     ///
     /// Overrides `nonbootstrap_base_port`.
     ///
-    /// If the node is bootstrap, thip option will be overriden by the corresponding port in
+    /// If the node is bootstrap, this option will be overriden by the corresponding port in
     /// `--bootstrap-nodes`.
     #[arg(long, env = "ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT")]
     pub nonbootstrap_port: Option<u16>,
@@ -200,6 +200,12 @@ pub struct NodeOpt {
     /// regardless of this argument.
     #[arg(long, short)]
     pub reset_store_state: bool,
+
+    /// Path to persistence files for the current node.
+    ///
+    /// Persistence files will be nested under the specified directory.
+    #[arg(long, short, env = "ESPRESSO_VALIDATOR_STORE_PATH")]
+    pub store_path: Option<PathBuf>,
 
     //
     // 2. Consensus options for all nodes.
@@ -282,12 +288,6 @@ pub struct NodeOpt {
     /// bootstrap nodes.
     #[arg(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
     pub num_nodes: usize,
-
-    /// Path to persistence files for all nodes.
-    ///
-    /// Persistence files will be nested under the specified directory.
-    #[arg(long, short, env = "ESPRESSO_VALIDATOR_STORE_PATH")]
-    pub store_path: Option<PathBuf>,
 
     /// The base port for the non-bootstrap nodes.
     ///
