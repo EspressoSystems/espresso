@@ -2313,7 +2313,7 @@
             .<span class="ident">derive_sub_tree</span>(<span class="string">&quot;keystore&quot;</span>.<span class="ident">as_bytes</span>())
             .<span class="ident">derive_sub_tree</span>(<span class="string">&quot;user&quot;</span>.<span class="ident">as_bytes</span>())
             .<span class="ident">derive_user_key_pair</span>(<span class="kw-2">&amp;</span><span class="number">0u64</span>.<span class="ident">to_le_bytes</span>());
-        <span class="kw">let</span> <span class="ident">network</span> <span class="op">=</span> <span class="ident">minimal_test_network</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>, <span class="ident">faucet_key_pair</span>.<span class="ident">pub_key</span>()).<span class="kw">await</span>;
+        <span class="kw">let</span> <span class="ident">network</span> <span class="op">=</span> <span class="ident">minimal_test_network</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>, <span class="ident">faucet_key_pair</span>.<span class="ident">pub_key</span>(), <span class="prelude-val">None</span>).<span class="kw">await</span>;
 
         <span class="comment">// Initiate a faucet server with the mnemonic associated with the faucet key pair.</span>
         <span class="kw">let</span> <span class="ident">faucet_dir</span> <span class="op">=</span> <span class="ident">TempDir::new</span>(<span class="string">&quot;espresso_keystore_faucet&quot;</span>).<span class="ident">unwrap</span>();

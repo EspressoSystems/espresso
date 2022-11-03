@@ -2162,6 +2162,9 @@
 <span id="2162">2162</span>
 <span id="2163">2163</span>
 <span id="2164">2164</span>
+<span id="2165">2165</span>
+<span id="2166">2166</span>
+<span id="2167">2167</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">deny</span>(<span class="ident">warnings</span>)]</span>
 <span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
@@ -2175,11 +2178,13 @@
 <span class="comment">// You should have received a copy of the GNU General Public License along with this program. If not,</span>
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table::StakeTableCommitment</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table</span>::{<span class="ident">StakeTableMap</span>, <span class="ident">StakeTableSetMT</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::state</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::universal_params</span>::{<span class="ident">MERKLE_HEIGHT</span>, <span class="ident">PROVER_CRS</span>, <span class="ident">UNIVERSAL_PARAM</span>, <span class="ident">VERIF_CRS</span>};
 <span class="kw">use</span> <span class="ident">arbitrary::Arbitrary</span>;
 <span class="kw">use</span> <span class="ident">core::iter::once</span>;
+<span class="kw">use</span> <span class="ident">hotshot::traits::election::vrf::SORTITION_PARAMETER</span>;
 <span class="kw">use</span> <span class="ident">hotshot::traits</span>::{<span class="ident">Block</span>, <span class="ident">State</span>};
 <span class="kw">use</span> <span class="ident">jf_cap</span>::{
     <span class="ident">keys::UserKeyPair</span>,
@@ -2484,9 +2489,9 @@
             <span class="ident">nullifiers</span>, <span class="comment">/*asset_defs,*/</span>
             <span class="ident">record_merkle_tree</span>: <span class="ident">t</span>.<span class="ident">clone</span>(),
             <span class="ident">validator</span>: <span class="ident">ValidatorState::new</span>(
-                <span class="ident">ChainVariables::new</span>(<span class="number">42</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>()),
+                <span class="ident">ChainVariables::new</span>(<span class="number">42</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>(), <span class="ident">SORTITION_PARAMETER</span>),
                 <span class="ident">t</span>,
-                <span class="ident">StakeTableMap::EmptySubtree</span>,
+                <span class="ident">StakeTableCommitment</span>(<span class="ident">StakeTableMap::EmptySubtree</span>.<span class="ident">hash</span>()),
                 <span class="ident">Amount::from</span>(<span class="number">0u64</span>),
                 <span class="ident">StakeTableSetMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
             ),
@@ -3618,9 +3623,10 @@
                         }))
                         .<span class="ident">unwrap</span>(),
                     }),
+                    <span class="ident">SORTITION_PARAMETER</span>,
                 ),
                 <span class="ident">record_merkle_tree</span>,
-                <span class="ident">stake_table_map</span>,
+                <span class="ident">StakeTableCommitment</span>(<span class="ident">stake_table_map</span>.<span class="ident">hash</span>()),
                 <span class="ident">Amount::from</span>(<span class="number">0u64</span>),
                 <span class="ident">stake_table_commitments_mt</span>,
             )
@@ -3649,9 +3655,9 @@
     <span class="kw">fn</span> <span class="ident">test_record_history_commit_hash</span>() {
         <span class="comment">// Check that ValidatorStates with different record histories have different commits.</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">v1</span> <span class="op">=</span> <span class="ident">ValidatorState::new</span>(
-            <span class="ident">ChainVariables::new</span>(<span class="number">42</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>()),
+            <span class="ident">ChainVariables::new</span>(<span class="number">42</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>(), <span class="ident">SORTITION_PARAMETER</span>),
             <span class="ident">MerkleTree::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
-            <span class="ident">StakeTableMap::EmptySubtree</span>,
+            <span class="ident">StakeTableCommitment</span>(<span class="ident">StakeTableMap::EmptySubtree</span>.<span class="ident">hash</span>()),
             <span class="ident">Amount::from</span>(<span class="number">0u64</span>),
             <span class="ident">StakeTableSetMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
         );
@@ -3809,9 +3815,9 @@
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">keystore_merkle_tree</span> <span class="op">=</span> <span class="ident">t</span>.<span class="ident">clone</span>();
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">validator</span> <span class="op">=</span> <span class="ident">ValidatorState::new</span>(
-            <span class="ident">ChainVariables::new</span>(<span class="number">42</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>()),
+            <span class="ident">ChainVariables::new</span>(<span class="number">42</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>(), <span class="ident">SORTITION_PARAMETER</span>),
             <span class="ident">t</span>,
-            <span class="ident">StakeTableMap::EmptySubtree</span>,
+            <span class="ident">StakeTableCommitment</span>(<span class="ident">StakeTableMap::EmptySubtree</span>.<span class="ident">hash</span>()),
             <span class="ident">Amount::from</span>(<span class="number">0u64</span>),
             <span class="ident">StakeTableSetMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
         );

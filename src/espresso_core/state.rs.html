@@ -1789,6 +1789,93 @@
 <span id="1789">1789</span>
 <span id="1790">1790</span>
 <span id="1791">1791</span>
+<span id="1792">1792</span>
+<span id="1793">1793</span>
+<span id="1794">1794</span>
+<span id="1795">1795</span>
+<span id="1796">1796</span>
+<span id="1797">1797</span>
+<span id="1798">1798</span>
+<span id="1799">1799</span>
+<span id="1800">1800</span>
+<span id="1801">1801</span>
+<span id="1802">1802</span>
+<span id="1803">1803</span>
+<span id="1804">1804</span>
+<span id="1805">1805</span>
+<span id="1806">1806</span>
+<span id="1807">1807</span>
+<span id="1808">1808</span>
+<span id="1809">1809</span>
+<span id="1810">1810</span>
+<span id="1811">1811</span>
+<span id="1812">1812</span>
+<span id="1813">1813</span>
+<span id="1814">1814</span>
+<span id="1815">1815</span>
+<span id="1816">1816</span>
+<span id="1817">1817</span>
+<span id="1818">1818</span>
+<span id="1819">1819</span>
+<span id="1820">1820</span>
+<span id="1821">1821</span>
+<span id="1822">1822</span>
+<span id="1823">1823</span>
+<span id="1824">1824</span>
+<span id="1825">1825</span>
+<span id="1826">1826</span>
+<span id="1827">1827</span>
+<span id="1828">1828</span>
+<span id="1829">1829</span>
+<span id="1830">1830</span>
+<span id="1831">1831</span>
+<span id="1832">1832</span>
+<span id="1833">1833</span>
+<span id="1834">1834</span>
+<span id="1835">1835</span>
+<span id="1836">1836</span>
+<span id="1837">1837</span>
+<span id="1838">1838</span>
+<span id="1839">1839</span>
+<span id="1840">1840</span>
+<span id="1841">1841</span>
+<span id="1842">1842</span>
+<span id="1843">1843</span>
+<span id="1844">1844</span>
+<span id="1845">1845</span>
+<span id="1846">1846</span>
+<span id="1847">1847</span>
+<span id="1848">1848</span>
+<span id="1849">1849</span>
+<span id="1850">1850</span>
+<span id="1851">1851</span>
+<span id="1852">1852</span>
+<span id="1853">1853</span>
+<span id="1854">1854</span>
+<span id="1855">1855</span>
+<span id="1856">1856</span>
+<span id="1857">1857</span>
+<span id="1858">1858</span>
+<span id="1859">1859</span>
+<span id="1860">1860</span>
+<span id="1861">1861</span>
+<span id="1862">1862</span>
+<span id="1863">1863</span>
+<span id="1864">1864</span>
+<span id="1865">1865</span>
+<span id="1866">1866</span>
+<span id="1867">1867</span>
+<span id="1868">1868</span>
+<span id="1869">1869</span>
+<span id="1870">1870</span>
+<span id="1871">1871</span>
+<span id="1872">1872</span>
+<span id="1873">1873</span>
+<span id="1874">1874</span>
+<span id="1875">1875</span>
+<span id="1876">1876</span>
+<span id="1877">1877</span>
+<span id="1878">1878</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">deny</span>(<span class="ident">warnings</span>)]</span>
 <span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
@@ -1803,8 +1890,10 @@
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
 <span class="kw">use</span> <span class="ident">espresso_macros</span>::<span class="kw-2">*</span>;
+<span class="kw">use</span> <span class="ident">generic_array::GenericArray</span>;
 <span class="kw">use</span> <span class="ident">jf_cap::structs</span>::{<span class="ident">Amount</span>, <span class="ident">ReceiverMemo</span>};
 <span class="kw">use</span> <span class="ident">jf_cap::Signature</span>;
+<span class="kw">use</span> <span class="ident">sha3::Sha3_256</span>;
 
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::full_persistence::FullPersistence</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::kv_merkle_tree</span>::<span class="kw-2">*</span>;
@@ -1823,8 +1912,8 @@
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::genesis::GenesisNote</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table</span>::{
     <span class="ident">CommittableStakeTableSetCommitment</span>, <span class="ident">CommittableStakeTableSetFrontier</span>, <span class="ident">StakeTableCommitment</span>,
-    <span class="ident">StakeTableMap</span>, <span class="ident">StakeTableSetCommitment</span>, <span class="ident">StakeTableSetFrontier</span>, <span class="ident">StakeTableSetHistory</span>,
-    <span class="ident">StakeTableSetMT</span>,
+    <span class="ident">StakeTableHash</span>, <span class="ident">StakeTableMap</span>, <span class="ident">StakeTableSetCommitment</span>, <span class="ident">StakeTableSetFrontier</span>,
+    <span class="ident">StakeTableSetHistory</span>, <span class="ident">StakeTableSetMT</span>,
 };
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::state::state_comm::CommittableAmount</span>;
@@ -1835,7 +1924,7 @@
 <span class="kw">use</span> <span class="ident">canonical::CanonicalBytes</span>;
 <span class="kw">use</span> <span class="ident">commit</span>::{<span class="ident">Commitment</span>, <span class="ident">Committable</span>};
 <span class="kw">use</span> <span class="ident">core::fmt::Debug</span>;
-<span class="kw">use</span> <span class="ident">derive_more</span>::{<span class="ident">From</span>, <span class="ident">Into</span>};
+<span class="kw">use</span> <span class="ident">derive_more</span>::{<span class="ident">AsRef</span>, <span class="ident">From</span>, <span class="ident">Into</span>};
 <span class="kw">use</span> <span class="ident">hotshot::traits</span>::{<span class="ident">Block</span> <span class="kw">as</span> <span class="ident">ConsensusBlock</span>, <span class="ident">State</span> <span class="kw">as</span> <span class="ident">ConsensusState</span>};
 <span class="kw">use</span> <span class="ident">jf_cap</span>::{
     <span class="ident">errors::TxnApiError</span>, <span class="ident">structs::Nullifier</span>, <span class="ident">txn_batch_verify</span>, <span class="ident">MerkleCommitment</span>, <span class="ident">MerkleFrontier</span>,
@@ -1845,12 +1934,16 @@
 <span class="kw">use</span> <span class="ident">jf_utils::tagged_blob</span>;
 <span class="kw">use</span> <span class="ident">key_set::VerifierKeySet</span>;
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
+<span class="kw">use</span> <span class="ident">sha3::digest::Update</span>;
+<span class="kw">use</span> <span class="ident">sha3::Digest</span>;
 <span class="kw">use</span> <span class="ident">snafu::Snafu</span>;
 <span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">HashMap</span>, <span class="ident">HashSet</span>, <span class="ident">VecDeque</span>};
 <span class="kw">use</span> <span class="ident">std::hash</span>::{<span class="ident">Hash</span>, <span class="ident">Hasher</span>};
 <span class="kw">use</span> <span class="ident">std::io::Read</span>;
 <span class="kw">use</span> <span class="ident">std::iter::once</span>;
+<span class="kw">use</span> <span class="ident">std::num::NonZeroU64</span>;
 <span class="kw">use</span> <span class="ident">std::sync::Arc</span>;
+<span class="kw">use</span> <span class="ident">typenum::U32</span>;
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>, <span class="ident">Serialize</span>, <span class="ident">Deserialize</span>)]</span>
 <span class="doccomment">/// A transaction tht can be either a CAP transaction or a collect reward transaction</span>
@@ -2303,6 +2396,9 @@
 
     <span class="doccomment">/// verification error for stake table commitments proof</span>
     <span class="ident">BadStakeTableCommitmentsProof</span> {},
+
+    <span class="doccomment">/// Error when calculating block fees</span>
+    <span class="ident">BadFeeCalculation</span> {},
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod</span> <span class="ident">ser_display</span> {
@@ -2367,6 +2463,7 @@
             <span class="ident">RewardAmountTooLarge</span> =&gt; <span class="ident">RewardAmountTooLarge</span>,
             <span class="ident">BadStakeTableProof</span> {} =&gt; <span class="ident">BadStakeTableProof</span> {},
             <span class="ident">BadStakeTableCommitmentsProof</span> {} =&gt; <span class="ident">BadStakeTableCommitmentsProof</span> {},
+            <span class="ident">BadFeeCalculation</span> {} =&gt; <span class="ident">BadFeeCalculation</span> {},
         }
     }
 }
@@ -2837,7 +2934,7 @@
         <span class="kw">pub</span> <span class="ident">past_record_merkle_roots</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">RecordMerkleHistory</span><span class="op">&gt;</span>,
         <span class="kw">pub</span> <span class="ident">past_nullifiers</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">NullifierHistory</span><span class="op">&gt;</span>,
         <span class="kw">pub</span> <span class="ident">prev_block</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">Block</span><span class="op">&gt;</span>,
-        <span class="kw">pub</span> <span class="ident">stake_table</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">StakeTableCommitment</span><span class="op">&gt;</span>,
+        <span class="kw">pub</span> <span class="ident">stake_table_root</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">StakeTableCommitment</span><span class="op">&gt;</span>,
         <span class="kw">pub</span> <span class="ident">total_stake</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">CommittableAmount</span><span class="op">&gt;</span>,
         <span class="kw">pub</span> <span class="ident">historical_stake_tables</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">CommittableStakeTableSetFrontier</span><span class="op">&gt;</span>,
         <span class="kw">pub</span> <span class="ident">past_stc_merkle_roots</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">StakeTableSetHistory</span><span class="op">&gt;</span>,
@@ -2866,7 +2963,7 @@
                 .<span class="ident">field</span>(<span class="string">&quot;past_record_merkle_roots&quot;</span>, <span class="self">self</span>.<span class="ident">past_record_merkle_roots</span>)
                 .<span class="ident">field</span>(<span class="string">&quot;past_nullifiers&quot;</span>, <span class="self">self</span>.<span class="ident">past_nullifiers</span>)
                 .<span class="ident">field</span>(<span class="string">&quot;prev_block&quot;</span>, <span class="self">self</span>.<span class="ident">prev_block</span>)
-                .<span class="ident">field</span>(<span class="string">&quot;stake_table&quot;</span>, <span class="self">self</span>.<span class="ident">stake_table</span>)
+                .<span class="ident">field</span>(<span class="string">&quot;stake_table_root&quot;</span>, <span class="self">self</span>.<span class="ident">stake_table_root</span>)
                 .<span class="ident">field</span>(<span class="string">&quot;total_stake&quot;</span>, <span class="self">self</span>.<span class="ident">total_stake</span>)
                 .<span class="ident">field</span>(<span class="string">&quot;stake_table_commitments&quot;</span>, <span class="self">self</span>.<span class="ident">historical_stake_tables</span>)
                 .<span class="ident">field</span>(<span class="string">&quot;past_stc_merkle_roots&quot;</span>, <span class="self">self</span>.<span class="ident">past_stc_merkle_roots</span>)
@@ -2951,11 +3048,53 @@
 
     <span class="doccomment">/// Plonk verifier keys.</span>
     <span class="kw">pub</span> <span class="ident">verif_crs</span>: <span class="ident">ArcSer</span><span class="op">&lt;</span><span class="ident">VerifierKeySet</span><span class="op">&gt;</span>,
+
+    <span class="doccomment">/// VRF seed for checking rewards</span>
+    <span class="kw">pub</span> <span class="ident">vrf_seed</span>: <span class="ident">VrfSeed</span>,
+
+    <span class="doccomment">/// Committee size</span>
+    <span class="kw">pub</span> <span class="ident">committee_size</span>: <span class="ident">u64</span>,
+}
+
+<span class="attribute">#[<span class="ident">tagged_blob</span>(<span class="string">&quot;VRFSEED&quot;</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(
+    <span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">PartialOrd</span>, <span class="ident">Ord</span>, <span class="ident">Copy</span>, <span class="ident">AsRef</span>, <span class="ident">Arbitrary</span>, <span class="ident">From</span>, <span class="ident">Into</span>, <span class="ident">Default</span>,
+)]</span>
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">VrfSeed</span>([<span class="ident">u8</span>; <span class="number">32</span>]);
+
+<span class="kw">impl</span> <span class="ident">CanonicalSerialize</span> <span class="kw">for</span> <span class="ident">VrfSeed</span> {
+    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">SerializationError</span><span class="op">&gt;</span> {
+        <span class="ident">writer</span>
+            .<span class="ident">write_all</span>(<span class="self">self</span>.<span class="ident">as_ref</span>())
+            .<span class="ident">map_err</span>(<span class="ident">SerializationError::from</span>)
+    }
+    <span class="kw">fn</span> <span class="ident">serialized_size</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
+        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">len</span>()
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">CanonicalDeserialize</span> <span class="kw">for</span> <span class="ident">VrfSeed</span> {
+    <span class="kw">fn</span> <span class="ident">deserialize</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SerializationError</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buf</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">32</span>];
+        <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<span class="self">Self</span>(<span class="ident">buf</span>))
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">GenericArray</span><span class="op">&lt;</span><span class="ident">u8</span>, <span class="ident">U32</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">VrfSeed</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">array</span>: <span class="ident">GenericArray</span><span class="op">&lt;</span><span class="ident">u8</span>, <span class="ident">U32</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
+        <span class="self">Self</span>(<span class="ident">array</span>.<span class="ident">into</span>())
+    }
+}
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">VrfSeed</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">GenericArray</span><span class="op">&lt;</span><span class="ident">u8</span>, <span class="ident">U32</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">vrf_seed</span>: <span class="ident">VrfSeed</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident">GenericArray::from</span>(<span class="ident">vrf_seed</span>.<span class="number">0</span>)
+    }
 }
 
 <span class="kw">impl</span> <span class="ident">Default</span> <span class="kw">for</span> <span class="ident">ChainVariables</span> {
     <span class="kw">fn</span> <span class="ident">default</span>() -&gt; <span class="self">Self</span> {
-        <span class="ident"><span class="self">Self</span>::new</span>(<span class="number">0</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>())
+        <span class="ident"><span class="self">Self</span>::new</span>(<span class="number">0</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>(), <span class="number">0</span>)
     }
 }
 
@@ -2967,6 +3106,8 @@
             .<span class="ident">u64_field</span>(<span class="string">&quot;protocol_version_patch&quot;</span>, <span class="self">self</span>.<span class="ident">protocol_version</span>.<span class="number">2</span> <span class="kw">as</span> <span class="ident">u64</span>)
             .<span class="ident">u64_field</span>(<span class="string">&quot;chain_id&quot;</span>, <span class="self">self</span>.<span class="ident">chain_id</span> <span class="kw">as</span> <span class="ident">u64</span>)
             .<span class="ident">var_size_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">canonical::serialize</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">verif_crs</span>).<span class="ident">unwrap</span>())
+            .<span class="ident">fixed_size_bytes</span>(<span class="self">self</span>.<span class="ident">vrf_seed</span>.<span class="ident">as_ref</span>())
+            .<span class="ident">u64_field</span>(<span class="string">&quot;committee size&quot;</span>, <span class="self">self</span>.<span class="ident">committee_size</span>)
             .<span class="ident">finalize</span>()
     }
 }
@@ -2977,6 +3118,8 @@
             <span class="ident">protocol_version</span>: <span class="ident">u</span>.<span class="ident">arbitrary</span>()<span class="question-mark">?</span>,
             <span class="ident">chain_id</span>: <span class="ident">u</span>.<span class="ident">arbitrary</span>()<span class="question-mark">?</span>,
             <span class="ident">verif_crs</span>: <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
+            <span class="ident">vrf_seed</span>: <span class="ident">u</span>.<span class="ident">arbitrary</span>()<span class="question-mark">?</span>,
+            <span class="ident">committee_size</span>: <span class="ident">u</span>.<span class="ident">arbitrary</span>()<span class="question-mark">?</span>,
         })
     }
 }
@@ -2996,7 +3139,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">ChainVariables</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">chain_id</span>: <span class="ident">u16</span>, <span class="ident">verif_crs</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">VerifierKeySet</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">chain_id</span>: <span class="ident">u16</span>, <span class="ident">verif_crs</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">VerifierKeySet</span><span class="op">&gt;</span>, <span class="ident">committee_size</span>: <span class="ident">u64</span>) -&gt; <span class="self">Self</span> {
         <span class="self">Self</span> {
             <span class="ident">protocol_version</span>: (
                 <span class="macro">env!</span>(<span class="string">&quot;CARGO_PKG_VERSION_MAJOR&quot;</span>).<span class="ident">parse</span>().<span class="ident">unwrap</span>(),
@@ -3005,6 +3148,12 @@
             ),
             <span class="ident">chain_id</span>,
             <span class="ident">verif_crs</span>: <span class="ident">verif_crs</span>.<span class="ident">into</span>(),
+            <span class="comment">//TODO: placeholder until beacon designed</span>
+            <span class="ident">vrf_seed</span>: <span class="ident">Sha3_256::new</span>()
+                .<span class="ident">chain</span>(<span class="ident">chain_id</span>.<span class="ident">to_le_bytes</span>())
+                .<span class="ident">finalize</span>()
+                .<span class="ident">into</span>(),
+            <span class="ident">committee_size</span>,
         }
     }
 }
@@ -3042,8 +3191,8 @@
     <span class="doccomment">/// Nullifiers from recent blocks, which allows validating slightly out-of-date-transactions</span>
     <span class="kw">pub</span> <span class="ident">past_nullifiers</span>: <span class="ident">NullifierHistory</span>,
     <span class="kw">pub</span> <span class="ident">prev_block</span>: <span class="ident">Commitment</span><span class="op">&lt;</span><span class="ident">Block</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// Staking table. For fixed-stake, this will be the same each round</span>
-    <span class="kw">pub</span> <span class="ident">stake_table</span>: <span class="ident">StakeTableMap</span>,
+    <span class="doccomment">/// Staking table root hash. For fixed-stake, this will be the same each round</span>
+    <span class="kw">pub</span> <span class="ident">stake_table_root</span>: <span class="ident">StakeTableCommitment</span>,
     <span class="doccomment">/// Total amount staked for the current table</span>
     <span class="kw">pub</span> <span class="ident">total_stake</span>: <span class="ident">Amount</span>,
     <span class="doccomment">/// Keeps track of previous stake tables and their total stake</span>
@@ -3067,7 +3216,7 @@
         <span class="ident"><span class="self">Self</span>::new</span>(
             <span class="ident">ChainVariables::default</span>(),
             <span class="ident">MerkleTree::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
-            <span class="ident">StakeTableMap::EmptySubtree</span>,
+            <span class="ident">StakeTableCommitment</span>(<span class="ident">StakeTableMap::EmptySubtree</span>.<span class="ident">hash</span>()),
             <span class="ident">Amount::from</span>(<span class="number">0u64</span>),
             <span class="ident">StakeTableSetMT::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>(),
         )
@@ -3089,7 +3238,7 @@
             <span class="ident">past_record_merkle_roots</span>: <span class="self">self</span>.<span class="ident">past_record_merkle_roots</span>.<span class="ident">commit</span>(),
             <span class="ident">past_nullifiers</span>: <span class="self">self</span>.<span class="ident">past_nullifiers</span>.<span class="ident">commit</span>(),
             <span class="ident">prev_block</span>: <span class="self">self</span>.<span class="ident">prev_block</span>,
-            <span class="ident">stake_table</span>: <span class="ident">StakeTableCommitment</span>(<span class="self">self</span>.<span class="ident">stake_table</span>.<span class="ident">hash</span>()).<span class="ident">commit</span>(),
+            <span class="ident">stake_table_root</span>: <span class="self">self</span>.<span class="ident">stake_table_root</span>.<span class="ident">commit</span>(),
             <span class="ident">total_stake</span>: <span class="ident">CommittableAmount::from</span>(<span class="self">self</span>.<span class="ident">total_stake</span>).<span class="ident">commit</span>(),
             <span class="ident">historical_stake_tables</span>: <span class="ident">CommittableStakeTableSetFrontier</span>(
                 <span class="self">self</span>.<span class="ident">historical_stake_tables</span>.<span class="ident">clone</span>(),
@@ -3117,7 +3266,7 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(
         <span class="ident">chain</span>: <span class="ident">ChainVariables</span>,
         <span class="ident">record_merkle_frontier</span>: <span class="ident">MerkleTree</span>,
-        <span class="ident">stake_table_map</span>: <span class="ident">StakeTableMap</span>,
+        <span class="ident">stake_table_map_root</span>: <span class="ident">StakeTableCommitment</span>,
         <span class="ident">total_stake</span>: <span class="ident">Amount</span>,
         <span class="ident">stake_table_commitments_mt</span>: <span class="ident">StakeTableSetMT</span>,
     ) -&gt; <span class="self">Self</span> {
@@ -3134,7 +3283,7 @@
             )),
             <span class="ident">past_nullifiers</span>: <span class="ident">NullifierHistory::default</span>(),
             <span class="ident">prev_block</span>: <span class="ident">Block::default</span>().<span class="ident">commit</span>(),
-            <span class="ident">stake_table</span>: <span class="ident">stake_table_map</span>,
+            <span class="ident">stake_table_root</span>: <span class="ident">stake_table_map_root</span>,
             <span class="ident">total_stake</span>,
             <span class="ident">historical_stake_tables</span>: <span class="ident">stake_table_commitments_mt</span>.<span class="ident">frontier</span>(),
             <span class="ident">past_historial_stake_table_merkle_roots</span>: <span class="ident">StakeTableSetHistory</span>(<span class="ident">VecDeque::with_capacity</span>(
@@ -3323,17 +3472,21 @@
                 };
 
                 <span class="comment">// verify eligibility reward txn (CollectRewardNote)</span>
-                <span class="ident">txn</span>.<span class="ident">verify</span>()
-                    .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">_e</span><span class="op">|</span> <span class="ident">ValidationError::BadCollectRewardNote</span> {})<span class="question-mark">?</span>;
+                <span class="ident">txn</span>.<span class="ident">verify</span>(
+                    <span class="self">self</span>.<span class="ident">chain</span>.<span class="ident">committee_size</span>,
+                    <span class="self">self</span>.<span class="ident">chain</span>.<span class="ident">vrf_seed</span>,
+                    <span class="ident">amount_to_nonzerou64</span>(<span class="ident">pfs</span>.<span class="ident">total_stake</span>()),
+                )
+                .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">_e</span><span class="op">|</span> <span class="ident">ValidationError::BadCollectRewardNote</span> {})<span class="question-mark">?</span>;
 
                 <span class="comment">// check helper proofs (RewardNoteProofs)</span>
-                <span class="kw">let</span> <span class="ident">extracted_data</span> <span class="op">=</span> <span class="ident">pfs</span>.<span class="ident">verify</span>(<span class="self">self</span>, <span class="ident">latest_reward</span>.<span class="ident">clone</span>())<span class="question-mark">?</span>;
+                <span class="kw">let</span> <span class="ident">reward_digest</span> <span class="op">=</span> <span class="ident">pfs</span>.<span class="ident">verify</span>(<span class="self">self</span>, <span class="ident">latest_reward</span>.<span class="ident">clone</span>())<span class="question-mark">?</span>;
 
                 <span class="comment">//check reward amount</span>
                 <span class="kw">let</span> <span class="ident">max_reward</span> <span class="op">=</span> <span class="ident"><span class="kw">crate</span>::reward::compute_reward_amount</span>(
                     <span class="self">self</span>.<span class="ident">block_height</span>,
-                    <span class="ident">extracted_data</span>.<span class="ident">key_stake</span>,
-                    <span class="ident">extracted_data</span>.<span class="ident">stake_table_total_stake</span>,
+                    <span class="ident">txn</span>.<span class="ident">num_votes</span>(),
+                    <span class="self">self</span>.<span class="ident">chain</span>.<span class="ident">committee_size</span>,
                 );
                 <span class="kw">if</span> <span class="ident">txn</span>.<span class="ident">reward_amount</span>() <span class="op">&gt;</span> <span class="ident">max_reward</span> {
                     <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ValidationError::RewardAmountTooLarge</span>);
@@ -3350,7 +3503,7 @@
                 <span class="ident">verified_rewards_proofs</span>.<span class="ident">push</span>((
                     <span class="ident">latest_reward</span>,
                     <span class="ident">pfs</span>.<span class="ident">get_uncollected_reward_proof</span>(),
-                    <span class="ident">extracted_data</span>.<span class="ident">collected_reward_digest</span>,
+                    <span class="ident">reward_digest</span>,
                 ));
             }
         }
@@ -3401,9 +3554,29 @@
             .<span class="ident">expect</span>(<span class="string">&quot;failed to append nullifiers after validation&quot;</span>);
 
         <span class="comment">// If this is a genesis block, apply system parameter updates.</span>
-        <span class="comment">// TODO: update total_stake when stake table is added to genesis note</span>
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">EspressoTransaction::Genesis</span>(<span class="ident">txn</span>)) <span class="op">=</span> <span class="ident">txns</span>.<span class="number">0</span>.<span class="ident">get</span>(<span class="number">0</span>) {
-            <span class="self">self</span>.<span class="ident">chain</span> <span class="op">=</span> <span class="ident">txn</span>.<span class="ident">chain</span>.<span class="ident">clone</span>()
+            <span class="self">self</span>.<span class="ident">chain</span> <span class="op">=</span> <span class="ident">txn</span>.<span class="ident">chain</span>.<span class="ident">clone</span>();
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">total_stake</span> <span class="op">=</span> <span class="ident">Amount::from</span>(<span class="number">0u128</span>);
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">stake_table</span> <span class="op">=</span> <span class="ident">KVMerkleTree</span>::<span class="op">&lt;</span><span class="ident">StakeTableHash</span><span class="op">&gt;</span><span class="ident">::default</span>();
+            <span class="kw">for</span> (<span class="ident">key</span>, <span class="ident">amount</span>) <span class="kw">in</span> <span class="ident">txn</span>.<span class="ident">stake_table</span>.<span class="ident">iter</span>() {
+                <span class="ident">total_stake</span> <span class="op">+</span><span class="op">=</span> <span class="kw-2">*</span><span class="ident">amount</span>;
+                <span class="comment">// This unwrap will always succeed, since we are building the tree from scratch and</span>
+                <span class="comment">// the whole thing is in memory.</span>
+                <span class="ident">stake_table</span>.<span class="ident">insert</span>(<span class="ident">key</span>.<span class="ident">clone</span>(), <span class="kw-2">*</span><span class="ident">amount</span>).<span class="ident">unwrap</span>();
+            }
+
+            <span class="self">self</span>.<span class="ident">stake_table_root</span> <span class="op">=</span> <span class="ident">StakeTableCommitment</span>(<span class="ident">stake_table</span>.<span class="ident">hash</span>());
+            <span class="self">self</span>.<span class="ident">total_stake</span> <span class="op">=</span> <span class="ident">total_stake</span>;
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">stake_table_set</span> <span class="op">=</span>
+                <span class="ident"><span class="kw">crate</span>::merkle_tree::FilledMTBuilder::new</span>(<span class="ident">MERKLE_HEIGHT</span>).<span class="ident">unwrap</span>();
+            <span class="ident">stake_table_set</span>.<span class="ident">push</span>((
+                <span class="self">self</span>.<span class="ident">stake_table_root</span>,
+                <span class="self">self</span>.<span class="ident">total_stake</span>,
+                <span class="ident">ConsensusTime::genesis</span>(),
+            ));
+            <span class="kw">let</span> <span class="ident">stake_table_set_mt</span> <span class="op">=</span> <span class="ident">stake_table_set</span>.<span class="ident">build</span>();
+            <span class="self">self</span>.<span class="ident">historical_stake_tables</span> <span class="op">=</span> <span class="ident">stake_table_set_mt</span>.<span class="ident">frontier</span>();
+            <span class="self">self</span>.<span class="ident">historical_stake_tables_commitment</span> <span class="op">=</span> <span class="ident">stake_table_set_mt</span>.<span class="ident">commitment</span>();
         }
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">record_merkle_builder</span> <span class="op">=</span> <span class="ident">FilledMTBuilder::from_frontier</span>(
@@ -3442,11 +3615,7 @@
             )
             .<span class="ident">expect</span>(<span class="string">&quot;failed to restore stake table commitments merkle tree from frontier&quot;</span>);
 
-        <span class="ident">historial_stake_tables_builder</span>.<span class="ident">push</span>((
-            <span class="ident">StakeTableCommitment</span>(<span class="self">self</span>.<span class="ident">stake_table</span>.<span class="ident">hash</span>()),
-            <span class="self">self</span>.<span class="ident">total_stake</span>,
-            <span class="kw-2">*</span><span class="ident">now</span>,
-        ));
+        <span class="ident">historial_stake_tables_builder</span>.<span class="ident">push</span>((<span class="self">self</span>.<span class="ident">stake_table_root</span>, <span class="self">self</span>.<span class="ident">total_stake</span>, <span class="kw-2">*</span><span class="ident">now</span>));
         <span class="kw">let</span> <span class="ident">historial_stake_tables_mt</span> <span class="op">=</span> <span class="ident">historial_stake_tables_builder</span>.<span class="ident">build</span>();
 
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">past_historial_stake_table_merkle_roots</span>.<span class="number">0</span>.<span class="ident">len</span>() <span class="op">&gt;</span><span class="op">=</span> <span class="ident"><span class="self">Self</span>::HISTORY_SIZE</span> {
@@ -3510,6 +3679,11 @@
         }
         <span class="ident">record_merkle_builder</span>.<span class="ident">build</span>()
     }
+}
+
+<span class="doccomment">/// converts Amount to NonZeroU64</span>
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">amount_to_nonzerou64</span>(<span class="ident">amt</span>: <span class="ident">Amount</span>) -&gt; <span class="ident">NonZeroU64</span> {
+    (<span class="ident">u128::from</span>(<span class="ident">amt</span>) <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">try_into</span>().<span class="ident">unwrap</span>()
 }
 
 <span class="doccomment">/// The Arbitrary trait is used for randomized (fuzz) testing.</span>

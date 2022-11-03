@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":[["is_eligible","check weather a staking key is elegible for rewards"],["prove_eligibility","Prove that staking key is eligible for reward on view number. Return None if key is not eligible"]]};
+window.SIDEBAR_ITEMS = {"fn":[["check_eligibility","check whether a staking key is eligible for rewards"],["prove_eligibility","Prove that staking key is eligible for reward on view number. Return None if key is not eligible"]]};

@@ -860,6 +860,100 @@
 <span id="860">860</span>
 <span id="861">861</span>
 <span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+<span id="947">947</span>
+<span id="948">948</span>
+<span id="949">949</span>
+<span id="950">950</span>
+<span id="951">951</span>
+<span id="952">952</span>
+<span id="953">953</span>
+<span id="954">954</span>
+<span id="955">955</span>
+<span id="956">956</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -878,14 +972,18 @@
 <span class="kw">use</span> <span class="ident">ark_serialize</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">ark_std::rand</span>::{<span class="ident">CryptoRng</span>, <span class="ident">RngCore</span>};
 <span class="kw">use</span> <span class="ident">async_std::sync</span>::{<span class="ident">Arc</span>, <span class="ident">RwLock</span>};
+<span class="kw">use</span> <span class="ident">async_std::task::spawn</span>;
 <span class="kw">use</span> <span class="ident">clap</span>::{<span class="ident">Args</span>, <span class="ident">Parser</span>};
 <span class="kw">use</span> <span class="ident">cld::ClDuration</span>;
 <span class="kw">use</span> <span class="ident">dirs::data_local_dir</span>;
+<span class="kw">use</span> <span class="ident">espresso_core::kv_merkle_tree::KVMerkleTree</span>;
 <span class="kw">use</span> <span class="ident">espresso_core::reward</span>::{
     <span class="ident">mock_eligibility</span>, <span class="ident">CollectRewardNote</span>, <span class="ident">CollectedRewards</span>, <span class="ident">CollectedRewardsSet</span>,
 };
 <span class="kw">use</span> <span class="ident">espresso_core::stake_table::StakingKey</span>;
-<span class="kw">use</span> <span class="ident">espresso_core::state</span>::{<span class="ident">EspressoTransaction</span>, <span class="ident">EspressoTxnHelperProofs</span>, <span class="ident">KVMerkleProof</span>};
+<span class="kw">use</span> <span class="ident">espresso_core::state</span>::{
+    <span class="ident">amount_to_nonzerou64</span>, <span class="ident">EspressoTransaction</span>, <span class="ident">EspressoTxnHelperProofs</span>, <span class="ident">KVMerkleProof</span>,
+};
 <span class="kw">use</span> <span class="ident">espresso_core</span>::{
     <span class="ident">genesis::GenesisNote</span>,
     <span class="ident">stake_table</span>::{<span class="ident">StakeTableHash</span>, <span class="ident">StakingPrivKey</span>},
@@ -919,7 +1017,7 @@
 <span class="kw">use</span> <span class="ident">rand_chacha</span>::{<span class="ident">rand_core::SeedableRng</span> <span class="kw">as</span> <span class="kw">_</span>, <span class="ident">ChaChaRng</span>};
 <span class="kw">use</span> <span class="ident">snafu::Snafu</span>;
 <span class="kw">use</span> <span class="ident">static_assertions::const_assert</span>;
-<span class="kw">use</span> <span class="ident">std::convert::TryInto</span>;
+<span class="kw">use</span> <span class="ident">std::collections::BTreeMap</span>;
 <span class="kw">use</span> <span class="ident">std::env</span>;
 <span class="kw">use</span> <span class="ident">std::fmt</span>::{<span class="self">self</span>, <span class="ident">Display</span>, <span class="ident">Formatter</span>};
 <span class="kw">use</span> <span class="ident">std::io::Read</span>;
@@ -1082,14 +1180,14 @@
     <span class="doccomment">/// slower, but each block is proportionally larger. Because of batch verification, larger</span>
     <span class="doccomment">/// blocks should lead to increased throughput.</span>
     <span class="doccomment">///</span>
-    <span class="doccomment">/// `min-propose-time` is set to 0s by default, since minimum block size can be controlled using</span>
+    <span class="doccomment">/// `min-propose-time` is set to 1s by default, since minimum block size can be controlled using</span>
     <span class="doccomment">/// `min-transactions`, which is a more intentional, declarative setting. You may still wish to</span>
     <span class="doccomment">/// set a non-zero `min-propose-time` to allow for larger blocks in higher volumes while setting</span>
-    <span class="doccomment">/// `min-transactions` to something small to handle low-volume conditions.</span>
+    <span class="doccomment">/// `min-transactions` to something small to handle low-volume conditions. Setting this to 0s can cause rewards collection transactions to blow up many reward transactions are submitted at the same time</span>
     <span class="attribute">#[<span class="ident">arg</span>(
         <span class="ident">long</span>,
         <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME&quot;</span>,
-        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;0s&quot;</span>,
+        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;1s&quot;</span>,
         <span class="ident">value_parser</span> <span class="op">=</span> <span class="ident">parse_duration</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">min_propose_time</span>: <span class="ident">Duration</span>,
@@ -1162,6 +1260,29 @@
         <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;10000&quot;</span>
     )]</span>
     <span class="kw">pub</span> <span class="ident">max_transactions</span>: <span class="ident">NonZeroUsize</span>,
+
+    <span class="doccomment">/// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-</span>
+    <span class="doccomment">/// bootstrap nodes.</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NUM_NODES&quot;</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">num_nodes</span>: <span class="ident">usize</span>,
+
+    <span class="doccomment">/// Unique identifier for this instance of Espresso.</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_CHAIN_ID&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;0&quot;</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">chain_id</span>: <span class="ident">u16</span>,
+
+    <span class="doccomment">/// Public key which should own a faucet record in the genesis block.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// For each given public key, the ledger will be initialized with a record of 2^32 native</span>
+    <span class="doccomment">/// tokens, owned by the public key.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// This option may be passed multiple times to initialize the ledger with multiple native</span>
+    <span class="doccomment">/// token records.</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_FAUCET_PUB_KEYS&quot;</span>, <span class="ident">value_delimiter</span> <span class="op">=</span> <span class="string">&#39;,&#39;</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">faucet_pub_key</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">UserPubKey</span><span class="op">&gt;</span>,
+
+    <span class="doccomment">/// CAP Address to send rewards to</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_REWARDS_ADDRESS&quot;</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">rewards_address</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">UserAddress</span><span class="op">&gt;</span>,
 }
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">Snafu</span>)]</span>
@@ -1178,9 +1299,9 @@
         })
 }
 
-<span class="kw">impl</span> <span class="ident">Default</span> <span class="kw">for</span> <span class="ident">NodeOpt</span> {
-    <span class="kw">fn</span> <span class="ident">default</span>() -&gt; <span class="self">Self</span> {
-        <span class="ident"><span class="self">Self</span>::parse_from</span>(<span class="ident">std::iter::empty</span>::<span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>())
+<span class="kw">impl</span> <span class="ident">NodeOpt</span> {
+    <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">num_nodes</span>: <span class="ident">usize</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident"><span class="self">Self</span>::parse_from</span>(<span class="macro">vec!</span>[<span class="string">&quot;--&quot;</span>, <span class="string">&quot;--num-nodes&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">num_nodes</span>.<span class="ident">to_string</span>()])
     }
 }
 
@@ -1356,14 +1477,13 @@
 <span class="kw">type</span> <span class="ident">Storage</span> <span class="op">=</span> <span class="ident">MemoryStorage</span><span class="op">&lt;</span><span class="ident">ValidatorState</span><span class="op">&gt;</span>;
 <span class="kw">pub</span> <span class="kw">type</span> <span class="ident">Consensus</span> <span class="op">=</span> <span class="ident">HotShotHandle</span><span class="op">&lt;</span><span class="ident">ValidatorNodeImpl</span><span class="op">&lt;</span><span class="ident">Network</span>, <span class="ident">Storage</span><span class="op">&gt;</span><span class="op">&gt;</span>;
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">genesis</span>(
-    <span class="ident">chain_id</span>: <span class="ident">u16</span>,
-    <span class="ident">faucet_pub_keys</span>: <span class="kw">impl</span> <span class="ident">IntoIterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">UserPubKey</span><span class="op">&gt;</span>,
-) -&gt; <span class="ident">GenesisNote</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">genesis</span>(<span class="ident">node_opt</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>, <span class="ident">consensus_opt</span>: <span class="kw-2">&amp;</span><span class="ident">ConsensusOpt</span>) -&gt; <span class="ident">GenesisNote</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">ChaChaRng::from_seed</span>(<span class="ident">GENESIS_SEED</span>);
 
     <span class="comment">// Process the initial native token records for the faucet.</span>
-    <span class="kw">let</span> <span class="ident">faucet_records</span> <span class="op">=</span> <span class="ident">faucet_pub_keys</span>
+    <span class="kw">let</span> <span class="ident">faucet_records</span> <span class="op">=</span> <span class="ident">node_opt</span>
+        .<span class="ident">faucet_pub_key</span>
+        .<span class="ident">clone</span>()
         .<span class="ident">into_iter</span>()
         .<span class="ident">map</span>(<span class="op">|</span><span class="ident">pub_key</span><span class="op">|</span> {
             <span class="comment">// Create the initial grant.</span>
@@ -1381,10 +1501,27 @@
             )
         })
         .<span class="ident">collect</span>();
+
+    <span class="comment">// generate keys</span>
+    <span class="kw">let</span> <span class="ident">known_nodes</span> <span class="op">=</span> <span class="ident">gen_keys</span>(<span class="ident">consensus_opt</span>, <span class="ident">node_opt</span>.<span class="ident">num_nodes</span>);
     <span class="ident">GenesisNote::new</span>(
-        <span class="ident">ChainVariables::new</span>(<span class="ident">chain_id</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>()),
+        <span class="ident">ChainVariables::new</span>(<span class="ident">node_opt</span>.<span class="ident">chain_id</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>(), <span class="ident">COMMITTEE_SIZE</span>),
         <span class="ident">Arc::new</span>(<span class="ident">faucet_records</span>),
+        <span class="ident">initialize_stake_table</span>(
+            <span class="ident">known_nodes</span>
+                .<span class="ident">into_iter</span>()
+                .<span class="ident">map</span>(<span class="op">|</span><span class="ident">key</span><span class="op">|</span> <span class="ident">StakingKey::from_private</span>(<span class="kw-2">&amp;</span><span class="ident">key</span>))
+                .<span class="ident">collect</span>(),
+        ),
     )
+}
+
+<span class="doccomment">/// Creates a btreemap for stake table</span>
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">initialize_stake_table</span>(<span class="ident">known_nodes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">StakingKey</span><span class="op">&gt;</span>) -&gt; <span class="ident">BTreeMap</span><span class="op">&lt;</span><span class="ident">StakingKey</span>, <span class="ident">Amount</span><span class="op">&gt;</span> {
+    <span class="ident">known_nodes</span>
+        .<span class="ident">into_iter</span>()
+        .<span class="ident">map</span>(<span class="op">|</span><span class="ident">key</span><span class="op">|</span> (<span class="ident">key</span>, <span class="ident">STAKE_PER_NODE</span>.<span class="ident">into</span>()))
+        .<span class="ident">collect</span>()
 }
 
 <span class="doccomment">/// Creates the initial state and hotshot for simulation.</span>
@@ -1397,19 +1534,26 @@
     <span class="ident">networking</span>: <span class="ident">Network</span>,
     <span class="ident">genesis</span>: <span class="ident">GenesisNote</span>,
     <span class="ident">num_bootstrap</span>: <span class="ident">usize</span>,
-) -&gt; <span class="ident">Consensus</span> {
+) -&gt; (
+    <span class="ident">Consensus</span>,
+    <span class="ident">KVMerkleProof</span><span class="op">&lt;</span><span class="ident">StakeTableHash</span><span class="op">&gt;</span>,
+    <span class="ident">Amount</span>,
+    <span class="ident">CollectedRewardsSet</span>,
+) {
     <span class="comment">// Create the initial hotshot</span>
+    <span class="kw">let</span> <span class="ident">stake_distribution</span> <span class="op">=</span> <span class="ident">known_nodes</span>
+        .<span class="ident">iter</span>()
+        .<span class="ident">map</span>(<span class="op">|</span><span class="ident">key</span><span class="op">|</span> <span class="ident">amount_to_nonzerou64</span>(<span class="ident">genesis</span>.<span class="ident">stake_table</span>[<span class="ident">key</span>]))
+        .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
+
     <span class="kw">let</span> <span class="ident">known_nodes</span> <span class="op">=</span> <span class="ident">known_nodes</span>
         .<span class="ident">into_iter</span>()
         .<span class="ident">map</span>(<span class="ident">SignatureKey::from</span>)
         .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-    <span class="kw">let</span> <span class="ident">stake_distribution</span> <span class="op">=</span> <span class="ident">known_nodes</span>
-        .<span class="ident">iter</span>()
-        .<span class="ident">map</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">STAKE_PER_NODE</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>())
-        .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
+
     <span class="kw">let</span> <span class="ident">pub_key</span> <span class="op">=</span> <span class="ident">known_nodes</span>[<span class="ident">node_id</span>].<span class="ident">clone</span>();
     <span class="kw">let</span> <span class="ident">vrf_config</span> <span class="op">=</span> <span class="ident">VRFStakeTableConfig</span> {
-        <span class="ident">sortition_parameter</span>: <span class="ident">COMMITTEE_SIZE</span>,
+        <span class="ident">sortition_parameter</span>: <span class="ident">genesis</span>.<span class="ident">chain</span>.<span class="ident">committee_size</span>,
         <span class="ident">distribution</span>: <span class="ident">stake_distribution</span>,
     };
     <span class="kw">let</span> <span class="ident">config</span> <span class="op">=</span> <span class="ident">HotShotConfig</span> {
@@ -1432,21 +1576,42 @@
 
     <span class="kw">let</span> <span class="ident">storage</span> <span class="op">=</span> <span class="ident">get_store_dir</span>(<span class="ident">options</span>, <span class="ident">node_id</span>);
     <span class="kw">let</span> <span class="ident">storage_path</span> <span class="op">=</span> <span class="ident">Path::new</span>(<span class="kw-2">&amp;</span><span class="ident">storage</span>);
-    <span class="kw">let</span> <span class="ident">lw_persistence</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">options</span>.<span class="ident">reset_store_state</span> {
+    <span class="kw">let</span> (<span class="ident">lw_persistence</span>, <span class="ident">collected_rewards_set</span>) <span class="op">=</span> <span class="kw">if</span> <span class="ident">options</span>.<span class="ident">reset_store_state</span> {
         <span class="macro">debug!</span>(<span class="string">&quot;Initializing new session&quot;</span>);
-        <span class="ident">LWPersistence::new</span>(<span class="ident">storage_path</span>, <span class="string">&quot;validator&quot;</span>).<span class="ident">unwrap</span>()
+        (
+            <span class="ident">LWPersistence::new</span>(<span class="ident">storage_path</span>, <span class="string">&quot;validator&quot;</span>).<span class="ident">unwrap</span>(),
+            <span class="ident">CollectedRewardsSet::EmptySubtree</span>,
+        )
     } <span class="kw">else</span> {
         <span class="macro">debug!</span>(<span class="string">&quot;Restoring from persisted session&quot;</span>);
-        <span class="ident">LWPersistence::load</span>(<span class="ident">storage_path</span>, <span class="string">&quot;validator&quot;</span>).<span class="ident">unwrap</span>()
-    };
-    <span class="kw">let</span> <span class="ident">initializer</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">lw_persistence</span>.<span class="ident">load_latest_leaf</span>() {
-        <span class="prelude-val">Ok</span>(<span class="ident">leaf</span>) =&gt; <span class="ident">HotShotInitializer::from_reload</span>(<span class="ident">leaf</span>),
-        <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; {
-            <span class="comment">// If we have reset the store state, or if there are no past leaves in storage, restart</span>
-            <span class="comment">// from genesis.</span>
-            <span class="ident">HotShotInitializer::from_genesis</span>(<span class="ident">ElaboratedBlock::genesis</span>(<span class="ident">genesis</span>)).<span class="ident">unwrap</span>()
+        <span class="kw">let</span> <span class="ident">lw_persistence</span> <span class="op">=</span> <span class="ident">LWPersistence::load</span>(<span class="ident">storage_path</span>, <span class="string">&quot;validator&quot;</span>).<span class="ident">unwrap</span>();
+        <span class="kw">if</span> <span class="ident">lw_persistence</span>.<span class="ident">load_latest_leaf</span>().<span class="ident">is_ok</span>() {
+            <span class="macro">panic!</span>(<span class="string">&quot;unimplemented&quot;</span>) <span class="comment">// TODO not storing CollectedRewardSet yet + catchup not implemented</span>
+        } <span class="kw">else</span> {
+            (<span class="ident">lw_persistence</span>, <span class="ident">CollectedRewardsSet::EmptySubtree</span>)
         }
     };
+    <span class="kw">let</span> <span class="ident">stake_table_list</span> <span class="op">=</span> <span class="ident">genesis</span>.<span class="ident">stake_table</span>.<span class="ident">clone</span>();
+    <span class="kw">let</span> <span class="ident">genesis</span> <span class="op">=</span> <span class="ident">ElaboratedBlock::genesis</span>(<span class="ident">genesis</span>);
+    <span class="kw">let</span> (<span class="ident">initializer</span>, <span class="ident">stake_proof</span>, <span class="ident">stake_amount</span>) <span class="op">=</span> <span class="kw">match</span> <span class="ident">lw_persistence</span>.<span class="ident">load_latest_leaf</span>() {
+        <span class="prelude-val">Ok</span>(<span class="ident">_state</span>) =&gt; {
+            <span class="macro">panic!</span>(<span class="string">&quot;&quot;</span>);
+        }
+        <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; {
+            <span class="kw">let</span> <span class="ident">initializer</span> <span class="op">=</span> <span class="ident">HotShotInitializer::from_genesis</span>(<span class="ident">genesis</span>).<span class="ident">unwrap</span>();
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">stake_table</span> <span class="op">=</span> <span class="ident">KVMerkleTree</span>::<span class="op">&lt;</span><span class="ident">StakeTableHash</span><span class="op">&gt;</span><span class="ident">::default</span>();
+            <span class="kw">for</span> (<span class="ident">key</span>, <span class="ident">amount</span>) <span class="kw">in</span> <span class="ident">stake_table_list</span>.<span class="ident">iter</span>() {
+                <span class="ident">stake_table</span>.<span class="ident">insert</span>(<span class="ident">key</span>.<span class="ident">clone</span>(), <span class="kw-2">*</span><span class="ident">amount</span>);
+            }
+
+            <span class="kw">let</span> (<span class="ident">amount</span>, <span class="ident">stake_proof</span>) <span class="op">=</span> <span class="ident">stake_table</span>
+                .<span class="ident">lookup</span>(<span class="ident">StakingKey::from_private</span>(<span class="kw-2">&amp;</span><span class="ident">priv_key</span>))
+                .<span class="ident">unwrap</span>();
+
+            (<span class="ident">initializer</span>, <span class="ident">stake_proof</span>, <span class="ident">amount</span>.<span class="ident">unwrap</span>())
+        }
+    };
+
     <span class="kw">let</span> <span class="ident">hotshot</span> <span class="op">=</span> <span class="ident">HotShot::init</span>(
         <span class="ident">pub_key</span>,
         <span class="ident">priv_key</span>,
@@ -1462,7 +1627,7 @@
     <span class="ident">lw_persistence</span>.<span class="ident">launch</span>(<span class="ident">hotshot</span>.<span class="ident">clone</span>().<span class="ident">into_stream</span>());
 
     <span class="macro">debug!</span>(<span class="string">&quot;Hotshot online!&quot;</span>);
-    <span class="ident">hotshot</span>
+    (<span class="ident">hotshot</span>, <span class="ident">stake_proof</span>, <span class="ident">stake_amount</span>, <span class="ident">collected_rewards_set</span>)
 }
 
 <span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">run_consensus</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Future</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">consensus</span>: <span class="ident">Consensus</span>, <span class="ident">kill</span>: <span class="ident">F</span>) {
@@ -1522,8 +1687,9 @@
         })
         .<span class="ident">collect</span>()
 }
-
-<span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">init_validator</span>(
+<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::too_many_arguments</span>)]</span>
+<span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">init_validator</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">CryptoRng</span> <span class="op">+</span> <span class="ident">RngCore</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="lifetime">&#39;static</span><span class="op">&gt;</span>(
+    <span class="ident">rng</span>: <span class="ident">R</span>,
     <span class="ident">node_opt</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>,
     <span class="ident">consensus_opt</span>: <span class="kw-2">&amp;</span><span class="ident">ConsensusOpt</span>,
     <span class="ident">priv_key</span>: <span class="ident">StakingPrivKey</span>,
@@ -1617,16 +1783,31 @@
     <span class="macro">debug!</span>(<span class="string">&quot;All nodes connected to network&quot;</span>);
 
     <span class="comment">// Initialize the state and hotshot</span>
-    <span class="ident">init_hotshot</span>(
+    <span class="kw">let</span> (<span class="ident">hotshot</span>, <span class="ident">stake_proof</span>, <span class="ident">stake_amount</span>, <span class="ident">collected_rewards</span>) <span class="op">=</span> <span class="ident">init_hotshot</span>(
         <span class="ident">node_opt</span>,
         <span class="ident">known_nodes</span>,
-        <span class="ident">priv_key</span>,
+        <span class="ident">priv_key</span>.<span class="ident">clone</span>(),
         <span class="ident">own_id</span>,
         <span class="ident">own_network</span>,
         <span class="ident">genesis</span>,
         <span class="ident">num_bootstrap</span>,
     )
-    .<span class="kw">await</span>
+    .<span class="kw">await</span>;
+
+    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">rewards_address</span>) <span class="op">=</span> <span class="ident">node_opt</span>.<span class="ident">rewards_address</span>.<span class="ident">clone</span>() {
+        <span class="macro">tracing::info!</span>(<span class="string">&quot;spawning reward daemon: {:?}&quot;</span>, <span class="ident">rewards_address</span>);
+        <span class="ident">spawn</span>(<span class="ident">collect_reward_daemon</span>(
+            <span class="ident">rng</span>,
+            <span class="ident">stake_proof</span>,
+            <span class="ident">stake_amount</span>,
+            <span class="ident">collected_rewards</span>,
+            <span class="ident">priv_key</span>,
+            <span class="ident">rewards_address</span>,
+            <span class="ident">hotshot</span>.<span class="ident">clone</span>(),
+        ));
+    }
+
+    <span class="ident">hotshot</span>
 }
 
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">open_data_source</span>(
@@ -1644,16 +1825,16 @@
 }
 
 <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span> <span class="comment">// FIXME use this function in main</span>
-<span class="kw">async</span> <span class="kw">fn</span> <span class="ident">collect_reward_daemon</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">CryptoRng</span> <span class="op">+</span> <span class="ident">RngCore</span><span class="op">&gt;</span>(
-    <span class="ident">rng</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>,
+<span class="kw">async</span> <span class="kw">fn</span> <span class="ident">collect_reward_daemon</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">CryptoRng</span> <span class="op">+</span> <span class="ident">RngCore</span> <span class="op">+</span> <span class="ident">Send</span><span class="op">&gt;</span>(
+    <span class="kw-2">mut</span> <span class="ident">rng</span>: <span class="ident">R</span>,
     <span class="ident">stake_proof</span>: <span class="ident">KVMerkleProof</span><span class="op">&lt;</span><span class="ident">StakeTableHash</span><span class="op">&gt;</span>,
     <span class="ident">stake_amount</span>: <span class="ident">Amount</span>,
     <span class="kw-2">mut</span> <span class="ident">collected_rewards</span>: <span class="ident">CollectedRewardsSet</span>,
-    <span class="ident">staking_priv_key</span>: <span class="kw-2">&amp;</span><span class="ident">StakingPrivKey</span>,
-    <span class="ident">cap_address</span>: <span class="kw-2">&amp;</span><span class="ident">UserAddress</span>,
+    <span class="ident">staking_priv_key</span>: <span class="ident">StakingPrivKey</span>,
+    <span class="ident">cap_address</span>: <span class="ident">UserAddress</span>,
     <span class="kw-2">mut</span> <span class="ident">hotshot</span>: <span class="ident">Consensus</span>,
 ) {
-    <span class="kw">let</span> <span class="ident">staking_key</span> <span class="op">=</span> <span class="ident">StakingKey::from_private</span>(<span class="ident">staking_priv_key</span>);
+    <span class="kw">let</span> <span class="ident">staking_key</span> <span class="op">=</span> <span class="ident">StakingKey::from_private</span>(<span class="kw-2">&amp;</span><span class="ident">staking_priv_key</span>);
     <span class="kw">loop</span> {
         <span class="kw">let</span> <span class="ident">event</span> <span class="op">=</span> <span class="ident">hotshot</span>
             .<span class="ident">next_event</span>()
@@ -1661,14 +1842,21 @@
             .<span class="ident">expect</span>(<span class="string">&quot;HotShot unexpectedly closed&quot;</span>);
         <span class="kw">if</span> <span class="kw">let</span> <span class="ident">EventType::Decide</span> { <span class="ident">leaf_chain</span> } <span class="op">=</span> <span class="ident">event</span>.<span class="ident">event</span> {
             <span class="kw">for</span> <span class="ident">leaf</span> <span class="kw">in</span> <span class="ident">leaf_chain</span>.<span class="ident">iter</span>().<span class="ident">rev</span>() {
+                <span class="macro">tracing::debug!</span>(<span class="string">&quot;event received {:?}&quot;</span>, <span class="ident">leaf</span>);
                 <span class="kw">let</span> <span class="ident">validator_state</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">leaf</span>.<span class="ident">state</span>;
                 <span class="kw">let</span> <span class="ident">blk</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">leaf</span>.<span class="ident">deltas</span>;
                 <span class="kw">let</span> <span class="ident">view_number</span> <span class="op">=</span> <span class="ident">leaf</span>.<span class="ident">justify_qc</span>.<span class="ident">view_number</span>;
 
                 <span class="comment">// 0. check if I&#39;m elected</span>
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">vrf_proof</span>) <span class="op">=</span>
-                    <span class="ident">mock_eligibility::prove_eligibility</span>(<span class="ident">view_number</span>, <span class="ident">staking_priv_key</span>)
-                {
+                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">vrf_proof</span>) <span class="op">=</span> <span class="ident">mock_eligibility::prove_eligibility</span>(
+                    <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>,
+                    <span class="ident">validator_state</span>.<span class="ident">chain</span>.<span class="ident">committee_size</span>,
+                    <span class="ident">validator_state</span>.<span class="ident">chain</span>.<span class="ident">vrf_seed</span>,
+                    <span class="ident">view_number</span>,
+                    <span class="kw-2">&amp;</span><span class="ident">staking_priv_key</span>,
+                    <span class="ident">amount_to_nonzerou64</span>(<span class="ident">stake_amount</span>),
+                    <span class="ident">amount_to_nonzerou64</span>(<span class="ident">validator_state</span>.<span class="ident">total_stake</span>),
+                ) {
                     <span class="kw">let</span> <span class="ident">claimed_reward</span> <span class="op">=</span> <span class="ident">CollectedRewards</span> {
                         <span class="ident">staking_key</span>: <span class="ident">staking_key</span>.<span class="ident">clone</span>(),
                         <span class="ident">time</span>: <span class="ident">view_number</span>,
@@ -1677,15 +1865,15 @@
                         <span class="ident">collected_rewards</span>.<span class="ident">lookup</span>(<span class="ident">claimed_reward</span>).<span class="ident">unwrap</span>().<span class="number">1</span>;
                     <span class="comment">// 1. generate collect reward transaction</span>
                     <span class="kw">let</span> (<span class="ident">note</span>, <span class="ident">proof</span>) <span class="op">=</span> <span class="ident">CollectRewardNote::generate</span>(
-                        <span class="ident">rng</span>,
+                        <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>,
                         <span class="kw-2">&amp;</span><span class="ident">validator_state</span>.<span class="ident">historical_stake_tables</span>,
-                        <span class="ident">validator_state</span>.<span class="ident">block_height</span> <span class="op">-</span> <span class="number">1</span>,
-                        <span class="ident">validator_state</span>.<span class="ident">total_stake</span>,
-                        <span class="ident">view_number</span>,
+                        <span class="ident">validator_state</span>
+                            .<span class="ident">historical_stake_tables_commitment</span>
+                            .<span class="ident">num_leaves</span>,
+                        <span class="ident">validator_state</span>.<span class="ident">chain</span>.<span class="ident">committee_size</span>,
                         <span class="ident">validator_state</span>.<span class="ident">block_height</span>,
-                        <span class="ident">staking_priv_key</span>,
+                        <span class="kw-2">&amp;</span><span class="ident">staking_priv_key</span>,
                         <span class="ident">cap_address</span>.<span class="ident">clone</span>(),
-                        <span class="ident">stake_amount</span>,
                         <span class="ident">stake_proof</span>.<span class="ident">clone</span>(),
                         <span class="ident">uncollected_reward_proof</span>,
                         <span class="ident">vrf_proof</span>,

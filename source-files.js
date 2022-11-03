@@ -9,7 +9,7 @@ var sourcesIndex = JSON.parse('{\
 "espresso_esqs":["",[],["full_node.rs","full_node_data_source.rs","lib.rs","update_query_data_source.rs"]],\
 "espresso_metastate_api":["",[],["api.rs","data_source.rs","lib.rs","query_data.rs"]],\
 "espresso_status_api":["",[],["api.rs","data_source.rs","lib.rs","query_data.rs"]],\
-"espresso_validator":["",[],["lib.rs","network.rs","node_impl.rs","testing.rs","validator.rs"]],\
+"espresso_validator":["",[["testing",[],["rewards.rs"]]],["lib.rs","network.rs","node_impl.rs","testing.rs","validator.rs"]],\
 "espresso_validator_api":["",[],["api.rs","data_source.rs","lib.rs"]],\
 "espresso_validator_testing":["",[],["espresso-validator-testing.rs"]],\
 "faucet":["",[],["faucet.rs","faucet_keystore_test_setup.rs","lib.rs"]],\

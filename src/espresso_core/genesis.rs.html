@@ -104,6 +104,21 @@
 <span id="104">104</span>
 <span id="105">105</span>
 <span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -116,6 +131,7 @@
 <span class="comment">// You should have received a copy of the GNU General Public License along with this program. If not,</span>
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table::StakingKey</span>;
 <span class="kw">use</span> <span class="kw">crate</span>::{
     <span class="ident">state</span>::{<span class="ident">ArcSer</span>, <span class="ident">ChainVariables</span>},
     <span class="ident">universal_params::MERKLE_HEIGHT</span>,
@@ -127,11 +143,13 @@
 <span class="kw">use</span> <span class="ident">async_std::sync::Arc</span>;
 <span class="kw">use</span> <span class="ident">commit</span>::{<span class="ident">Commitment</span>, <span class="ident">Committable</span>, <span class="ident">RawCommitmentBuilder</span>};
 <span class="kw">use</span> <span class="ident">espresso_macros::ser_test</span>;
+<span class="kw">use</span> <span class="ident">jf_cap::structs::Amount</span>;
 <span class="kw">use</span> <span class="ident">jf_cap</span>::{
     <span class="ident">structs</span>::{<span class="ident">RecordCommitment</span>, <span class="ident">RecordOpening</span>},
     <span class="ident">MerkleTree</span>,
 };
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
+<span class="kw">use</span> <span class="ident">std::collections::BTreeMap</span>;
 
 <span class="doccomment">/// Genesis transaction</span>
 <span class="doccomment">///</span>
@@ -155,6 +173,7 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">GenesisNote</span> {
     <span class="kw">pub</span> <span class="ident">chain</span>: <span class="ident">ChainVariables</span>,
     <span class="kw">pub</span> <span class="ident">faucet_records</span>: <span class="ident">ArcSer</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">RecordOpening</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span> <span class="ident">stake_table</span>: <span class="ident">BTreeMap</span><span class="op">&lt;</span><span class="ident">StakingKey</span>, <span class="ident">Amount</span><span class="op">&gt;</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">Committable</span> <span class="kw">for</span> <span class="ident">GenesisNote</span> {
@@ -175,18 +194,29 @@
                     .<span class="ident">map</span>(<span class="op">|</span><span class="ident">ro</span><span class="op">|</span> <span class="prelude-val">Ok</span>(<span class="ident">ro</span><span class="question-mark">?</span>.<span class="ident">into</span>()))
                     .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="kw">_</span>, <span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>()<span class="question-mark">?</span>,
             ),
+            <span class="ident">stake_table</span>: <span class="ident">u</span>
+                .<span class="ident">arbitrary_iter</span>::<span class="op">&lt;</span>(<span class="ident">StakingKey</span>, <span class="ident">u64</span>)<span class="op">&gt;</span>()<span class="question-mark">?</span>
+                .<span class="ident">map</span>(<span class="op">|</span><span class="ident">res</span><span class="op">|</span> {
+                    <span class="kw">let</span> (<span class="ident">key</span>, <span class="ident">amt</span>) <span class="op">=</span> <span class="ident">res</span><span class="question-mark">?</span>;
+                    <span class="prelude-val">Ok</span>((<span class="ident">key</span>, <span class="ident">Amount::from</span>(<span class="ident">amt</span>)))
+                })
+                .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="kw">_</span>, <span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>()<span class="question-mark">?</span>,
         })
     }
 }
 
 <span class="kw">impl</span> <span class="ident">GenesisNote</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">chain</span>: <span class="ident">ChainVariables</span>, <span class="ident">faucet_records</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">RecordOpening</span><span class="op">&gt;</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(
+        <span class="ident">chain</span>: <span class="ident">ChainVariables</span>,
+        <span class="ident">faucet_records</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">RecordOpening</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        <span class="ident">stake_table</span>: <span class="ident">BTreeMap</span><span class="op">&lt;</span><span class="ident">StakingKey</span>, <span class="ident">Amount</span><span class="op">&gt;</span>,
+    ) -&gt; <span class="self">Self</span> {
         <span class="self">Self</span> {
             <span class="ident">chain</span>,
             <span class="ident">faucet_records</span>: <span class="ident">faucet_records</span>.<span class="ident">into</span>(),
+            <span class="ident">stake_table</span>,
         }
     }
-
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">output_len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="self">self</span>.<span class="ident">faucet_records</span>.<span class="ident">len</span>()
     }
