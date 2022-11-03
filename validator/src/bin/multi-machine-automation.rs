@@ -73,7 +73,6 @@ fn cargo_run(bin: impl AsRef<str>) -> Command {
     CargoBuild::new()
         .bin(bin.as_ref())
         .current_release()
-        .current_target()
         .run()
         .expect("Failed to build.")
         .command()
