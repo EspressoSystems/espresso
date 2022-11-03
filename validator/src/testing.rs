@@ -11,8 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    gen_keys, genesis, init_validator, open_data_source, run_consensus, ConsensusOpt, NodeOpt,
-    MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES,
+    gen_keys, genesis, init_validator, open_data_source, parse_duration, run_consensus,
+    ConsensusOpt, NodeOpt, MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES,
 };
 use address_book::{error::AddressBookError, store::FileStore};
 use async_std::task::{block_on, spawn, JoinHandle};
@@ -23,6 +23,7 @@ use hotshot::types::SignatureKey;
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use rand_chacha::{rand_core::RngCore, ChaChaRng};
+use std::env;
 use std::io;
 use std::iter;
 use std::mem::take;
@@ -172,8 +173,15 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 // low latency and the tests run much faster.
                 min_propose_time: Duration::from_secs(5),
                 min_transactions: 1,
-                max_propose_time: Duration::from_secs(10),
-                next_view_timeout: Duration::from_secs(60),
+                max_propose_time: parse_duration(
+                    &env::var("ESPRESSO_TEST_MAX_PROPOSE_TIME")
+                        .unwrap_or_else(|_| "10s".to_string()),
+                )
+                .unwrap(),
+                next_view_timeout: parse_duration(
+                    &env::var("ESPRESSO_TEST_VIEW_TIMEOUT").unwrap_or_else(|_| "60s".to_string()),
+                )
+                .unwrap(),
                 ..NodeOpt::default()
             };
             let consensus =
