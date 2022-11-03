@@ -344,7 +344,7 @@ pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
 }
 
 impl NodeOpt {
-    fn new(num_nodes: usize) -> Self {
+    pub fn new(num_nodes: usize) -> Self {
         Self::parse_from(vec!["--", "--num-nodes", &num_nodes.to_string()])
     }
 }

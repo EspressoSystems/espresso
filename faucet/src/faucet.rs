@@ -997,7 +997,6 @@ mod test {
             self.process = Some(
                 CargoBuild::new()
                     .current_release()
-                    .current_target()
                     .bin("faucet")
                     .run()
                     .unwrap()
