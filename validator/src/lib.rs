@@ -16,14 +16,18 @@
 use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
 use async_std::sync::{Arc, RwLock};
+use async_std::task::spawn;
 use clap::{Args, Parser};
 use cld::ClDuration;
 use dirs::data_local_dir;
+use espresso_core::kv_merkle_tree::KVMerkleTree;
 use espresso_core::reward::{
     mock_eligibility, CollectRewardNote, CollectedRewards, CollectedRewardsSet,
 };
 use espresso_core::stake_table::StakingKey;
-use espresso_core::state::{EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof};
+use espresso_core::state::{
+    amount_to_nonzerou64, EspressoTransaction, EspressoTxnHelperProofs, KVMerkleProof,
+};
 use espresso_core::{
     genesis::GenesisNote,
     stake_table::{StakeTableHash, StakingPrivKey},
@@ -57,7 +61,7 @@ use node_impl::{SignatureKey, ValidatorNodeImpl};
 use rand_chacha::{rand_core::SeedableRng as _, ChaChaRng};
 use snafu::Snafu;
 use static_assertions::const_assert;
-use std::convert::TryInto;
+use std::collections::BTreeMap;
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::io::Read;
@@ -220,14 +224,14 @@ pub struct NodeOpt {
     /// slower, but each block is proportionally larger. Because of batch verification, larger
     /// blocks should lead to increased throughput.
     ///
-    /// `min-propose-time` is set to 0s by default, since minimum block size can be controlled using
+    /// `min-propose-time` is set to 1s by default, since minimum block size can be controlled using
     /// `min-transactions`, which is a more intentional, declarative setting. You may still wish to
     /// set a non-zero `min-propose-time` to allow for larger blocks in higher volumes while setting
-    /// `min-transactions` to something small to handle low-volume conditions.
+    /// `min-transactions` to something small to handle low-volume conditions. Setting this to 0s can cause rewards collection transactions to blow up many reward transactions are submitted at the same time
     #[arg(
         long,
         env = "ESPRESSO_VALIDATOR_MIN_PROPOSE_TIME",
-        default_value = "0s",
+        default_value = "1s",
         value_parser = parse_duration
     )]
     pub min_propose_time: Duration,
@@ -300,6 +304,29 @@ pub struct NodeOpt {
         default_value = "10000"
     )]
     pub max_transactions: NonZeroUsize,
+
+    /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
+    /// bootstrap nodes.
+    #[arg(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
+    pub num_nodes: usize,
+
+    /// Unique identifier for this instance of Espresso.
+    #[arg(long, env = "ESPRESSO_VALIDATOR_CHAIN_ID", default_value = "0")]
+    pub chain_id: u16,
+
+    /// Public key which should own a faucet record in the genesis block.
+    ///
+    /// For each given public key, the ledger will be initialized with a record of 2^32 native
+    /// tokens, owned by the public key.
+    ///
+    /// This option may be passed multiple times to initialize the ledger with multiple native
+    /// token records.
+    #[arg(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ',')]
+    pub faucet_pub_key: Vec<UserPubKey>,
+
+    /// CAP Address to send rewards to
+    #[arg(long, env = "ESPRESSO_VALIDATOR_REWARDS_ADDRESS")]
+    pub rewards_address: Option<UserAddress>,
 }
 
 #[derive(Clone, Debug, Snafu)]
@@ -316,9 +343,9 @@ pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
         })
 }
 
-impl Default for NodeOpt {
-    fn default() -> Self {
-        Self::parse_from(std::iter::empty::<String>())
+impl NodeOpt {
+    fn new(num_nodes: usize) -> Self {
+        Self::parse_from(vec!["--", "--num-nodes", &num_nodes.to_string()])
     }
 }
 
@@ -494,14 +521,13 @@ type Network = network::HybridNetwork;
 type Storage = MemoryStorage<ValidatorState>;
 pub type Consensus = HotShotHandle<ValidatorNodeImpl<Network, Storage>>;
 
-pub fn genesis(
-    chain_id: u16,
-    faucet_pub_keys: impl IntoIterator<Item = UserPubKey>,
-) -> GenesisNote {
+pub fn genesis(node_opt: &NodeOpt, consensus_opt: &ConsensusOpt) -> GenesisNote {
     let mut rng = ChaChaRng::from_seed(GENESIS_SEED);
 
     // Process the initial native token records for the faucet.
-    let faucet_records = faucet_pub_keys
+    let faucet_records = node_opt
+        .faucet_pub_key
+        .clone()
         .into_iter()
         .map(|pub_key| {
             // Create the initial grant.
@@ -519,10 +545,27 @@ pub fn genesis(
             )
         })
         .collect();
+
+    // generate keys
+    let known_nodes = gen_keys(consensus_opt, node_opt.num_nodes);
     GenesisNote::new(
-        ChainVariables::new(chain_id, VERIF_CRS.clone()),
+        ChainVariables::new(node_opt.chain_id, VERIF_CRS.clone(), COMMITTEE_SIZE),
         Arc::new(faucet_records),
+        initialize_stake_table(
+            known_nodes
+                .into_iter()
+                .map(|key| StakingKey::from_private(&key))
+                .collect(),
+        ),
     )
+}
+
+/// Creates a btreemap for stake table
+pub fn initialize_stake_table(known_nodes: Vec<StakingKey>) -> BTreeMap<StakingKey, Amount> {
+    known_nodes
+        .into_iter()
+        .map(|key| (key, STAKE_PER_NODE.into()))
+        .collect()
 }
 
 /// Creates the initial state and hotshot for simulation.
@@ -535,19 +578,26 @@ async fn init_hotshot(
     networking: Network,
     genesis: GenesisNote,
     num_bootstrap: usize,
-) -> Consensus {
+) -> (
+    Consensus,
+    KVMerkleProof<StakeTableHash>,
+    Amount,
+    CollectedRewardsSet,
+) {
     // Create the initial hotshot
+    let stake_distribution = known_nodes
+        .iter()
+        .map(|key| amount_to_nonzerou64(genesis.stake_table[key]))
+        .collect::<Vec<_>>();
+
     let known_nodes = known_nodes
         .into_iter()
         .map(SignatureKey::from)
         .collect::<Vec<_>>();
-    let stake_distribution = known_nodes
-        .iter()
-        .map(|_| STAKE_PER_NODE.try_into().unwrap())
-        .collect::<Vec<_>>();
+
     let pub_key = known_nodes[node_id].clone();
     let vrf_config = VRFStakeTableConfig {
-        sortition_parameter: COMMITTEE_SIZE,
+        sortition_parameter: genesis.chain.committee_size,
         distribution: stake_distribution,
     };
     let config = HotShotConfig {
@@ -570,21 +620,42 @@ async fn init_hotshot(
 
     let storage = get_store_dir(options, node_id);
     let storage_path = Path::new(&storage);
-    let lw_persistence = if options.reset_store_state {
+    let (lw_persistence, collected_rewards_set) = if options.reset_store_state {
         debug!("Initializing new session");
-        LWPersistence::new(storage_path, "validator").unwrap()
+        (
+            LWPersistence::new(storage_path, "validator").unwrap(),
+            CollectedRewardsSet::EmptySubtree,
+        )
     } else {
         debug!("Restoring from persisted session");
-        LWPersistence::load(storage_path, "validator").unwrap()
-    };
-    let initializer = match lw_persistence.load_latest_leaf() {
-        Ok(leaf) => HotShotInitializer::from_reload(leaf),
-        Err(_) => {
-            // If we have reset the store state, or if there are no past leaves in storage, restart
-            // from genesis.
-            HotShotInitializer::from_genesis(ElaboratedBlock::genesis(genesis)).unwrap()
+        let lw_persistence = LWPersistence::load(storage_path, "validator").unwrap();
+        if lw_persistence.load_latest_leaf().is_ok() {
+            panic!("unimplemented") // TODO not storing CollectedRewardSet yet + catchup not implemented
+        } else {
+            (lw_persistence, CollectedRewardsSet::EmptySubtree)
         }
     };
+    let stake_table_list = genesis.stake_table.clone();
+    let genesis = ElaboratedBlock::genesis(genesis);
+    let (initializer, stake_proof, stake_amount) = match lw_persistence.load_latest_leaf() {
+        Ok(_state) => {
+            panic!("");
+        }
+        Err(_) => {
+            let initializer = HotShotInitializer::from_genesis(genesis).unwrap();
+            let mut stake_table = KVMerkleTree::<StakeTableHash>::default();
+            for (key, amount) in stake_table_list.iter() {
+                stake_table.insert(key.clone(), *amount);
+            }
+
+            let (amount, stake_proof) = stake_table
+                .lookup(StakingKey::from_private(&priv_key))
+                .unwrap();
+
+            (initializer, stake_proof, amount.unwrap())
+        }
+    };
+
     let hotshot = HotShot::init(
         pub_key,
         priv_key,
@@ -600,7 +671,7 @@ async fn init_hotshot(
     lw_persistence.launch(hotshot.clone().into_stream());
 
     debug!("Hotshot online!");
-    hotshot
+    (hotshot, stake_proof, stake_amount, collected_rewards_set)
 }
 
 pub async fn run_consensus<F: Send + Future>(mut consensus: Consensus, kill: F) {
@@ -660,8 +731,9 @@ pub fn gen_keys(consensus_opt: &ConsensusOpt, num_nodes: usize) -> Vec<StakingPr
         })
         .collect()
 }
-
-pub async fn init_validator(
+#[allow(clippy::too_many_arguments)]
+pub async fn init_validator<R: CryptoRng + RngCore + Send + 'static>(
+    rng: R,
     node_opt: &NodeOpt,
     consensus_opt: &ConsensusOpt,
     priv_key: StakingPrivKey,
@@ -755,16 +827,31 @@ pub async fn init_validator(
     debug!("All nodes connected to network");
 
     // Initialize the state and hotshot
-    init_hotshot(
+    let (hotshot, stake_proof, stake_amount, collected_rewards) = init_hotshot(
         node_opt,
         known_nodes,
-        priv_key,
+        priv_key.clone(),
         own_id,
         own_network,
         genesis,
         num_bootstrap,
     )
-    .await
+    .await;
+
+    if let Some(rewards_address) = node_opt.rewards_address.clone() {
+        tracing::info!("spawning reward daemon: {:?}", rewards_address);
+        spawn(collect_reward_daemon(
+            rng,
+            stake_proof,
+            stake_amount,
+            collected_rewards,
+            priv_key,
+            rewards_address,
+            hotshot.clone(),
+        ));
+    }
+
+    hotshot
 }
 
 pub fn open_data_source(
@@ -782,16 +869,16 @@ pub fn open_data_source(
 }
 
 #[allow(dead_code)] // FIXME use this function in main
-async fn collect_reward_daemon<R: CryptoRng + RngCore>(
-    rng: &mut R,
+async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
+    mut rng: R,
     stake_proof: KVMerkleProof<StakeTableHash>,
     stake_amount: Amount,
     mut collected_rewards: CollectedRewardsSet,
-    staking_priv_key: &StakingPrivKey,
-    cap_address: &UserAddress,
+    staking_priv_key: StakingPrivKey,
+    cap_address: UserAddress,
     mut hotshot: Consensus,
 ) {
-    let staking_key = StakingKey::from_private(staking_priv_key);
+    let staking_key = StakingKey::from_private(&staking_priv_key);
     loop {
         let event = hotshot
             .next_event()
@@ -799,14 +886,21 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
             .expect("HotShot unexpectedly closed");
         if let EventType::Decide { leaf_chain } = event.event {
             for leaf in leaf_chain.iter().rev() {
+                tracing::debug!("event received {:?}", leaf);
                 let validator_state = &leaf.state;
                 let blk = &leaf.deltas;
                 let view_number = leaf.justify_qc.view_number;
 
                 // 0. check if I'm elected
-                if let Some(vrf_proof) =
-                    mock_eligibility::prove_eligibility(view_number, staking_priv_key)
-                {
+                if let Some(vrf_proof) = mock_eligibility::prove_eligibility(
+                    &mut rng,
+                    validator_state.chain.committee_size,
+                    validator_state.chain.vrf_seed,
+                    view_number,
+                    &staking_priv_key,
+                    amount_to_nonzerou64(stake_amount),
+                    amount_to_nonzerou64(validator_state.total_stake),
+                ) {
                     let claimed_reward = CollectedRewards {
                         staking_key: staking_key.clone(),
                         time: view_number,
@@ -815,15 +909,15 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore>(
                         collected_rewards.lookup(claimed_reward).unwrap().1;
                     // 1. generate collect reward transaction
                     let (note, proof) = CollectRewardNote::generate(
-                        rng,
+                        &mut rng,
                         &validator_state.historical_stake_tables,
-                        validator_state.block_height - 1,
-                        validator_state.total_stake,
-                        view_number,
+                        validator_state
+                            .historical_stake_tables_commitment
+                            .num_leaves,
+                        validator_state.chain.committee_size,
                         validator_state.block_height,
-                        staking_priv_key,
+                        &staking_priv_key,
                         cap_address.clone(),
-                        stake_amount,
                         stake_proof.clone(),
                         uncollected_reward_proof,
                         vrf_proof,

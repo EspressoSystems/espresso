@@ -10,6 +10,7 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
+use espresso_validator::COMMITTEE_SIZE;
 pub use seahorse::testing::MockLedger;
 
 use async_std::sync::{Arc, Mutex};
@@ -41,7 +42,7 @@ use seahorse::{
     transactions::Transaction,
     KeystoreBackend, KeystoreError,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use testing::MockNetwork;
 
@@ -353,8 +354,10 @@ impl<'a> testing::SystemUnderTest<'a> for EspressoTest {
 
         // Commit a [Genesis] block to initialize the ledger.
         let genesis = ElaboratedBlock::genesis(GenesisNote::new(
-            ChainVariables::new(42, verif_crs),
+            ChainVariables::new(42, verif_crs, COMMITTEE_SIZE),
             Arc::new(initial_grants.into_iter().map(|(ro, _)| ro).collect()),
+            //The mock ledger does not simulate staking or rewards, so it doesn't matter what stake table we use. We use the empty stake table for simplicity.
+            BTreeMap::new(),
         ));
         ret.submit(genesis).unwrap();
         assert_eq!(ret.validator.record_merkle_commitment, records.commitment());

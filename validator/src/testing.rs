@@ -15,21 +15,58 @@ use crate::{
     MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES,
 };
 use address_book::{error::AddressBookError, store::FileStore};
+use async_std::task::sleep;
 use async_std::task::{block_on, spawn, JoinHandle};
+use async_trait::async_trait;
+use espresso_core::ledger::EspressoLedger;
 use espresso_core::StakingKey;
 use espresso_esqs::full_node::{self, EsQS};
+use futures::Future;
 use futures::{channel::oneshot, future::join_all};
 use hotshot::types::SignatureKey;
+use jf_cap::keys::UserAddress;
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
+use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::{rand_core::RngCore, ChaChaRng};
+use seahorse::hd::KeyTree;
+use seahorse::loader::KeystoreLoader;
+use seahorse::KeySnafu;
+use seahorse::KeystoreError;
+use snafu::ResultExt;
 use std::io;
-use std::iter;
 use std::mem::take;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use surf_disco::Url;
 use tempdir::TempDir;
 
+mod rewards;
+
+pub struct UnencryptedKeystoreLoader {
+    pub dir: TempDir,
+}
+
+#[async_trait]
+impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
+    type Meta = ();
+
+    fn location(&self) -> PathBuf {
+        self.dir.path().into()
+    }
+
+    async fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
+        let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
+        Ok(((), key))
+    }
+
+    async fn load(
+        &mut self,
+        _meta: &mut Self::Meta,
+    ) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
+        KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
+    }
+}
 pub struct TestNode {
     esqs: Option<EsQS>,
     kill: oneshot::Sender<()>,
@@ -121,7 +158,11 @@ impl Drop for TestNetwork {
 /// This function will start the minimal number of validators needed to run consensus. One of the
 /// validators will be a full node with a query service, which can be used to follow the ledger
 /// state and submit transactions. The URL for the query service is returned.
-pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKey) -> TestNetwork {
+pub async fn minimal_test_network(
+    rng: &mut ChaChaRng,
+    faucet_pub_key: UserPubKey,
+    rewards_address: Option<UserAddress>,
+) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
     let bootstrap_ports = (0..MINIMUM_BOOTSTRAP_NODES)
@@ -153,16 +194,19 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
     println!("generated public keys in {:?}", start.elapsed());
 
     let store = TempDir::new("minimal_test_network_store").unwrap();
-    let genesis = genesis(0, iter::once(faucet_pub_key));
-    let nodes = join_all((0..MINIMUM_NODES).into_iter().map(|i| {
+
+    let mut nodes_futures = vec![];
+    for (i, key) in keys.iter().enumerate() {
         let consensus_opt = consensus_opt.clone();
-        let genesis = genesis.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
-        let priv_key = keys[i].clone();
+        let priv_key = key.clone();
+        let facuet_pub_key = faucet_pub_key.clone();
+        let rewards_address = rewards_address.clone();
 
         store_path.push(i.to_string());
-        async move {
+        let new_rng = ChaChaRng::from_rng(&mut *rng).unwrap();
+        let future = async move {
             let node_opt = NodeOpt {
                 store_path: Some(store_path),
                 nonbootstrap_base_port: pick_unused_port().unwrap() as usize,
@@ -174,10 +218,21 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
                 min_transactions: 1,
                 max_propose_time: Duration::from_secs(10),
                 next_view_timeout: Duration::from_secs(60),
-                ..NodeOpt::default()
+                faucet_pub_key: vec![facuet_pub_key],
+                rewards_address,
+                ..NodeOpt::new(MINIMUM_NODES)
             };
-            let consensus =
-                init_validator(&node_opt, &consensus_opt, priv_key, pub_keys, genesis, i).await;
+            let genesis = genesis(&node_opt, &consensus_opt);
+            let consensus = init_validator(
+                new_rng,
+                &node_opt,
+                &consensus_opt,
+                priv_key,
+                pub_keys,
+                genesis,
+                i,
+            )
+            .await;
             let data_source = open_data_source(
                 &node_opt,
                 i,
@@ -204,9 +259,10 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
             let (kill, recv_kill) = oneshot::channel();
             let wait = spawn(run_consensus(consensus, recv_kill));
             TestNode { esqs, kill, wait }
-        }
-    }))
-    .await;
+        };
+        nodes_futures.push(future);
+    }
+    let nodes = join_all(nodes_futures).await;
 
     let address_book = AddressBook::init().await;
     let address_book_api = address_book.url();
@@ -219,4 +275,16 @@ pub async fn minimal_test_network(rng: &mut ChaChaRng, faucet_pub_key: UserPubKe
         address_book: Some(address_book),
         _store: store,
     }
+}
+
+pub async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
+    let mut backoff = Duration::from_millis(100);
+    for _ in 0..13 {
+        if f().await {
+            return;
+        }
+        sleep(backoff).await;
+        backoff *= 2;
+    }
+    panic!("retry loop did not complete in {:?}", backoff);
 }
