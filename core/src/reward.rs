@@ -354,7 +354,6 @@ impl RewardNoteProofs {
         claimed_reward: CollectedRewards, // staking key and time t
     ) -> Result<CollectedRewardsDigest, ValidationError> {
         let stake_table_commitment = self.stake_tables_set_leaf_proof.leaf.0 .0;
-        let _total_staked_amount = self.stake_tables_set_leaf_proof.leaf.0 .1;
         let time_in_proof = self.stake_tables_set_leaf_proof.leaf.0 .2;
         // 0. check public input matched proof data
         // 0.i) stake table proof leaf should contain correct commitment, total staked, and time.
@@ -435,6 +434,11 @@ impl RewardNoteProofs {
     /// retrieves proof that reward hasn't been collected
     pub fn get_uncollected_reward_proof(&self) -> CollectedRewardsProof {
         self.uncollected_reward_proof.clone()
+    }
+
+    /// returns total staked amount from stake table commitment proof
+    pub fn total_stake(&self) -> Amount {
+        self.stake_tables_set_leaf_proof.leaf.0 .1
     }
 }
 

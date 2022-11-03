@@ -1597,7 +1597,7 @@ impl ValidatorState {
                 txn.verify(
                     self.chain.committee_size,
                     self.chain.vrf_seed,
-                    amount_to_nonzerou64(self.total_stake),
+                    amount_to_nonzerou64(pfs.total_stake()),
                 )
                 .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
 
