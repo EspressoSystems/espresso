@@ -21,6 +21,7 @@ use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use regex::Regex;
 use std::collections::HashMap;
+use std::env;
 use std::ffi::OsStr;
 use std::fs::{self};
 use std::io::{BufRead, BufReader, Write};
@@ -527,6 +528,15 @@ impl Validator {
         let cdn = self.cdn_url.to_string();
 
         let mut child = spawn_blocking(move || {
+            // Set a fairly short timeout for proposing empty blocks. Since these tests mostly
+            // propose transactions serially, each transaction we propose requires 2 empty blocks to
+            // be committed. Allow this to be overridden in the environment so that we can test a
+            // slow target without transactions becoming invalidated by empty blocks faster than we
+            // can build them.
+            let max_propose_time =
+                env::var("ESPRESSO_TEST_MAX_PROPOSE_TIME").unwrap_or_else(|_| "30s".to_string());
+            let next_view_timeout =
+                env::var("ESPRESSO_TEST_VIEW_TIMEOUT").unwrap_or_else(|_| "60s".to_string());
             cargo_run("espresso-validator", "espresso-validator")
                 .map_err(err)?
                 .args([
@@ -538,11 +548,10 @@ impl Validator {
                     &num_nodes.to_string(),
                     "--faucet-pub-key",
                     &pub_key.to_string(),
-                    // Set a fairly short timeout for proposing empty blocks. Since these tests
-                    // mostly propose transactions serially, each transaction we propose requires 2
-                    // empty blocks to be committed.
                     "--max-propose-time",
-                    "10s",
+                    &max_propose_time,
+                    "--next-view-timeout",
+                    &next_view_timeout,
                     // NOTE these are arbitrarily chosen.
                     "--replication-factor",
                     "4",
