@@ -824,7 +824,7 @@ pub async fn init_web_server(
     // first HD sending key is the faucet key.
     let new_key = if let Some(key) = faucet_key_pair {
         keystore
-            .add_sending_account(key.clone(), "faucet".into(), EventIndex::default())
+            .add_account(key.clone(), "faucet".into(), EventIndex::default())
             .await
             .unwrap();
         Some(key.pub_key())
@@ -877,7 +877,7 @@ pub async fn init_web_server(
             .keystore
             .lock()
             .await
-            .await_key_scan(&key.address())
+            .await_sending_key_scan(&key.address())
             .await
             .unwrap();
     }
@@ -997,7 +997,6 @@ mod test {
             self.process = Some(
                 CargoBuild::new()
                     .current_release()
-                    .current_target()
                     .bin("faucet")
                     .run()
                     .unwrap()
