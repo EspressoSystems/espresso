@@ -18,7 +18,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arbitrary = { version = "1.1", features = ["derive"] }
+arbitrary = { version = "1.2", features = ["derive"] }
 arbitrary-wrappers = { git = "https://github.com/EspressoSystems/arbitrary-wrappers.git" }
 ark-bls12-381 = { version = "0.3.0", default-features = false, features = ["curve"] }
 ark-ff = { version = "0.3.0", default-features = false }
@@ -41,8 +41,8 @@ futures = "0.3.16"
 generic-array = { version = "0.14.4", features = ["serde"] }
 hex = "0.4.3"
 hmac = "0.12.1"
-hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.3.0", features = ["async-std-executor", "channel-async-std"] }
-hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.3.0", features = ["async-std-executor", "channel-async-std"] }
+hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.3.1", features = ["async-std-executor", "channel-async-std"] }
+hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.3.1", features = ["async-std-executor", "channel-async-std"] }
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 # per https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html, this should work for each project in the workspace

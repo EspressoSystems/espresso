@@ -65,7 +65,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::io::Read;
-use std::num::{NonZeroUsize, ParseIntError};
+use std::num::{NonZeroU64, NonZeroUsize, ParseIntError};
 use std::path::{Path, PathBuf};
 use std::str;
 use std::str::FromStr;
@@ -597,12 +597,11 @@ async fn init_hotshot(
 
     let pub_key = known_nodes[node_id].clone();
     let vrf_config = VRFStakeTableConfig {
-        sortition_parameter: genesis.chain.committee_size,
+        sortition_parameter: NonZeroU64::new(genesis.chain.committee_size).unwrap(),
         distribution: stake_distribution,
     };
     let config = HotShotConfig {
         total_nodes: NonZeroUsize::new(known_nodes.len()).unwrap(),
-        threshold: NonZeroUsize::new(QUORUM_THRESHOLD as usize).unwrap(),
         max_transactions: options.max_transactions,
         known_nodes: known_nodes.clone(),
         next_view_timeout: options.next_view_timeout.as_millis() as u64,
@@ -663,7 +662,7 @@ async fn init_hotshot(
         config,
         networking,
         MemoryStorage::new(),
-        VrfImpl::with_initial_stake(known_nodes, &vrf_config),
+        VrfImpl::with_initial_stake(known_nodes, &vrf_config, Default::default()),
         initializer,
     )
     .await
@@ -893,7 +892,6 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
 
                 // 0. check if I'm elected
                 if let Some(vrf_proof) = mock_eligibility::prove_eligibility(
-                    &mut rng,
                     validator_state.chain.committee_size,
                     validator_state.chain.vrf_seed,
                     view_number,

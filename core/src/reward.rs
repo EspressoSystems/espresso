@@ -24,12 +24,14 @@ pub use crate::util::canonical;
 use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
 use commit::Committable;
+use core::fmt::Debug;
 use core::hash::Hash;
 use hotshot::types::SignatureKey;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::structs::{
     Amount, AssetDefinition, BlindFactor, FreezeFlag, RecordCommitment, RecordOpening,
 };
+use jf_primitives::signatures::bls::BLSSignature;
 use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -38,7 +40,27 @@ use std::iter::once;
 use std::num::NonZeroU64;
 
 /// Proof for Vrf output
-pub type VrfProof = StakingKeySignature;
+#[tagged_blob("VRFPROOF")]
+#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
+pub struct VrfProof(BLSSignature<ark_bls12_381::Parameters>);
+impl Debug for VrfProof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("VrfProof").finish()
+    }
+}
+impl PartialEq for VrfProof {
+    fn eq(&self, other: &Self) -> bool {
+        canonical::serialize(self).unwrap() == canonical::serialize(other).unwrap()
+    }
+}
+
+impl Eq for VrfProof {}
+
+impl Hash for VrfProof {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Hash::hash(&canonical::serialize(self).unwrap(), state)
+    }
+}
 
 /// Compute the allowed stake amount given committee size, view_number and number of votes
 /// Hard-coded to 0 for FST
@@ -300,7 +322,7 @@ impl EligibilityWitness {
     ) -> Result<(), RewardError> {
         if mock_eligibility::check_eligibility(
             committee_size,
-            &vrf_seed,
+            vrf_seed,
             self.time,
             self.num_seats.try_into().unwrap(),
             total_stake,
@@ -483,23 +505,37 @@ impl From<ark_serialize::SerializationError> for RewardError {
 }
 
 pub mod mock_eligibility {
-    use crate::state::VrfSeed;
+    use crate::{stake_table::Election, state::VrfSeed};
 
     // TODO this is only mock implementation (and totally insecure as Staking keys (VRF keys) are not currently bls signature keys)
     // eligibility will be implemented in hotshot repo from a pro
     use super::*;
-    use sha3::{Digest, Sha3_256};
 
     /// check whether a staking key is eligible for rewards
     pub fn check_eligibility(
-        _sorition_parameter: u64,
-        _vrf_seed: &VrfSeed,
+        sortition_parameter: u64,
+        vrf_seed: VrfSeed,
         view_number: ConsensusTime,
-        _stake_amount: NonZeroU64,
-        _total_stake: NonZeroU64,
+        stake_amount: NonZeroU64,
+        total_stake: NonZeroU64,
         proof: &EligibilityWitness,
     ) -> bool {
-        // 1. compute vrf value = Hash ( vrf_proof)
+        let vrf_check = Election::check_sortition_proof(
+            &proof.staking_key.clone().into(),
+            &(),
+            &proof.vrf_proof.0,
+            total_stake,
+            stake_amount,
+            NonZeroU64::new(sortition_parameter).unwrap(),
+            NonZeroU64::new(proof.num_seats).unwrap(),
+            &vrf_seed.into(),
+            view_number,
+        );
+        match vrf_check {
+            Ok(res) => res,
+            _ => false,
+        }
+        /*// 1. compute vrf value = Hash ( vrf_proof)
         let mut hasher = Sha3_256::new();
         hasher.update(&bincode::serialize(proof).unwrap());
         let vrf_value = hasher.finalize();
@@ -507,17 +543,16 @@ pub mod mock_eligibility {
         let data = bincode::serialize(&view_number).unwrap();
         if !proof
             .staking_key
-            .validate(proof.vrf_proof.as_ref(), &data[..])
+            .validate(proof.vrf_proof, &data[..])
         {
             return false;
         }
         // mock eligibility return true ~25% of times
-        vrf_value[0] < 64
+        vrf_value[0] < 64*/
     }
 
     /// Prove that staking key is eligible for reward on view number. Return None if key is not eligible
-    pub fn prove_eligibility<R: CryptoRng>(
-        _rng: R,
+    pub fn prove_eligibility(
         sortition_parameter: u64,
         vrf_seed: VrfSeed,
         view_number: ConsensusTime,
@@ -526,30 +561,27 @@ pub mod mock_eligibility {
         total_stake: NonZeroU64,
     ) -> Option<EligibilityWitness> {
         // 1. compute vrf proof
-        let data = bincode::serialize(&view_number).unwrap();
-        let proof = StakingKey::sign(private_key, &data[..]).into();
-        let pub_key = private_key.into();
-        // 2. check eligibility
-        let eligibility_witness = EligibilityWitness {
-            staking_key: pub_key,
-            vrf_proof: proof,
-            time: view_number,
-            num_seats: 1,
-        };
-        if check_eligibility(
-            sortition_parameter,
-            &vrf_seed,
+        let vrf_elibigility = Election::get_sortition_proof(
+            &private_key.0,
+            &(),
+            &vrf_seed.into(),
             view_number,
-            stake_amount,
             total_stake,
-            &eligibility_witness,
-        ) {
-            Some(eligibility_witness)
-        } else {
-            None
+            stake_amount,
+            NonZeroU64::new(sortition_parameter).unwrap(),
+        );
+        match vrf_elibigility {
+            Ok((proof, sortition)) => Some(EligibilityWitness {
+                staking_key: StakingKey::from_private(private_key),
+                vrf_proof: VrfProof(proof),
+                time: view_number,
+                num_seats: sortition.unwrap().try_into().unwrap(),
+            }),
+            _ => None,
         }
     }
-    #[cfg(test)]
+}
+/*#[cfg(test)]
     mod test_eligibility {
         use crate::reward::mock_eligibility::{check_eligibility, prove_eligibility};
         use crate::stake_table::StakingKey;
@@ -608,7 +640,7 @@ pub mod mock_eligibility {
             )
         }
     }
-}
+}*/
 
 pub type CollectedRewardsSet = KVMerkleTree<CollectedRewardsHash>;
 pub type CollectedRewardsDigest = <CollectedRewardsHash as KVTreeHash>::Digest;

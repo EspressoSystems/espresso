@@ -16,18 +16,23 @@ use crate::tree_hash::KVTreeHash;
 use crate::util::canonical;
 
 use crate::kv_merkle_tree::KVMerkleTree;
+use crate::state::ValidatorState;
 use arbitrary::Arbitrary;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use commit::{Commitment, Committable};
 use derive_more::{AsRef, From, Into};
 use hotshot::traits::election::vrf;
+use hotshot::traits::election::vrf::VrfImpl;
 use hotshot_types::traits::signature_key::{EncodedPublicKey, EncodedSignature, SignatureKey};
 use jf_cap::structs::Amount;
+use jf_primitives::signatures::bls::BLSVerKey;
 use jf_primitives::signatures::{BLSSignatureScheme, SignatureScheme as _};
+use jf_primitives::vrf::blsvrf::BLSVRFScheme;
 use jf_utils::tagged_blob;
 use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
+use sha3::Sha3_256 as Hasher;
 use sha3::{
     digest::{Digest, Update},
     Sha3_256,
@@ -39,9 +44,17 @@ pub use ark_bls12_381::Parameters as VrfParam;
 type SignatureScheme = BLSSignatureScheme<VrfParam>;
 type VrfPubKey = vrf::VRFPubKey<SignatureScheme>;
 
+pub type Election =
+    VrfImpl<ValidatorState, BLSSignatureScheme<VrfParam>, BLSVRFScheme<VrfParam>, Hasher, VrfParam>;
+
 #[tagged_blob("STAKINGKEY")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, From, Into, AsRef)]
 pub struct StakingKey(VrfPubKey);
+impl From<StakingKey> for BLSVerKey<VrfParam> {
+    fn from(key: StakingKey) -> Self {
+        key.into()
+    }
+}
 
 /// Staking Private Key
 pub type StakingPrivKey = <VrfPubKey as SignatureKey>::PrivateKey;

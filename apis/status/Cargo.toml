@@ -21,7 +21,7 @@ clap = { version = "4.0", features = ["derive", "env"] }
 derive_more = "0.99"
 espresso-core = { path = "../../core/" }
 futures = "0.3.21"
-hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.3.0", features = ["async-std-executor", "channel-async-std"] }
+hotshot = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.3.1", features = ["async-std-executor", "channel-async-std"] }
 jf-cap = { features = ["std"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 serde = { version = "1.0.139", features = ["derive", "rc"] }
 snafu = { version = "0.7", features = ["backtraces"] }
