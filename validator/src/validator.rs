@@ -22,10 +22,10 @@ use std::process::exit;
 #[derive(Parser)]
 pub struct ValidatorOpt {
     #[command(flatten)]
-    node_opt: NodeOpt,
+    pub node_opt: NodeOpt,
 
     #[command(flatten)]
-    consensus_opt: ConsensusOpt,
+    pub consensus_opt: ConsensusOpt,
 
     /// Id of the current node.
     ///
@@ -39,25 +39,17 @@ pub struct ValidatorOpt {
     #[clap(long, env = "ESPRESSO_VALIDATOR_LOCATION")]
     pub location: Option<String>,
 
-    /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-
-    /// bootstrap nodes.
-    #[arg(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
-    pub num_nodes: usize,
-
     /// Whether to color log output with ANSI color codes.
     #[arg(long, env = "ESPRESSO_COLORED_LOGS")]
     pub colored_logs: bool,
-
-    /// Unique identifier for this instance of Espresso.
-    #[arg(long, env = "ESPRESSO_VALIDATOR_CHAIN_ID", default_value = "0")]
-    pub chain_id: u16,
 
     #[command(subcommand)]
     pub esqs: Option<full_node::Command>,
 }
 
 /// Initiate the hotshot
-pub async fn init(
+pub async fn init<R: CryptoRng + RngCore + Send + 'static>(
+    rng: R,
     genesis: GenesisNote,
     options: ValidatorOpt,
 ) -> Result<Consensus, std::io::Error> {
@@ -65,7 +57,7 @@ pub async fn init(
         eprintln!("{}", msg);
         exit(1);
     }
-    if options.num_nodes < MINIMUM_NODES {
+    if options.node_opt.num_nodes < MINIMUM_NODES {
         eprintln!("Not enough nodes (need at least {})", MINIMUM_NODES);
         exit(1);
     }
@@ -78,13 +70,14 @@ pub async fn init(
     let own_id = options.id;
 
     // Initialize the hotshot
-    let keys = gen_keys(&options.consensus_opt, options.num_nodes);
+    let keys = gen_keys(&options.consensus_opt, options.node_opt.num_nodes);
     let priv_key = keys[own_id].clone();
     let known_nodes = keys
         .into_iter()
         .map(|sk| StakingKey::from_private(&sk))
         .collect();
     let hotshot = init_validator(
+        rng,
         &options.node_opt,
         &options.consensus_opt,
         priv_key,

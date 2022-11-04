@@ -1001,7 +1001,6 @@ mod test {
             self.process = Some(
                 CargoBuild::new()
                     .current_release()
-                    .current_target()
                     .bin("faucet")
                     .run()
                     .unwrap()
@@ -1078,7 +1077,7 @@ mod test {
             .derive_sub_tree("keystore".as_bytes())
             .derive_sub_tree("user".as_bytes())
             .derive_user_key_pair(&0u64.to_le_bytes());
-        let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key()).await;
+        let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key(), None).await;
 
         // Initiate a faucet server with the mnemonic associated with the faucet key pair.
         let faucet_dir = TempDir::new("espresso_keystore_faucet").unwrap();

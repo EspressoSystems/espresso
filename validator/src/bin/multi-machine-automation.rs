@@ -30,11 +30,6 @@ struct Options {
     #[command(flatten)]
     node_opt: NodeOpt,
 
-    /// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of
-    /// non-bootstrap nodes.
-    #[arg(long, short, env = "ESPRESSO_VALIDATOR_NUM_NODES")]
-    pub num_nodes: usize,
-
     /// Public key which should own a faucet record in the genesis block.
     ///
     /// For each given public key, the ledger will be initialized with a record of 2^32 native
@@ -78,7 +73,6 @@ fn cargo_run(bin: impl AsRef<str>) -> Command {
     CargoBuild::new()
         .bin(bin.as_ref())
         .current_release()
-        .current_target()
         .run()
         .expect("Failed to build.")
         .command()
@@ -160,7 +154,7 @@ async fn main() {
     let max_transactions = options.node_opt.max_transactions.to_string();
     args.push("--max-transactions");
     args.push(&max_transactions);
-    let num_nodes_str = options.num_nodes.to_string();
+    let num_nodes_str = options.node_opt.num_nodes.to_string();
     let num_nodes = num_nodes_str.parse::<usize>().unwrap();
     let faucet_pub_keys = options
         .faucet_pub_key
@@ -195,7 +189,7 @@ async fn main() {
     // Start a CDN server if one is required.
     let cdn = options.node_opt.cdn.as_ref().map(|url| {
         let port = url.port_or_known_default().unwrap().to_string();
-        let num_nodes = options.num_nodes.to_string();
+        let num_nodes = options.node_opt.num_nodes.to_string();
         let mut cdn_args = vec!["-p", &port, "-n", &num_nodes];
         if !options.node_opt.libp2p {
             // If we're not using libp2p (we're just using the CDN for networking) we don't need a
