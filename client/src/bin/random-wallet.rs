@@ -295,7 +295,7 @@ async fn main() {
                 panic!("invalid private key file: {}", err);
             });
             keystore
-                .add_sending_account(
+                .add_account(
                     key_pair.clone(),
                     "Random keystore key".to_string(),
                     EventIndex::default(),
@@ -308,11 +308,11 @@ async fn main() {
         }
         None => {
             keystore
-                .generate_viewing_account("view key".to_string())
+                .generate_viewing_account("view key".to_string(), Some(EventIndex::default()))
                 .await
                 .unwrap();
             keystore
-                .generate_freezing_account("freeze key".to_string())
+                .generate_freezing_account("freeze key".to_string(), Some(EventIndex::default()))
                 .await
                 .unwrap();
             keystore
@@ -325,7 +325,7 @@ async fn main() {
     event!(Level::INFO, "Seed {}, address = {:?}", seed, address);
 
     // Wait for the scan of the ledger to catch up.
-    keystore.await_key_scan(&address).await.unwrap();
+    keystore.await_sending_key_scan(&address).await.unwrap();
 
     if keystore.balance(&AssetCode::native()).await == 0u64.into() {
         event!(

@@ -54,7 +54,7 @@ mod test {
         .unwrap();
 
         keystore1
-            .add_sending_account(
+            .add_account(
                 rewards_address_keypair.clone(),
                 "rewards addr".into(),
                 Default::default(),
@@ -62,12 +62,12 @@ mod test {
             .await
             .unwrap();
         keystore1
-            .add_sending_account(faucet_key_pair.clone(), "faucet".into(), Default::default())
+            .add_account(faucet_key_pair.clone(), "faucet".into(), Default::default())
             .await
             .unwrap();
 
         keystore1
-            .await_key_scan(&faucet_key_pair.address())
+            .await_sending_key_scan(&faucet_key_pair.address())
             .await
             .unwrap();
 

@@ -133,7 +133,10 @@ async fn main() {
 
     // Once we have all the keystores, we need to wait for the ledger scan so that the parent keystore
     // can discover a record to transfer from.
-    parent.await_key_scan(&parent_key.address()).await.unwrap();
+    parent
+        .await_sending_key_scan(&parent_key.address())
+        .await
+        .unwrap();
     let balance = parent.balance(&AssetCode::native()).await;
     let total_per_keystore = U256::from(opt.record_size) * opt.num_records;
     if balance < total_per_keystore * opt.num_keystores {
