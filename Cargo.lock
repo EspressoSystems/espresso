@@ -3057,8 +3057,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot"
-version = "0.3.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.1#ac7f2c599fd331298893daef6e23803c10f036ef"
+version = "0.3.3"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -3072,7 +3072,6 @@ dependencies = [
  "bimap",
  "bincode",
  "blake3",
- "cfg-if",
  "commit",
  "custom_debug",
  "dashmap",
@@ -3101,12 +3100,11 @@ dependencies = [
 [[package]]
 name = "hotshot-centralized-server"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.1#ac7f2c599fd331298893daef6e23803c10f036ef"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-std",
  "async-trait",
  "bincode",
- "cfg-if",
  "commit",
  "futures",
  "hotshot-types",
@@ -3122,13 +3120,12 @@ dependencies = [
 [[package]]
 name = "hotshot-consensus"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.1#ac7f2c599fd331298893daef6e23803c10f036ef"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-lock",
  "async-std",
  "async-trait",
  "bincode",
- "cfg-if",
  "commit",
  "custom_debug",
  "futures",
@@ -3142,7 +3139,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.1#ac7f2c599fd331298893daef6e23803c10f036ef"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "arbitrary",
  "ark-serialize",
@@ -3152,7 +3149,6 @@ dependencies = [
  "atomic_store 0.1.3 (git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.3)",
  "bincode",
  "blake3",
- "cfg-if",
  "commit",
  "custom_debug",
  "derivative",
@@ -3173,14 +3169,13 @@ dependencies = [
 [[package]]
 name = "hotshot-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.1#ac7f2c599fd331298893daef6e23803c10f036ef"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-channel",
  "async-lock",
  "async-std",
  "async-trait",
  "bincode",
- "cfg-if",
  "color-eyre",
  "futures",
  "tracing",
@@ -4045,14 +4040,13 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.1#ac7f2c599fd331298893daef6e23803c10f036ef"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-lock",
  "async-std",
  "async-trait",
  "bincode",
  "blake3",
- "cfg-if",
  "color-eyre",
  "custom_debug",
  "derive_builder",

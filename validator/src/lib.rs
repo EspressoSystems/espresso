@@ -22,7 +22,7 @@ use cld::ClDuration;
 use dirs::data_local_dir;
 use espresso_core::kv_merkle_tree::KVMerkleTree;
 use espresso_core::reward::{
-    mock_eligibility, CollectRewardNote, CollectedRewards, CollectedRewardsSet,
+    eligibility, CollectRewardNote, CollectedRewards, CollectedRewardsSet,
 };
 use espresso_core::stake_table::StakingKey;
 use espresso_core::state::{
@@ -635,6 +635,7 @@ async fn init_hotshot(
         }
     };
     let stake_table_list = genesis.stake_table.clone();
+    let genesis_vrf_seed = genesis.chain.vrf_seed;
     let genesis = ElaboratedBlock::genesis(genesis);
     let (initializer, stake_proof, stake_amount) = match lw_persistence.load_latest_leaf() {
         Ok(_state) => {
@@ -662,7 +663,7 @@ async fn init_hotshot(
         config,
         networking,
         MemoryStorage::new(),
-        VrfImpl::with_initial_stake(known_nodes, &vrf_config, Default::default()),
+        VrfImpl::with_initial_stake(known_nodes, &vrf_config, genesis_vrf_seed.into()),
         initializer,
     )
     .await
@@ -891,7 +892,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
                 let view_number = leaf.justify_qc.view_number;
 
                 // 0. check if I'm elected
-                if let Some(vrf_proof) = mock_eligibility::prove_eligibility(
+                if let Some(vrf_proof) = eligibility::prove_eligibility(
                     validator_state.chain.committee_size,
                     validator_state.chain.vrf_seed,
                     view_number,

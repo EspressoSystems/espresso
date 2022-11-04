@@ -25,7 +25,6 @@ use hotshot::traits::election::vrf;
 use hotshot::traits::election::vrf::VrfImpl;
 use hotshot_types::traits::signature_key::{EncodedPublicKey, EncodedSignature, SignatureKey};
 use jf_cap::structs::Amount;
-use jf_primitives::signatures::bls::BLSVerKey;
 use jf_primitives::signatures::{BLSSignatureScheme, SignatureScheme as _};
 use jf_primitives::vrf::blsvrf::BLSVRFScheme;
 use jf_utils::tagged_blob;
@@ -50,11 +49,6 @@ pub type Election =
 #[tagged_blob("STAKINGKEY")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, From, Into, AsRef)]
 pub struct StakingKey(VrfPubKey);
-impl From<StakingKey> for BLSVerKey<VrfParam> {
-    fn from(key: StakingKey) -> Self {
-        key.into()
-    }
-}
 
 /// Staking Private Key
 pub type StakingPrivKey = <VrfPubKey as SignatureKey>::PrivateKey;

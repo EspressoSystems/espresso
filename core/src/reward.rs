@@ -45,7 +45,7 @@ use std::num::NonZeroU64;
 pub struct VrfProof(BLSSignature<ark_bls12_381::Parameters>);
 impl Debug for VrfProof {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("VrfProof").finish()
+        write!(f, "{}", self)
     }
 }
 impl PartialEq for VrfProof {
@@ -320,7 +320,7 @@ impl EligibilityWitness {
         vrf_seed: VrfSeed,
         total_stake: NonZeroU64,
     ) -> Result<(), RewardError> {
-        if mock_eligibility::check_eligibility(
+        if eligibility::check_eligibility(
             committee_size,
             vrf_seed,
             self.time,
@@ -504,12 +504,9 @@ impl From<ark_serialize::SerializationError> for RewardError {
     }
 }
 
-pub mod mock_eligibility {
-    use crate::{stake_table::Election, state::VrfSeed};
-
-    // TODO this is only mock implementation (and totally insecure as Staking keys (VRF keys) are not currently bls signature keys)
-    // eligibility will be implemented in hotshot repo from a pro
+pub mod eligibility {
     use super::*;
+    use crate::{stake_table::Election, state::VrfSeed};
 
     /// check whether a staking key is eligible for rewards
     pub fn check_eligibility(
@@ -521,34 +518,20 @@ pub mod mock_eligibility {
         proof: &EligibilityWitness,
     ) -> bool {
         let vrf_check = Election::check_sortition_proof(
-            &proof.staking_key.clone().into(),
+            proof.staking_key.as_ref(),
             &(),
             &proof.vrf_proof.0,
             total_stake,
             stake_amount,
             NonZeroU64::new(sortition_parameter).unwrap(),
             NonZeroU64::new(proof.num_seats).unwrap(),
-            &vrf_seed.into(),
+            vrf_seed.as_ref(),
             view_number,
         );
         match vrf_check {
             Ok(res) => res,
             _ => false,
         }
-        /*// 1. compute vrf value = Hash ( vrf_proof)
-        let mut hasher = Sha3_256::new();
-        hasher.update(&bincode::serialize(proof).unwrap());
-        let vrf_value = hasher.finalize();
-        // 2. validate proof
-        let data = bincode::serialize(&view_number).unwrap();
-        if !proof
-            .staking_key
-            .validate(proof.vrf_proof, &data[..])
-        {
-            return false;
-        }
-        // mock eligibility return true ~25% of times
-        vrf_value[0] < 64*/
     }
 
     /// Prove that staking key is eligible for reward on view number. Return None if key is not eligible
@@ -560,87 +543,26 @@ pub mod mock_eligibility {
         stake_amount: NonZeroU64,
         total_stake: NonZeroU64,
     ) -> Option<EligibilityWitness> {
-        // 1. compute vrf proof
         let vrf_elibigility = Election::get_sortition_proof(
             &private_key.0,
             &(),
-            &vrf_seed.into(),
+            vrf_seed.as_ref(),
             view_number,
             total_stake,
             stake_amount,
             NonZeroU64::new(sortition_parameter).unwrap(),
         );
         match vrf_elibigility {
-            Ok((proof, sortition)) => Some(EligibilityWitness {
+            Ok((proof, Some(sortition))) => Some(EligibilityWitness {
                 staking_key: StakingKey::from_private(private_key),
                 vrf_proof: VrfProof(proof),
                 time: view_number,
-                num_seats: sortition.unwrap().try_into().unwrap(),
+                num_seats: sortition.into(),
             }),
             _ => None,
         }
     }
 }
-/*#[cfg(test)]
-    mod test_eligibility {
-        use crate::reward::mock_eligibility::{check_eligibility, prove_eligibility};
-        use crate::stake_table::StakingKey;
-        use crate::state::VrfSeed;
-        use hotshot::traits::election::vrf::SORTITION_PARAMETER;
-        use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-        use std::num::NonZeroU64;
-        use std::ops::Add;
-
-        #[test]
-        fn test_reward_eligibility() {
-            let mut rng = ChaChaRng::from_seed([1; 32]);
-            let mut view_number = hotshot_types::data::ViewNumber::genesis();
-            let (_pub_key, priv_key) = StakingKey::generate(&mut rng);
-            let (bad_pub_key, _) = StakingKey::generate(&mut rng);
-            let mut found = 0;
-            for _ in 0..600 {
-                // with 600 runs we get ~2^{-100} failure pbb
-                if let Some(mut proof) = prove_eligibility(
-                    &mut rng,
-                    SORTITION_PARAMETER,
-                    Default::default(),
-                    view_number,
-                    &priv_key,
-                    NonZeroU64::new(1).unwrap(),
-                    NonZeroU64::new(10).unwrap(),
-                ) {
-                    assert!(check_eligibility(
-                        SORTITION_PARAMETER,
-                        &VrfSeed::default(),
-                        view_number,
-                        NonZeroU64::new(1).unwrap(),
-                        NonZeroU64::new(10).unwrap(),
-                        &proof
-                    ));
-                    proof.staking_key = bad_pub_key.clone();
-                    assert!(!check_eligibility(
-                        SORTITION_PARAMETER,
-                        &VrfSeed::default(),
-                        view_number,
-                        NonZeroU64::new(1).unwrap(),
-                        NonZeroU64::new(10).unwrap(),
-                        &proof
-                    ));
-
-                    found += 1;
-                }
-                view_number = view_number.add(1);
-            }
-            assert_ne!(found, 0, "Staking key was never eligible");
-            println!(
-                "Staking key was found {} times out of 600: {:0.2}%, view_number:{:?}",
-                found,
-                (found as f64) / 6.0,
-                view_number
-            )
-        }
-    }
-}*/
 
 pub type CollectedRewardsSet = KVMerkleTree<CollectedRewardsHash>;
 pub type CollectedRewardsDigest = <CollectedRewardsHash as KVTreeHash>::Digest;
