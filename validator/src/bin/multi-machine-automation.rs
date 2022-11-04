@@ -15,7 +15,6 @@ use clap::Parser;
 use escargot::CargoBuild;
 use espresso_esqs::full_node;
 use espresso_validator::{div_ceil, NodeOpt, QUORUM_THRESHOLD, STAKE_PER_NODE};
-use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
 use std::process::{exit, Command, Stdio};
@@ -29,16 +28,6 @@ use std::time::Duration;
 struct Options {
     #[command(flatten)]
     node_opt: NodeOpt,
-
-    /// Public key which should own a faucet record in the genesis block.
-    ///
-    /// For each given public key, the ledger will be initialized with a record of 2^32 native
-    /// tokens, owned by the public key.
-    ///
-    /// This option may be passed multiple times to initialize the ledger with multiple native
-    /// token records.
-    #[arg(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ',')]
-    pub faucet_pub_key: Vec<UserPubKey>,
 
     /// Number of transactions to generate.
     ///
@@ -154,6 +143,7 @@ async fn main() {
     let num_nodes_str = options.node_opt.num_nodes.to_string();
     let num_nodes = num_nodes_str.parse::<usize>().unwrap();
     let faucet_pub_keys = options
+        .node_opt
         .faucet_pub_key
         .iter()
         .map(|k| k.to_string())
