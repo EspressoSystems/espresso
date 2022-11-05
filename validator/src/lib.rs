@@ -892,12 +892,13 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
                 let view_number = leaf.justify_qc.view_number;
 
                 // 0. check if I'm elected
+
                 if let Some(vrf_proof) = eligibility::prove_eligibility(
                     validator_state.chain.committee_size,
                     validator_state.chain.vrf_seed,
                     view_number,
                     &staking_priv_key,
-                    amount_to_nonzerou64(stake_amount),
+                    stake_amount,
                     amount_to_nonzerou64(validator_state.total_stake),
                 ) {
                     let claimed_reward = CollectedRewards {
