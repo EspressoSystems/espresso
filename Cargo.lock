@@ -683,9 +683,9 @@ dependencies = [
 
 [[package]]
 name = "async-tungstenite"
-version = "0.17.2"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1b71b31561643aa8e7df3effe284fa83ab1a840e52294c5f4bd7bfd8b2becbb"
+checksum = "4b750efd83b7e716a015eed5ebb583cda83c52d9b24a8f0125e5c48c3313c9f8"
 dependencies = [
  "async-std",
  "futures-io",
@@ -3057,8 +3057,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot"
-version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.0#c965c4cc14b909c4a9b553affb7390e688290f0a"
+version = "0.3.3"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -3067,15 +3067,15 @@ dependencies = [
  "async-lock",
  "async-std",
  "async-trait",
- "async-tungstenite 0.17.2",
+ "async-tungstenite 0.18.0",
  "atomic_store 0.1.3 (git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.3)",
  "bimap",
  "bincode",
  "blake3",
- "cfg-if",
  "commit",
  "custom_debug",
  "dashmap",
+ "digest 0.10.5",
  "embed-doc-image",
  "futures",
  "hotshot-centralized-server",
@@ -3100,18 +3100,18 @@ dependencies = [
 [[package]]
 name = "hotshot-centralized-server"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.0#c965c4cc14b909c4a9b553affb7390e688290f0a"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-std",
  "async-trait",
  "bincode",
- "cfg-if",
  "commit",
  "futures",
  "hotshot-types",
  "hotshot-utils",
  "libp2p-core",
  "serde",
+ "serde_json",
  "snafu",
  "toml",
  "tracing",
@@ -3120,13 +3120,12 @@ dependencies = [
 [[package]]
 name = "hotshot-consensus"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.0#c965c4cc14b909c4a9b553affb7390e688290f0a"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-lock",
  "async-std",
  "async-trait",
  "bincode",
- "cfg-if",
  "commit",
  "custom_debug",
  "futures",
@@ -3140,17 +3139,16 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.0#c965c4cc14b909c4a9b553affb7390e688290f0a"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "arbitrary",
  "ark-serialize",
  "async-std",
  "async-trait",
- "async-tungstenite 0.17.2",
+ "async-tungstenite 0.18.0",
  "atomic_store 0.1.3 (git+https://github.com/EspressoSystems/atomicstore.git?tag=0.1.3)",
  "bincode",
  "blake3",
- "cfg-if",
  "commit",
  "custom_debug",
  "derivative",
@@ -3171,14 +3169,13 @@ dependencies = [
 [[package]]
 name = "hotshot-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.0#c965c4cc14b909c4a9b553affb7390e688290f0a"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-channel",
  "async-lock",
  "async-std",
  "async-trait",
  "bincode",
- "cfg-if",
  "color-eyre",
  "futures",
  "tracing",
@@ -4043,14 +4040,13 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.0#c965c4cc14b909c4a9b553affb7390e688290f0a"
+source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-lock",
  "async-std",
  "async-trait",
  "bincode",
  "blake3",
- "cfg-if",
  "color-eyre",
  "custom_debug",
  "derive_builder",
