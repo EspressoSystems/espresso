@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":[["ValidatorNodeImpl",""]],"trait":[["PLNet","A lightweight node that handles validation for consensus, and nothing more."],["PLStore",""]],"type":[["Election",""],["SignatureKey",""]]};
+window.SIDEBAR_ITEMS = {"struct":[["ValidatorNodeImpl",""]],"trait":[["PLNet","A lightweight node that handles validation for consensus, and nothing more."],["PLStore",""]],"type":[["SignatureKey",""]]};

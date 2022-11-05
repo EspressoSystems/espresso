@@ -840,45 +840,6 @@
 <span id="840">840</span>
 <span id="841">841</span>
 <span id="842">842</span>
-<span id="843">843</span>
-<span id="844">844</span>
-<span id="845">845</span>
-<span id="846">846</span>
-<span id="847">847</span>
-<span id="848">848</span>
-<span id="849">849</span>
-<span id="850">850</span>
-<span id="851">851</span>
-<span id="852">852</span>
-<span id="853">853</span>
-<span id="854">854</span>
-<span id="855">855</span>
-<span id="856">856</span>
-<span id="857">857</span>
-<span id="858">858</span>
-<span id="859">859</span>
-<span id="860">860</span>
-<span id="861">861</span>
-<span id="862">862</span>
-<span id="863">863</span>
-<span id="864">864</span>
-<span id="865">865</span>
-<span id="866">866</span>
-<span id="867">867</span>
-<span id="868">868</span>
-<span id="869">869</span>
-<span id="870">870</span>
-<span id="871">871</span>
-<span id="872">872</span>
-<span id="873">873</span>
-<span id="874">874</span>
-<span id="875">875</span>
-<span id="876">876</span>
-<span id="877">877</span>
-<span id="878">878</span>
-<span id="879">879</span>
-<span id="880">880</span>
-<span id="881">881</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -905,12 +866,14 @@
 <span class="kw">use</span> <span class="ident">ark_serialize</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">ark_std::rand</span>::{<span class="ident">CryptoRng</span>, <span class="ident">RngCore</span>};
 <span class="kw">use</span> <span class="ident">commit::Committable</span>;
+<span class="kw">use</span> <span class="ident">core::fmt::Debug</span>;
 <span class="kw">use</span> <span class="ident">core::hash::Hash</span>;
 <span class="kw">use</span> <span class="ident">hotshot::types::SignatureKey</span>;
 <span class="kw">use</span> <span class="ident">jf_cap::keys</span>::{<span class="ident">UserAddress</span>, <span class="ident">UserPubKey</span>};
 <span class="kw">use</span> <span class="ident">jf_cap::structs</span>::{
     <span class="ident">Amount</span>, <span class="ident">AssetDefinition</span>, <span class="ident">BlindFactor</span>, <span class="ident">FreezeFlag</span>, <span class="ident">RecordCommitment</span>, <span class="ident">RecordOpening</span>,
 };
+<span class="kw">use</span> <span class="ident">jf_primitives::signatures::bls::BLSSignature</span>;
 <span class="kw">use</span> <span class="ident">jf_utils::tagged_blob</span>;
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
 <span class="kw">use</span> <span class="ident">snafu::Snafu</span>;
@@ -919,7 +882,27 @@
 <span class="kw">use</span> <span class="ident">std::num::NonZeroU64</span>;
 
 <span class="doccomment">/// Proof for Vrf output</span>
-<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">VrfProof</span> <span class="op">=</span> <span class="ident">StakingKeySignature</span>;
+<span class="attribute">#[<span class="ident">tagged_blob</span>(<span class="string">&quot;VRFPROOF&quot;</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">CanonicalSerialize</span>, <span class="ident">CanonicalDeserialize</span>)]</span>
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">VrfProof</span>(<span class="ident">BLSSignature</span><span class="op">&lt;</span><span class="ident">ark_bls12_381::Parameters</span><span class="op">&gt;</span>);
+<span class="kw">impl</span> <span class="ident">Debug</span> <span class="kw">for</span> <span class="ident">VrfProof</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">core::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">core::fmt::Result</span> {
+        <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="self">self</span>)
+    }
+}
+<span class="kw">impl</span> <span class="ident">PartialEq</span> <span class="kw">for</span> <span class="ident">VrfProof</span> {
+    <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">bool</span> {
+        <span class="ident">canonical::serialize</span>(<span class="self">self</span>).<span class="ident">unwrap</span>() <span class="op">==</span> <span class="ident">canonical::serialize</span>(<span class="ident">other</span>).<span class="ident">unwrap</span>()
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">Eq</span> <span class="kw">for</span> <span class="ident">VrfProof</span> {}
+
+<span class="kw">impl</span> <span class="ident">Hash</span> <span class="kw">for</span> <span class="ident">VrfProof</span> {
+    <span class="kw">fn</span> <span class="ident">hash</span><span class="op">&lt;</span><span class="ident">H</span>: <span class="ident">std::hash::Hasher</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">state</span>: <span class="kw-2">&amp;mut</span> <span class="ident">H</span>) {
+        <span class="ident">Hash::hash</span>(<span class="kw-2">&amp;</span><span class="ident">canonical::serialize</span>(<span class="self">self</span>).<span class="ident">unwrap</span>(), <span class="ident">state</span>)
+    }
+}
 
 <span class="doccomment">/// Compute the allowed stake amount given committee size, view_number and number of votes</span>
 <span class="doccomment">/// Hard-coded to 0 for FST</span>
@@ -1010,9 +993,11 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">committee_size</span>: <span class="ident">u64</span>,
         <span class="ident">vrf_seed</span>: <span class="ident">VrfSeed</span>,
+        <span class="ident">stake_amount</span>: <span class="ident">Amount</span>,
         <span class="ident">total_stake</span>: <span class="ident">NonZeroU64</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">RewardError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">body</span>.<span class="ident">verify</span>(<span class="ident">committee_size</span>, <span class="ident">vrf_seed</span>, <span class="ident">total_stake</span>)<span class="question-mark">?</span>;
+        <span class="self">self</span>.<span class="ident">body</span>
+            .<span class="ident">verify</span>(<span class="ident">committee_size</span>, <span class="ident">vrf_seed</span>, <span class="ident">stake_amount</span>, <span class="ident">total_stake</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">size</span> <span class="op">=</span> <span class="ident">CanonicalSerialize::serialized_size</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">body</span>);
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">size</span>);
         <span class="ident">CanonicalSerialize::serialize</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">body</span>, <span class="kw-2">&amp;mut</span> <span class="ident">bytes</span>).<span class="ident">map_err</span>(<span class="ident">RewardError::from</span>)<span class="question-mark">?</span>;
@@ -1127,10 +1112,11 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">committee_size</span>: <span class="ident">u64</span>,
         <span class="ident">vrf_seed</span>: <span class="ident">VrfSeed</span>,
+        <span class="ident">stake_amount</span>: <span class="ident">Amount</span>,
         <span class="ident">total_stake</span>: <span class="ident">NonZeroU64</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">RewardError</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">eligibility_witness</span>
-            .<span class="ident">verify</span>(<span class="ident">committee_size</span>, <span class="ident">vrf_seed</span>, <span class="ident">total_stake</span>)
+            .<span class="ident">verify</span>(<span class="ident">committee_size</span>, <span class="ident">vrf_seed</span>, <span class="ident">stake_amount</span>, <span class="ident">total_stake</span>)
     }
 }
 
@@ -1177,13 +1163,14 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">committee_size</span>: <span class="ident">u64</span>,
         <span class="ident">vrf_seed</span>: <span class="ident">VrfSeed</span>,
+        <span class="ident">stake_amount</span>: <span class="ident">Amount</span>,
         <span class="ident">total_stake</span>: <span class="ident">NonZeroU64</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">RewardError</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="ident">mock_eligibility::check_eligibility</span>(
+        <span class="kw">if</span> <span class="ident">eligibility::check_eligibility</span>(
             <span class="ident">committee_size</span>,
-            <span class="kw-2">&amp;</span><span class="ident">vrf_seed</span>,
+            <span class="ident">vrf_seed</span>,
             <span class="self">self</span>.<span class="ident">time</span>,
-            <span class="self">self</span>.<span class="ident">num_seats</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>(),
+            <span class="ident">stake_amount</span>,
             <span class="ident">total_stake</span>,
             <span class="self">self</span>,
         ) {
@@ -1233,7 +1220,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">validator_state</span>: <span class="kw-2">&amp;</span><span class="ident">ValidatorState</span>,
         <span class="ident">claimed_reward</span>: <span class="ident">CollectedRewards</span>, <span class="comment">// staking key and time t</span>
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">CollectedRewardsDigest</span>, <span class="ident">ValidationError</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">CollectedRewardsDigest</span>, <span class="ident">Amount</span>), <span class="ident">ValidationError</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">stake_table_commitment</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">stake_tables_set_leaf_proof</span>.<span class="ident">leaf</span>.<span class="number">0</span> .<span class="number">0</span>;
         <span class="kw">let</span> <span class="ident">time_in_proof</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">stake_tables_set_leaf_proof</span>.<span class="ident">leaf</span>.<span class="number">0</span> .<span class="number">2</span>;
         <span class="comment">// 0. check public input matched proof data</span>
@@ -1245,7 +1232,7 @@
         }
 
         <span class="comment">// 0.ii) staking key must be checked against claimed reward&#39;s staking key</span>
-        <span class="kw">let</span> (<span class="ident">staking_key_in_proof</span>, <span class="ident">_key_staked_amount</span>) <span class="op">=</span> <span class="self">self</span>
+        <span class="kw">let</span> (<span class="ident">staking_key_in_proof</span>, <span class="ident">key_staked_amount</span>) <span class="op">=</span> <span class="self">self</span>
             .<span class="ident">stake_amount_proof</span>
             .<span class="ident">get_leaf</span>()
             .<span class="ident">ok_or</span>(<span class="ident">ValidationError::BadCollectedRewardProof</span> {})<span class="question-mark">?</span>;
@@ -1309,7 +1296,7 @@
             <span class="ident">option_value</span>.<span class="ident">ok_or</span>(<span class="ident">ValidationError::BadStakeTableProof</span> {})<span class="question-mark">?</span>;
         }
 
-        <span class="prelude-val">Ok</span>(<span class="ident">root</span>)
+        <span class="prelude-val">Ok</span>((<span class="ident">root</span>, <span class="ident">key_staked_amount</span>))
     }
 
     <span class="doccomment">/// retrieves proof that reward hasn&#39;t been collected</span>
@@ -1363,130 +1350,65 @@
     }
 }
 
-<span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">mock_eligibility</span> {
-    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::state::VrfSeed</span>;
-
-    <span class="comment">// TODO this is only mock implementation (and totally insecure as Staking keys (VRF keys) are not currently bls signature keys)</span>
-    <span class="comment">// eligibility will be implemented in hotshot repo from a pro</span>
+<span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">eligibility</span> {
     <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
-    <span class="kw">use</span> <span class="ident">sha3</span>::{<span class="ident">Digest</span>, <span class="ident">Sha3_256</span>};
+    <span class="kw">use</span> <span class="kw">crate</span>::{
+        <span class="ident">stake_table::Election</span>,
+        <span class="ident">state</span>::{<span class="ident">amount_to_nonzerou64</span>, <span class="ident">VrfSeed</span>},
+    };
 
     <span class="doccomment">/// check whether a staking key is eligible for rewards</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">check_eligibility</span>(
-        <span class="ident">_sorition_parameter</span>: <span class="ident">u64</span>,
-        <span class="ident">_vrf_seed</span>: <span class="kw-2">&amp;</span><span class="ident">VrfSeed</span>,
+        <span class="ident">sortition_parameter</span>: <span class="ident">u64</span>,
+        <span class="ident">vrf_seed</span>: <span class="ident">VrfSeed</span>,
         <span class="ident">view_number</span>: <span class="ident">ConsensusTime</span>,
-        <span class="ident">_stake_amount</span>: <span class="ident">NonZeroU64</span>,
-        <span class="ident">_total_stake</span>: <span class="ident">NonZeroU64</span>,
+        <span class="ident">stake_amount</span>: <span class="ident">Amount</span>,
+        <span class="ident">total_stake</span>: <span class="ident">NonZeroU64</span>,
         <span class="ident">proof</span>: <span class="kw-2">&amp;</span><span class="ident">EligibilityWitness</span>,
     ) -&gt; <span class="ident">bool</span> {
-        <span class="comment">// 1. compute vrf value = Hash ( vrf_proof)</span>
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hasher</span> <span class="op">=</span> <span class="ident">Sha3_256::new</span>();
-        <span class="ident">hasher</span>.<span class="ident">update</span>(<span class="kw-2">&amp;</span><span class="ident">bincode::serialize</span>(<span class="ident">proof</span>).<span class="ident">unwrap</span>());
-        <span class="kw">let</span> <span class="ident">vrf_value</span> <span class="op">=</span> <span class="ident">hasher</span>.<span class="ident">finalize</span>();
-        <span class="comment">// 2. validate proof</span>
-        <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">bincode::serialize</span>(<span class="kw-2">&amp;</span><span class="ident">view_number</span>).<span class="ident">unwrap</span>();
-        <span class="kw">if</span> <span class="op">!</span><span class="ident">proof</span>
-            .<span class="ident">staking_key</span>
-            .<span class="ident">validate</span>(<span class="ident">proof</span>.<span class="ident">vrf_proof</span>.<span class="ident">as_ref</span>(), <span class="kw-2">&amp;</span><span class="ident">data</span>[..])
-        {
-            <span class="kw">return</span> <span class="bool-val">false</span>;
+        <span class="kw">let</span> <span class="ident">vrf_check</span> <span class="op">=</span> <span class="ident">Election::check_sortition_proof</span>(
+            <span class="ident">proof</span>.<span class="ident">staking_key</span>.<span class="ident">as_ref</span>(),
+            <span class="kw-2">&amp;</span>(),
+            <span class="kw-2">&amp;</span><span class="ident">proof</span>.<span class="ident">vrf_proof</span>.<span class="number">0</span>,
+            <span class="ident">total_stake</span>,
+            <span class="ident">amount_to_nonzerou64</span>(<span class="ident">stake_amount</span>),
+            <span class="ident">NonZeroU64::new</span>(<span class="ident">sortition_parameter</span>).<span class="ident">unwrap</span>(),
+            <span class="ident">NonZeroU64::new</span>(<span class="ident">proof</span>.<span class="ident">num_seats</span>).<span class="ident">unwrap</span>(),
+            <span class="ident">vrf_seed</span>.<span class="ident">as_ref</span>(),
+            <span class="ident">view_number</span>,
+        );
+        <span class="kw">match</span> <span class="ident">vrf_check</span> {
+            <span class="prelude-val">Ok</span>(<span class="ident">res</span>) =&gt; <span class="ident">res</span>,
+            <span class="kw">_</span> =&gt; <span class="bool-val">false</span>,
         }
-        <span class="comment">// mock eligibility return true ~25% of times</span>
-        <span class="ident">vrf_value</span>[<span class="number">0</span>] <span class="op">&lt;</span> <span class="number">64</span>
     }
 
     <span class="doccomment">/// Prove that staking key is eligible for reward on view number. Return None if key is not eligible</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">prove_eligibility</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">CryptoRng</span><span class="op">&gt;</span>(
-        <span class="ident">_rng</span>: <span class="ident">R</span>,
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">prove_eligibility</span>(
         <span class="ident">sortition_parameter</span>: <span class="ident">u64</span>,
         <span class="ident">vrf_seed</span>: <span class="ident">VrfSeed</span>,
         <span class="ident">view_number</span>: <span class="ident">ConsensusTime</span>,
         <span class="ident">private_key</span>: <span class="kw-2">&amp;</span><span class="ident">StakingPrivKey</span>,
-        <span class="ident">stake_amount</span>: <span class="ident">NonZeroU64</span>,
+        <span class="ident">stake_amount</span>: <span class="ident">Amount</span>,
         <span class="ident">total_stake</span>: <span class="ident">NonZeroU64</span>,
     ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">EligibilityWitness</span><span class="op">&gt;</span> {
-        <span class="comment">// 1. compute vrf proof</span>
-        <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">bincode::serialize</span>(<span class="kw-2">&amp;</span><span class="ident">view_number</span>).<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">proof</span> <span class="op">=</span> <span class="ident">StakingKey::sign</span>(<span class="ident">private_key</span>, <span class="kw-2">&amp;</span><span class="ident">data</span>[..]).<span class="ident">into</span>();
-        <span class="kw">let</span> <span class="ident">pub_key</span> <span class="op">=</span> <span class="ident">private_key</span>.<span class="ident">into</span>();
-        <span class="comment">// 2. check eligibility</span>
-        <span class="kw">let</span> <span class="ident">eligibility_witness</span> <span class="op">=</span> <span class="ident">EligibilityWitness</span> {
-            <span class="ident">staking_key</span>: <span class="ident">pub_key</span>,
-            <span class="ident">vrf_proof</span>: <span class="ident">proof</span>,
-            <span class="ident">time</span>: <span class="ident">view_number</span>,
-            <span class="ident">num_seats</span>: <span class="number">1</span>,
-        };
-        <span class="kw">if</span> <span class="ident">check_eligibility</span>(
-            <span class="ident">sortition_parameter</span>,
-            <span class="kw-2">&amp;</span><span class="ident">vrf_seed</span>,
+        <span class="kw">let</span> <span class="ident">vrf_elibigility</span> <span class="op">=</span> <span class="ident">Election::get_sortition_proof</span>(
+            <span class="kw-2">&amp;</span><span class="ident">private_key</span>.<span class="number">0</span>,
+            <span class="kw-2">&amp;</span>(),
+            <span class="ident">vrf_seed</span>.<span class="ident">as_ref</span>(),
             <span class="ident">view_number</span>,
-            <span class="ident">stake_amount</span>,
             <span class="ident">total_stake</span>,
-            <span class="kw-2">&amp;</span><span class="ident">eligibility_witness</span>,
-        ) {
-            <span class="prelude-val">Some</span>(<span class="ident">eligibility_witness</span>)
-        } <span class="kw">else</span> {
-            <span class="prelude-val">None</span>
-        }
-    }
-    <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-    <span class="kw">mod</span> <span class="ident">test_eligibility</span> {
-        <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::reward::mock_eligibility</span>::{<span class="ident">check_eligibility</span>, <span class="ident">prove_eligibility</span>};
-        <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::stake_table::StakingKey</span>;
-        <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::state::VrfSeed</span>;
-        <span class="kw">use</span> <span class="ident">hotshot::traits::election::vrf::SORTITION_PARAMETER</span>;
-        <span class="kw">use</span> <span class="ident">rand_chacha</span>::{<span class="ident">rand_core::SeedableRng</span>, <span class="ident">ChaChaRng</span>};
-        <span class="kw">use</span> <span class="ident">std::num::NonZeroU64</span>;
-        <span class="kw">use</span> <span class="ident">std::ops::Add</span>;
-
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">test_reward_eligibility</span>() {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">ChaChaRng::from_seed</span>([<span class="number">1</span>; <span class="number">32</span>]);
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">view_number</span> <span class="op">=</span> <span class="ident">hotshot_types::data::ViewNumber::genesis</span>();
-            <span class="kw">let</span> (<span class="ident">_pub_key</span>, <span class="ident">priv_key</span>) <span class="op">=</span> <span class="ident">StakingKey::generate</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
-            <span class="kw">let</span> (<span class="ident">bad_pub_key</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="ident">StakingKey::generate</span>(<span class="kw-2">&amp;mut</span> <span class="ident">rng</span>);
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">found</span> <span class="op">=</span> <span class="number">0</span>;
-            <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="number">600</span> {
-                <span class="comment">// with 600 runs we get ~2^{-100} failure pbb</span>
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="kw-2">mut</span> <span class="ident">proof</span>) <span class="op">=</span> <span class="ident">prove_eligibility</span>(
-                    <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>,
-                    <span class="ident">SORTITION_PARAMETER</span>,
-                    <span class="ident">Default::default</span>(),
-                    <span class="ident">view_number</span>,
-                    <span class="kw-2">&amp;</span><span class="ident">priv_key</span>,
-                    <span class="ident">NonZeroU64::new</span>(<span class="number">1</span>).<span class="ident">unwrap</span>(),
-                    <span class="ident">NonZeroU64::new</span>(<span class="number">10</span>).<span class="ident">unwrap</span>(),
-                ) {
-                    <span class="macro">assert!</span>(<span class="ident">check_eligibility</span>(
-                        <span class="ident">SORTITION_PARAMETER</span>,
-                        <span class="kw-2">&amp;</span><span class="ident">VrfSeed::default</span>(),
-                        <span class="ident">view_number</span>,
-                        <span class="ident">NonZeroU64::new</span>(<span class="number">1</span>).<span class="ident">unwrap</span>(),
-                        <span class="ident">NonZeroU64::new</span>(<span class="number">10</span>).<span class="ident">unwrap</span>(),
-                        <span class="kw-2">&amp;</span><span class="ident">proof</span>
-                    ));
-                    <span class="ident">proof</span>.<span class="ident">staking_key</span> <span class="op">=</span> <span class="ident">bad_pub_key</span>.<span class="ident">clone</span>();
-                    <span class="macro">assert!</span>(<span class="op">!</span><span class="ident">check_eligibility</span>(
-                        <span class="ident">SORTITION_PARAMETER</span>,
-                        <span class="kw-2">&amp;</span><span class="ident">VrfSeed::default</span>(),
-                        <span class="ident">view_number</span>,
-                        <span class="ident">NonZeroU64::new</span>(<span class="number">1</span>).<span class="ident">unwrap</span>(),
-                        <span class="ident">NonZeroU64::new</span>(<span class="number">10</span>).<span class="ident">unwrap</span>(),
-                        <span class="kw-2">&amp;</span><span class="ident">proof</span>
-                    ));
-
-                    <span class="ident">found</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-                }
-                <span class="ident">view_number</span> <span class="op">=</span> <span class="ident">view_number</span>.<span class="ident">add</span>(<span class="number">1</span>);
-            }
-            <span class="macro">assert_ne!</span>(<span class="ident">found</span>, <span class="number">0</span>, <span class="string">&quot;Staking key was never eligible&quot;</span>);
-            <span class="macro">println!</span>(
-                <span class="string">&quot;Staking key was found {} times out of 600: {:0.2}%, view_number:{:?}&quot;</span>,
-                <span class="ident">found</span>,
-                (<span class="ident">found</span> <span class="kw">as</span> <span class="ident">f64</span>) <span class="op">/</span> <span class="number">6.0</span>,
-                <span class="ident">view_number</span>
-            )
+            <span class="ident">amount_to_nonzerou64</span>(<span class="ident">stake_amount</span>),
+            <span class="ident">NonZeroU64::new</span>(<span class="ident">sortition_parameter</span>).<span class="ident">unwrap</span>(),
+        );
+        <span class="kw">match</span> <span class="ident">vrf_elibigility</span> {
+            <span class="prelude-val">Ok</span>((<span class="ident">proof</span>, <span class="prelude-val">Some</span>(<span class="ident">sortition</span>))) =&gt; <span class="prelude-val">Some</span>(<span class="ident">EligibilityWitness</span> {
+                <span class="ident">staking_key</span>: <span class="ident">StakingKey::from_private</span>(<span class="ident">private_key</span>),
+                <span class="ident">vrf_proof</span>: <span class="ident">VrfProof</span>(<span class="ident">proof</span>),
+                <span class="ident">time</span>: <span class="ident">view_number</span>,
+                <span class="ident">num_seats</span>: <span class="ident">sortition</span>.<span class="ident">into</span>(),
+            }),
+            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
         }
     }
 }

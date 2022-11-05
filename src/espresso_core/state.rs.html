@@ -3470,17 +3470,17 @@
                     <span class="ident">staking_key</span>: <span class="ident">txn</span>.<span class="ident">staking_key</span>(),
                     <span class="ident">time</span>: <span class="ident">txn</span>.<span class="ident">time</span>(),
                 };
+                <span class="comment">// check helper proofs (RewardNoteProofs)</span>
+                <span class="kw">let</span> (<span class="ident">reward_digest</span>, <span class="ident">stake_amount</span>) <span class="op">=</span> <span class="ident">pfs</span>.<span class="ident">verify</span>(<span class="self">self</span>, <span class="ident">latest_reward</span>.<span class="ident">clone</span>())<span class="question-mark">?</span>;
 
                 <span class="comment">// verify eligibility reward txn (CollectRewardNote)</span>
                 <span class="ident">txn</span>.<span class="ident">verify</span>(
                     <span class="self">self</span>.<span class="ident">chain</span>.<span class="ident">committee_size</span>,
                     <span class="self">self</span>.<span class="ident">chain</span>.<span class="ident">vrf_seed</span>,
+                    <span class="ident">stake_amount</span>,
                     <span class="ident">amount_to_nonzerou64</span>(<span class="ident">pfs</span>.<span class="ident">total_stake</span>()),
                 )
                 .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">_e</span><span class="op">|</span> <span class="ident">ValidationError::BadCollectRewardNote</span> {})<span class="question-mark">?</span>;
-
-                <span class="comment">// check helper proofs (RewardNoteProofs)</span>
-                <span class="kw">let</span> <span class="ident">reward_digest</span> <span class="op">=</span> <span class="ident">pfs</span>.<span class="ident">verify</span>(<span class="self">self</span>, <span class="ident">latest_reward</span>.<span class="ident">clone</span>())<span class="question-mark">?</span>;
 
                 <span class="comment">//check reward amount</span>
                 <span class="kw">let</span> <span class="ident">max_reward</span> <span class="op">=</span> <span class="ident"><span class="kw">crate</span>::reward::compute_reward_amount</span>(
