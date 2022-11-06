@@ -214,7 +214,7 @@
               [ cargo-llvm-cov stableToolchain protobuf ] ++ rustDeps;
 
             RUST_LOG = "info,libp2p=off";
-            ESPRESSO_FAUCET_TEST_DISABLE_TIMEOUT = "1";
+            ESPRESSO_TEST_DISABLE_RETRY_TIMEOUT = "1";
             SEAHORSE_TEST_TXN_HISTORY_TIME_TOLERANCE = "30";
             ESPRESSO_CLI_TEST_CONNECTION_TIMEOUT = "30m";
             ESPRESSO_TEST_VIEW_TIMEOUT = "5m";
