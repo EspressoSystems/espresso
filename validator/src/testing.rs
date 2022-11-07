@@ -168,6 +168,9 @@ pub async fn minimal_test_network(
     let bootstrap_ports = (0..MINIMUM_BOOTSTRAP_NODES)
         .into_iter()
         .map(|_| pick_unused_port().unwrap());
+    let bootstrap_nodes: Vec<Url> = bootstrap_ports
+        .map(|p| format!("localhost:{}", p).parse().unwrap())
+        .collect();
     let nonbootstrap_base_port = pick_unused_port().unwrap() as usize;
 
     println!("generating public keys");
@@ -182,7 +185,7 @@ pub async fn minimal_test_network(
     let store = TempDir::new("minimal_test_network_store").unwrap();
     let mut nodes_futures = vec![];
     for (i, key) in keys.iter().enumerate() {
-        let bootstrap_ports = bootstrap_ports.clone();
+        let bootstrap_nodes = bootstrap_nodes.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
         let priv_key = key.clone();
@@ -214,9 +217,7 @@ pub async fn minimal_test_network(
                 nonbootstrap_mesh_n_low: 8,
                 nonbootstrap_mesh_outbound_min: 4,
                 nonbootstrap_mesh_n: 12,
-                bootstrap_nodes: bootstrap_ports
-                    .map(|p| format!("localhost:{}", p).parse().unwrap())
-                    .collect(),
+                bootstrap_nodes,
                 faucet_pub_key: vec![facuet_pub_key],
                 rewards_address,
                 ..NodeOpt::new(i, MINIMUM_NODES)
