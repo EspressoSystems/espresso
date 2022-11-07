@@ -24,12 +24,14 @@ pub use crate::util::canonical;
 use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
 use commit::Committable;
+use core::fmt::Debug;
 use core::hash::Hash;
 use hotshot::types::SignatureKey;
 use jf_cap::keys::{UserAddress, UserPubKey};
 use jf_cap::structs::{
     Amount, AssetDefinition, BlindFactor, FreezeFlag, RecordCommitment, RecordOpening,
 };
+use jf_primitives::signatures::bls::BLSSignature;
 use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -38,7 +40,27 @@ use std::iter::once;
 use std::num::NonZeroU64;
 
 /// Proof for Vrf output
-pub type VrfProof = StakingKeySignature;
+#[tagged_blob("VRFPROOF")]
+#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
+pub struct VrfProof(BLSSignature<ark_bls12_381::Parameters>);
+impl Debug for VrfProof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+impl PartialEq for VrfProof {
+    fn eq(&self, other: &Self) -> bool {
+        canonical::serialize(self).unwrap() == canonical::serialize(other).unwrap()
+    }
+}
+
+impl Eq for VrfProof {}
+
+impl Hash for VrfProof {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Hash::hash(&canonical::serialize(self).unwrap(), state)
+    }
+}
 
 /// Compute the allowed stake amount given committee size, view_number and number of votes
 /// Hard-coded to 0 for FST
@@ -129,9 +151,11 @@ impl CollectRewardNote {
         &self,
         committee_size: u64,
         vrf_seed: VrfSeed,
+        stake_amount: Amount,
         total_stake: NonZeroU64,
     ) -> Result<(), RewardError> {
-        self.body.verify(committee_size, vrf_seed, total_stake)?;
+        self.body
+            .verify(committee_size, vrf_seed, stake_amount, total_stake)?;
         let size = CanonicalSerialize::serialized_size(&self.body);
         let mut bytes = Vec::with_capacity(size);
         CanonicalSerialize::serialize(&self.body, &mut bytes).map_err(RewardError::from)?;
@@ -246,10 +270,11 @@ impl CollectRewardBody {
         &self,
         committee_size: u64,
         vrf_seed: VrfSeed,
+        stake_amount: Amount,
         total_stake: NonZeroU64,
     ) -> Result<(), RewardError> {
         self.eligibility_witness
-            .verify(committee_size, vrf_seed, total_stake)
+            .verify(committee_size, vrf_seed, stake_amount, total_stake)
     }
 }
 
@@ -296,13 +321,14 @@ impl EligibilityWitness {
         &self,
         committee_size: u64,
         vrf_seed: VrfSeed,
+        stake_amount: Amount,
         total_stake: NonZeroU64,
     ) -> Result<(), RewardError> {
-        if mock_eligibility::check_eligibility(
+        if eligibility::check_eligibility(
             committee_size,
-            &vrf_seed,
+            vrf_seed,
             self.time,
-            self.num_seats.try_into().unwrap(),
+            stake_amount,
             total_stake,
             self,
         ) {
@@ -352,7 +378,7 @@ impl RewardNoteProofs {
         &self,
         validator_state: &ValidatorState,
         claimed_reward: CollectedRewards, // staking key and time t
-    ) -> Result<CollectedRewardsDigest, ValidationError> {
+    ) -> Result<(CollectedRewardsDigest, Amount), ValidationError> {
         let stake_table_commitment = self.stake_tables_set_leaf_proof.leaf.0 .0;
         let time_in_proof = self.stake_tables_set_leaf_proof.leaf.0 .2;
         // 0. check public input matched proof data
@@ -364,7 +390,7 @@ impl RewardNoteProofs {
         }
 
         // 0.ii) staking key must be checked against claimed reward's staking key
-        let (staking_key_in_proof, _key_staked_amount) = self
+        let (staking_key_in_proof, key_staked_amount) = self
             .stake_amount_proof
             .get_leaf()
             .ok_or(ValidationError::BadCollectedRewardProof {})?;
@@ -428,7 +454,7 @@ impl RewardNoteProofs {
             option_value.ok_or(ValidationError::BadStakeTableProof {})?;
         }
 
-        Ok(root)
+        Ok((root, key_staked_amount))
     }
 
     /// retrieves proof that reward hasn't been collected
@@ -482,130 +508,65 @@ impl From<ark_serialize::SerializationError> for RewardError {
     }
 }
 
-pub mod mock_eligibility {
-    use crate::state::VrfSeed;
-
-    // TODO this is only mock implementation (and totally insecure as Staking keys (VRF keys) are not currently bls signature keys)
-    // eligibility will be implemented in hotshot repo from a pro
+pub mod eligibility {
     use super::*;
-    use sha3::{Digest, Sha3_256};
+    use crate::{
+        stake_table::Election,
+        state::{amount_to_nonzerou64, VrfSeed},
+    };
 
     /// check whether a staking key is eligible for rewards
     pub fn check_eligibility(
-        _sorition_parameter: u64,
-        _vrf_seed: &VrfSeed,
+        sortition_parameter: u64,
+        vrf_seed: VrfSeed,
         view_number: ConsensusTime,
-        _stake_amount: NonZeroU64,
-        _total_stake: NonZeroU64,
+        stake_amount: Amount,
+        total_stake: NonZeroU64,
         proof: &EligibilityWitness,
     ) -> bool {
-        // 1. compute vrf value = Hash ( vrf_proof)
-        let mut hasher = Sha3_256::new();
-        hasher.update(&bincode::serialize(proof).unwrap());
-        let vrf_value = hasher.finalize();
-        // 2. validate proof
-        let data = bincode::serialize(&view_number).unwrap();
-        if !proof
-            .staking_key
-            .validate(proof.vrf_proof.as_ref(), &data[..])
-        {
-            return false;
+        let vrf_check = Election::check_sortition_proof(
+            proof.staking_key.as_ref(),
+            &(),
+            &proof.vrf_proof.0,
+            total_stake,
+            amount_to_nonzerou64(stake_amount),
+            NonZeroU64::new(sortition_parameter).unwrap(),
+            NonZeroU64::new(proof.num_seats).unwrap(),
+            vrf_seed.as_ref(),
+            view_number,
+        );
+        match vrf_check {
+            Ok(res) => res,
+            _ => false,
         }
-        // mock eligibility return true ~25% of times
-        vrf_value[0] < 64
     }
 
     /// Prove that staking key is eligible for reward on view number. Return None if key is not eligible
-    pub fn prove_eligibility<R: CryptoRng>(
-        _rng: R,
+    pub fn prove_eligibility(
         sortition_parameter: u64,
         vrf_seed: VrfSeed,
         view_number: ConsensusTime,
         private_key: &StakingPrivKey,
-        stake_amount: NonZeroU64,
+        stake_amount: Amount,
         total_stake: NonZeroU64,
     ) -> Option<EligibilityWitness> {
-        // 1. compute vrf proof
-        let data = bincode::serialize(&view_number).unwrap();
-        let proof = StakingKey::sign(private_key, &data[..]).into();
-        let pub_key = private_key.into();
-        // 2. check eligibility
-        let eligibility_witness = EligibilityWitness {
-            staking_key: pub_key,
-            vrf_proof: proof,
-            time: view_number,
-            num_seats: 1,
-        };
-        if check_eligibility(
-            sortition_parameter,
-            &vrf_seed,
+        let vrf_elibigility = Election::get_sortition_proof(
+            &private_key.0,
+            &(),
+            vrf_seed.as_ref(),
             view_number,
-            stake_amount,
             total_stake,
-            &eligibility_witness,
-        ) {
-            Some(eligibility_witness)
-        } else {
-            None
-        }
-    }
-    #[cfg(test)]
-    mod test_eligibility {
-        use crate::reward::mock_eligibility::{check_eligibility, prove_eligibility};
-        use crate::stake_table::StakingKey;
-        use crate::state::VrfSeed;
-        use hotshot::traits::election::vrf::SORTITION_PARAMETER;
-        use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-        use std::num::NonZeroU64;
-        use std::ops::Add;
-
-        #[test]
-        fn test_reward_eligibility() {
-            let mut rng = ChaChaRng::from_seed([1; 32]);
-            let mut view_number = hotshot_types::data::ViewNumber::genesis();
-            let (_pub_key, priv_key) = StakingKey::generate(&mut rng);
-            let (bad_pub_key, _) = StakingKey::generate(&mut rng);
-            let mut found = 0;
-            for _ in 0..600 {
-                // with 600 runs we get ~2^{-100} failure pbb
-                if let Some(mut proof) = prove_eligibility(
-                    &mut rng,
-                    SORTITION_PARAMETER,
-                    Default::default(),
-                    view_number,
-                    &priv_key,
-                    NonZeroU64::new(1).unwrap(),
-                    NonZeroU64::new(10).unwrap(),
-                ) {
-                    assert!(check_eligibility(
-                        SORTITION_PARAMETER,
-                        &VrfSeed::default(),
-                        view_number,
-                        NonZeroU64::new(1).unwrap(),
-                        NonZeroU64::new(10).unwrap(),
-                        &proof
-                    ));
-                    proof.staking_key = bad_pub_key.clone();
-                    assert!(!check_eligibility(
-                        SORTITION_PARAMETER,
-                        &VrfSeed::default(),
-                        view_number,
-                        NonZeroU64::new(1).unwrap(),
-                        NonZeroU64::new(10).unwrap(),
-                        &proof
-                    ));
-
-                    found += 1;
-                }
-                view_number = view_number.add(1);
-            }
-            assert_ne!(found, 0, "Staking key was never eligible");
-            println!(
-                "Staking key was found {} times out of 600: {:0.2}%, view_number:{:?}",
-                found,
-                (found as f64) / 6.0,
-                view_number
-            )
+            amount_to_nonzerou64(stake_amount),
+            NonZeroU64::new(sortition_parameter).unwrap(),
+        );
+        match vrf_elibigility {
+            Ok((proof, Some(sortition))) => Some(EligibilityWitness {
+                staking_key: StakingKey::from_private(private_key),
+                vrf_proof: VrfProof(proof),
+                time: view_number,
+                num_seats: sortition.into(),
+            }),
+            _ => None,
         }
     }
 }

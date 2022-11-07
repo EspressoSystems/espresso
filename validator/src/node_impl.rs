@@ -12,21 +12,17 @@
 
 use core::fmt::Debug;
 use core::marker::PhantomData;
-use espresso_core::{stake_table::VrfParam, state::ValidatorState};
+use espresso_core::{
+    stake_table::{Election, VrfParam},
+    state::ValidatorState,
+};
 use hotshot::{
-    traits::{
-        election::vrf::{VRFPubKey, VrfImpl},
-        NetworkingImplementation, NodeImplementation, Storage,
-    },
+    traits::{election::vrf::VRFPubKey, NetworkingImplementation, NodeImplementation, Storage},
     types::Message,
 };
-use jf_primitives::{signatures::BLSSignatureScheme, vrf::blsvrf::BLSVRFScheme};
-use sha3::Sha3_256 as Hasher;
+use jf_primitives::signatures::BLSSignatureScheme;
 
 pub type SignatureKey = VRFPubKey<BLSSignatureScheme<VrfParam>>;
-
-pub type Election =
-    VrfImpl<ValidatorState, BLSSignatureScheme<VrfParam>, BLSVRFScheme<VrfParam>, Hasher, VrfParam>;
 
 /// A lightweight node that handles validation for consensus, and nothing more.
 pub trait PLNet:

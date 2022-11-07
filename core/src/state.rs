@@ -1592,17 +1592,17 @@ impl ValidatorState {
                     staking_key: txn.staking_key(),
                     time: txn.time(),
                 };
+                // check helper proofs (RewardNoteProofs)
+                let (reward_digest, stake_amount) = pfs.verify(self, latest_reward.clone())?;
 
                 // verify eligibility reward txn (CollectRewardNote)
                 txn.verify(
                     self.chain.committee_size,
                     self.chain.vrf_seed,
+                    stake_amount,
                     amount_to_nonzerou64(pfs.total_stake()),
                 )
                 .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
-
-                // check helper proofs (RewardNoteProofs)
-                let reward_digest = pfs.verify(self, latest_reward.clone())?;
 
                 //check reward amount
                 let max_reward = crate::reward::compute_reward_amount(
