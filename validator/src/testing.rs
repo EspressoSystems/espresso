@@ -24,7 +24,6 @@ use espresso_esqs::full_node::{self, EsQS};
 use futures::Future;
 use futures::{channel::oneshot, future::join_all};
 use hotshot::types::SignatureKey;
-use jf_cap::keys::UserAddress;
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
@@ -162,7 +161,7 @@ impl Drop for TestNetwork {
 pub async fn minimal_test_network(
     rng: &mut ChaChaRng,
     faucet_pub_key: UserPubKey,
-    rewards_address: Option<UserAddress>,
+    rewards_pub_key: Option<UserPubKey>,
 ) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
@@ -203,7 +202,7 @@ pub async fn minimal_test_network(
         let mut store_path = store.path().to_owned();
         let priv_key = key.clone();
         let facuet_pub_key = faucet_pub_key.clone();
-        let rewards_address = rewards_address.clone();
+        let rewards_pub_key = rewards_pub_key.clone();
 
         store_path.push(i.to_string());
         let new_rng = ChaChaRng::from_rng(&mut *rng).unwrap();
@@ -227,7 +226,7 @@ pub async fn minimal_test_network(
                 )
                 .unwrap(),
                 faucet_pub_key: vec![facuet_pub_key],
-                rewards_address,
+                rewards_pub_key,
                 ..NodeOpt::new(MINIMUM_NODES)
             };
             let genesis = genesis(&node_opt, &consensus_opt);

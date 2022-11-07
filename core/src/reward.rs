@@ -27,7 +27,7 @@ use commit::Committable;
 use core::fmt::Debug;
 use core::hash::Hash;
 use hotshot::types::SignatureKey;
-use jf_cap::keys::{UserAddress, UserPubKey};
+use jf_cap::keys::UserPubKey;
 use jf_cap::structs::{
     Amount, AssetDefinition, BlindFactor, FreezeFlag, RecordCommitment, RecordOpening,
 };
@@ -119,7 +119,7 @@ impl CollectRewardNote {
         committee_size: u64,
         block_height: u64,
         staking_priv_key: &StakingPrivKey,
-        cap_address: UserAddress,
+        cap_pub_key: UserPubKey,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
         uncollected_reward_proof: CollectedRewardsProof,
         eligibility_witness: EligibilityWitness,
@@ -130,7 +130,7 @@ impl CollectRewardNote {
             historical_stake_tables_num_leaves,
             committee_size,
             block_height,
-            cap_address,
+            cap_pub_key,
             stake_amount_proof,
             uncollected_reward_proof,
             eligibility_witness,
@@ -218,7 +218,7 @@ pub struct CollectRewardBody {
     /// Blinding factor for reward record commitment on CAP native asset
     blind_factor: BlindFactor,
     /// Address that owns the reward
-    cap_address: UserAddress,
+    cap_pub_key: UserPubKey,
     /// Reward amount
     reward_amount: Amount,
     /// Staking `pub_key`, `view` number and a proof that staking key was selected for committee election on `view`
@@ -235,7 +235,7 @@ impl CollectRewardBody {
         historical_stake_tables_num_leaves: u64,
         committee_size: u64,
         block_height: u64,
-        cap_address: UserAddress,
+        cap_pub_key: UserPubKey,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
         uncollected_reward_proof: CollectedRewardsProof,
         eligibility_witness: EligibilityWitness,
@@ -259,7 +259,7 @@ impl CollectRewardBody {
         };
         let body = CollectRewardBody {
             blind_factor,
-            cap_address,
+            cap_pub_key,
             reward_amount: allowed_reward, // TODO allow fees, need to subtract fee from reward_amount
             eligibility_witness,
         };
@@ -287,7 +287,7 @@ impl CollectRewardBody {
         RecordOpening {
             amount: self.reward_amount,
             asset_def: AssetDefinition::native(),
-            pub_key: UserPubKey::new(self.cap_address.clone(), Default::default()),
+            pub_key: self.cap_pub_key.clone(),
             freeze_flag: FreezeFlag::Unfrozen,
             blind: self.blind_factor,
         }
