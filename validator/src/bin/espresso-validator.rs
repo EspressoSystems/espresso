@@ -18,24 +18,11 @@ use futures::future::pending;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
-#[derive(Parser)]
-#[command(
-    name = "Espresso validator",
-    about = "Runs a validator to participate in the consensus."
-)]
-struct Options {
-    #[command(flatten)]
-    validator_opt: ValidatorOpt,
-}
-
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
-    let options = Options::parse();
-    let genesis = genesis(
-        &options.validator_opt.node_opt,
-        &options.validator_opt.consensus_opt,
-    );
-    let hotshot = init(ChaChaRng::from_entropy(), genesis, options.validator_opt).await?;
+    let node_opt = NodeOpt::parse();
+    let genesis = genesis(&node_opt);
+    let hotshot = init(ChaChaRng::from_entropy(), genesis, node_opt).await?;
     run_consensus(hotshot, pending::<()>()).await;
     Ok(())
 }
