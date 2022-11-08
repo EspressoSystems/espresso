@@ -274,20 +274,6 @@
 <span id="274">274</span>
 <span id="275">275</span>
 <span id="276">276</span>
-<span id="277">277</span>
-<span id="278">278</span>
-<span id="279">279</span>
-<span id="280">280</span>
-<span id="281">281</span>
-<span id="282">282</span>
-<span id="283">283</span>
-<span id="284">284</span>
-<span id="285">285</span>
-<span id="286">286</span>
-<span id="287">287</span>
-<span id="288">288</span>
-<span id="289">289</span>
-<span id="290">290</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -301,7 +287,7 @@
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">gen_keys</span>, <span class="ident">genesis</span>, <span class="ident">init_validator</span>, <span class="ident">open_data_source</span>, <span class="ident">run_consensus</span>, <span class="ident">ConsensusOpt</span>, <span class="ident">NodeOpt</span>,
+    <span class="ident">gen_keys</span>, <span class="ident">genesis</span>, <span class="ident">init_validator</span>, <span class="ident">open_data_source</span>, <span class="ident">run_consensus</span>, <span class="ident">NodeOpt</span>,
     <span class="ident">MINIMUM_BOOTSTRAP_NODES</span>, <span class="ident">MINIMUM_NODES</span>,
 };
 <span class="kw">use</span> <span class="ident">address_book</span>::{<span class="ident">error::AddressBookError</span>, <span class="ident">store::FileStore</span>};
@@ -458,25 +444,14 @@
     <span class="kw">let</span> <span class="ident">bootstrap_ports</span> <span class="op">=</span> (<span class="number">0</span>..<span class="ident">MINIMUM_BOOTSTRAP_NODES</span>)
         .<span class="ident">into_iter</span>()
         .<span class="ident">map</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">pick_unused_port</span>().<span class="ident">unwrap</span>());
-    <span class="kw">let</span> <span class="ident">consensus_opt</span> <span class="op">=</span> <span class="ident">ConsensusOpt</span> {
-        <span class="ident">secret_key_seed</span>: <span class="prelude-val">Some</span>(<span class="ident">seed</span>.<span class="ident">into</span>()),
-        <span class="ident">replication_factor</span>: <span class="number">4</span>,
-        <span class="ident">bootstrap_mesh_n_high</span>: <span class="number">50</span>,
-        <span class="ident">bootstrap_mesh_n_low</span>: <span class="number">10</span>,
-        <span class="ident">bootstrap_mesh_outbound_min</span>: <span class="number">4</span>,
-        <span class="ident">bootstrap_mesh_n</span>: <span class="number">15</span>,
-        <span class="ident">nonbootstrap_mesh_n_high</span>: <span class="number">15</span>,
-        <span class="ident">nonbootstrap_mesh_n_low</span>: <span class="number">8</span>,
-        <span class="ident">nonbootstrap_mesh_outbound_min</span>: <span class="number">4</span>,
-        <span class="ident">nonbootstrap_mesh_n</span>: <span class="number">12</span>,
-        <span class="ident">bootstrap_nodes</span>: <span class="ident">bootstrap_ports</span>
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">p</span><span class="op">|</span> <span class="macro">format!</span>(<span class="string">&quot;localhost:{}&quot;</span>, <span class="ident">p</span>).<span class="ident">parse</span>().<span class="ident">unwrap</span>())
-            .<span class="ident">collect</span>(),
-    };
+    <span class="kw">let</span> <span class="ident">bootstrap_nodes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Url</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">bootstrap_ports</span>
+        .<span class="ident">map</span>(<span class="op">|</span><span class="ident">p</span><span class="op">|</span> <span class="macro">format!</span>(<span class="string">&quot;localhost:{}&quot;</span>, <span class="ident">p</span>).<span class="ident">parse</span>().<span class="ident">unwrap</span>())
+        .<span class="ident">collect</span>();
+    <span class="kw">let</span> <span class="ident">nonbootstrap_base_port</span> <span class="op">=</span> <span class="ident">pick_unused_port</span>().<span class="ident">unwrap</span>() <span class="kw">as</span> <span class="ident">usize</span>;
 
     <span class="macro">println!</span>(<span class="string">&quot;generating public keys&quot;</span>);
     <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="ident">Instant::now</span>();
-    <span class="kw">let</span> <span class="ident">keys</span> <span class="op">=</span> <span class="ident">gen_keys</span>(<span class="kw-2">&amp;</span><span class="ident">consensus_opt</span>, <span class="ident">MINIMUM_NODES</span>);
+    <span class="kw">let</span> <span class="ident">keys</span> <span class="op">=</span> <span class="ident">gen_keys</span>(<span class="prelude-val">Some</span>(<span class="ident">seed</span>.<span class="ident">into</span>()), <span class="ident">MINIMUM_NODES</span>);
     <span class="kw">let</span> <span class="ident">pub_keys</span> <span class="op">=</span> <span class="ident">keys</span>
         .<span class="ident">iter</span>()
         .<span class="ident">map</span>(<span class="ident">StakingKey::from_private</span>)
@@ -484,10 +459,9 @@
     <span class="macro">println!</span>(<span class="string">&quot;generated public keys in {:?}&quot;</span>, <span class="ident">start</span>.<span class="ident">elapsed</span>());
 
     <span class="kw">let</span> <span class="ident">store</span> <span class="op">=</span> <span class="ident">TempDir::new</span>(<span class="string">&quot;minimal_test_network_store&quot;</span>).<span class="ident">unwrap</span>();
-
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">nodes_futures</span> <span class="op">=</span> <span class="macro">vec!</span>[];
     <span class="kw">for</span> (<span class="ident">i</span>, <span class="ident">key</span>) <span class="kw">in</span> <span class="ident">keys</span>.<span class="ident">iter</span>().<span class="ident">enumerate</span>() {
-        <span class="kw">let</span> <span class="ident">consensus_opt</span> <span class="op">=</span> <span class="ident">consensus_opt</span>.<span class="ident">clone</span>();
+        <span class="kw">let</span> <span class="ident">bootstrap_nodes</span> <span class="op">=</span> <span class="ident">bootstrap_nodes</span>.<span class="ident">clone</span>();
         <span class="kw">let</span> <span class="ident">pub_keys</span> <span class="op">=</span> <span class="ident">pub_keys</span>.<span class="ident">clone</span>();
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">store_path</span> <span class="op">=</span> <span class="ident">store</span>.<span class="ident">path</span>().<span class="ident">to_owned</span>();
         <span class="kw">let</span> <span class="ident">priv_key</span> <span class="op">=</span> <span class="ident">key</span>.<span class="ident">clone</span>();
@@ -498,8 +472,9 @@
         <span class="kw">let</span> <span class="ident">new_rng</span> <span class="op">=</span> <span class="ident">ChaChaRng::from_rng</span>(<span class="kw-2">&amp;mut</span> <span class="kw-2">*</span><span class="ident">rng</span>).<span class="ident">unwrap</span>();
         <span class="kw">let</span> <span class="ident">future</span> <span class="op">=</span> <span class="kw">async</span> <span class="kw">move</span> {
             <span class="kw">let</span> <span class="ident">node_opt</span> <span class="op">=</span> <span class="ident">NodeOpt</span> {
+                <span class="ident">location</span>: <span class="prelude-val">Some</span>(<span class="string">&quot;My location&quot;</span>.<span class="ident">to_string</span>()),
+                <span class="ident">nonbootstrap_base_port</span>,
                 <span class="ident">store_path</span>: <span class="prelude-val">Some</span>(<span class="ident">store_path</span>),
-                <span class="ident">nonbootstrap_base_port</span>: <span class="ident">pick_unused_port</span>().<span class="ident">unwrap</span>() <span class="kw">as</span> <span class="ident">usize</span>,
                 <span class="comment">// Set fairly short view times (propose any transactions available after 5s, propose</span>
                 <span class="comment">// an empty block after 10s). In testing, we generally have low volumes, so we don&#39;t</span>
                 <span class="comment">// gain much from waiting longer to batch larger blocks, but with low views we get</span>
@@ -508,27 +483,24 @@
                 <span class="ident">min_transactions</span>: <span class="number">1</span>,
                 <span class="ident">max_propose_time</span>: <span class="ident">Duration::from_secs</span>(<span class="number">10</span>),
                 <span class="ident">next_view_timeout</span>: <span class="ident">Duration::from_secs</span>(<span class="number">60</span>),
+                <span class="ident">secret_key_seed</span>: <span class="prelude-val">Some</span>(<span class="ident">seed</span>.<span class="ident">into</span>()),
+                <span class="ident">replication_factor</span>: <span class="number">4</span>,
+                <span class="ident">bootstrap_mesh_n_high</span>: <span class="number">50</span>,
+                <span class="ident">bootstrap_mesh_n_low</span>: <span class="number">10</span>,
+                <span class="ident">bootstrap_mesh_outbound_min</span>: <span class="number">4</span>,
+                <span class="ident">bootstrap_mesh_n</span>: <span class="number">15</span>,
+                <span class="ident">nonbootstrap_mesh_n_high</span>: <span class="number">15</span>,
+                <span class="ident">nonbootstrap_mesh_n_low</span>: <span class="number">8</span>,
+                <span class="ident">nonbootstrap_mesh_outbound_min</span>: <span class="number">4</span>,
+                <span class="ident">nonbootstrap_mesh_n</span>: <span class="number">12</span>,
+                <span class="ident">bootstrap_nodes</span>,
                 <span class="ident">faucet_pub_key</span>: <span class="macro">vec!</span>[<span class="ident">facuet_pub_key</span>],
                 <span class="ident">rewards_address</span>,
-                ..<span class="ident">NodeOpt::new</span>(<span class="ident">MINIMUM_NODES</span>)
+                ..<span class="ident">NodeOpt::new</span>(<span class="ident">i</span>, <span class="ident">MINIMUM_NODES</span>)
             };
-            <span class="kw">let</span> <span class="ident">genesis</span> <span class="op">=</span> <span class="ident">genesis</span>(<span class="kw-2">&amp;</span><span class="ident">node_opt</span>, <span class="kw-2">&amp;</span><span class="ident">consensus_opt</span>);
-            <span class="kw">let</span> <span class="ident">consensus</span> <span class="op">=</span> <span class="ident">init_validator</span>(
-                <span class="ident">new_rng</span>,
-                <span class="kw-2">&amp;</span><span class="ident">node_opt</span>,
-                <span class="kw-2">&amp;</span><span class="ident">consensus_opt</span>,
-                <span class="ident">priv_key</span>,
-                <span class="ident">pub_keys</span>,
-                <span class="ident">genesis</span>,
-                <span class="ident">i</span>,
-            )
-            .<span class="kw">await</span>;
-            <span class="kw">let</span> <span class="ident">data_source</span> <span class="op">=</span> <span class="ident">open_data_source</span>(
-                <span class="kw-2">&amp;</span><span class="ident">node_opt</span>,
-                <span class="ident">i</span>,
-                <span class="prelude-val">Some</span>(<span class="string">&quot;My location&quot;</span>.<span class="ident">to_string</span>()),
-                <span class="ident">consensus</span>.<span class="ident">clone</span>(),
-            );
+            <span class="kw">let</span> <span class="ident">genesis</span> <span class="op">=</span> <span class="ident">genesis</span>(<span class="kw-2">&amp;</span><span class="ident">node_opt</span>);
+            <span class="kw">let</span> <span class="ident">consensus</span> <span class="op">=</span> <span class="ident">init_validator</span>(<span class="ident">new_rng</span>, <span class="kw-2">&amp;</span><span class="ident">node_opt</span>, <span class="ident">priv_key</span>, <span class="ident">pub_keys</span>, <span class="ident">genesis</span>).<span class="kw">await</span>;
+            <span class="kw">let</span> <span class="ident">data_source</span> <span class="op">=</span> <span class="ident">open_data_source</span>(<span class="kw-2">&amp;</span><span class="ident">node_opt</span>, <span class="ident">consensus</span>.<span class="ident">clone</span>());
 
             <span class="comment">// If applicable, run a query service.</span>
             <span class="kw">let</span> <span class="ident">esqs</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">i</span> <span class="op">==</span> <span class="number">0</span> {

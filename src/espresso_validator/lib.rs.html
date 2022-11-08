@@ -954,6 +954,13 @@
 <span id="954">954</span>
 <span id="955">955</span>
 <span id="956">956</span>
+<span id="957">957</span>
+<span id="958">958</span>
+<span id="959">959</span>
+<span id="960">960</span>
+<span id="961">961</span>
+<span id="962">962</span>
+<span id="963">963</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -973,7 +980,7 @@
 <span class="kw">use</span> <span class="ident">ark_std::rand</span>::{<span class="ident">CryptoRng</span>, <span class="ident">RngCore</span>};
 <span class="kw">use</span> <span class="ident">async_std::sync</span>::{<span class="ident">Arc</span>, <span class="ident">RwLock</span>};
 <span class="kw">use</span> <span class="ident">async_std::task::spawn</span>;
-<span class="kw">use</span> <span class="ident">clap</span>::{<span class="ident">Args</span>, <span class="ident">Parser</span>};
+<span class="kw">use</span> <span class="ident">clap::Parser</span>;
 <span class="kw">use</span> <span class="ident">cld::ClDuration</span>;
 <span class="kw">use</span> <span class="ident">dirs::data_local_dir</span>;
 <span class="kw">use</span> <span class="ident">espresso_core::kv_merkle_tree::KVMerkleTree</span>;
@@ -992,6 +999,7 @@
     },
     <span class="ident">universal_params::VERIF_CRS</span>,
 };
+<span class="kw">use</span> <span class="ident">espresso_esqs::full_node</span>::{<span class="self">self</span>};
 <span class="kw">use</span> <span class="ident">espresso_esqs::full_node_data_source::QueryData</span>;
 <span class="kw">use</span> <span class="ident">espresso_validator_api::data_source::ValidatorDataSource</span>;
 <span class="kw">use</span> <span class="ident">futures</span>::{<span class="ident">select</span>, <span class="ident">Future</span>, <span class="ident">FutureExt</span>};
@@ -1127,8 +1135,32 @@
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Parser</span>)]</span>
+<span class="doccomment">/// Options for validator nodes, including node-specific options, consensus options, and other</span>
+<span class="doccomment">/// options that are consistent among nodes.</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Parser</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">NodeOpt</span> {
+    <span class="comment">//</span>
+    <span class="comment">// 1. Node-specific options.</span>
+    <span class="comment">//</span>
+    <span class="doccomment">/// Id of the current node.</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_ID&quot;</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">id</span>: <span class="ident">usize</span>,
+
+    <span class="doccomment">/// Location of the current node.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// If not provided, the IP address will be used for dashboard display.</span>
+    <span class="attribute">#[<span class="ident">clap</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_LOCATION&quot;</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">location</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
+
+    <span class="doccomment">/// Port of the current node if it&#39;s non-bootstrap.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// Overrides `nonbootstrap_base_port`.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// If the node is bootstrap, this option will be overriden by the corresponding port in</span>
+    <span class="doccomment">/// `--bootstrap-nodes`.</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT&quot;</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">nonbootstrap_port</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u16</span><span class="op">&gt;</span>,
+
     <span class="doccomment">/// Whether to reset the persisted state.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// If the path to a node&#39;s persistence files doesn&#39;t exist, its persisted state will be reset</span>
@@ -1136,20 +1168,93 @@
     <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>)]</span>
     <span class="kw">pub</span> <span class="ident">reset_store_state</span>: <span class="ident">bool</span>,
 
-    <span class="doccomment">/// Path to persistence files for all nodes.</span>
+    <span class="doccomment">/// Path to persistence files for the current node.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Persistence files will be nested under the specified directory.</span>
     <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_STORE_PATH&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">store_path</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">PathBuf</span><span class="op">&gt;</span>,
 
-    <span class="doccomment">/// Port of the current node if it&#39;s non-bootstrap.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// Overrides `nonbootstrap_base_port`.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// If the node is bootstrap, thip option will be overriden by the corresponding port in</span>
-    <span class="doccomment">/// `--bootstrap-nodes`.</span>
-    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_PORT&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="ident">nonbootstrap_port</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u16</span><span class="op">&gt;</span>,
+    <span class="comment">//</span>
+    <span class="comment">// 2. Consensus options for all nodes.</span>
+    <span class="comment">// The default values of `replication_factor` and mesh parameters for bootstrap and non-bootstrap</span>
+    <span class="comment">// nodes are set arbitrarily. They should increase as the number of nodes increases, and must meet</span>
+    <span class="comment">// the following requirements.</span>
+    <span class="comment">// * `mesh_outbound_min &lt;= mesh_n_low &lt;= mesh_n &lt;= mesh_n_high`.</span>
+    <span class="comment">// * `mesh_outbound_min &lt;= mesh_n / 2`.</span>
+    <span class="comment">//</span>
+    <span class="doccomment">/// Seed number used to generate secret key set for all nodes.</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_SECRET_KEY_SEED&quot;</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">secret_key_seed</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">SecretKeySeed</span><span class="op">&gt;</span>,
+    <span class="attribute">#[<span class="ident">arg</span>(
+        <span class="ident">long</span>,
+        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_REPLICATION_FACTOR&quot;</span>,
+        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5&quot;</span>
+    )]</span>
+    <span class="kw">pub</span> <span class="ident">replication_factor</span>: <span class="ident">usize</span>,
+    <span class="attribute">#[<span class="ident">arg</span>(
+        <span class="ident">long</span>,
+        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH&quot;</span>,
+        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;50&quot;</span>
+    )]</span>
+    <span class="kw">pub</span> <span class="ident">bootstrap_mesh_n_high</span>: <span class="ident">usize</span>,
+    <span class="attribute">#[<span class="ident">arg</span>(
+        <span class="ident">long</span>,
+        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW&quot;</span>,
+        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;10&quot;</span>
+    )]</span>
+    <span class="kw">pub</span> <span class="ident">bootstrap_mesh_n_low</span>: <span class="ident">usize</span>,
+    <span class="attribute">#[<span class="ident">arg</span>(
+        <span class="ident">long</span>,
+        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN&quot;</span>,
+        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5&quot;</span>
+    )]</span>
+    <span class="kw">pub</span> <span class="ident">bootstrap_mesh_outbound_min</span>: <span class="ident">usize</span>,
+    <span class="attribute">#[<span class="ident">arg</span>(
+        <span class="ident">long</span>,
+        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N&quot;</span>,
+        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;15&quot;</span>
+    )]</span>
+    <span class="kw">pub</span> <span class="ident">bootstrap_mesh_n</span>: <span class="ident">usize</span>,
+    <span class="attribute">#[<span class="ident">arg</span>(
+        <span class="ident">long</span>,
+        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH&quot;</span>,
+        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;15&quot;</span>
+    )]</span>
+    <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_n_high</span>: <span class="ident">usize</span>,
+    <span class="attribute">#[<span class="ident">arg</span>(
+        <span class="ident">long</span>,
+        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW&quot;</span>,
+        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;8&quot;</span>
+    )]</span>
+    <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_n_low</span>: <span class="ident">usize</span>,
+    <span class="attribute">#[<span class="ident">arg</span>(
+        <span class="ident">long</span>,
+        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN&quot;</span>,
+        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;4&quot;</span>
+    )]</span>
+    <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_outbound_min</span>: <span class="ident">usize</span>,
+    <span class="attribute">#[<span class="ident">arg</span>(
+        <span class="ident">long</span>,
+        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N&quot;</span>,
+        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;12&quot;</span>
+    )]</span>
+    <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_n</span>: <span class="ident">usize</span>,
+    <span class="doccomment">/// URLs of the bootstrap nodes, in the format of `&lt;host&gt;:&lt;port&gt;`.</span>
+    <span class="attribute">#[<span class="ident">arg</span>(
+        <span class="ident">long</span>,
+        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_NODES&quot;</span>,
+        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;localhost:9000,localhost:9001,localhost:9002,localhost:9003,localhost:9004,localhost:9005,localhost:9006&quot;</span>,
+        <span class="ident">value_delimiter</span> <span class="op">=</span> <span class="string">&#39;,&#39;</span>
+    )]</span>
+    <span class="kw">pub</span> <span class="ident">bootstrap_nodes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Url</span><span class="op">&gt;</span>,
+
+    <span class="comment">//</span>
+    <span class="comment">// 3. Other options for all nodes.</span>
+    <span class="comment">//</span>
+    <span class="doccomment">/// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-</span>
+    <span class="doccomment">/// bootstrap nodes.</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NUM_NODES&quot;</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">num_nodes</span>: <span class="ident">usize</span>,
 
     <span class="doccomment">/// The base port for the non-bootstrap nodes.</span>
     <span class="doccomment">///</span>
@@ -1261,11 +1366,6 @@
     )]</span>
     <span class="kw">pub</span> <span class="ident">max_transactions</span>: <span class="ident">NonZeroUsize</span>,
 
-    <span class="doccomment">/// Number of nodes, including a fixed number of bootstrap nodes and a dynamic number of non-</span>
-    <span class="doccomment">/// bootstrap nodes.</span>
-    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">short</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NUM_NODES&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="ident">num_nodes</span>: <span class="ident">usize</span>,
-
     <span class="doccomment">/// Unique identifier for this instance of Espresso.</span>
     <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_CHAIN_ID&quot;</span>, <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;0&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">chain_id</span>: <span class="ident">u16</span>,
@@ -1283,6 +1383,13 @@
     <span class="doccomment">/// CAP Address to send rewards to</span>
     <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_REWARDS_ADDRESS&quot;</span>)]</span>
     <span class="kw">pub</span> <span class="ident">rewards_address</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">UserAddress</span><span class="op">&gt;</span>,
+
+    <span class="doccomment">/// Whether to color log output with ANSI color codes.</span>
+    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_COLORED_LOGS&quot;</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">colored_logs</span>: <span class="ident">bool</span>,
+
+    <span class="attribute">#[<span class="ident">command</span>(<span class="ident">subcommand</span>)]</span>
+    <span class="kw">pub</span> <span class="ident">esqs</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">full_node::Command</span><span class="op">&gt;</span>,
 }
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">Snafu</span>)]</span>
@@ -1300,13 +1407,25 @@
 }
 
 <span class="kw">impl</span> <span class="ident">NodeOpt</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">num_nodes</span>: <span class="ident">usize</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident"><span class="self">Self</span>::parse_from</span>(<span class="macro">vec!</span>[<span class="string">&quot;--&quot;</span>, <span class="string">&quot;--num-nodes&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">num_nodes</span>.<span class="ident">to_string</span>()])
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">id</span>: <span class="ident">usize</span>, <span class="ident">num_nodes</span>: <span class="ident">usize</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident"><span class="self">Self</span>::parse_from</span>(<span class="macro">vec!</span>[
+            <span class="string">&quot;--&quot;</span>,
+            <span class="string">&quot;--id&quot;</span>,
+            <span class="kw-2">&amp;</span><span class="ident">id</span>.<span class="ident">to_string</span>(),
+            <span class="string">&quot;--num-nodes&quot;</span>,
+            <span class="kw-2">&amp;</span><span class="ident">num_nodes</span>.<span class="ident">to_string</span>(),
+        ])
     }
 }
 
 <span class="kw">impl</span> <span class="ident">NodeOpt</span> {
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">check</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">String</span><span class="op">&gt;</span> {
+        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">num_nodes</span> <span class="op">&lt;</span> <span class="ident">MINIMUM_NODES</span> {
+            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="macro">format!</span>(
+                <span class="string">&quot;number of nodes must not be less than {}&quot;</span>,
+                <span class="ident">MINIMUM_NODES</span>
+            ));
+        }
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">max_propose_time</span> <span class="op">&lt;</span> <span class="self">self</span>.<span class="ident">min_propose_time</span> {
             <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="string">&quot;max propose time must not be less than min propose time&quot;</span>.<span class="ident">into</span>());
         }
@@ -1358,88 +1477,6 @@
     }
 }
 
-<span class="doccomment">/// Options for the validator connections during the consensus.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// All validators should have the same consensus options.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// The default values of `replication_factor` and mesh parameters for bootstrap and non-bootstrap</span>
-<span class="doccomment">/// nodes are set arbitrarily. They should increase as the number of nodes increases, and must meet</span>
-<span class="doccomment">/// the following requirements.</span>
-<span class="doccomment">/// 1. `mesh_outbound_min &lt;= mesh_n_low &lt;= mesh_n &lt;= mesh_n_high`.</span>
-<span class="doccomment">/// 2. `mesh_outbound_min &lt;= mesh_n / 2`.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">Args</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ConsensusOpt</span> {
-    <span class="doccomment">/// Seed number used to generate secret key set for all nodes.</span>
-    <span class="attribute">#[<span class="ident">arg</span>(<span class="ident">long</span>, <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_SECRET_KEY_SEED&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="ident">secret_key_seed</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">SecretKeySeed</span><span class="op">&gt;</span>,
-
-    <span class="attribute">#[<span class="ident">arg</span>(
-        <span class="ident">long</span>,
-        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_REPLICATION_FACTOR&quot;</span>,
-        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5&quot;</span>
-    )]</span>
-    <span class="kw">pub</span> <span class="ident">replication_factor</span>: <span class="ident">usize</span>,
-
-    <span class="attribute">#[<span class="ident">arg</span>(
-        <span class="ident">long</span>,
-        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_HIGH&quot;</span>,
-        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;50&quot;</span>
-    )]</span>
-    <span class="kw">pub</span> <span class="ident">bootstrap_mesh_n_high</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">arg</span>(
-        <span class="ident">long</span>,
-        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N_LOW&quot;</span>,
-        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;10&quot;</span>
-    )]</span>
-    <span class="kw">pub</span> <span class="ident">bootstrap_mesh_n_low</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">arg</span>(
-        <span class="ident">long</span>,
-        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_OUTBOUND_MIN&quot;</span>,
-        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;5&quot;</span>
-    )]</span>
-    <span class="kw">pub</span> <span class="ident">bootstrap_mesh_outbound_min</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">arg</span>(
-        <span class="ident">long</span>,
-        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_MESH_N&quot;</span>,
-        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;15&quot;</span>
-    )]</span>
-    <span class="kw">pub</span> <span class="ident">bootstrap_mesh_n</span>: <span class="ident">usize</span>,
-
-    <span class="attribute">#[<span class="ident">arg</span>(
-        <span class="ident">long</span>,
-        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_HIGH&quot;</span>,
-        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;15&quot;</span>
-    )]</span>
-    <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_n_high</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">arg</span>(
-        <span class="ident">long</span>,
-        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N_LOW&quot;</span>,
-        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;8&quot;</span>
-    )]</span>
-    <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_n_low</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">arg</span>(
-        <span class="ident">long</span>,
-        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_OUTBOUND_MIN&quot;</span>,
-        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;4&quot;</span>
-    )]</span>
-    <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_outbound_min</span>: <span class="ident">usize</span>,
-    <span class="attribute">#[<span class="ident">arg</span>(
-        <span class="ident">long</span>,
-        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_NONBOOTSTRAP_MESH_N&quot;</span>,
-        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;12&quot;</span>
-    )]</span>
-    <span class="kw">pub</span> <span class="ident">nonbootstrap_mesh_n</span>: <span class="ident">usize</span>,
-
-    <span class="doccomment">/// URLs of the bootstrap nodes, in the format of `&lt;host&gt;:&lt;port&gt;`.</span>
-    <span class="attribute">#[<span class="ident">arg</span>(
-        <span class="ident">long</span>,
-        <span class="ident">env</span> <span class="op">=</span> <span class="string">&quot;ESPRESSO_VALIDATOR_BOOTSTRAP_NODES&quot;</span>,
-        <span class="ident">default_value</span> <span class="op">=</span> <span class="string">&quot;localhost:9000,localhost:9001,localhost:9002,localhost:9003,localhost:9004,localhost:9005,localhost:9006&quot;</span>,
-        <span class="ident">value_delimiter</span> <span class="op">=</span> <span class="string">&#39;,&#39;</span>
-    )]</span>
-    <span class="kw">pub</span> <span class="ident">bootstrap_nodes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Url</span><span class="op">&gt;</span>,
-}
-
 <span class="doccomment">/// Returns the project directory.</span>
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">project_path</span>() -&gt; <span class="ident">PathBuf</span> {
     <span class="ident">PathBuf::from</span>(<span class="macro">env!</span>(<span class="string">&quot;CARGO_MANIFEST_DIR&quot;</span>))
@@ -1459,17 +1496,15 @@
 <span class="doccomment">///</span>
 <span class="doccomment">/// The returned path can be passed to `reset_store_dir` to remove the contents, if the</span>
 <span class="doccomment">/// `--reset-store-state` argument is true.</span>
-<span class="kw">fn</span> <span class="ident">get_store_dir</span>(<span class="ident">options</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>, <span class="ident">node_id</span>: <span class="ident">usize</span>) -&gt; <span class="ident">PathBuf</span> {
-    <span class="ident">options</span>
+<span class="kw">fn</span> <span class="ident">get_store_dir</span>(<span class="ident">node_opt</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>) -&gt; <span class="ident">PathBuf</span> {
+    <span class="ident">node_opt</span>
         .<span class="ident">store_path</span>
         .<span class="ident">clone</span>()
-        .<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">default_store_path</span>(<span class="ident">node_id</span>))
+        .<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">default_store_path</span>(<span class="ident">node_opt</span>.<span class="ident">id</span>))
 }
 
-<span class="kw">fn</span> <span class="ident">get_secret_key_seed</span>(<span class="ident">consensus_opt</span>: <span class="kw-2">&amp;</span><span class="ident">ConsensusOpt</span>) -&gt; [<span class="ident">u8</span>; <span class="number">32</span>] {
-    <span class="ident">consensus_opt</span>
-        .<span class="ident">secret_key_seed</span>
-        .<span class="ident">unwrap_or</span>(<span class="ident">SecretKeySeed</span>(<span class="ident">DEFAULT_SECRET_KEY_SEED</span>))
+<span class="kw">fn</span> <span class="ident">get_secret_key_seed</span>(<span class="ident">seed</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">SecretKeySeed</span><span class="op">&gt;</span>) -&gt; [<span class="ident">u8</span>; <span class="number">32</span>] {
+    <span class="ident">seed</span>.<span class="ident">unwrap_or</span>(<span class="ident">SecretKeySeed</span>(<span class="ident">DEFAULT_SECRET_KEY_SEED</span>))
         .<span class="ident">into</span>()
 }
 
@@ -1477,7 +1512,7 @@
 <span class="kw">type</span> <span class="ident">Storage</span> <span class="op">=</span> <span class="ident">MemoryStorage</span><span class="op">&lt;</span><span class="ident">ValidatorState</span><span class="op">&gt;</span>;
 <span class="kw">pub</span> <span class="kw">type</span> <span class="ident">Consensus</span> <span class="op">=</span> <span class="ident">HotShotHandle</span><span class="op">&lt;</span><span class="ident">ValidatorNodeImpl</span><span class="op">&lt;</span><span class="ident">Network</span>, <span class="ident">Storage</span><span class="op">&gt;</span><span class="op">&gt;</span>;
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">genesis</span>(<span class="ident">node_opt</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>, <span class="ident">consensus_opt</span>: <span class="kw-2">&amp;</span><span class="ident">ConsensusOpt</span>) -&gt; <span class="ident">GenesisNote</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">genesis</span>(<span class="ident">node_opt</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>) -&gt; <span class="ident">GenesisNote</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">ChaChaRng::from_seed</span>(<span class="ident">GENESIS_SEED</span>);
 
     <span class="comment">// Process the initial native token records for the faucet.</span>
@@ -1503,7 +1538,7 @@
         .<span class="ident">collect</span>();
 
     <span class="comment">// generate keys</span>
-    <span class="kw">let</span> <span class="ident">known_nodes</span> <span class="op">=</span> <span class="ident">gen_keys</span>(<span class="ident">consensus_opt</span>, <span class="ident">node_opt</span>.<span class="ident">num_nodes</span>);
+    <span class="kw">let</span> <span class="ident">known_nodes</span> <span class="op">=</span> <span class="ident">gen_keys</span>(<span class="ident">node_opt</span>.<span class="ident">secret_key_seed</span>, <span class="ident">node_opt</span>.<span class="ident">num_nodes</span>);
     <span class="ident">GenesisNote::new</span>(
         <span class="ident">ChainVariables::new</span>(<span class="ident">node_opt</span>.<span class="ident">chain_id</span>, <span class="ident">VERIF_CRS</span>.<span class="ident">clone</span>(), <span class="ident">COMMITTEE_SIZE</span>),
         <span class="ident">Arc::new</span>(<span class="ident">faucet_records</span>),
@@ -1527,13 +1562,11 @@
 <span class="doccomment">/// Creates the initial state and hotshot for simulation.</span>
 <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::too_many_arguments</span>)]</span>
 <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">init_hotshot</span>(
-    <span class="ident">options</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>,
+    <span class="ident">node_opt</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>,
     <span class="ident">known_nodes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">StakingKey</span><span class="op">&gt;</span>,
     <span class="ident">priv_key</span>: <span class="ident">StakingPrivKey</span>,
-    <span class="ident">node_id</span>: <span class="ident">usize</span>,
     <span class="ident">networking</span>: <span class="ident">Network</span>,
     <span class="ident">genesis</span>: <span class="ident">GenesisNote</span>,
-    <span class="ident">num_bootstrap</span>: <span class="ident">usize</span>,
 ) -&gt; (
     <span class="ident">Consensus</span>,
     <span class="ident">KVMerkleProof</span><span class="op">&lt;</span><span class="ident">StakeTableHash</span><span class="op">&gt;</span>,
@@ -1551,31 +1584,31 @@
         .<span class="ident">map</span>(<span class="ident">SignatureKey::from</span>)
         .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
 
-    <span class="kw">let</span> <span class="ident">pub_key</span> <span class="op">=</span> <span class="ident">known_nodes</span>[<span class="ident">node_id</span>].<span class="ident">clone</span>();
+    <span class="kw">let</span> <span class="ident">pub_key</span> <span class="op">=</span> <span class="ident">known_nodes</span>[<span class="ident">node_opt</span>.<span class="ident">id</span>].<span class="ident">clone</span>();
     <span class="kw">let</span> <span class="ident">vrf_config</span> <span class="op">=</span> <span class="ident">VRFStakeTableConfig</span> {
         <span class="ident">sortition_parameter</span>: <span class="ident">NonZeroU64::new</span>(<span class="ident">genesis</span>.<span class="ident">chain</span>.<span class="ident">committee_size</span>).<span class="ident">unwrap</span>(),
         <span class="ident">distribution</span>: <span class="ident">stake_distribution</span>,
     };
     <span class="kw">let</span> <span class="ident">config</span> <span class="op">=</span> <span class="ident">HotShotConfig</span> {
         <span class="ident">total_nodes</span>: <span class="ident">NonZeroUsize::new</span>(<span class="ident">known_nodes</span>.<span class="ident">len</span>()).<span class="ident">unwrap</span>(),
-        <span class="ident">max_transactions</span>: <span class="ident">options</span>.<span class="ident">max_transactions</span>,
+        <span class="ident">max_transactions</span>: <span class="ident">node_opt</span>.<span class="ident">max_transactions</span>,
         <span class="ident">known_nodes</span>: <span class="ident">known_nodes</span>.<span class="ident">clone</span>(),
-        <span class="ident">next_view_timeout</span>: <span class="ident">options</span>.<span class="ident">next_view_timeout</span>.<span class="ident">as_millis</span>() <span class="kw">as</span> <span class="ident">u64</span>,
-        <span class="ident">timeout_ratio</span>: <span class="ident">options</span>.<span class="ident">timeout_ratio</span>.<span class="ident">into</span>(),
-        <span class="ident">round_start_delay</span>: <span class="ident">options</span>.<span class="ident">round_start_delay</span>.<span class="ident">as_millis</span>() <span class="kw">as</span> <span class="ident">u64</span>,
-        <span class="ident">start_delay</span>: <span class="ident">options</span>.<span class="ident">start_delay</span>.<span class="ident">as_millis</span>() <span class="kw">as</span> <span class="ident">u64</span>,
-        <span class="ident">propose_min_round_time</span>: <span class="ident">options</span>.<span class="ident">min_propose_time</span>,
-        <span class="ident">propose_max_round_time</span>: <span class="ident">options</span>.<span class="ident">max_propose_time</span>,
-        <span class="ident">min_transactions</span>: <span class="ident">options</span>.<span class="ident">min_transactions</span>,
-        <span class="ident">num_bootstrap</span>,
+        <span class="ident">next_view_timeout</span>: <span class="ident">node_opt</span>.<span class="ident">next_view_timeout</span>.<span class="ident">as_millis</span>() <span class="kw">as</span> <span class="ident">u64</span>,
+        <span class="ident">timeout_ratio</span>: <span class="ident">node_opt</span>.<span class="ident">timeout_ratio</span>.<span class="ident">into</span>(),
+        <span class="ident">round_start_delay</span>: <span class="ident">node_opt</span>.<span class="ident">round_start_delay</span>.<span class="ident">as_millis</span>() <span class="kw">as</span> <span class="ident">u64</span>,
+        <span class="ident">start_delay</span>: <span class="ident">node_opt</span>.<span class="ident">start_delay</span>.<span class="ident">as_millis</span>() <span class="kw">as</span> <span class="ident">u64</span>,
+        <span class="ident">propose_min_round_time</span>: <span class="ident">node_opt</span>.<span class="ident">min_propose_time</span>,
+        <span class="ident">propose_max_round_time</span>: <span class="ident">node_opt</span>.<span class="ident">max_propose_time</span>,
+        <span class="ident">min_transactions</span>: <span class="ident">node_opt</span>.<span class="ident">min_transactions</span>,
+        <span class="ident">num_bootstrap</span>: <span class="ident">node_opt</span>.<span class="ident">bootstrap_nodes</span>.<span class="ident">len</span>(),
         <span class="ident">execution_type</span>: <span class="ident">ExecutionType::Continuous</span>,
         <span class="ident">election_config</span>: <span class="prelude-val">None</span>,
     };
     <span class="macro">debug!</span>(<span class="question-mark">?</span><span class="ident">config</span>);
 
-    <span class="kw">let</span> <span class="ident">storage</span> <span class="op">=</span> <span class="ident">get_store_dir</span>(<span class="ident">options</span>, <span class="ident">node_id</span>);
+    <span class="kw">let</span> <span class="ident">storage</span> <span class="op">=</span> <span class="ident">get_store_dir</span>(<span class="ident">node_opt</span>);
     <span class="kw">let</span> <span class="ident">storage_path</span> <span class="op">=</span> <span class="ident">Path::new</span>(<span class="kw-2">&amp;</span><span class="ident">storage</span>);
-    <span class="kw">let</span> (<span class="ident">lw_persistence</span>, <span class="ident">collected_rewards_set</span>) <span class="op">=</span> <span class="kw">if</span> <span class="ident">options</span>.<span class="ident">reset_store_state</span> {
+    <span class="kw">let</span> (<span class="ident">lw_persistence</span>, <span class="ident">collected_rewards_set</span>) <span class="op">=</span> <span class="kw">if</span> <span class="ident">node_opt</span>.<span class="ident">reset_store_state</span> {
         <span class="macro">debug!</span>(<span class="string">&quot;Initializing new session&quot;</span>);
         (
             <span class="ident">LWPersistence::new</span>(<span class="ident">storage_path</span>, <span class="string">&quot;validator&quot;</span>).<span class="ident">unwrap</span>(),
@@ -1615,7 +1648,7 @@
     <span class="kw">let</span> <span class="ident">hotshot</span> <span class="op">=</span> <span class="ident">HotShot::init</span>(
         <span class="ident">pub_key</span>,
         <span class="ident">priv_key</span>,
-        <span class="ident">node_id</span> <span class="kw">as</span> <span class="ident">u64</span>,
+        <span class="ident">node_opt</span>.<span class="ident">id</span> <span class="kw">as</span> <span class="ident">u64</span>,
         <span class="ident">config</span>,
         <span class="ident">networking</span>,
         <span class="ident">MemoryStorage::new</span>(),
@@ -1667,23 +1700,12 @@
     }
 }
 
-<span class="doccomment">/// Generate a list of private and public keys for `consensus_opt.bootstrap_nodes.len()` bootstrap</span>
-<span class="doccomment">/// keys, with a given `consensus_opt.seed` seed.</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">gen_bootstrap_keys</span>(<span class="ident">consensus_opt</span>: <span class="kw-2">&amp;</span><span class="ident">ConsensusOpt</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">StakingPrivKey</span><span class="op">&gt;</span> {
-    <span class="ident">gen_keys</span>(<span class="ident">consensus_opt</span>, <span class="ident">consensus_opt</span>.<span class="ident">bootstrap_nodes</span>.<span class="ident">len</span>())
-}
-
-<span class="doccomment">/// Generate a list of private and public keys for the given number of nodes with a given</span>
-<span class="doccomment">/// `consensus_opt.seed` seed.</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">gen_keys</span>(<span class="ident">consensus_opt</span>: <span class="kw-2">&amp;</span><span class="ident">ConsensusOpt</span>, <span class="ident">num_nodes</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">StakingPrivKey</span><span class="op">&gt;</span> {
+<span class="doccomment">/// Generate a list of private and public keys for the given number of nodes with a given seed.</span>
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">gen_keys</span>(<span class="ident">seed</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">SecretKeySeed</span><span class="op">&gt;</span>, <span class="ident">num_nodes</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">StakingPrivKey</span><span class="op">&gt;</span> {
     (<span class="number">0</span>..<span class="ident">num_nodes</span>)
         .<span class="ident">into_iter</span>()
         .<span class="ident">map</span>(<span class="op">|</span><span class="ident">node_id</span><span class="op">|</span> {
-            <span class="ident">StakingKey::generated_from_seed_indexed</span>(
-                <span class="ident">get_secret_key_seed</span>(<span class="ident">consensus_opt</span>),
-                <span class="ident">node_id</span> <span class="kw">as</span> <span class="ident">u64</span>,
-            )
-            .<span class="number">1</span>
+            <span class="ident">StakingKey::generated_from_seed_indexed</span>(<span class="ident">get_secret_key_seed</span>(<span class="ident">seed</span>), <span class="ident">node_id</span> <span class="kw">as</span> <span class="ident">u64</span>).<span class="number">1</span>
         })
         .<span class="ident">collect</span>()
 }
@@ -1691,20 +1713,20 @@
 <span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">init_validator</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">CryptoRng</span> <span class="op">+</span> <span class="ident">RngCore</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="lifetime">&#39;static</span><span class="op">&gt;</span>(
     <span class="ident">rng</span>: <span class="ident">R</span>,
     <span class="ident">node_opt</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>,
-    <span class="ident">consensus_opt</span>: <span class="kw-2">&amp;</span><span class="ident">ConsensusOpt</span>,
     <span class="ident">priv_key</span>: <span class="ident">StakingPrivKey</span>,
     <span class="ident">pub_keys</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">StakingKey</span><span class="op">&gt;</span>,
     <span class="ident">genesis</span>: <span class="ident">GenesisNote</span>,
-    <span class="ident">own_id</span>: <span class="ident">usize</span>,
 ) -&gt; <span class="ident">Consensus</span> {
-    <span class="macro">debug!</span>(<span class="string">&quot;Current node: {}&quot;</span>, <span class="ident">own_id</span>);
+    <span class="macro">debug!</span>(<span class="string">&quot;Current node: {}&quot;</span>, <span class="ident">node_opt</span>.<span class="ident">id</span>);
 
-    <span class="kw">let</span> <span class="ident">num_bootstrap</span> <span class="op">=</span> <span class="ident">consensus_opt</span>.<span class="ident">bootstrap_nodes</span>.<span class="ident">len</span>();
+    <span class="kw">let</span> <span class="ident">num_bootstrap</span> <span class="op">=</span> <span class="ident">node_opt</span>.<span class="ident">bootstrap_nodes</span>.<span class="ident">len</span>();
 
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bootstrap_nodes</span> <span class="op">=</span> <span class="macro">vec!</span>[];
     <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">num_bootstrap</span> {
-        <span class="kw">let</span> <span class="ident">priv_key</span> <span class="op">=</span>
-            <span class="ident">Ed25519Priv::generated_from_seed_indexed</span>(<span class="ident">get_secret_key_seed</span>(<span class="ident">consensus_opt</span>), <span class="ident">i</span> <span class="kw">as</span> <span class="ident">u64</span>);
+        <span class="kw">let</span> <span class="ident">priv_key</span> <span class="op">=</span> <span class="ident">Ed25519Priv::generated_from_seed_indexed</span>(
+            <span class="ident">get_secret_key_seed</span>(<span class="ident">node_opt</span>.<span class="ident">secret_key_seed</span>),
+            <span class="ident">i</span> <span class="kw">as</span> <span class="ident">u64</span>,
+        );
         <span class="kw">let</span> <span class="ident">libp2p_priv_key</span> <span class="op">=</span> <span class="ident">SecretKey::from_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">priv_key</span>.<span class="ident">to_bytes</span>()[<span class="number">0</span>..<span class="number">32</span>]).<span class="ident">unwrap</span>();
         <span class="ident">bootstrap_nodes</span>.<span class="ident">push</span>(<span class="ident">libp2p_priv_key</span>);
     }
@@ -1713,7 +1735,7 @@
         .<span class="ident">into_iter</span>()
         .<span class="ident">enumerate</span>()
         .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">idx</span>, <span class="ident">kp</span>)<span class="op">|</span> {
-            <span class="kw">let</span> <span class="ident">multiaddr</span> <span class="op">=</span> <span class="ident">parse_url</span>(<span class="ident">consensus_opt</span>.<span class="ident">bootstrap_nodes</span>[<span class="ident">idx</span>].<span class="ident">as_str</span>()).<span class="ident">unwrap</span>();
+            <span class="kw">let</span> <span class="ident">multiaddr</span> <span class="op">=</span> <span class="ident">parse_url</span>(<span class="ident">node_opt</span>.<span class="ident">bootstrap_nodes</span>[<span class="ident">idx</span>].<span class="ident">as_str</span>()).<span class="ident">unwrap</span>();
             (<span class="ident">libp2p::identity::Keypair::Ed25519</span>(<span class="ident">kp</span>.<span class="ident">into</span>()), <span class="ident">multiaddr</span>)
         })
         .<span class="ident">take</span>(<span class="ident">num_bootstrap</span>)
@@ -1725,11 +1747,11 @@
         .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">kp</span>, <span class="ident">ma</span>)<span class="op">|</span> (<span class="prelude-val">Some</span>(<span class="ident">PeerId::from_public_key</span>(<span class="kw-2">&amp;</span><span class="ident">kp</span>.<span class="ident">public</span>())), <span class="ident">ma</span>))
         .<span class="ident">collect</span>();
 
-    <span class="kw">let</span> (<span class="ident">node_type</span>, <span class="ident">own_identity</span>, <span class="ident">port</span>) <span class="op">=</span> <span class="kw">if</span> <span class="ident">own_id</span> <span class="op">&lt;</span> <span class="ident">num_bootstrap</span> {
+    <span class="kw">let</span> (<span class="ident">node_type</span>, <span class="ident">own_identity</span>, <span class="ident">port</span>) <span class="op">=</span> <span class="kw">if</span> <span class="ident">node_opt</span>.<span class="ident">id</span> <span class="op">&lt;</span> <span class="ident">num_bootstrap</span> {
         (
             <span class="ident">NetworkNodeType::Bootstrap</span>,
-            <span class="prelude-val">Some</span>(<span class="ident">bootstrap_priv</span>[<span class="ident">own_id</span>].<span class="number">0</span>.<span class="ident">clone</span>()),
-            <span class="ident">consensus_opt</span>.<span class="ident">bootstrap_nodes</span>[<span class="ident">own_id</span>]
+            <span class="prelude-val">Some</span>(<span class="ident">bootstrap_priv</span>[<span class="ident">node_opt</span>.<span class="ident">id</span>].<span class="number">0</span>.<span class="ident">clone</span>()),
+            <span class="ident">node_opt</span>.<span class="ident">bootstrap_nodes</span>[<span class="ident">node_opt</span>.<span class="ident">id</span>]
                 .<span class="ident">as_str</span>()
                 .<span class="ident">split_once</span>(<span class="string">&#39;:&#39;</span>)
                 .<span class="ident">unwrap</span>()
@@ -1743,24 +1765,23 @@
             <span class="prelude-val">None</span>,
             <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="ident">node_opt</span>.<span class="ident">nonbootstrap_port</span> {
                 <span class="prelude-val">Some</span>(<span class="ident">port</span>) =&gt; <span class="kw-2">*</span><span class="ident">port</span>,
-                <span class="prelude-val">None</span> =&gt; (<span class="ident">node_opt</span>.<span class="ident">nonbootstrap_base_port</span> <span class="op">+</span> <span class="ident">own_id</span>) <span class="kw">as</span> <span class="ident">u16</span>,
+                <span class="prelude-val">None</span> =&gt; (<span class="ident">node_opt</span>.<span class="ident">nonbootstrap_base_port</span> <span class="op">+</span> <span class="ident">node_opt</span>.<span class="ident">id</span>) <span class="kw">as</span> <span class="ident">u16</span>,
             },
         )
     };
 
     <span class="kw">let</span> <span class="ident">own_network</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">node_opt</span>.<span class="ident">cdn</span>.<span class="ident">clone</span>() {
-        <span class="prelude-val">Some</span>(<span class="ident">cdn</span>) <span class="kw">if</span> <span class="op">!</span><span class="ident">node_opt</span>.<span class="ident">libp2p</span> =&gt; <span class="ident">Network::new_cdn</span>(<span class="ident">pub_keys</span>.<span class="ident">clone</span>(), <span class="ident">cdn</span>, <span class="ident">own_id</span>)
+        <span class="prelude-val">Some</span>(<span class="ident">cdn</span>) <span class="kw">if</span> <span class="op">!</span><span class="ident">node_opt</span>.<span class="ident">libp2p</span> =&gt; <span class="ident">Network::new_cdn</span>(<span class="ident">pub_keys</span>.<span class="ident">clone</span>(), <span class="ident">cdn</span>, <span class="ident">node_opt</span>.<span class="ident">id</span>)
             .<span class="kw">await</span>
             .<span class="ident">unwrap</span>(),
         <span class="kw">_</span> =&gt; {
             <span class="kw">let</span> <span class="ident">network</span> <span class="op">=</span> <span class="ident">Network::new_p2p</span>(
-                <span class="ident">pub_keys</span>[<span class="ident">own_id</span>].<span class="ident">clone</span>(),
+                <span class="ident">pub_keys</span>[<span class="ident">node_opt</span>.<span class="ident">id</span>].<span class="ident">clone</span>(),
                 <span class="ident">to_connect_addrs</span>,
-                <span class="ident">own_id</span>,
                 <span class="ident">node_type</span>,
                 <span class="ident">parse_url</span>(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;0.0.0.0:{:?}&quot;</span>, <span class="ident">port</span>)).<span class="ident">unwrap</span>(),
                 <span class="ident">own_identity</span>,
-                <span class="ident">consensus_opt</span>,
+                <span class="ident">node_opt</span>,
             )
             .<span class="kw">await</span>
             .<span class="ident">unwrap</span>();
@@ -1769,7 +1790,7 @@
                 <span class="comment">// If there is a centralized server, use it as a barrier, so we don&#39;t proceed beyond</span>
                 <span class="comment">// this point until all nodes have reached this point and connected to the server.</span>
                 <span class="comment">// We will still use the libp2p network for consensus itself.</span>
-                <span class="ident">Network::new_cdn</span>(<span class="ident">pub_keys</span>.<span class="ident">clone</span>(), <span class="ident">cdn</span>, <span class="ident">own_id</span>)
+                <span class="ident">Network::new_cdn</span>(<span class="ident">pub_keys</span>.<span class="ident">clone</span>(), <span class="ident">cdn</span>, <span class="ident">node_opt</span>.<span class="ident">id</span>)
                     .<span class="kw">await</span>
                     .<span class="ident">unwrap</span>();
             }
@@ -1787,10 +1808,8 @@
         <span class="ident">node_opt</span>,
         <span class="ident">known_nodes</span>,
         <span class="ident">priv_key</span>.<span class="ident">clone</span>(),
-        <span class="ident">own_id</span>,
         <span class="ident">own_network</span>,
         <span class="ident">genesis</span>,
-        <span class="ident">num_bootstrap</span>,
     )
     .<span class="kw">await</span>;
 
@@ -1810,17 +1829,12 @@
     <span class="ident">hotshot</span>
 }
 
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">open_data_source</span>(
-    <span class="ident">options</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>,
-    <span class="ident">id</span>: <span class="ident">usize</span>,
-    <span class="ident">location</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
-    <span class="ident">consensus</span>: <span class="ident">Consensus</span>,
-) -&gt; <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">RwLock</span><span class="op">&lt;</span><span class="ident">QueryData</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> <span class="ident">storage</span> <span class="op">=</span> <span class="ident">get_store_dir</span>(<span class="ident">options</span>, <span class="ident">id</span>);
-    <span class="ident">Arc::new</span>(<span class="ident">RwLock::new</span>(<span class="kw">if</span> <span class="ident">options</span>.<span class="ident">reset_store_state</span> {
-        <span class="ident">QueryData::new</span>(<span class="kw-2">&amp;</span><span class="ident">storage</span>, <span class="ident">Box::new</span>(<span class="ident">consensus</span>), <span class="ident">location</span>).<span class="ident">unwrap</span>()
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">open_data_source</span>(<span class="ident">node_opt</span>: <span class="kw-2">&amp;</span><span class="ident">NodeOpt</span>, <span class="ident">consensus</span>: <span class="ident">Consensus</span>) -&gt; <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">RwLock</span><span class="op">&lt;</span><span class="ident">QueryData</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+    <span class="kw">let</span> <span class="ident">storage</span> <span class="op">=</span> <span class="ident">get_store_dir</span>(<span class="ident">node_opt</span>);
+    <span class="ident">Arc::new</span>(<span class="ident">RwLock::new</span>(<span class="kw">if</span> <span class="ident">node_opt</span>.<span class="ident">reset_store_state</span> {
+        <span class="ident">QueryData::new</span>(<span class="kw-2">&amp;</span><span class="ident">storage</span>, <span class="ident">Box::new</span>(<span class="ident">consensus</span>), <span class="ident">node_opt</span>.<span class="ident">location</span>.<span class="ident">clone</span>()).<span class="ident">unwrap</span>()
     } <span class="kw">else</span> {
-        <span class="ident">QueryData::load</span>(<span class="kw-2">&amp;</span><span class="ident">storage</span>, <span class="ident">Box::new</span>(<span class="ident">consensus</span>), <span class="ident">location</span>).<span class="ident">unwrap</span>()
+        <span class="ident">QueryData::load</span>(<span class="kw-2">&amp;</span><span class="ident">storage</span>, <span class="ident">Box::new</span>(<span class="ident">consensus</span>), <span class="ident">node_opt</span>.<span class="ident">location</span>.<span class="ident">clone</span>()).<span class="ident">unwrap</span>()
     }))
 }
 
