@@ -58,9 +58,9 @@ impl<'a> NetworkBackend<'a> {
         validator_url: Url,
     ) -> Result<NetworkBackend<'a>, KeystoreError<EspressoLedger>> {
         let backend = Self {
-            query_client: Client::new(query_url),
-            address_book_client: Client::new(address_book_url),
-            validator_client: Client::new(validator_url),
+            query_client: Self::client(query_url),
+            address_book_client: Self::client(address_book_url),
+            validator_client: Self::client(validator_url),
             univ_param,
         };
         backend.wait_for_esqs().await?;
@@ -107,6 +107,12 @@ impl<'a> NetworkBackend<'a> {
             tracing::error!("{}", msg);
             Err(KeystoreError::Failed { msg })
         }
+    }
+
+    fn client<E: surf_disco::Error>(url: Url) -> Client<E> {
+        Client::builder(url)
+            .set_timeout(Some(Duration::from_secs(5 * 60)))
+            .build()
     }
 }
 
