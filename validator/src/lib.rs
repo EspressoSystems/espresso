@@ -51,7 +51,7 @@ use hotshot::{
 };
 use hotshot_types::{ExecutionType, HotShotConfig};
 use jf_cap::{
-    keys::{UserAddress, UserPubKey},
+    keys::UserPubKey,
     structs::{Amount, AssetDefinition, FreezeFlag, RecordOpening},
 };
 use jf_utils::tagged_blob;
@@ -418,8 +418,8 @@ pub struct NodeOpt {
     pub faucet_pub_key: Vec<UserPubKey>,
 
     /// CAP Address to send rewards to
-    #[arg(long, env = "ESPRESSO_VALIDATOR_REWARDS_ADDRESS")]
-    pub rewards_address: Option<UserAddress>,
+    #[arg(long, env = "ESPRESSO_VALIDATOR_REWARDS_PUB_KEY")]
+    pub rewards_pub_key: Option<UserPubKey>,
 
     /// Whether to color log output with ANSI color codes.
     #[arg(long, env = "ESPRESSO_COLORED_LOGS")]
@@ -850,15 +850,15 @@ pub async fn init_validator<R: CryptoRng + RngCore + Send + 'static>(
     )
     .await;
 
-    if let Some(rewards_address) = node_opt.rewards_address.clone() {
-        tracing::info!("spawning reward daemon: {:?}", rewards_address);
+    if let Some(rewards_pub_key) = node_opt.rewards_pub_key.clone() {
+        tracing::info!("spawning reward daemon: {:?}", rewards_pub_key);
         spawn(collect_reward_daemon(
             rng,
             stake_proof,
             stake_amount,
             collected_rewards,
             priv_key,
-            rewards_address,
+            rewards_pub_key,
             hotshot.clone(),
         ));
     }
@@ -882,7 +882,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
     stake_amount: Amount,
     mut collected_rewards: CollectedRewardsSet,
     staking_priv_key: StakingPrivKey,
-    cap_address: UserAddress,
+    cap_pub_key: UserPubKey,
     mut hotshot: Consensus,
 ) {
     let staking_key = StakingKey::from_private(&staking_priv_key);
@@ -924,7 +924,7 @@ async fn collect_reward_daemon<R: CryptoRng + RngCore + Send>(
                         validator_state.chain.committee_size,
                         validator_state.block_height,
                         &staking_priv_key,
-                        cap_address.clone(),
+                        cap_pub_key.clone(),
                         stake_proof.clone(),
                         uncollected_reward_proof,
                         vrf_proof,

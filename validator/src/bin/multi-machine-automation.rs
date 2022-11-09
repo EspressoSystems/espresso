@@ -400,6 +400,17 @@ mod test {
         let fail_after_txn = &fail_after_txn.to_string();
         let cdn_port = pick_unused_port().unwrap();
         let cdn_url = &format!("tcp://localhost:{}", cdn_port);
+        // Set a fairly short view timeout by default (so that tests with leader failure don't take
+        // too long) but allow this to be overridden in the environment, so that we can test a slow
+        // target (like the coverage target) and still complete views within the timeout.
+        let next_view_timeout =
+            env::var("ESPRESSO_TEST_VIEW_TIMEOUT").unwrap_or_else(|_| "30s".to_string());
+        // Set a fairly short timeout for proposing empty blocks by default. Each transaction we
+        // propose requires 2 empty blocks to be committed. Allow this to be overridden in the
+        // environment so that we can test a slow target without transactions becoming invalidated
+        // faster than we can build them.
+        let max_propose_time =
+            env::var("ESPRESSO_TEST_MAX_PROPOSE_TIME").unwrap_or_else(|_| "10s".to_string());
         let mut args = vec![
             // Set an arbitrary ID. The automation code will use IDs from 0 to `num_nodes - 1` to
             // run the validator executable.
@@ -421,12 +432,10 @@ mod test {
             "0s",
             "--min-transactions",
             "1",
-            // Set a fairly short timeout for proposing empty blocks. Each transaction we propose
-            // requires 2 empty blocks to be committed.
             "--max-propose-time",
-            "10s",
+            &max_propose_time,
             "--next-view-timeout",
-            "30s",
+            &next_view_timeout,
             "--reset-store-state",
             "--verbose",
         ];

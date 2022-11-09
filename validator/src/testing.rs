@@ -11,7 +11,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    gen_keys, genesis, init_validator, open_data_source, run_consensus, NodeOpt,
+    gen_keys, genesis, init_validator, open_data_source, parse_duration, run_consensus, NodeOpt,
     MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES,
 };
 use address_book::{error::AddressBookError, store::FileStore};
@@ -24,7 +24,6 @@ use espresso_esqs::full_node::{self, EsQS};
 use futures::Future;
 use futures::{channel::oneshot, future::join_all};
 use hotshot::types::SignatureKey;
-use jf_cap::keys::UserAddress;
 use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use rand_chacha::rand_core::SeedableRng;
@@ -34,6 +33,7 @@ use seahorse::loader::KeystoreLoader;
 use seahorse::KeySnafu;
 use seahorse::KeystoreError;
 use snafu::ResultExt;
+use std::env;
 use std::io;
 use std::mem::take;
 use std::path::PathBuf;
@@ -161,7 +161,7 @@ impl Drop for TestNetwork {
 pub async fn minimal_test_network(
     rng: &mut ChaChaRng,
     faucet_pub_key: UserPubKey,
-    rewards_address: Option<UserAddress>,
+    rewards_pub_key: Option<UserPubKey>,
 ) -> TestNetwork {
     let mut seed = [0; 32];
     rng.fill_bytes(&mut seed);
@@ -189,8 +189,8 @@ pub async fn minimal_test_network(
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
         let priv_key = key.clone();
-        let facuet_pub_key = faucet_pub_key.clone();
-        let rewards_address = rewards_address.clone();
+        let faucet_pub_key = faucet_pub_key.clone();
+        let rewards_pub_key = rewards_pub_key.clone();
 
         store_path.push(i.to_string());
         let new_rng = ChaChaRng::from_rng(&mut *rng).unwrap();
@@ -205,8 +205,15 @@ pub async fn minimal_test_network(
                 // low latency and the tests run much faster.
                 min_propose_time: Duration::from_secs(5),
                 min_transactions: 1,
-                max_propose_time: Duration::from_secs(10),
-                next_view_timeout: Duration::from_secs(60),
+                max_propose_time: parse_duration(
+                    &env::var("ESPRESSO_TEST_MAX_PROPOSE_TIME")
+                        .unwrap_or_else(|_| "10s".to_string()),
+                )
+                .unwrap(),
+                next_view_timeout: parse_duration(
+                    &env::var("ESPRESSO_TEST_VIEW_TIMEOUT").unwrap_or_else(|_| "60s".to_string()),
+                )
+                .unwrap(),
                 secret_key_seed: Some(seed.into()),
                 replication_factor: 4,
                 bootstrap_mesh_n_high: 50,
@@ -218,8 +225,8 @@ pub async fn minimal_test_network(
                 nonbootstrap_mesh_outbound_min: 4,
                 nonbootstrap_mesh_n: 12,
                 bootstrap_nodes,
-                faucet_pub_key: vec![facuet_pub_key],
-                rewards_address,
+                faucet_pub_key: vec![faucet_pub_key],
+                rewards_pub_key,
                 ..NodeOpt::new(i, MINIMUM_NODES)
             };
             let genesis = genesis(&node_opt);
@@ -264,13 +271,19 @@ pub async fn minimal_test_network(
 }
 
 pub async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
-    let mut backoff = Duration::from_millis(100);
-    for _ in 0..13 {
-        if f().await {
-            return;
+    if std::env::var("ESPRESSO_TEST_DISABLE_RETRY_TIMEOUT").is_ok() {
+        while !f().await {
+            sleep(Duration::from_secs(5)).await;
         }
-        sleep(backoff).await;
-        backoff *= 2;
+    } else {
+        let mut backoff = Duration::from_millis(100);
+        for _ in 0..13 {
+            if f().await {
+                return;
+            }
+            sleep(backoff).await;
+            backoff *= 2;
+        }
+        panic!("retry loop did not complete in {:?}", backoff);
     }
-    panic!("retry loop did not complete in {:?}", backoff);
 }

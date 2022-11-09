@@ -31,7 +31,7 @@ mod test {
         let network = minimal_test_network(
             &mut rng,
             faucet_key_pair.pub_key(),
-            Some(rewards_address_keypair.address()),
+            Some(rewards_address_keypair.pub_key()),
         )
         .await;
 
