@@ -15,7 +15,6 @@ use clap::Parser;
 use escargot::CargoBuild;
 use espresso_esqs::full_node;
 use espresso_validator::{div_ceil, NodeOpt, QUORUM_THRESHOLD, STAKE_PER_NODE};
-use jf_cap::keys::UserPubKey;
 use std::env;
 use std::io::{BufRead, BufReader};
 use std::process::{exit, Command, Stdio};
@@ -30,16 +29,6 @@ struct Options {
     #[command(flatten)]
     node_opt: NodeOpt,
 
-    /// Public key which should own a faucet record in the genesis block.
-    ///
-    /// For each given public key, the ledger will be initialized with a record of 2^32 native
-    /// tokens, owned by the public key.
-    ///
-    /// This option may be passed multiple times to initialize the ledger with multiple native
-    /// token records.
-    #[arg(long, env = "ESPRESSO_FAUCET_PUB_KEYS", value_delimiter = ',')]
-    pub faucet_pub_key: Vec<UserPubKey>,
-
     /// Number of transactions to generate.
     ///
     /// If this option is provided, runs the `espresso-validator-testing` executable to generate
@@ -47,10 +36,6 @@ struct Options {
     /// submitted transactions.
     #[arg(long, short, conflicts_with("faucet-pub-key"))]
     pub num_txns: Option<u64>,
-
-    /// Options for the new EsQS.
-    #[command(subcommand)]
-    pub esqs: Option<full_node::Command>,
 
     #[arg(long, short)]
     verbose: bool,
@@ -91,6 +76,7 @@ async fn main() {
     // to construct a command line for each child, so the child processes shouldn't get their
     // options from the environment. Clear the environment variables corresponding to each option
     // that we will set explicitly in the command line.
+    env::remove_var("ESPRESSO_VALIDATOR_ID");
     env::remove_var("ESPRESSO_VALIDATOR_SECRET_KEY_SEED");
     env::remove_var("ESPRESSO_VALIDATOR_BOOTSTRAP_NODES");
     env::remove_var("ESPRESSO_VALIDATOR_PUB_KEY_PATH");
@@ -157,6 +143,7 @@ async fn main() {
     let num_nodes_str = options.node_opt.num_nodes.to_string();
     let num_nodes = num_nodes_str.parse::<usize>().unwrap();
     let faucet_pub_keys = options
+        .node_opt
         .faucet_pub_key
         .iter()
         .map(|k| k.to_string())
@@ -235,6 +222,7 @@ async fn main() {
             let mut this_args = args.clone();
             let id_str = id.to_string();
             this_args.push("--id");
+            // Use `id_str` rather than `node_opt.id` since the latter is arbitrarily set as 0.
             this_args.push(&id_str);
             this_args.push("--num-nodes");
             this_args.push(&num_nodes_str);
@@ -246,7 +234,7 @@ async fn main() {
                 this_args.push(&num_txn_str);
             }
             let mut esqs_args = vec![];
-            if let Some(full_node::Command::Esqs(opt)) = &options.esqs {
+            if let Some(full_node::Command::Esqs(opt)) = &options.node_opt.esqs {
                 esqs_args = vec!["esqs".to_string(), "-p".to_string(), opt.port.to_string()];
                 if let Some(path) = &opt.metastate.api_path {
                     esqs_args.push("--metastate-api-path".to_string());
@@ -424,6 +412,10 @@ mod test {
         let max_propose_time =
             env::var("ESPRESSO_TEST_MAX_PROPOSE_TIME").unwrap_or_else(|_| "10s".to_string());
         let mut args = vec![
+            // Set an arbitrary ID. The automation code will use IDs from 0 to `num_nodes - 1` to
+            // run the validator executable.
+            "--id",
+            "0",
             "--cdn",
             cdn_url,
             "--num-nodes",

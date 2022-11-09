@@ -11,8 +11,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    gen_keys, genesis, init_validator, open_data_source, parse_duration, run_consensus,
-    ConsensusOpt, NodeOpt, MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES,
+    gen_keys, genesis, init_validator, open_data_source, parse_duration, run_consensus, NodeOpt,
+    MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES,
 };
 use address_book::{error::AddressBookError, store::FileStore};
 use async_std::task::sleep;
@@ -168,25 +168,14 @@ pub async fn minimal_test_network(
     let bootstrap_ports = (0..MINIMUM_BOOTSTRAP_NODES)
         .into_iter()
         .map(|_| pick_unused_port().unwrap());
-    let consensus_opt = ConsensusOpt {
-        secret_key_seed: Some(seed.into()),
-        replication_factor: 4,
-        bootstrap_mesh_n_high: 50,
-        bootstrap_mesh_n_low: 10,
-        bootstrap_mesh_outbound_min: 4,
-        bootstrap_mesh_n: 15,
-        nonbootstrap_mesh_n_high: 15,
-        nonbootstrap_mesh_n_low: 8,
-        nonbootstrap_mesh_outbound_min: 4,
-        nonbootstrap_mesh_n: 12,
-        bootstrap_nodes: bootstrap_ports
-            .map(|p| format!("localhost:{}", p).parse().unwrap())
-            .collect(),
-    };
+    let bootstrap_nodes: Vec<Url> = bootstrap_ports
+        .map(|p| format!("localhost:{}", p).parse().unwrap())
+        .collect();
+    let nonbootstrap_base_port = pick_unused_port().unwrap() as usize;
 
     println!("generating public keys");
     let start = Instant::now();
-    let keys = gen_keys(&consensus_opt, MINIMUM_NODES);
+    let keys = gen_keys(Some(seed.into()), MINIMUM_NODES);
     let pub_keys = keys
         .iter()
         .map(StakingKey::from_private)
@@ -194,22 +183,22 @@ pub async fn minimal_test_network(
     println!("generated public keys in {:?}", start.elapsed());
 
     let store = TempDir::new("minimal_test_network_store").unwrap();
-
     let mut nodes_futures = vec![];
     for (i, key) in keys.iter().enumerate() {
-        let consensus_opt = consensus_opt.clone();
+        let bootstrap_nodes = bootstrap_nodes.clone();
         let pub_keys = pub_keys.clone();
         let mut store_path = store.path().to_owned();
         let priv_key = key.clone();
-        let facuet_pub_key = faucet_pub_key.clone();
+        let faucet_pub_key = faucet_pub_key.clone();
         let rewards_pub_key = rewards_pub_key.clone();
 
         store_path.push(i.to_string());
         let new_rng = ChaChaRng::from_rng(&mut *rng).unwrap();
         let future = async move {
             let node_opt = NodeOpt {
+                location: Some("My location".to_string()),
+                nonbootstrap_base_port,
                 store_path: Some(store_path),
-                nonbootstrap_base_port: pick_unused_port().unwrap() as usize,
                 // Set fairly short view times (propose any transactions available after 5s, propose
                 // an empty block after 10s). In testing, we generally have low volumes, so we don't
                 // gain much from waiting longer to batch larger blocks, but with low views we get
@@ -225,27 +214,24 @@ pub async fn minimal_test_network(
                     &env::var("ESPRESSO_TEST_VIEW_TIMEOUT").unwrap_or_else(|_| "60s".to_string()),
                 )
                 .unwrap(),
-                faucet_pub_key: vec![facuet_pub_key],
+                secret_key_seed: Some(seed.into()),
+                replication_factor: 4,
+                bootstrap_mesh_n_high: 50,
+                bootstrap_mesh_n_low: 10,
+                bootstrap_mesh_outbound_min: 4,
+                bootstrap_mesh_n: 15,
+                nonbootstrap_mesh_n_high: 15,
+                nonbootstrap_mesh_n_low: 8,
+                nonbootstrap_mesh_outbound_min: 4,
+                nonbootstrap_mesh_n: 12,
+                bootstrap_nodes,
+                faucet_pub_key: vec![faucet_pub_key],
                 rewards_pub_key,
-                ..NodeOpt::new(MINIMUM_NODES)
+                ..NodeOpt::new(i, MINIMUM_NODES)
             };
-            let genesis = genesis(&node_opt, &consensus_opt);
-            let consensus = init_validator(
-                new_rng,
-                &node_opt,
-                &consensus_opt,
-                priv_key,
-                pub_keys,
-                genesis,
-                i,
-            )
-            .await;
-            let data_source = open_data_source(
-                &node_opt,
-                i,
-                Some("My location".to_string()),
-                consensus.clone(),
-            );
+            let genesis = genesis(&node_opt);
+            let consensus = init_validator(new_rng, &node_opt, priv_key, pub_keys, genesis).await;
+            let data_source = open_data_source(&node_opt, consensus.clone());
 
             // If applicable, run a query service.
             let esqs = if i == 0 {

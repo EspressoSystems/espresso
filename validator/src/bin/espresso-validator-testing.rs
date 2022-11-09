@@ -39,18 +39,16 @@ use tracing::info;
     about = "Runs a validator for a given rounds of consensus for testing purposes."
 )]
 struct Options {
+    /// Node with `node_opt.id = 0` will be the transaction submitter.
     #[command(flatten)]
-    validator_opt: ValidatorOpt,
+    node_opt: NodeOpt,
 
-    /// Number of transactions to generate.
+    /// Number of successful transactions to submit.
     #[arg(long, short)]
     pub num_txns: u64,
 }
 
-fn genesis_for_test(
-    node_opt: &NodeOpt,
-    consensus_opt: &ConsensusOpt,
-) -> (GenesisNote, MultiXfrTestState) {
+fn genesis_for_test(node_opt: &NodeOpt) -> (GenesisNote, MultiXfrTestState) {
     let mut state = MultiXfrTestState::initialize(
         GENESIS_SEED,
         10,
@@ -83,7 +81,7 @@ fn genesis_for_test(
     state.nullifiers = SetMerkleTree::default();
 
     // generate keys
-    let known_nodes = gen_keys(consensus_opt, node_opt.num_nodes);
+    let known_nodes = gen_keys(node_opt.secret_key_seed, node_opt.num_nodes);
     let genesis = GenesisNote::new(
         ChainVariables::new(42, VERIF_CRS.clone(), COMMITTEE_SIZE),
         Arc::new(state.records().collect()),
@@ -205,7 +203,7 @@ async fn generate_transactions(
                                 // one. We could update the same one and fix all its nullifier
                                 // proofs, but for testing it doesn't matter and its simpler to just
                                 // build a new transaction.
-                                info!("transaction expired, proposing a new one");
+                                info!("transaction expired, submitting a new one");
                                 (state, txn) = generate_transaction(state, round).await;
                                 hotshot
                                     .submit_transaction(txn.transaction.clone())
@@ -308,12 +306,9 @@ async fn generate_transactions(
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::parse();
-    let id = options.validator_opt.id;
-    let (genesis, state) = genesis_for_test(
-        &options.validator_opt.node_opt,
-        &options.validator_opt.consensus_opt,
-    );
-    let hotshot = init(ChaChaRng::from_entropy(), genesis, options.validator_opt).await?;
+    let id = options.node_opt.id;
+    let (genesis, state) = genesis_for_test(&options.node_opt);
+    let hotshot = init(ChaChaRng::from_entropy(), genesis, options.node_opt).await?;
     generate_transactions(options.num_txns, id, hotshot, state).await;
     Ok(())
 }
