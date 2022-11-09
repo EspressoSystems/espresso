@@ -824,7 +824,7 @@ pub async fn init_web_server(
     // first HD sending key is the faucet key.
     let new_key = if let Some(key) = faucet_key_pair {
         keystore
-            .add_sending_account(key.clone(), "faucet".into(), EventIndex::default())
+            .add_account(key.clone(), "faucet".into(), EventIndex::default())
             .await
             .unwrap();
         Some(key.pub_key())
@@ -877,7 +877,7 @@ pub async fn init_web_server(
             .keystore
             .lock()
             .await
-            .await_key_scan(&key.address())
+            .await_sending_key_scan(&key.address())
             .await
             .unwrap();
     }
@@ -943,8 +943,8 @@ mod test {
     use async_std::task::{sleep, spawn_blocking};
     use escargot::CargoBuild;
     use espresso_client::{hd::KeyTree, loader::CreateLoader};
-    use espresso_validator::testing::minimal_test_network;
-    use futures::{future::join_all, Future};
+    use espresso_validator::testing::{minimal_test_network, retry};
+    use futures::future::join_all;
     use jf_cap::structs::AssetDefinition;
     use portpicker::pick_unused_port;
     use primitive_types::U256;
@@ -955,18 +955,6 @@ mod test {
     use std::time::Duration;
     use tempdir::TempDir;
     use tracing_test::traced_test;
-
-    async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
-        let mut backoff = Duration::from_millis(100);
-        for _ in 0..13 {
-            if f().await {
-                return;
-            }
-            sleep(backoff).await;
-            backoff *= 2;
-        }
-        panic!("retry loop did not complete in {:?}", backoff);
-    }
 
     struct Faucet {
         esqs_url: Url,
@@ -997,7 +985,6 @@ mod test {
             self.process = Some(
                 CargoBuild::new()
                     .current_release()
-                    .current_target()
                     .bin("faucet")
                     .run()
                     .unwrap()
@@ -1074,7 +1061,7 @@ mod test {
             .derive_sub_tree("keystore".as_bytes())
             .derive_sub_tree("user".as_bytes())
             .derive_user_key_pair(&0u64.to_le_bytes());
-        let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key()).await;
+        let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key(), None).await;
 
         // Initiate a faucet server with the mnemonic associated with the faucet key pair.
         let faucet_dir = TempDir::new("espresso_keystore_faucet").unwrap();

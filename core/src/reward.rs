@@ -17,36 +17,56 @@ use crate::stake_table::{
     StakingPrivKey,
 };
 use crate::state::{
-    CommitableHash, CommitableHashTag, ConsensusTime, ValidationError, ValidatorState,
+    CommitableHash, CommitableHashTag, ConsensusTime, ValidationError, ValidatorState, VrfSeed,
 };
 use crate::tree_hash::KVTreeHash;
 pub use crate::util::canonical;
 use ark_serialize::*;
 use ark_std::rand::{CryptoRng, RngCore};
 use commit::Committable;
+use core::fmt::Debug;
 use core::hash::Hash;
 use hotshot::types::SignatureKey;
-use jf_cap::keys::{UserAddress, UserPubKey};
+use jf_cap::keys::UserPubKey;
 use jf_cap::structs::{
     Amount, AssetDefinition, BlindFactor, FreezeFlag, RecordCommitment, RecordOpening,
 };
+use jf_primitives::signatures::bls::BLSSignature;
 use jf_utils::tagged_blob;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter::once;
+use std::num::NonZeroU64;
 
 /// Proof for Vrf output
-pub type VrfProof = StakingKeySignature;
+#[tagged_blob("VRFPROOF")]
+#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
+pub struct VrfProof(BLSSignature<ark_bls12_381::Parameters>);
+impl Debug for VrfProof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+impl PartialEq for VrfProof {
+    fn eq(&self, other: &Self) -> bool {
+        canonical::serialize(self).unwrap() == canonical::serialize(other).unwrap()
+    }
+}
 
-/// Compute the allowed stake amount given current state (e.g. circulating supply), view_number and stake amount
+impl Eq for VrfProof {}
+
+impl Hash for VrfProof {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Hash::hash(&canonical::serialize(self).unwrap(), state)
+    }
+}
+
+/// Compute the allowed stake amount given committee size, view_number and number of votes
 /// Hard-coded to 0 for FST
-pub fn compute_reward_amount(
-    _block_height: u64,
-    _stake: Amount,
-    _total_staked_amount: Amount,
-) -> Amount {
-    Amount::from(0u64)
+//TODO: !kaley add block fees to compute_reward_amount
+pub fn compute_reward_amount(_block_height: u64, _votes: u64, _committee_size: u64) -> Amount {
+    Amount::from(1000u64)
 }
 
 /// Previously collected rewards are recorded in (StakingKey, view_number) pairs
@@ -96,30 +116,24 @@ impl CollectRewardNote {
         rng: &mut R,
         historical_stake_tables_frontier: &StakeTableSetFrontier,
         historical_stake_tables_num_leaves: u64,
-        total_staked_amount: Amount,
-        time: ConsensusTime,
+        committee_size: u64,
         block_height: u64,
         staking_priv_key: &StakingPrivKey,
-        cap_address: UserAddress,
-        stake_amount: Amount,
+        cap_pub_key: UserPubKey,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
         uncollected_reward_proof: CollectedRewardsProof,
-        vrf_proof: VrfProof,
+        eligibility_witness: EligibilityWitness,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
-        let staking_key = staking_priv_key.into();
         let (body, proofs) = CollectRewardBody::generate(
             rng,
             historical_stake_tables_frontier,
             historical_stake_tables_num_leaves,
-            total_staked_amount,
-            time,
+            committee_size,
             block_height,
-            staking_key,
-            cap_address,
-            stake_amount,
+            cap_pub_key,
             stake_amount_proof,
             uncollected_reward_proof,
-            vrf_proof,
+            eligibility_witness,
         )?;
         let size = CanonicalSerialize::serialized_size(&body);
         let mut bytes = Vec::with_capacity(size);
@@ -133,14 +147,21 @@ impl CollectRewardNote {
     }
 
     /// verifies a reward collect note
-    pub fn verify(&self) -> Result<(), RewardError> {
-        self.body.verify()?;
+    pub fn verify(
+        &self,
+        committee_size: u64,
+        vrf_seed: VrfSeed,
+        stake_amount: Amount,
+        total_stake: NonZeroU64,
+    ) -> Result<(), RewardError> {
+        self.body
+            .verify(committee_size, vrf_seed, stake_amount, total_stake)?;
         let size = CanonicalSerialize::serialized_size(&self.body);
         let mut bytes = Vec::with_capacity(size);
         CanonicalSerialize::serialize(&self.body, &mut bytes).map_err(RewardError::from)?;
         if self
             .body
-            .vrf_witness
+            .eligibility_witness
             .staking_key
             .validate(self.signature.as_ref(), &bytes)
         {
@@ -152,12 +173,17 @@ impl CollectRewardNote {
 
     /// returns staking for which reward is being claimed
     pub fn staking_key(&self) -> StakingKey {
-        self.body.vrf_witness.staking_key.clone()
+        self.body.eligibility_witness.staking_key.clone()
+    }
+
+    /// returns number of votes validator had for reward being claimed
+    pub fn num_votes(&self) -> u64 {
+        self.body.eligibility_witness.num_seats
     }
 
     /// returns time for which reward is being claimed
     pub fn time(&self) -> ConsensusTime {
-        self.body.vrf_witness.time
+        self.body.eligibility_witness.time
     }
 
     /// returns amount claimed for reward
@@ -192,11 +218,11 @@ pub struct CollectRewardBody {
     /// Blinding factor for reward record commitment on CAP native asset
     blind_factor: BlindFactor,
     /// Address that owns the reward
-    cap_address: UserAddress,
+    cap_pub_key: UserPubKey,
     /// Reward amount
     reward_amount: Amount,
     /// Staking `pub_key`, `view` number and a proof that staking key was selected for committee election on `view`
-    vrf_witness: EligibilityWitness,
+    eligibility_witness: EligibilityWitness,
 }
 
 impl CollectRewardBody {
@@ -207,17 +233,15 @@ impl CollectRewardBody {
         rng: &mut R,
         historical_stake_tables_frontier: &StakeTableSetFrontier,
         historical_stake_tables_num_leaves: u64,
-        total_staked_amount: Amount,
-        time: ConsensusTime,
+        committee_size: u64,
         block_height: u64,
-        staking_key: StakingKey,
-        cap_address: UserAddress,
-        stake_amount: Amount,
+        cap_pub_key: UserPubKey,
         stake_amount_proof: KVMerkleProof<StakeTableHash>,
         uncollected_reward_proof: CollectedRewardsProof,
-        vrf_proof: VrfProof,
+        eligibility_witness: EligibilityWitness,
     ) -> Result<(Self, RewardNoteProofs), RewardError> {
-        let allowed_reward = compute_reward_amount(block_height, stake_amount, total_staked_amount);
+        let allowed_reward =
+            compute_reward_amount(block_height, eligibility_witness.num_seats, committee_size);
         let blind_factor = BlindFactor::rand(rng);
         let rewards_proofs = {
             // assemble reward proofs
@@ -233,22 +257,24 @@ impl CollectRewardBody {
                 }
             }
         };
-        let vrf_witness = EligibilityWitness {
-            staking_key,
-            time,
-            vrf_proof,
-        };
         let body = CollectRewardBody {
             blind_factor,
-            cap_address,
-            reward_amount: allowed_reward, // TODO allow fees, need to subtract fee from reward_amouint
-            vrf_witness,
+            cap_pub_key,
+            reward_amount: allowed_reward, // TODO allow fees, need to subtract fee from reward_amount
+            eligibility_witness,
         };
         Ok((body, rewards_proofs))
     }
 
-    pub fn verify(&self) -> Result<(), RewardError> {
-        self.vrf_witness.verify()
+    pub fn verify(
+        &self,
+        committee_size: u64,
+        vrf_seed: VrfSeed,
+        stake_amount: Amount,
+        total_stake: NonZeroU64,
+    ) -> Result<(), RewardError> {
+        self.eligibility_witness
+            .verify(committee_size, vrf_seed, stake_amount, total_stake)
     }
 }
 
@@ -261,7 +287,7 @@ impl CollectRewardBody {
         RecordOpening {
             amount: self.reward_amount,
             asset_def: AssetDefinition::native(),
-            pub_key: UserPubKey::new(self.cap_address.clone(), Default::default()),
+            pub_key: self.cap_pub_key.clone(),
             freeze_flag: FreezeFlag::Unfrozen,
             blind: self.blind_factor,
         }
@@ -279,18 +305,33 @@ impl CollectRewardBody {
     Serialize,
     Deserialize,
 )]
-struct EligibilityWitness {
+pub struct EligibilityWitness {
     /// Staking public key
     staking_key: StakingKey,
     /// View number for which the key was elected for reward
     time: ConsensusTime,
     /// Cryptographic proof
     vrf_proof: VrfProof,
+    /// Number of committee seats
+    num_seats: u64,
 }
 
 impl EligibilityWitness {
-    pub fn verify(&self) -> Result<(), RewardError> {
-        if mock_eligibility::is_eligible(self.time, &self.staking_key, &self.vrf_proof) {
+    pub fn verify(
+        &self,
+        committee_size: u64,
+        vrf_seed: VrfSeed,
+        stake_amount: Amount,
+        total_stake: NonZeroU64,
+    ) -> Result<(), RewardError> {
+        if eligibility::check_eligibility(
+            committee_size,
+            vrf_seed,
+            self.time,
+            stake_amount,
+            total_stake,
+            self,
+        ) {
             Ok(())
         } else {
             Err(RewardError::KeyNotEligible {
@@ -330,18 +371,6 @@ pub struct RewardNoteProofs {
     leaf_proof_pos: u64,
 }
 
-/// RewardNote fields extracted data from proof
-/// returned by RewardNoteProof::verify
-/// It contains
-/// i) digest for which uncollected reward proof was verified against,
-/// ii) Stake owned by the staking key at time of reward eligibility
-/// iii) Total staked in stake table at time of reward eligibility
-pub struct RewardProofsValidationOutputs {
-    pub(crate) collected_reward_digest: CollectedRewardsDigest,
-    pub(crate) key_stake: Amount,
-    pub(crate) stake_table_total_stake: Amount,
-}
-
 impl RewardNoteProofs {
     /// Checks proofs in RewardNoteProofs against ValidatorState
     /// On success, return RewardProofExtractedData
@@ -349,9 +378,8 @@ impl RewardNoteProofs {
         &self,
         validator_state: &ValidatorState,
         claimed_reward: CollectedRewards, // staking key and time t
-    ) -> Result<RewardProofsValidationOutputs, ValidationError> {
+    ) -> Result<(CollectedRewardsDigest, Amount), ValidationError> {
         let stake_table_commitment = self.stake_tables_set_leaf_proof.leaf.0 .0;
-        let stake_table_total_stake = self.stake_tables_set_leaf_proof.leaf.0 .1;
         let time_in_proof = self.stake_tables_set_leaf_proof.leaf.0 .2;
         // 0. check public input matched proof data
         // 0.i) stake table proof leaf should contain correct commitment, total staked, and time.
@@ -426,16 +454,17 @@ impl RewardNoteProofs {
             option_value.ok_or(ValidationError::BadStakeTableProof {})?;
         }
 
-        Ok(RewardProofsValidationOutputs {
-            collected_reward_digest: root,
-            key_stake: key_staked_amount,
-            stake_table_total_stake,
-        })
+        Ok((root, key_staked_amount))
     }
 
     /// retrieves proof that reward hasn't been collected
     pub fn get_uncollected_reward_proof(&self) -> CollectedRewardsProof {
         self.uncollected_reward_proof.clone()
+    }
+
+    /// returns total staked amount from stake table commitment proof
+    pub fn total_stake(&self) -> Amount {
+        self.stake_tables_set_leaf_proof.leaf.0 .1
     }
 }
 
@@ -479,77 +508,65 @@ impl From<ark_serialize::SerializationError> for RewardError {
     }
 }
 
-pub mod mock_eligibility {
-    // TODO this is only mock implementation (and totally insecure as Staking keys (VRF keys) are not currently bls signature keys)
-    // eligibility will be implemented in hotshot repo from a pro
+pub mod eligibility {
     use super::*;
-    use sha3::{Digest, Sha3_256};
+    use crate::{
+        stake_table::Election,
+        state::{amount_to_nonzerou64, VrfSeed},
+    };
 
-    /// check weather a staking key is elegible for rewards
-    pub fn is_eligible(
+    /// check whether a staking key is eligible for rewards
+    pub fn check_eligibility(
+        sortition_parameter: u64,
+        vrf_seed: VrfSeed,
         view_number: ConsensusTime,
-        staking_key: &StakingKey,
-        proof: &VrfProof,
+        stake_amount: Amount,
+        total_stake: NonZeroU64,
+        proof: &EligibilityWitness,
     ) -> bool {
-        // 1. compute vrf value = Hash ( vrf_proof)
-        let mut hasher = Sha3_256::new();
-        hasher.update(&bincode::serialize(proof).unwrap());
-        let vrf_value = hasher.finalize();
-        // 2. validate proof
-        let data = bincode::serialize(&view_number).unwrap();
-        if !staking_key.validate(proof.as_ref(), &data[..]) {
-            return false;
+        let vrf_check = Election::check_sortition_proof(
+            proof.staking_key.as_ref(),
+            &(),
+            &proof.vrf_proof.0,
+            total_stake,
+            amount_to_nonzerou64(stake_amount),
+            NonZeroU64::new(sortition_parameter).unwrap(),
+            NonZeroU64::new(proof.num_seats).unwrap(),
+            vrf_seed.as_ref(),
+            view_number,
+        );
+        match vrf_check {
+            Ok(res) => res,
+            _ => false,
         }
-        // mock eligibility return true ~10% of times
-        vrf_value[0] < 25
     }
 
     /// Prove that staking key is eligible for reward on view number. Return None if key is not eligible
     pub fn prove_eligibility(
+        sortition_parameter: u64,
+        vrf_seed: VrfSeed,
         view_number: ConsensusTime,
-        staking_priv_key: &StakingPrivKey,
-    ) -> Option<VrfProof> {
-        // 1. compute vrf proof
-        let data = bincode::serialize(&view_number).unwrap();
-        let proof = StakingKey::sign(staking_priv_key, &data[..]).into();
-        let pub_key = staking_priv_key.into();
-        // 2. check eligibility
-        if is_eligible(view_number, &pub_key, &proof) {
-            Some(proof)
-        } else {
-            None
-        }
-    }
-    #[cfg(test)]
-    mod test_eligibility {
-        use crate::reward::mock_eligibility::{is_eligible, prove_eligibility};
-        use crate::stake_table::StakingKey;
-        use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
-        use std::ops::Add;
-
-        #[test]
-        fn test_reward_eligibility() {
-            let mut rng = ChaChaRng::from_seed([1; 32]);
-            let mut view_number = hotshot_types::data::ViewNumber::genesis();
-            let (pub_key, priv_key) = StakingKey::generate(&mut rng);
-            let (bad_pub_key, _) = StakingKey::generate(&mut rng);
-            let mut found = 0;
-            for _ in 0..600 {
-                // with 600 runs we get ~2^{-100} failure pbb
-                if let Some(proof) = prove_eligibility(view_number, &priv_key) {
-                    assert!(is_eligible(view_number, &pub_key, &proof));
-                    assert!(!is_eligible(view_number, &bad_pub_key, &proof));
-                    found += 1;
-                }
-                view_number = view_number.add(1);
-            }
-            assert_ne!(found, 0, "Staking key was never eligible");
-            println!(
-                "Staking key was found {} times out of 600: {:0.2}%, view_number:{:?}",
-                found,
-                (found as f64) / 6.0,
-                view_number
-            )
+        private_key: &StakingPrivKey,
+        stake_amount: Amount,
+        total_stake: NonZeroU64,
+    ) -> Option<EligibilityWitness> {
+        let vrf_elibigility = Election::get_sortition_proof(
+            &private_key.0,
+            &(),
+            vrf_seed.as_ref(),
+            view_number,
+            total_stake,
+            amount_to_nonzerou64(stake_amount),
+            NonZeroU64::new(sortition_parameter).unwrap(),
+        );
+        match vrf_elibigility {
+            Ok((proof, Some(sortition))) => Some(EligibilityWitness {
+                staking_key: StakingKey::from_private(private_key),
+                vrf_proof: VrfProof(proof),
+                time: view_number,
+                num_seats: sortition.into(),
+            }),
+            _ => None,
         }
     }
 }

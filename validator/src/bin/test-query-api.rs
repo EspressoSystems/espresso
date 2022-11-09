@@ -27,7 +27,6 @@
 
 use ark_serialize::CanonicalSerialize;
 use async_std::future::timeout;
-use async_trait::async_trait;
 use async_tungstenite::async_std::connect_async;
 use clap::Parser;
 use commit::Committable;
@@ -39,15 +38,12 @@ use futures::prelude::*;
 use hotshot_types::data::ViewNumber;
 use itertools::izip;
 use reef::traits::Transaction;
-use seahorse::{events::LedgerEvent, hd::KeyTree, loader::KeystoreLoader, KeySnafu, KeystoreError};
+use seahorse::events::LedgerEvent;
 use serde::Deserialize;
-use snafu::ResultExt;
 use std::fmt::Display;
 use std::ops::Deref;
-use std::path::PathBuf;
 use std::time::Duration;
 use surf_disco::Url;
-use tempdir::TempDir;
 use tracing::{event, Level};
 
 #[derive(Parser)]
@@ -165,31 +161,6 @@ async fn validate_committed_block(
     assert_eq!(summary.view_number, *view_number.deref());
 }
 
-struct UnencryptedKeystoreLoader {
-    dir: TempDir,
-}
-
-#[async_trait]
-impl KeystoreLoader<EspressoLedger> for UnencryptedKeystoreLoader {
-    type Meta = ();
-
-    fn location(&self) -> PathBuf {
-        self.dir.path().into()
-    }
-
-    async fn create(&mut self) -> Result<(Self::Meta, KeyTree), KeystoreError<EspressoLedger>> {
-        let key = KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)?;
-        Ok(((), key))
-    }
-
-    async fn load(
-        &mut self,
-        _meta: &mut Self::Meta,
-    ) -> Result<KeyTree, KeystoreError<EspressoLedger>> {
-        KeyTree::from_password_and_salt(&[], &[0; 32]).context(KeySnafu)
-    }
-}
-
 async fn test(opt: &Args) {
     let num_blocks = get::<u64, _>(opt, "/status/latest_block_id").await + 1;
 
@@ -287,9 +258,10 @@ mod test {
     use super::*;
     use espresso_client::{network::NetworkBackend, Keystore};
     use espresso_core::universal_params::UNIVERSAL_PARAM;
-    use espresso_validator::testing::minimal_test_network;
+    use espresso_validator::testing::{minimal_test_network, UnencryptedKeystoreLoader};
     use jf_cap::{keys::UserKeyPair, structs::AssetCode};
     use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+    use tempdir::TempDir;
     use tracing_test::traced_test;
 
     #[cfg(feature = "slow-tests")]
@@ -298,7 +270,7 @@ mod test {
     async fn test_query_api() {
         let mut rng = ChaChaRng::from_seed([1; 32]);
         let faucet_key_pair = UserKeyPair::generate(&mut rng);
-        let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key()).await;
+        let network = minimal_test_network(&mut rng, faucet_key_pair.pub_key(), None).await;
 
         // Create two wallets and transfer from one to the other, to populate the ledger.
         let mut loader1 = UnencryptedKeystoreLoader {
@@ -334,7 +306,7 @@ mod test {
         .await
         .unwrap();
         keystore1
-            .add_sending_account(
+            .add_account(
                 faucet_key_pair.clone(),
                 "faucet account".into(),
                 Default::default(),
@@ -342,7 +314,7 @@ mod test {
             .await
             .unwrap();
         keystore1
-            .await_key_scan(&faucet_key_pair.address())
+            .await_sending_key_scan(&faucet_key_pair.address())
             .await
             .unwrap();
         let receiver = keystore2

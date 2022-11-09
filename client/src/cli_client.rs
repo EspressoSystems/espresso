@@ -12,6 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 use async_std::task::{block_on, spawn_blocking};
+use cld::ClDuration;
 use escargot::CargoBuild;
 use espresso_esqs::ApiError;
 use espresso_validator::{testing::AddressBook, MINIMUM_BOOTSTRAP_NODES, MINIMUM_NODES};
@@ -20,11 +21,13 @@ use jf_cap::keys::UserPubKey;
 use portpicker::pick_unused_port;
 use regex::Regex;
 use std::collections::HashMap;
+use std::env;
 use std::ffi::OsStr;
 use std::fs::{self};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::str::FromStr;
 use std::time::Duration;
 use surf_disco::Url;
 use tempdir::TempDir;
@@ -525,6 +528,15 @@ impl Validator {
         let cdn = self.cdn_url.to_string();
 
         let mut child = spawn_blocking(move || {
+            // Set a fairly short timeout for proposing empty blocks. Since these tests mostly
+            // propose transactions serially, each transaction we propose requires 2 empty blocks to
+            // be committed. Allow this to be overridden in the environment so that we can test a
+            // slow target without transactions becoming invalidated by empty blocks faster than we
+            // can build them.
+            let max_propose_time =
+                env::var("ESPRESSO_TEST_MAX_PROPOSE_TIME").unwrap_or_else(|_| "30s".to_string());
+            let next_view_timeout =
+                env::var("ESPRESSO_TEST_VIEW_TIMEOUT").unwrap_or_else(|_| "60s".to_string());
             cargo_run("espresso-validator", "espresso-validator")
                 .map_err(err)?
                 .args([
@@ -536,11 +548,10 @@ impl Validator {
                     &num_nodes.to_string(),
                     "--faucet-pub-key",
                     &pub_key.to_string(),
-                    // Set a fairly short timeout for proposing empty blocks. Since these tests
-                    // mostly propose transactions serially, each transaction we propose requires 2
-                    // empty blocks to be committed.
                     "--max-propose-time",
-                    "10s",
+                    &max_propose_time,
+                    "--next-view-timeout",
+                    &next_view_timeout,
                     // NOTE these are arbitrarily chosen.
                     "--replication-factor",
                     "4",
@@ -671,7 +682,6 @@ fn cargo_run(package: impl AsRef<str>, bin: impl AsRef<str>) -> Result<Command, 
         .package(package.as_ref())
         .bin(bin.as_ref())
         .current_release()
-        .current_target()
         .run()
         .map_err(err)?
         .command())
@@ -679,7 +689,10 @@ fn cargo_run(package: impl AsRef<str>, bin: impl AsRef<str>) -> Result<Command, 
 
 async fn wait_for_connect(port: u16) -> Result<(), String> {
     let url: Url = format!("http://localhost:{}", port).parse().unwrap();
-    let timeout = Duration::from_secs(300);
+    let timeout = match std::env::var("ESPRESSO_CLI_TEST_CONNECTION_TIMEOUT") {
+        Ok(t) => ClDuration::from_str(&t).unwrap().into(),
+        Err(_) => Duration::from_secs(300),
+    };
     if surf_disco::connect::<ApiError>(url, Some(timeout)).await {
         Ok(())
     } else {

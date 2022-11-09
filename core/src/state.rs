@@ -12,8 +12,10 @@
 // see <https://www.gnu.org/licenses/>.
 
 use espresso_macros::*;
+use generic_array::GenericArray;
 use jf_cap::structs::{Amount, ReceiverMemo};
 use jf_cap::Signature;
+use sha3::Sha3_256;
 
 pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
@@ -32,8 +34,8 @@ pub use state_comm::LedgerStateCommitment;
 use crate::genesis::GenesisNote;
 use crate::stake_table::{
     CommittableStakeTableSetCommitment, CommittableStakeTableSetFrontier, StakeTableCommitment,
-    StakeTableMap, StakeTableSetCommitment, StakeTableSetFrontier, StakeTableSetHistory,
-    StakeTableSetMT,
+    StakeTableHash, StakeTableMap, StakeTableSetCommitment, StakeTableSetFrontier,
+    StakeTableSetHistory, StakeTableSetMT,
 };
 
 use crate::state::state_comm::CommittableAmount;
@@ -44,7 +46,7 @@ use canonical::deserialize_canonical_bytes;
 use canonical::CanonicalBytes;
 use commit::{Commitment, Committable};
 use core::fmt::Debug;
-use derive_more::{From, Into};
+use derive_more::{AsRef, From, Into};
 use hotshot::traits::{Block as ConsensusBlock, State as ConsensusState};
 use jf_cap::{
     errors::TxnApiError, structs::Nullifier, txn_batch_verify, MerkleCommitment, MerkleFrontier,
@@ -54,12 +56,16 @@ use jf_primitives::merkle_tree::FilledMTBuilder;
 use jf_utils::tagged_blob;
 use key_set::VerifierKeySet;
 use serde::{Deserialize, Serialize};
+use sha3::digest::Update;
+use sha3::Digest;
 use snafu::Snafu;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::iter::once;
+use std::num::NonZeroU64;
 use std::sync::Arc;
+use typenum::U32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 /// A transaction tht can be either a CAP transaction or a collect reward transaction
@@ -512,6 +518,9 @@ pub enum ValidationError {
 
     /// verification error for stake table commitments proof
     BadStakeTableCommitmentsProof {},
+
+    /// Error when calculating block fees
+    BadFeeCalculation {},
 }
 
 pub(crate) mod ser_display {
@@ -576,6 +585,7 @@ impl Clone for ValidationError {
             RewardAmountTooLarge => RewardAmountTooLarge,
             BadStakeTableProof {} => BadStakeTableProof {},
             BadStakeTableCommitmentsProof {} => BadStakeTableCommitmentsProof {},
+            BadFeeCalculation {} => BadFeeCalculation {},
         }
     }
 }
@@ -1046,7 +1056,7 @@ pub mod state_comm {
         pub past_record_merkle_roots: Commitment<RecordMerkleHistory>,
         pub past_nullifiers: Commitment<NullifierHistory>,
         pub prev_block: Commitment<Block>,
-        pub stake_table: Commitment<StakeTableCommitment>,
+        pub stake_table_root: Commitment<StakeTableCommitment>,
         pub total_stake: Commitment<CommittableAmount>,
         pub historical_stake_tables: Commitment<CommittableStakeTableSetFrontier>,
         pub past_stc_merkle_roots: Commitment<StakeTableSetHistory>,
@@ -1075,7 +1085,7 @@ pub mod state_comm {
                 .field("past_record_merkle_roots", self.past_record_merkle_roots)
                 .field("past_nullifiers", self.past_nullifiers)
                 .field("prev_block", self.prev_block)
-                .field("stake_table", self.stake_table)
+                .field("stake_table_root", self.stake_table_root)
                 .field("total_stake", self.total_stake)
                 .field("stake_table_commitments", self.historical_stake_tables)
                 .field("past_stc_merkle_roots", self.past_stc_merkle_roots)
@@ -1160,11 +1170,53 @@ pub struct ChainVariables {
 
     /// Plonk verifier keys.
     pub verif_crs: ArcSer<VerifierKeySet>,
+
+    /// VRF seed for checking rewards
+    pub vrf_seed: VrfSeed,
+
+    /// Committee size
+    pub committee_size: u64,
+}
+
+#[tagged_blob("VRFSEED")]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Copy, AsRef, Arbitrary, From, Into, Default,
+)]
+pub struct VrfSeed([u8; 32]);
+
+impl CanonicalSerialize for VrfSeed {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer
+            .write_all(self.as_ref())
+            .map_err(SerializationError::from)
+    }
+    fn serialized_size(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl CanonicalDeserialize for VrfSeed {
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut buf = [0; 32];
+        reader.read_exact(&mut buf)?;
+        Ok(Self(buf))
+    }
+}
+
+impl From<GenericArray<u8, U32>> for VrfSeed {
+    fn from(array: GenericArray<u8, U32>) -> Self {
+        Self(array.into())
+    }
+}
+impl From<VrfSeed> for GenericArray<u8, U32> {
+    fn from(vrf_seed: VrfSeed) -> Self {
+        GenericArray::from(vrf_seed.0)
+    }
 }
 
 impl Default for ChainVariables {
     fn default() -> Self {
-        Self::new(0, VERIF_CRS.clone())
+        Self::new(0, VERIF_CRS.clone(), 0)
     }
 }
 
@@ -1176,6 +1228,8 @@ impl Committable for ChainVariables {
             .u64_field("protocol_version_patch", self.protocol_version.2 as u64)
             .u64_field("chain_id", self.chain_id as u64)
             .var_size_bytes(&canonical::serialize(&self.verif_crs).unwrap())
+            .fixed_size_bytes(self.vrf_seed.as_ref())
+            .u64_field("committee size", self.committee_size)
             .finalize()
     }
 }
@@ -1186,6 +1240,8 @@ impl<'a> Arbitrary<'a> for ChainVariables {
             protocol_version: u.arbitrary()?,
             chain_id: u.arbitrary()?,
             verif_crs: VERIF_CRS.clone().into(),
+            vrf_seed: u.arbitrary()?,
+            committee_size: u.arbitrary()?,
         })
     }
 }
@@ -1205,7 +1261,7 @@ impl Hash for ChainVariables {
 }
 
 impl ChainVariables {
-    pub fn new(chain_id: u16, verif_crs: Arc<VerifierKeySet>) -> Self {
+    pub fn new(chain_id: u16, verif_crs: Arc<VerifierKeySet>, committee_size: u64) -> Self {
         Self {
             protocol_version: (
                 env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
@@ -1214,6 +1270,12 @@ impl ChainVariables {
             ),
             chain_id,
             verif_crs: verif_crs.into(),
+            //TODO: placeholder until beacon designed
+            vrf_seed: Sha3_256::new()
+                .chain(chain_id.to_le_bytes())
+                .finalize()
+                .into(),
+            committee_size,
         }
     }
 }
@@ -1251,8 +1313,8 @@ pub struct ValidatorState {
     /// Nullifiers from recent blocks, which allows validating slightly out-of-date-transactions
     pub past_nullifiers: NullifierHistory,
     pub prev_block: Commitment<Block>,
-    /// Staking table. For fixed-stake, this will be the same each round
-    pub stake_table: StakeTableMap,
+    /// Staking table root hash. For fixed-stake, this will be the same each round
+    pub stake_table_root: StakeTableCommitment,
     /// Total amount staked for the current table
     pub total_stake: Amount,
     /// Keeps track of previous stake tables and their total stake
@@ -1276,7 +1338,7 @@ impl Default for ValidatorState {
         Self::new(
             ChainVariables::default(),
             MerkleTree::new(MERKLE_HEIGHT).unwrap(),
-            StakeTableMap::EmptySubtree,
+            StakeTableCommitment(StakeTableMap::EmptySubtree.hash()),
             Amount::from(0u64),
             StakeTableSetMT::new(MERKLE_HEIGHT).unwrap(),
         )
@@ -1298,7 +1360,7 @@ impl Committable for ValidatorState {
             past_record_merkle_roots: self.past_record_merkle_roots.commit(),
             past_nullifiers: self.past_nullifiers.commit(),
             prev_block: self.prev_block,
-            stake_table: StakeTableCommitment(self.stake_table.hash()).commit(),
+            stake_table_root: self.stake_table_root.commit(),
             total_stake: CommittableAmount::from(self.total_stake).commit(),
             historical_stake_tables: CommittableStakeTableSetFrontier(
                 self.historical_stake_tables.clone(),
@@ -1326,7 +1388,7 @@ impl ValidatorState {
     pub fn new(
         chain: ChainVariables,
         record_merkle_frontier: MerkleTree,
-        stake_table_map: StakeTableMap,
+        stake_table_map_root: StakeTableCommitment,
         total_stake: Amount,
         stake_table_commitments_mt: StakeTableSetMT,
     ) -> Self {
@@ -1343,7 +1405,7 @@ impl ValidatorState {
             )),
             past_nullifiers: NullifierHistory::default(),
             prev_block: Block::default().commit(),
-            stake_table: stake_table_map,
+            stake_table_root: stake_table_map_root,
             total_stake,
             historical_stake_tables: stake_table_commitments_mt.frontier(),
             past_historial_stake_table_merkle_roots: StakeTableSetHistory(VecDeque::with_capacity(
@@ -1530,19 +1592,23 @@ impl ValidatorState {
                     staking_key: txn.staking_key(),
                     time: txn.time(),
                 };
+                // check helper proofs (RewardNoteProofs)
+                let (reward_digest, stake_amount) = pfs.verify(self, latest_reward.clone())?;
 
                 // verify eligibility reward txn (CollectRewardNote)
-                txn.verify()
-                    .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
-
-                // check helper proofs (RewardNoteProofs)
-                let extracted_data = pfs.verify(self, latest_reward.clone())?;
+                txn.verify(
+                    self.chain.committee_size,
+                    self.chain.vrf_seed,
+                    stake_amount,
+                    amount_to_nonzerou64(pfs.total_stake()),
+                )
+                .map_err(|_e| ValidationError::BadCollectRewardNote {})?;
 
                 //check reward amount
                 let max_reward = crate::reward::compute_reward_amount(
                     self.block_height,
-                    extracted_data.key_stake,
-                    extracted_data.stake_table_total_stake,
+                    txn.num_votes(),
+                    self.chain.committee_size,
                 );
                 if txn.reward_amount() > max_reward {
                     return Err(ValidationError::RewardAmountTooLarge);
@@ -1559,7 +1625,7 @@ impl ValidatorState {
                 verified_rewards_proofs.push((
                     latest_reward,
                     pfs.get_uncollected_reward_proof(),
-                    extracted_data.collected_reward_digest,
+                    reward_digest,
                 ));
             }
         }
@@ -1610,9 +1676,29 @@ impl ValidatorState {
             .expect("failed to append nullifiers after validation");
 
         // If this is a genesis block, apply system parameter updates.
-        // TODO: update total_stake when stake table is added to genesis note
         if let Some(EspressoTransaction::Genesis(txn)) = txns.0.get(0) {
-            self.chain = txn.chain.clone()
+            self.chain = txn.chain.clone();
+            let mut total_stake = Amount::from(0u128);
+            let mut stake_table = KVMerkleTree::<StakeTableHash>::default();
+            for (key, amount) in txn.stake_table.iter() {
+                total_stake += *amount;
+                // This unwrap will always succeed, since we are building the tree from scratch and
+                // the whole thing is in memory.
+                stake_table.insert(key.clone(), *amount).unwrap();
+            }
+
+            self.stake_table_root = StakeTableCommitment(stake_table.hash());
+            self.total_stake = total_stake;
+            let mut stake_table_set =
+                crate::merkle_tree::FilledMTBuilder::new(MERKLE_HEIGHT).unwrap();
+            stake_table_set.push((
+                self.stake_table_root,
+                self.total_stake,
+                ConsensusTime::genesis(),
+            ));
+            let stake_table_set_mt = stake_table_set.build();
+            self.historical_stake_tables = stake_table_set_mt.frontier();
+            self.historical_stake_tables_commitment = stake_table_set_mt.commitment();
         }
 
         let mut record_merkle_builder = FilledMTBuilder::from_frontier(
@@ -1651,11 +1737,7 @@ impl ValidatorState {
             )
             .expect("failed to restore stake table commitments merkle tree from frontier");
 
-        historial_stake_tables_builder.push((
-            StakeTableCommitment(self.stake_table.hash()),
-            self.total_stake,
-            *now,
-        ));
+        historial_stake_tables_builder.push((self.stake_table_root, self.total_stake, *now));
         let historial_stake_tables_mt = historial_stake_tables_builder.build();
 
         if self.past_historial_stake_table_merkle_roots.0.len() >= Self::HISTORY_SIZE {
@@ -1719,6 +1801,11 @@ impl ValidatorState {
         }
         record_merkle_builder.build()
     }
+}
+
+/// converts Amount to NonZeroU64
+pub fn amount_to_nonzerou64(amt: Amount) -> NonZeroU64 {
+    (u128::from(amt) as u64).try_into().unwrap()
 }
 
 /// The Arbitrary trait is used for randomized (fuzz) testing.

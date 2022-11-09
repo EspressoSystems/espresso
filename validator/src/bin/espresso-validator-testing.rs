@@ -17,6 +17,7 @@ use async_std::{
     task::{sleep, spawn_blocking},
 };
 use clap::Parser;
+use espresso_core::StakingKey;
 use espresso_core::{
     genesis::GenesisNote,
     state::{ChainVariables, SetMerkleTree, ValidatorState},
@@ -25,7 +26,10 @@ use espresso_core::{
     universal_params::VERIF_CRS,
 };
 use espresso_validator::{validator::*, *};
+use hotshot::types::SignatureKey;
 use hotshot::{traits::State, types::EventType};
+use rand::SeedableRng;
+use rand_chacha::ChaChaRng;
 use std::time::Duration;
 use tracing::info;
 
@@ -35,15 +39,16 @@ use tracing::info;
     about = "Runs a validator for a given rounds of consensus for testing purposes."
 )]
 struct Options {
+    /// Node with `node_opt.id = 0` will be the transaction submitter.
     #[command(flatten)]
-    validator_opt: ValidatorOpt,
+    node_opt: NodeOpt,
 
-    /// Number of transactions to generate.
+    /// Number of successful transactions to submit.
     #[arg(long, short)]
     pub num_txns: u64,
 }
 
-fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
+fn genesis_for_test(node_opt: &NodeOpt) -> (GenesisNote, MultiXfrTestState) {
     let mut state = MultiXfrTestState::initialize(
         GENESIS_SEED,
         10,
@@ -74,9 +79,18 @@ fn genesis_for_test() -> (GenesisNote, MultiXfrTestState) {
     // our test state. This effectively "unspends" the records which were used to set up the initial
     // state. This is fine for testing purposes.
     state.nullifiers = SetMerkleTree::default();
+
+    // generate keys
+    let known_nodes = gen_keys(node_opt.secret_key_seed, node_opt.num_nodes);
     let genesis = GenesisNote::new(
-        ChainVariables::new(42, VERIF_CRS.clone()),
+        ChainVariables::new(42, VERIF_CRS.clone(), COMMITTEE_SIZE),
         Arc::new(state.records().collect()),
+        initialize_stake_table(
+            known_nodes
+                .into_iter()
+                .map(|key| StakingKey::from_private(&key))
+                .collect(),
+        ),
     );
     state.validator = ValidatorState::genesis(genesis.clone());
     (genesis, state)
@@ -189,7 +203,7 @@ async fn generate_transactions(
                                 // one. We could update the same one and fix all its nullifier
                                 // proofs, but for testing it doesn't matter and its simpler to just
                                 // build a new transaction.
-                                info!("transaction expired, proposing a new one");
+                                info!("transaction expired, submitting a new one");
                                 (state, txn) = generate_transaction(state, round).await;
                                 hotshot
                                     .submit_transaction(txn.transaction.clone())
@@ -292,9 +306,9 @@ async fn generate_transactions(
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
     let options = Options::parse();
-    let id = options.validator_opt.id;
-    let (genesis, state) = genesis_for_test();
-    let hotshot = init(genesis, options.validator_opt).await?;
+    let id = options.node_opt.id;
+    let (genesis, state) = genesis_for_test(&options.node_opt);
+    let hotshot = init(ChaChaRng::from_entropy(), genesis, options.node_opt).await?;
     generate_transactions(options.num_txns, id, hotshot, state).await;
     Ok(())
 }

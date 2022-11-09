@@ -68,7 +68,9 @@ accordingly.
 * To automate a single-command consensus:
     * In a terminal window:
         * Cd to `target/release/`.
-        * Run `./multi-machine-automation --num-nodes {num_nodes} --num-txns {num_txns}`.
+        * Run `./multi-machine-automation --id 0 --num-nodes {num_nodes} --num-txns {num_txns}`.
+            * `id` is set arbitrarily. The automation code will use IDs from 0 to `num_nodes - 1`
+            to run the validator executable.
             * `num_nodes` is the number of nodes, including the bootstrap nodes in the node config
             file, and non-bootstrap nodes.
             * `num_txns` is the number of transactions to generate.
