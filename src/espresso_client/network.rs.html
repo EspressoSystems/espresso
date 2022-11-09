@@ -313,6 +313,12 @@
 <span id="313">313</span>
 <span id="314">314</span>
 <span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -373,9 +379,9 @@
         <span class="ident">validator_url</span>: <span class="ident">Url</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">NetworkBackend</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>, <span class="ident">KeystoreError</span><span class="op">&lt;</span><span class="ident">EspressoLedger</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">backend</span> <span class="op">=</span> <span class="self">Self</span> {
-            <span class="ident">query_client</span>: <span class="ident">Client::new</span>(<span class="ident">query_url</span>),
-            <span class="ident">address_book_client</span>: <span class="ident">Client::new</span>(<span class="ident">address_book_url</span>),
-            <span class="ident">validator_client</span>: <span class="ident">Client::new</span>(<span class="ident">validator_url</span>),
+            <span class="ident">query_client</span>: <span class="ident"><span class="self">Self</span>::client</span>(<span class="ident">query_url</span>),
+            <span class="ident">address_book_client</span>: <span class="ident"><span class="self">Self</span>::client</span>(<span class="ident">address_book_url</span>),
+            <span class="ident">validator_client</span>: <span class="ident"><span class="self">Self</span>::client</span>(<span class="ident">validator_url</span>),
             <span class="ident">univ_param</span>,
         };
         <span class="ident">backend</span>.<span class="ident">wait_for_esqs</span>().<span class="kw">await</span><span class="question-mark">?</span>;
@@ -422,6 +428,12 @@
             <span class="macro">tracing::error!</span>(<span class="string">&quot;{}&quot;</span>, <span class="ident">msg</span>);
             <span class="prelude-val">Err</span>(<span class="ident">KeystoreError::Failed</span> { <span class="ident">msg</span> })
         }
+    }
+
+    <span class="kw">fn</span> <span class="ident">client</span><span class="op">&lt;</span><span class="ident">E</span>: <span class="ident">surf_disco::Error</span><span class="op">&gt;</span>(<span class="ident">url</span>: <span class="ident">Url</span>) -&gt; <span class="ident">Client</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span> {
+        <span class="ident">Client::builder</span>(<span class="ident">url</span>)
+            .<span class="ident">set_timeout</span>(<span class="prelude-val">Some</span>(<span class="ident">Duration::from_secs</span>(<span class="number">5</span> <span class="op">*</span> <span class="number">60</span>)))
+            .<span class="ident">build</span>()
     }
 }
 

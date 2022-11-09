@@ -274,6 +274,19 @@
 <span id="274">274</span>
 <span id="275">275</span>
 <span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -287,7 +300,7 @@
 <span class="comment">// see &lt;https://www.gnu.org/licenses/&gt;.</span>
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">gen_keys</span>, <span class="ident">genesis</span>, <span class="ident">init_validator</span>, <span class="ident">open_data_source</span>, <span class="ident">run_consensus</span>, <span class="ident">NodeOpt</span>,
+    <span class="ident">gen_keys</span>, <span class="ident">genesis</span>, <span class="ident">init_validator</span>, <span class="ident">open_data_source</span>, <span class="ident">parse_duration</span>, <span class="ident">run_consensus</span>, <span class="ident">NodeOpt</span>,
     <span class="ident">MINIMUM_BOOTSTRAP_NODES</span>, <span class="ident">MINIMUM_NODES</span>,
 };
 <span class="kw">use</span> <span class="ident">address_book</span>::{<span class="ident">error::AddressBookError</span>, <span class="ident">store::FileStore</span>};
@@ -300,7 +313,6 @@
 <span class="kw">use</span> <span class="ident">futures::Future</span>;
 <span class="kw">use</span> <span class="ident">futures</span>::{<span class="ident">channel::oneshot</span>, <span class="ident">future::join_all</span>};
 <span class="kw">use</span> <span class="ident">hotshot::types::SignatureKey</span>;
-<span class="kw">use</span> <span class="ident">jf_cap::keys::UserAddress</span>;
 <span class="kw">use</span> <span class="ident">jf_cap::keys::UserPubKey</span>;
 <span class="kw">use</span> <span class="ident">portpicker::pick_unused_port</span>;
 <span class="kw">use</span> <span class="ident">rand_chacha::rand_core::SeedableRng</span>;
@@ -310,6 +322,7 @@
 <span class="kw">use</span> <span class="ident">seahorse::KeySnafu</span>;
 <span class="kw">use</span> <span class="ident">seahorse::KeystoreError</span>;
 <span class="kw">use</span> <span class="ident">snafu::ResultExt</span>;
+<span class="kw">use</span> <span class="ident">std::env</span>;
 <span class="kw">use</span> <span class="ident">std::io</span>;
 <span class="kw">use</span> <span class="ident">std::mem::take</span>;
 <span class="kw">use</span> <span class="ident">std::path::PathBuf</span>;
@@ -437,7 +450,7 @@
 <span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">minimal_test_network</span>(
     <span class="ident">rng</span>: <span class="kw-2">&amp;mut</span> <span class="ident">ChaChaRng</span>,
     <span class="ident">faucet_pub_key</span>: <span class="ident">UserPubKey</span>,
-    <span class="ident">rewards_address</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">UserAddress</span><span class="op">&gt;</span>,
+    <span class="ident">rewards_pub_key</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">UserPubKey</span><span class="op">&gt;</span>,
 ) -&gt; <span class="ident">TestNetwork</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">seed</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">32</span>];
     <span class="ident">rng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">seed</span>);
@@ -465,8 +478,8 @@
         <span class="kw">let</span> <span class="ident">pub_keys</span> <span class="op">=</span> <span class="ident">pub_keys</span>.<span class="ident">clone</span>();
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">store_path</span> <span class="op">=</span> <span class="ident">store</span>.<span class="ident">path</span>().<span class="ident">to_owned</span>();
         <span class="kw">let</span> <span class="ident">priv_key</span> <span class="op">=</span> <span class="ident">key</span>.<span class="ident">clone</span>();
-        <span class="kw">let</span> <span class="ident">facuet_pub_key</span> <span class="op">=</span> <span class="ident">faucet_pub_key</span>.<span class="ident">clone</span>();
-        <span class="kw">let</span> <span class="ident">rewards_address</span> <span class="op">=</span> <span class="ident">rewards_address</span>.<span class="ident">clone</span>();
+        <span class="kw">let</span> <span class="ident">faucet_pub_key</span> <span class="op">=</span> <span class="ident">faucet_pub_key</span>.<span class="ident">clone</span>();
+        <span class="kw">let</span> <span class="ident">rewards_pub_key</span> <span class="op">=</span> <span class="ident">rewards_pub_key</span>.<span class="ident">clone</span>();
 
         <span class="ident">store_path</span>.<span class="ident">push</span>(<span class="ident">i</span>.<span class="ident">to_string</span>());
         <span class="kw">let</span> <span class="ident">new_rng</span> <span class="op">=</span> <span class="ident">ChaChaRng::from_rng</span>(<span class="kw-2">&amp;mut</span> <span class="kw-2">*</span><span class="ident">rng</span>).<span class="ident">unwrap</span>();
@@ -481,8 +494,15 @@
                 <span class="comment">// low latency and the tests run much faster.</span>
                 <span class="ident">min_propose_time</span>: <span class="ident">Duration::from_secs</span>(<span class="number">5</span>),
                 <span class="ident">min_transactions</span>: <span class="number">1</span>,
-                <span class="ident">max_propose_time</span>: <span class="ident">Duration::from_secs</span>(<span class="number">10</span>),
-                <span class="ident">next_view_timeout</span>: <span class="ident">Duration::from_secs</span>(<span class="number">60</span>),
+                <span class="ident">max_propose_time</span>: <span class="ident">parse_duration</span>(
+                    <span class="kw-2">&amp;</span><span class="ident">env::var</span>(<span class="string">&quot;ESPRESSO_TEST_MAX_PROPOSE_TIME&quot;</span>)
+                        .<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="string">&quot;10s&quot;</span>.<span class="ident">to_string</span>()),
+                )
+                .<span class="ident">unwrap</span>(),
+                <span class="ident">next_view_timeout</span>: <span class="ident">parse_duration</span>(
+                    <span class="kw-2">&amp;</span><span class="ident">env::var</span>(<span class="string">&quot;ESPRESSO_TEST_VIEW_TIMEOUT&quot;</span>).<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="string">&quot;60s&quot;</span>.<span class="ident">to_string</span>()),
+                )
+                .<span class="ident">unwrap</span>(),
                 <span class="ident">secret_key_seed</span>: <span class="prelude-val">Some</span>(<span class="ident">seed</span>.<span class="ident">into</span>()),
                 <span class="ident">replication_factor</span>: <span class="number">4</span>,
                 <span class="ident">bootstrap_mesh_n_high</span>: <span class="number">50</span>,
@@ -494,8 +514,8 @@
                 <span class="ident">nonbootstrap_mesh_outbound_min</span>: <span class="number">4</span>,
                 <span class="ident">nonbootstrap_mesh_n</span>: <span class="number">12</span>,
                 <span class="ident">bootstrap_nodes</span>,
-                <span class="ident">faucet_pub_key</span>: <span class="macro">vec!</span>[<span class="ident">facuet_pub_key</span>],
-                <span class="ident">rewards_address</span>,
+                <span class="ident">faucet_pub_key</span>: <span class="macro">vec!</span>[<span class="ident">faucet_pub_key</span>],
+                <span class="ident">rewards_pub_key</span>,
                 ..<span class="ident">NodeOpt::new</span>(<span class="ident">i</span>, <span class="ident">MINIMUM_NODES</span>)
             };
             <span class="kw">let</span> <span class="ident">genesis</span> <span class="op">=</span> <span class="ident">genesis</span>(<span class="kw-2">&amp;</span><span class="ident">node_opt</span>);
@@ -540,15 +560,21 @@
 }
 
 <span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">retry</span><span class="op">&lt;</span><span class="ident">Fut</span>: <span class="ident">Future</span><span class="op">&lt;</span><span class="ident">Output</span> <span class="op">=</span> <span class="ident">bool</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">f</span>: <span class="kw">impl</span> <span class="ident">Fn</span>() -&gt; <span class="ident">Fut</span>) {
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">backoff</span> <span class="op">=</span> <span class="ident">Duration::from_millis</span>(<span class="number">100</span>);
-    <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="number">13</span> {
-        <span class="kw">if</span> <span class="ident">f</span>().<span class="kw">await</span> {
-            <span class="kw">return</span>;
+    <span class="kw">if</span> <span class="ident">std::env::var</span>(<span class="string">&quot;ESPRESSO_TEST_DISABLE_RETRY_TIMEOUT&quot;</span>).<span class="ident">is_ok</span>() {
+        <span class="kw">while</span> <span class="op">!</span><span class="ident">f</span>().<span class="kw">await</span> {
+            <span class="ident">sleep</span>(<span class="ident">Duration::from_secs</span>(<span class="number">5</span>)).<span class="kw">await</span>;
         }
-        <span class="ident">sleep</span>(<span class="ident">backoff</span>).<span class="kw">await</span>;
-        <span class="ident">backoff</span> <span class="kw-2">*</span><span class="op">=</span> <span class="number">2</span>;
+    } <span class="kw">else</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">backoff</span> <span class="op">=</span> <span class="ident">Duration::from_millis</span>(<span class="number">100</span>);
+        <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="number">13</span> {
+            <span class="kw">if</span> <span class="ident">f</span>().<span class="kw">await</span> {
+                <span class="kw">return</span>;
+            }
+            <span class="ident">sleep</span>(<span class="ident">backoff</span>).<span class="kw">await</span>;
+            <span class="ident">backoff</span> <span class="kw-2">*</span><span class="op">=</span> <span class="number">2</span>;
+        }
+        <span class="macro">panic!</span>(<span class="string">&quot;retry loop did not complete in {:?}&quot;</span>, <span class="ident">backoff</span>);
     }
-    <span class="macro">panic!</span>(<span class="string">&quot;retry loop did not complete in {:?}&quot;</span>, <span class="ident">backoff</span>);
 }
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="espresso_validator" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>

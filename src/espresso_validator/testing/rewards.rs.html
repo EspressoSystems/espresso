@@ -126,7 +126,7 @@
         <span class="kw">let</span> <span class="ident">network</span> <span class="op">=</span> <span class="ident">minimal_test_network</span>(
             <span class="kw-2">&amp;mut</span> <span class="ident">rng</span>,
             <span class="ident">faucet_key_pair</span>.<span class="ident">pub_key</span>(),
-            <span class="prelude-val">Some</span>(<span class="ident">rewards_address_keypair</span>.<span class="ident">address</span>()),
+            <span class="prelude-val">Some</span>(<span class="ident">rewards_address_keypair</span>.<span class="ident">pub_key</span>()),
         )
         .<span class="kw">await</span>;
 

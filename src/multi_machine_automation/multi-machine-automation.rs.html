@@ -466,6 +466,15 @@
 <span id="466">466</span>
 <span id="467">467</span>
 <span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)</span>
 <span class="comment">// This file is part of the Espresso library.</span>
 <span class="comment">//</span>
@@ -868,6 +877,17 @@
         <span class="kw">let</span> <span class="ident">fail_after_txn</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">fail_after_txn</span>.<span class="ident">to_string</span>();
         <span class="kw">let</span> <span class="ident">cdn_port</span> <span class="op">=</span> <span class="ident">pick_unused_port</span>().<span class="ident">unwrap</span>();
         <span class="kw">let</span> <span class="ident">cdn_url</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;tcp://localhost:{}&quot;</span>, <span class="ident">cdn_port</span>);
+        <span class="comment">// Set a fairly short view timeout by default (so that tests with leader failure don&#39;t take</span>
+        <span class="comment">// too long) but allow this to be overridden in the environment, so that we can test a slow</span>
+        <span class="comment">// target (like the coverage target) and still complete views within the timeout.</span>
+        <span class="kw">let</span> <span class="ident">next_view_timeout</span> <span class="op">=</span>
+            <span class="ident">env::var</span>(<span class="string">&quot;ESPRESSO_TEST_VIEW_TIMEOUT&quot;</span>).<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="string">&quot;30s&quot;</span>.<span class="ident">to_string</span>());
+        <span class="comment">// Set a fairly short timeout for proposing empty blocks by default. Each transaction we</span>
+        <span class="comment">// propose requires 2 empty blocks to be committed. Allow this to be overridden in the</span>
+        <span class="comment">// environment so that we can test a slow target without transactions becoming invalidated</span>
+        <span class="comment">// faster than we can build them.</span>
+        <span class="kw">let</span> <span class="ident">max_propose_time</span> <span class="op">=</span>
+            <span class="ident">env::var</span>(<span class="string">&quot;ESPRESSO_TEST_MAX_PROPOSE_TIME&quot;</span>).<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="string">&quot;10s&quot;</span>.<span class="ident">to_string</span>());
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">args</span> <span class="op">=</span> <span class="macro">vec!</span>[
             <span class="comment">// Set an arbitrary ID. The automation code will use IDs from 0 to `num_nodes - 1` to</span>
             <span class="comment">// run the validator executable.</span>
@@ -889,12 +909,10 @@
             <span class="string">&quot;0s&quot;</span>,
             <span class="string">&quot;--min-transactions&quot;</span>,
             <span class="string">&quot;1&quot;</span>,
-            <span class="comment">// Set a fairly short timeout for proposing empty blocks. Each transaction we propose</span>
-            <span class="comment">// requires 2 empty blocks to be committed.</span>
             <span class="string">&quot;--max-propose-time&quot;</span>,
-            <span class="string">&quot;10s&quot;</span>,
+            <span class="kw-2">&amp;</span><span class="ident">max_propose_time</span>,
             <span class="string">&quot;--next-view-timeout&quot;</span>,
-            <span class="string">&quot;30s&quot;</span>,
+            <span class="kw-2">&amp;</span><span class="ident">next_view_timeout</span>,
             <span class="string">&quot;--reset-store-state&quot;</span>,
             <span class="string">&quot;--verbose&quot;</span>,
         ];
