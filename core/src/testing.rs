@@ -35,7 +35,6 @@ use num_bigint::BigInt;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaChaRng;
 use rayon::prelude::*;
-use seahorse::ledger_state::RecordAmount;
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -770,8 +769,8 @@ impl MultiXfrTestState {
                         };
                         let amt2 = total - amt1.clone();
                         (
-                            RecordAmount::try_from(amt1).unwrap().into(),
-                            RecordAmount::try_from(amt2).unwrap().into(),
+                            u128::try_from(amt1).unwrap().into(),
+                            u128::try_from(amt2).unwrap().into(),
                         )
                     } else {
                         (rec1.amount, rec2.amount)

@@ -37,8 +37,8 @@ hotshot-types = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag 
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 postage = { version = "0.5", features = ["futures-traits"] }
-reef = { git = "https://github.com/EspressoSystems/reef.git", features = ["testing"] }
-seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
+reef = { git = "https://github.com/EspressoSystems/reef.git", tag = "0.3.1", features = ["testing"] }
+seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", tag = "0.3.2" }
 serde = { version = "1.0", features = ["derive"] }
 snafu = { version = "0.7", features = ["backtraces"] }
 tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1" }

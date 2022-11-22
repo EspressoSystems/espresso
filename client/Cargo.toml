@@ -49,22 +49,22 @@ jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSys
 jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
 jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
 jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
-key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
+key-set = { git = "https://github.com/EspressoSystems/key-set.git", tag = "0.3.0" }
 lazy_static = "1.4.0"
 parse-size = { version = "1.0", features = ["std"] }
 portpicker = "0.1"
 primitive-types = "0.12"
 rand = "0.8.5"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
-reef = { git = "https://github.com/EspressoSystems/reef.git", features = ["testing"] }
+reef = { git = "https://github.com/EspressoSystems/reef.git", tag = "0.3.1", features = ["testing"] }
 regex = "1.5.4"
 rustyline = "9.0.0"
-seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
+seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", tag = "0.3.2" }
 serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1.0"
 serde_json = "1.0.61"
 snafu = { version = "0.7", features = ["backtraces"] }
-surf-disco = { git = "ssh://git@github.com/EspressoSystems/surf-disco.git", branch = "main" }
+surf-disco = { git = "ssh://git@github.com/EspressoSystems/surf-disco.git", tag = "0.1.0" }
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.2.1" }
 tempdir = "0.3.7"
 toml = "0.5"
@@ -72,4 +72,4 @@ tracing = "0.1.35"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
-seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", features = ["testing"] }
+seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", tag = "0.3.2", features = ["testing"] }

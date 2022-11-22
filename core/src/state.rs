@@ -17,7 +17,6 @@ use jf_cap::structs::{Amount, ReceiverMemo};
 use jf_cap::Signature;
 use sha3::Sha3_256;
 
-pub use crate::full_persistence::FullPersistence;
 pub use crate::kv_merkle_tree::*;
 pub use crate::lw_persistence::LWPersistence;
 use crate::reward::{
