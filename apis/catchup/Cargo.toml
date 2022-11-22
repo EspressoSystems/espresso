@@ -23,7 +23,7 @@ derive_more = "0.99"
 espresso-core = { path = "../../core/" }
 futures = "0.3.21"
 postage = { version = "0.5", features = ["futures-traits"] }
-seahorse = { git = "https://github.com/EspressoSystems/seahorse.git" }
+seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", tag = "0.3.2" }
 serde = { version = "1.0.139", features = ["derive", "rc"] }
 snafu = { version = "0.7", features = ["backtraces"] }
 tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1" }

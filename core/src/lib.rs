@@ -11,7 +11,6 @@
 // You should have received a copy of the GNU General Public License along with this program. If not,
 // see <https://www.gnu.org/licenses/>.
 
-pub mod full_persistence;
 pub mod genesis;
 pub mod kv_merkle_tree;
 pub mod ledger;

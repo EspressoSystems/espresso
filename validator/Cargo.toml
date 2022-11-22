@@ -49,7 +49,6 @@ jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSys
 jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
 jf-primitives = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
 jf-utils = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
-key-set = { git = "https://github.com/EspressoSystems/key-set.git" }
 libp2p = "0.49"
 libp2p-networking = { git = "ssh://git@github.com/EspressoSystems/HotShot.git", tag = "0.3.3" }
 markdown = "0.3"
@@ -57,8 +56,8 @@ portpicker = { version = "0.1", optional = true }
 rand = "0.8.5"
 rand_chacha = { package = "rand_chacha", version = "0.3.1" }
 rand_chacha_02 = { package = "rand_chacha", version = "0.2.2" }
-reef = { git = "https://github.com/EspressoSystems/reef.git", optional = true }
-seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", optional = true }
+reef = { git = "https://github.com/EspressoSystems/reef.git", tag = "0.3.1", optional = true }
+seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", tag = "0.3.2", optional = true }
 serde = { version = "1.0.139", features = ["derive", "rc"] }
 serde_derive = "1.0.118"
 serde_json = "1.0.61"
@@ -68,7 +67,7 @@ snafu = { version = "0.7", features = ["backtraces"] }
 static_assertions = "1.1"
 strum = "0.24"
 strum_macros = "0.24"
-surf-disco = { git = "ssh://git@github.com/EspressoSystems/surf-disco.git", branch = "main" }
+surf-disco = { git = "ssh://git@github.com/EspressoSystems/surf-disco.git", tag = "0.1.0" }
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.2.1" }
 tempdir = "0.3.7"
 tracing = "0.1.35"

@@ -197,12 +197,12 @@ dependencies = [
 
 [[package]]
 name = "arbitrary-wrappers"
-version = "0.2.1"
-source = "git+https://github.com/EspressoSystems/arbitrary-wrappers.git#691a65234f605400c4f824af1fb600a6f460d938"
+version = "0.3.0"
+source = "git+https://github.com/EspressoSystems/arbitrary-wrappers.git?tag=0.3.0#df1ed9ac9dca13fe3960df7f543840dd67868de8"
 dependencies = [
  "arbitrary",
  "ark-std",
- "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git?tag=0.1.0)",
+ "espresso-macros",
  "itertools 0.10.5",
  "jf-cap",
  "rand_chacha 0.3.1",
@@ -2246,7 +2246,7 @@ dependencies = [
  "chrono",
  "commit",
  "derive_more",
- "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git)",
+ "espresso-macros",
  "futures",
  "generic-array",
  "hex",
@@ -2274,7 +2274,6 @@ dependencies = [
  "rpassword 6.0.1",
  "rust-argon2 0.8.3",
  "rustyline",
- "seahorse",
  "serde",
  "serde_cbor",
  "serde_derive",
@@ -2327,16 +2326,6 @@ dependencies = [
 name = "espresso-macros"
 version = "0.1.0"
 source = "git+https://github.com/EspressoSystems/espresso-macros.git?tag=0.1.0#9e0b0258c99757c567676c4dd92f1501db0cf580"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "espresso-macros"
-version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/espresso-macros.git#1bf0a092ce7e19f074d995cb8f542c76562f55a4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2424,7 +2413,6 @@ dependencies = [
  "jf-plonk",
  "jf-primitives",
  "jf-utils",
- "key-set",
  "libp2p",
  "libp2p-networking",
  "markdown",
@@ -2574,7 +2562,6 @@ dependencies = [
  "futures",
  "hex",
  "jf-cap",
- "key-set",
  "num-bigint 0.4.3",
  "portpicker",
  "primitive-types 0.12.1",
@@ -3714,7 +3701,7 @@ checksum = "f9b7d56ba4a8344d6be9729995e6b06f928af29998cdf79fe390cbf6b1fee838"
 [[package]]
 name = "key-set"
 version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/key-set.git#e340c4006f07f15044d6333b8a39e1e3cf4230d0"
+source = "git+https://github.com/EspressoSystems/key-set.git?tag=0.3.0#e340c4006f07f15044d6333b8a39e1e3cf4230d0"
 dependencies = [
  "ark-serialize",
  "bincode",
@@ -5860,8 +5847,8 @@ dependencies = [
 
 [[package]]
 name = "reef"
-version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/reef.git#c716c9a36128c1e3e3fab48fcf17579066e821dd"
+version = "0.3.1"
+source = "git+https://github.com/EspressoSystems/reef.git?tag=0.3.1#f21b54f4937d5d62f942389ae839b3f524a16dd3"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -6250,8 +6237,8 @@ dependencies = [
 
 [[package]]
 name = "seahorse"
-version = "0.3.0"
-source = "git+https://github.com/EspressoSystems/seahorse.git#b53e2e823d0740a453ae04cf376043fb13788dbf"
+version = "0.3.2"
+source = "git+https://github.com/EspressoSystems/seahorse.git?tag=0.3.2#4d3be310dacda9e831b2138aee8d5d68ba5f26be"
 dependencies = [
  "arbitrary",
  "arbitrary-wrappers",
@@ -6269,7 +6256,7 @@ dependencies = [
  "criterion",
  "derivative",
  "derive_more",
- "espresso-macros 0.1.0 (git+https://github.com/EspressoSystems/espresso-macros.git?tag=0.1.0)",
+ "espresso-macros",
  "futures",
  "generic-array",
  "hmac 0.12.1",
@@ -6917,7 +6904,7 @@ dependencies = [
 [[package]]
 name = "surf-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/surf-disco.git?branch=main#78aea853fde5c6fdfcae0c163abc3f2943d180cb"
+source = "git+ssh://git@github.com/EspressoSystems/surf-disco.git?tag=0.1.0#78aea853fde5c6fdfcae0c163abc3f2943d180cb"
 dependencies = [
  "async-std",
  "async-tungstenite 0.15.0",
