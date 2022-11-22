@@ -5,7 +5,7 @@ var sourcesIndex = JSON.parse('{\
 "espresso_availability_api":["",[],["api.rs","data_source.rs","lib.rs","query_data.rs"]],\
 "espresso_catchup_api":["",[],["api.rs","data_source.rs","lib.rs","query_data.rs"]],\
 "espresso_client":["",[],["cli_client.rs","lib.rs","network.rs"]],\
-"espresso_core":["",[],["full_persistence.rs","genesis.rs","kv_merkle_tree.rs","ledger.rs","lib.rs","lw_persistence.rs","merkle_tree.rs","reward.rs","set_merkle_tree.rs","stake_table.rs","state.rs","testing.rs","tree_hash.rs","universal_params.rs","util.rs"]],\
+"espresso_core":["",[],["genesis.rs","kv_merkle_tree.rs","ledger.rs","lib.rs","lw_persistence.rs","merkle_tree.rs","reward.rs","set_merkle_tree.rs","stake_table.rs","state.rs","testing.rs","tree_hash.rs","universal_params.rs","util.rs"]],\
 "espresso_esqs":["",[],["full_node.rs","full_node_data_source.rs","lib.rs","update_query_data_source.rs"]],\
 "espresso_metastate_api":["",[],["api.rs","data_source.rs","lib.rs","query_data.rs"]],\
 "espresso_status_api":["",[],["api.rs","data_source.rs","lib.rs","query_data.rs"]],\
