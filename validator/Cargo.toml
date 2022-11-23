@@ -78,14 +78,7 @@ url = "2.3"
 
 [features]
 slow-tests = []
-testing = [ "address-book"
-          , "async-tungstenite"
-          , "espresso-availability-api"
-          , "espresso-metastate-api"
-          , "portpicker"
-          , "reef/testing"
-          , "seahorse"
-          ]
+testing = ["address-book", "async-tungstenite", "espresso-availability-api", "espresso-metastate-api", "portpicker", "reef/testing", "seahorse"]
 
 [dev-dependencies]
 address-book = { path = "../address-book" }
