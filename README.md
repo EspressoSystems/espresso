@@ -8,8 +8,10 @@ Espresso is the layer 1 protocol developed by Espresso Systems. It is built on t
 [Jellyfish](EspressoSystems/jellyfish) cryptographic library and the [CAP](EspressoSystems/cap)
 protocol.
 
-**DISCLAIMER:** This software is provided "as is" and its security has not been externally audited.
-Use at your own risk.
+## Disclaimer
+
+**DISCLAIMER:** This software is provided "as is" and its security has not been externally audited. Use at your own risk.
+
 
 ---
 
@@ -39,7 +41,7 @@ Use at your own risk.
 - [Running locally](#running-locally)
   - [Running with docker-compose](#running-with-docker-compose)
   - [Running the services manually](#running-the-services-manually)
-- [License headers](#license-headers)
+- [License](#license)
 
 ## Obtaining the source code
 
@@ -376,3 +378,8 @@ target/release/faucet
 | ESPRESSO_FAUCET_FEE_SIZE   | u64  | faucet               | The fee to include with each transfer from the faucet
 | ESPRESSO_FAUCET_PORT       | u16  | faucet               | Port on which to serve the faucet service
 | ESPRESSO_FAUCET_URL        | Url  |                      | URL of the faucet service
+
+# License
+
+## Copyright
+`espresso` was developed by Espresso Systems. While we plan to adopt an open source license, we have not yet selected one. As such, all rights are reserved for the time being. Please reach out to us if you have thoughts on licensing.  
