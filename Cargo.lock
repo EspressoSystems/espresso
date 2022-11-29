@@ -20,7 +20,7 @@ dependencies = [
  "clap 4.0.18",
  "config",
  "dirs",
- "espresso-systems-common 0.2.0 (git+ssh://git@github.com/EspressoSystems/espresso-systems-common.git?tag=0.2.0)",
+ "espresso-systems-common 0.2.0",
  "futures",
  "hex",
  "itertools 0.10.5",
@@ -39,7 +39,7 @@ dependencies = [
  "surf-disco",
  "tagged-base64 0.2.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.2.1)",
  "tempdir",
- "tide-disco",
+ "tide-disco 0.3.1 (git+https://github.com/EspressoSystems/tide-disco.git?tag=v0.3.1)",
  "tide-websockets",
  "toml",
  "tracing",
@@ -2152,7 +2152,7 @@ dependencies = [
  "jf-utils",
  "serde",
  "snafu",
- "tide-disco",
+ "tide-disco 0.3.1 (git+https://github.com/EspressoSystems/tide-disco.git?tag=v0.3.1)",
  "toml",
  "tracing",
 ]
@@ -2170,7 +2170,7 @@ dependencies = [
  "seahorse",
  "serde",
  "snafu",
- "tide-disco",
+ "tide-disco 0.3.1 (git+https://github.com/EspressoSystems/tide-disco.git?tag=v0.3.1)",
  "toml",
  "tracing",
 ]
@@ -2318,7 +2318,7 @@ dependencies = [
  "seahorse",
  "serde",
  "snafu",
- "tide-disco",
+ "tide-disco 0.3.1 (git+https://github.com/EspressoSystems/tide-disco.git?tag=v0.3.1)",
  "tracing",
 ]
 
@@ -2343,7 +2343,7 @@ dependencies = [
  "jf-cap",
  "serde",
  "snafu",
- "tide-disco",
+ "tide-disco 0.3.1 (git+https://github.com/EspressoSystems/tide-disco.git?tag=v0.3.1)",
  "toml",
 ]
 
@@ -2359,7 +2359,7 @@ dependencies = [
  "jf-cap",
  "serde",
  "snafu",
- "tide-disco",
+ "tide-disco 0.3.1 (git+https://github.com/EspressoSystems/tide-disco.git?tag=v0.3.1)",
  "toml",
 ]
 
@@ -2371,12 +2371,7 @@ source = "git+https://github.com/espressosystems/espresso-systems-common?tag=0.1
 [[package]]
 name = "espresso-systems-common"
 version = "0.2.0"
-source = "git+ssh://git@github.com/EspressoSystems/espresso-systems-common.git?tag=0.2.0#99b910038e4880a967eb979394e3adcfa526bb26"
-
-[[package]]
-name = "espresso-systems-common"
-version = "0.2.0"
-source = "git+https://github.com/espressosystems/espresso-systems-common?tag=0.2.0#99b910038e4880a967eb979394e3adcfa526bb26"
+source = "git+https://github.com/EspressoSystems/espresso-systems-common.git?tag=0.2.0#99b910038e4880a967eb979394e3adcfa526bb26"
 
 [[package]]
 name = "espresso-validator"
@@ -2455,7 +2450,7 @@ dependencies = [
  "hotshot",
  "serde",
  "snafu",
- "tide-disco",
+ "tide-disco 0.3.1 (git+https://github.com/EspressoSystems/tide-disco.git?tag=v0.3.1)",
  "toml",
 ]
 
@@ -2573,7 +2568,7 @@ dependencies = [
  "snafu",
  "surf-disco",
  "tempdir",
- "tide-disco",
+ "tide-disco 0.3.1 (git+https://github.com/EspressoSystems/tide-disco.git?tag=v0.3.1)",
  "toml",
  "tracing",
  "tracing-futures",
@@ -2590,7 +2585,7 @@ dependencies = [
  "jf-cap",
  "serde",
  "snafu",
- "tide-disco",
+ "tide-disco 0.3.1 (git+https://github.com/EspressoSystems/tide-disco.git?tag=v0.3.1)",
 ]
 
 [[package]]
@@ -3046,7 +3041,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.3.3"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -3088,7 +3083,7 @@ dependencies = [
 [[package]]
 name = "hotshot-centralized-server"
 version = "0.1.1"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-std",
  "async-trait",
@@ -3108,7 +3103,7 @@ dependencies = [
 [[package]]
 name = "hotshot-consensus"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-lock",
  "async-std",
@@ -3127,7 +3122,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "arbitrary",
  "ark-serialize",
@@ -3141,7 +3136,7 @@ dependencies = [
  "custom_debug",
  "derivative",
  "ed25519-compact",
- "espresso-systems-common 0.2.0 (git+https://github.com/espressosystems/espresso-systems-common?tag=0.2.0)",
+ "espresso-systems-common 0.2.0",
  "futures",
  "hex_fmt",
  "hotshot-utils",
@@ -3157,7 +3152,7 @@ dependencies = [
 [[package]]
 name = "hotshot-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-channel",
  "async-lock",
@@ -4028,7 +4023,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.3.3#16363b04b69999fc6819432f05521f0a76014948"
 dependencies = [
  "async-lock",
  "async-std",
@@ -6904,7 +6899,7 @@ dependencies = [
 [[package]]
 name = "surf-disco"
 version = "0.1.0"
-source = "git+ssh://git@github.com/EspressoSystems/surf-disco.git?tag=0.1.0#78aea853fde5c6fdfcae0c163abc3f2943d180cb"
+source = "git+https://github.com/EspressoSystems/surf-disco.git?tag=0.1.0#78aea853fde5c6fdfcae0c163abc3f2943d180cb"
 dependencies = [
  "async-std",
  "async-tungstenite 0.15.0",
@@ -6915,7 +6910,7 @@ dependencies = [
  "serde",
  "serde_json",
  "surf",
- "tide-disco",
+ "tide-disco 0.3.1 (git+ssh://git@github.com/EspressoSystems/tide-disco.git?tag=v0.3.1)",
 ]
 
 [[package]]
@@ -7121,6 +7116,54 @@ dependencies = [
 name = "tide-disco"
 version = "0.3.1"
 source = "git+ssh://git@github.com/EspressoSystems/tide-disco.git?tag=v0.3.1#2848d5d06f7d90bb1467a71156a807ec4f32c6e9"
+dependencies = [
+ "ark-serialize",
+ "async-std",
+ "async-trait",
+ "bincode",
+ "clap 4.0.18",
+ "config",
+ "derive_more",
+ "dirs",
+ "edit-distance",
+ "futures",
+ "futures-util",
+ "http",
+ "include_dir",
+ "jf-utils",
+ "lazy_static",
+ "libc",
+ "markdown",
+ "maud",
+ "parking_lot 0.12.1",
+ "routefinder",
+ "semver 1.0.14",
+ "serde",
+ "serde_json",
+ "serde_with 1.14.0",
+ "shellexpand",
+ "signal-hook",
+ "signal-hook-async-std",
+ "snafu",
+ "strum",
+ "strum_macros",
+ "surf",
+ "tagged-base64 0.2.0 (git+https://github.com/EspressoSystems/tagged-base64.git?tag=0.2.1)",
+ "tide",
+ "tide-websockets",
+ "toml",
+ "tracing",
+ "tracing-distributed 0.4.0",
+ "tracing-futures",
+ "tracing-log",
+ "tracing-subscriber 0.3.16",
+ "url",
+]
+
+[[package]]
+name = "tide-disco"
+version = "0.3.1"
+source = "git+https://github.com/EspressoSystems/tide-disco.git?tag=v0.3.1#2848d5d06f7d90bb1467a71156a807ec4f32c6e9"
 dependencies = [
  "ark-serialize",
  "async-std",
