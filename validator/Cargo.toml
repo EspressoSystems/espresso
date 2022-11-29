@@ -57,7 +57,7 @@ snafu = { version = "0.7", features = ["backtraces"] }
 static_assertions = "1.1"
 strum = "0.24"
 strum_macros = "0.24"
-surf-disco = { git = "https://github.com/EspressoSystems/surf-disco.git", tag = "0.1.0" }
+surf-disco = { git = "https://github.com/EspressoSystems/surf-disco.git", tag = "0.1.1" }
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64.git", tag = "0.2.1" }
 tempdir = "0.3.7"
 tracing = "0.1.35"

@@ -49,4 +49,4 @@ signal-hook-async-std = "0.2.2"
 
 [dev-dependencies]
 portpicker = "0.1"
-surf-disco = { git = "https://github.com/EspressoSystems/surf-disco.git", tag = "0.1.0" }
+surf-disco = { git = "https://github.com/EspressoSystems/surf-disco.git", tag = "0.1.1" }
