@@ -75,7 +75,7 @@ quickcheck_macros = "1.0"
 rand_xoshiro = "0.4.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = "0.11.0"
+procfs = "0.14.1"
 
 [features]
 mocks = []
