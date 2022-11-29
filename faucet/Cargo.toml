@@ -60,5 +60,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 escargot = "0.5"
 espresso-validator = { path = "../validator", features = ["testing"] }
 portpicker = "0.1"
-surf-disco = { git = "https://github.com/EspressoSystems/surf-disco.git", tag = "0.1.0" }
+surf-disco = { git = "https://github.com/EspressoSystems/surf-disco.git", tag = "0.1.1" }
 tracing-test = "0.2"
