@@ -11,10 +11,6 @@ on:
     tags:
       # YYYYMMDD
       - "20[0-9][0-9][0-1][0-9][0-3][0-9]*"
-  pull_request:
-    branches:
-      - main
-      - release-*
   schedule:
     - cron: "0 0 * * 1"
   workflow_dispatch:
@@ -27,18 +23,8 @@ jobs:
       volumes:
         - github_nix:/nix
     steps:
-      - name: Configure Git
-        run: |
-          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf git://github.com/
-          git config --global url."https://ancient123:${{ secrets.ORG_GITHUB_PAT }}@github.com/".insteadOf ssh://git@github.com/
-
       - name: Checkout Repository
         uses: actions/checkout@v3
-
-      - uses: cachix/cachix-action@v12
-        with:
-          name: espresso-systems-private
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Cache cargo
         uses: actions/cache@v3.0.11
@@ -63,17 +49,6 @@ jobs:
         timeout-minutes: 60
         run: |
           nix develop .#staticShell --option sandbox relaxed -c cargo build --profile=release-lto
-
-      # prune all untagged artifacts besides the most recent 5.
-      # BREAKING BUILD AS OF 2022-07-01
-      #- uses: c-hive/gha-remove-artifacts@v1
-      #  if: ${{ github.event_name != 'pull_request' }}
-      #  name: Garbage collect old artifacts
-      #  with:
-      #    skip-tags: true
-      #    skip-recent: 5
-      #    GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_PAT }}
-      #    age: '0 day'
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3

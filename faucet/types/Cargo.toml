@@ -12,4 +12,4 @@ atomic_store = { git = "https://github.com/EspressoSystems/atomicstore.git", ver
 jf-cap = { git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 serde = "1.0.139"
 snafu = "0.7.1"
-tide-disco = { git = "ssh://git@github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1" }
+tide-disco = { git = "https://github.com/EspressoSystems/tide-disco.git", tag = "v0.3.1" }
