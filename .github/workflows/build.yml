@@ -12,11 +12,8 @@ on:
       # YYYYMMDD
       - "20[0-9][0-9][0-1][0-9][0-3][0-9]*"
   pull_request:
-    branches:
-      - main
-      - release-*
   schedule:
-    - cron: "0 0 * * 1"
+    - cron: "0 0 1 * *"
   workflow_dispatch:
 
 env:
@@ -37,34 +34,45 @@ jobs:
       - uses: actions/checkout@v3
         name: Checkout Repository
 
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.64"
+          components: "clippy, rustfmt"
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+
       - uses: Swatinem/rust-cache@v2
         name: Enable Rust Caching
+        with:
+          cache-on-failure: true
 
       - name: Format Check
         run: cargo fmt -- --check
 
-      - uses: actions-rs/clippy-check@v1
-        name: Clippy
-        with:
-          token: ${{ github.token }}
-          args: --workspace --examples --bins --tests -- -D warnings -A clippy::format_push_string
+      - name: Lint
+        run: |
+          cargo clippy --all-targets --no-deps --workspace -- -D warnings -A clippy::format_push_string
 
       - name: Audit
         run: cargo audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071 --ignore RUSTSEC-2022-0006 --ignore RUSTSEC-2022-0040
 
+      - name: Check Slow Tests
+        # Make sure the slow tests build, but don't run them (we have another workflow for that).
+        run: cargo check --tests --features=testing,slow-tests
+
+      - name: Build Tests
+        run: |
+          cargo test --workspace --profile=release-lto --features testing --no-run
+
+      - name: Test
+        timeout-minutes: 30
+        run: |
+          cargo test --workspace --profile=release-lto --features testing --verbose -- -Zunstable-options --report-time --test-threads 2
+
       - name: Build
         run: |
           cargo build --workspace --profile=release-lto
-
-      - name: Build Slow Tests
-        # Make sure the slow tests build, but don't run them (we have another workflow for that).
-        run: cargo test --profile=release-lto --features=testing,slow-tests --no-run
-
-      - name: Test
-        run: |
-          cargo test --workspace --profile=release-lto --features testing --no-run
-          cargo test --workspace --profile=release-lto --features testing --verbose -- -Zunstable-options --report-time --test-threads 2
-        timeout-minutes: 30
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
@@ -72,7 +80,7 @@ jobs:
           name: x86_64-unknown-linux-gnu-services
           path: |
             target/release-lto/address-book
+            target/release-lto/cdn-server
             target/release-lto/espresso-validator
             target/release-lto/faucet
             target/release-lto/random-wallet
-            target/release-lto/cdn-server

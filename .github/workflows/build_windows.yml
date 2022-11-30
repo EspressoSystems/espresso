@@ -17,6 +17,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.64"
+
       - uses: Swatinem/rust-cache@v2
         name: Enable Rust Caching
 
