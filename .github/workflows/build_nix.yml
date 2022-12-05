@@ -23,4 +23,4 @@ jobs:
         run: nix-shell --run "echo Success"
 
       - name: "Sanity Check: nix environment builds all targets"
-        run: nix-shell --run "cargo build --all-targets --profile=release-lto --workspace"
+        run: nix-shell --run "cargo check --workspace --all-targets"
