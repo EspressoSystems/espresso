@@ -2278,7 +2278,7 @@ dependencies = [
  "serde_cbor",
  "serde_derive",
  "serde_json",
- "serde_with 1.14.0",
+ "serde_with 2.0.1",
  "sha3",
  "snafu",
  "strum",
