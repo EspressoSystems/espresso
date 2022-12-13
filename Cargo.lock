@@ -20,7 +20,7 @@ dependencies = [
  "clap 4.0.18",
  "config",
  "dirs",
- "espresso-systems-common 0.2.0",
+ "espresso-systems-common 0.4.1",
  "futures",
  "hex",
  "itertools 0.10.5",
@@ -2372,6 +2372,11 @@ source = "git+https://github.com/espressosystems/espresso-systems-common?tag=0.1
 name = "espresso-systems-common"
 version = "0.2.0"
 source = "git+https://github.com/EspressoSystems/espresso-systems-common.git?tag=0.2.0#99b910038e4880a967eb979394e3adcfa526bb26"
+
+[[package]]
+name = "espresso-systems-common"
+version = "0.4.1"
+source = "git+https://github.com/EspressoSystems/espresso-systems-common.git?tag=0.4.1#2e889e878866c2a5cce1daaab947f7c93d5811ae"
 
 [[package]]
 name = "espresso-validator"
