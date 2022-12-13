@@ -1183,9 +1183,9 @@ dependencies = [
 
 [[package]]
 name = "cld"
-version = "0.4.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "642b8c05700b4b4f207c0c80797324288471868d82f890369116c4a7920b1ddf"
+checksum = "6a78c5223c7966b3f7c4ecacae340d1ef303e2d4e4466063002c68e0d7a4cdde"
 
 [[package]]
 name = "clipboard-win"
