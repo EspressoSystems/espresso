@@ -48,7 +48,7 @@ primitive-types = "0.12"
 rand = "0.8.5"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 reef = { git = "https://github.com/EspressoSystems/reef.git", tag = "0.3.1", features = ["testing"] }
-regex = "1.5.4"
+regex = "1.7.1"
 rustyline = "9.0.0"
 seahorse = { git = "https://github.com/EspressoSystems/seahorse.git", tag = "0.3.2" }
 serde = { version = "1.0", features = ["derive"] }
