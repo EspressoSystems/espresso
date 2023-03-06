@@ -116,7 +116,7 @@ jobs:
           images: ghcr.io/espressosystems/espresso/cdn-server
 
       - name: Build and push address book docker
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v4
         with:
           context: ./
           file: ./docker/address-book.Dockerfile
@@ -126,7 +126,7 @@ jobs:
           labels: ${{ steps.ab.outputs.labels }}
 
       - name: Build and push faucet docker
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v4
         with:
           context: ./
           file: ./docker/faucet.Dockerfile
@@ -136,7 +136,7 @@ jobs:
           labels: ${{ steps.faucet.outputs.labels }}
 
       - name: Build and push validator docker
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v4
         with:
           context: ./
           file: ./docker/validator.Dockerfile
@@ -146,7 +146,7 @@ jobs:
           labels: ${{ steps.validator.outputs.labels }}
 
       - name: Build and push random wallet docker
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v4
         with:
           context: ./
           file: ./docker/random-wallet.Dockerfile
@@ -156,7 +156,7 @@ jobs:
           labels: ${{ steps.random-wallet.outputs.labels }}
 
       - name: Build and push CDN server docker
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v4
         with:
           context: ./
           file: ./docker/cdn-server.Dockerfile
