@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-nix --extra-experimental-features nix-command --extra-experimental-features flakes develop .#staticShell -c cargo build --profile=release-lto 
+nix --experimental-features "nix-command flakes" develop .#staticShell -c cargo build --profile=release-lto 
 
 docker build . -f docker/cdn-server.Dockerfile -t ghcr.io/espressosystems/espresso/cdn-server:main
 docker build . -f docker/address-book.Dockerfile -t ghcr.io/espressosystems/espresso/address-book:main
