@@ -5,8 +5,8 @@
 
 # Espresso
 Espresso is the decentralized sequencer for layer 2 scaling solutions developed by Espresso Systems.
-It is built on the [HotShot](EspressoSystems/HotShot) consensus protocol. This demo runs the
-[CAP](EspressoSystems/cap) protocol as an example layer 2 application.
+It is built on the [HotShot](https://github.com/EspressoSystems/HotShot) consensus protocol. This demo runs the
+[CAP](https://github.com/EspressoSystems/cap) protocol as an example layer 2 application.
 
 ## Disclaimer
 
