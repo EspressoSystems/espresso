@@ -3217,9 +3217,9 @@ checksum = "d897f394bad6a705d5f4104762e116a75639e470d80901eed05a860a95cb1904"
 
 [[package]]
 name = "human_bytes"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88a0d4dc39ec942e44c1c306aa196da67f2bd6a30dc7b4a475465c13ccf28817"
+checksum = "784ca50f834542d90523a37f32717ba06c2cd0a9e3234bfd633fd4e3cc237476"
 
 [[package]]
 name = "iana-time-zone"
