@@ -6,8 +6,9 @@ name: Code Coverage Workflow
 on:
   push:
     branches:
-      - main
       - coverage
+  schedule:
+    - cron: "0 0 * * 6"
   workflow_dispatch:
 
 jobs:
@@ -35,10 +36,10 @@ jobs:
           cache-on-failure: true
 
       - name: Generate code coverage
-        timeout-minutes: 120
+        timeout-minutes: 60
         run: |
           mkdir coverage
-          cargo llvm-cov --lcov --output-path ./coverage/lcov.info
+          cargo llvm-cov  --all-features --lcov --test-threads=16 --output-path ./coverage/lcov.info
 
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
