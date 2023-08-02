@@ -25,7 +25,7 @@ jobs:
         name: Enable Rust Caching
 
       - name: Install Protoc
-        uses: arduino/setup-protoc@v1
+        uses: arduino/setup-protoc@v2
 
       - name: Check
         run: cargo check --workspace --all-targets
