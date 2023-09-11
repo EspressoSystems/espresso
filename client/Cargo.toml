@@ -34,7 +34,7 @@ espresso-validator = { path = "../validator", features = ["testing"] }
 faucet-types = { path = "../faucet/types" }
 futures = "0.3.16"
 hex = "0.4"
-human_bytes = "0.3"
+human_bytes = "0.4"
 itertools = "0.10.1"
 jf-cap = { features = ["std","test_apis"], git = "https://github.com/EspressoSystems/cap.git", branch = "testnet-v1" }
 jf-plonk = { features = ["std"], git = "https://github.com/EspressoSystems/jellyfish.git", tag = "0.1.2" }
