@@ -86,31 +86,31 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate address-book docker metadata
-        uses: docker/metadata-action@v3
+        uses: docker/metadata-action@v5
         id: ab
         with:
           images: ghcr.io/espressosystems/espresso/address-book
 
       - name: Generate faucet docker metadata
-        uses: docker/metadata-action@v3
+        uses: docker/metadata-action@v5
         id: faucet
         with:
           images: ghcr.io/espressosystems/espresso/faucet
 
       - name: Generate validator docker metadata
-        uses: docker/metadata-action@v3
+        uses: docker/metadata-action@v5
         id: validator
         with:
           images: ghcr.io/espressosystems/espresso/validator
 
       - name: Generate random wallet docker metadata
-        uses: docker/metadata-action@v3
+        uses: docker/metadata-action@v5
         id: random-wallet
         with:
           images: ghcr.io/espressosystems/espresso/random-wallet
 
       - name: Generate CDN server docker metadata
-        uses: docker/metadata-action@v3
+        uses: docker/metadata-action@v5
         id: cdn-server
         with:
           images: ghcr.io/espressosystems/espresso/cdn-server
