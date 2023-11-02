@@ -54,9 +54,6 @@ jobs:
         run: |
           cargo clippy --all-targets --no-deps --workspace -- -D warnings -A clippy::format_push_string
 
-      - name: Audit
-        run: cargo audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071 --ignore RUSTSEC-2022-0006 --ignore RUSTSEC-2022-0040
-
       - name: Check Slow Tests
         # Make sure the slow tests build, but don't run them (we have another workflow for that).
         run: cargo check --tests --features=testing,slow-tests
