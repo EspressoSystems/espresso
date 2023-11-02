@@ -2591,7 +2591,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c93a581058d957dc4176875aad04f82f81613e6611d64aa1a9c755bdfb16711"
 dependencies = [
  "cfg-if",
- "rustix 0.35.13",
+ "rustix 0.35.16",
  "windows-sys 0.42.0",
 ]
 
@@ -6039,9 +6039,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.35.13"
+version = "0.35.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "727a1a6d65f786ec22df8a81ca3121107f235970dc1705ed681d3e6e8b9cd5f9"
+checksum = "5363f616a5244fd47fc1dd0a0b24c28a5c0154f5010c16332a7ad6f78f2e8b62"
 dependencies = [
  "bitflags",
  "errno",
