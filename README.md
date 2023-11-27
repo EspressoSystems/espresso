@@ -174,7 +174,7 @@ To build the project run
     cargo build --release
 
 The `--release` flag is recommended because without it many cryptographic
-computations the project relies one become unbearably slow.
+computations the project relies on can become unbearably slow.
 
 ## Static build
 
