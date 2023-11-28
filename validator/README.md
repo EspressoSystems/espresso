@@ -8,7 +8,7 @@
 * `espresso-validator` is the executable which actually runs a validator and participates in the
 Espresso protocol.
 * `espresso-validator-testing` is a similar executable for testing purposes. It terminates when a
-given number of transactions has been generated.
+given number of transactions have been generated.
 
 ## Build code
 * Run `cargo run --release` with `--bin espresso-validator` or `--bin espresso-validator-testing`.
