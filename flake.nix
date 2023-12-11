@@ -45,7 +45,7 @@
         };
         rustDeps = with pkgs;
           [
-            pkgconfig
+            pkg-config
             openssl
             bash
 
