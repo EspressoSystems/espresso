@@ -51,7 +51,7 @@ jobs:
           nix develop .#staticShell --option sandbox relaxed -c cargo build --profile=release-lto
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: x86_64-unknown-linux-musl-services
           path: |
